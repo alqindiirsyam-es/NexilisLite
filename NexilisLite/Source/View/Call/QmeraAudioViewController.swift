@@ -1,0 +1,1056 @@
+//
+//  OutgoingViewController.swift
+//  Qmera
+//
+//  Created by Yayan Dwi on 07/10/21.
+//
+
+import UIKit
+import AVFoundation
+import nuSDKService
+import NotificationBannerSwift
+
+class QmeraAudioViewController: UIViewController {
+    
+    let stackViewToolbar2 = UIStackView()
+    var onScreenConstraintWB = [NSLayoutConstraint]()
+    let buttonWB = UIButton()
+    let buttonChat = UIButton()
+    var wbVC : WhiteboardViewController?
+    var wbTimer = Timer()
+    var wbBlink = false
+    var wbRoomId = ""
+    var callFCM = false
+    
+    let buttonSize: CGFloat = 70
+    
+    lazy var data: String = "" {
+        didSet {
+            getUserData { user in
+                self.user = user
+            }
+        }
+    }
+    
+    var user: User?
+    
+    var isAddCall = ""
+    
+    private var isEndByMe = false
+        
+    private var users: [User] = [] {
+        didSet {
+            DispatchQueue.main.async {
+                if oldValue.count > self.users.count { // remove
+                    let remove = oldValue.filter { !self.users.contains($0) }
+                    remove.forEach { user in
+                        if let subviews = self.profiles.subviews as? [ProfileView] {
+                            subviews.forEach { p in
+                                if p.user == user {
+                                    self.profiles.removeArrangeSubview(view: p)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    if let user = self.users.last {
+                        let profile = ProfileView(image: UIImage(systemName: "person.circle.fill"))
+                        profile.user = user
+                        self.profiles.addArrangedSubview(view: profile)
+                    }
+                }
+                self.name.text = self.users.map { $0.fullName }.joined(separator: ", ")
+            }
+        }
+    }
+    
+    var isOutgoing: Bool = true
+    
+    var isOnGoing: Bool = false
+    
+    var ticketId: String = ""
+    
+    private var timer: Timer?
+    
+    private var firstCall: Bool = true
+    
+    private var isSpeaker: Bool = false
+    
+    var listRemoteViewFix: [UIImageView] = [
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView()
+    ]
+    
+    let zoomView = UIImageView()
+    let cameraView = UIImageView()
+    
+    let status: UILabel = {
+        let label = UILabel()
+        label.text = "Calling..."
+        label.font = UIFont.systemFont(ofSize: 14)
+        label.textColor = .white
+        label.textAlignment = .center
+        return label
+    }()
+    
+    let profiles: GroupView = {
+        let groupView = GroupView()
+        groupView.spacing = 50
+        groupView.maxUser = 3
+        return groupView
+    }()
+    
+    let name: UILabel = {
+        let label = UILabel()
+        label.text = "uwitan"
+        label.font = UIFont.systemFont(ofSize: 14)
+        label.textColor = .white
+        label.textAlignment = .center
+        return label
+    }()
+    
+    let end: UIButton = {
+        let button = UIButton()
+        button.setImage(UIImage(systemName: "phone.down"), for: .normal)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.imageView?.tintColor = .white
+        button.setBackgroundColor(.red, for: .normal)
+        button.setBackgroundColor(.white, for: .highlighted)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+        button.imageEdgeInsets = UIEdgeInsets(top: 15, left: 15, bottom: 15, right: 15)
+        return button
+    }()
+    
+    let reject: UIButton = {
+        let button = UIButton()
+        let image = UIImage(systemName: "xmark")
+        button.setImage(image, for: .normal)
+        let selectedImage = image?.withTintColor(.mainColor)
+        button.setImage(selectedImage, for: .selected)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.imageView?.tintColor = .white
+        button.setBackgroundColor(.red, for: .normal)
+        button.setBackgroundColor(.white, for: .highlighted)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+        button.imageEdgeInsets = UIEdgeInsets(top: 15, left: 15, bottom: 15, right: 15)
+        return button
+    }()
+    
+    let accept: UIButton = {
+        let button = UIButton()
+        let image = UIImage(systemName: "checkmark")
+        button.setImage(image, for: .normal)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.imageView?.tintColor = .white
+        button.setBackgroundColor(.greenColor, for: .normal)
+        button.setBackgroundColor(.white, for: .highlighted)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+        button.imageEdgeInsets = UIEdgeInsets(top: 15, left: 15, bottom: 15, right: 15)
+        return button
+    }()
+    
+    let invite: UIButton = {
+        let button = UIButton()
+        let image = UIImage(systemName: "person.badge.plus")
+        button.setImage(image, for: .normal)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.imageView?.tintColor = .mainColor
+        button.setBackgroundColor(.white, for: .normal)
+        button.setBackgroundColor(.mainColor, for: .highlighted)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+        button.imageEdgeInsets = UIEdgeInsets(top: 15, left: 15, bottom: 15, right: 15)
+        return button
+    }()
+    
+    let speaker: UIButton = {
+        let button = UIButton()
+        button.setImage(UIImage(systemName: "speaker.slash")?.withTintColor(.mainColor, renderingMode: .alwaysOriginal), for: .normal)
+        button.setImage(UIImage(systemName: "speaker.wave.3")?.withTintColor(.white, renderingMode: .alwaysOriginal), for: .selected)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.setBackgroundColor(.white, for: .normal)
+        button.setBackgroundColor(.mainColor, for: .highlighted)
+        button.setBackgroundColor(.mainColor, for: .selected)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+        button.imageEdgeInsets = UIEdgeInsets(top: 15, left: 15, bottom: 15, right: 15)
+        return button
+    }()
+    
+    let stack: UIStackView = {
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.distribution = .fillEqually
+        return stackView
+    }()
+    
+    let poweredByView: UIStackView = {
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.spacing = 5
+        return stackView
+    }()
+    
+    let poweredByLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Powered by Nexilis".localized()
+        return label
+    }()
+    
+    let qmeraLogo: UIButton = {
+        let image = UIImage(named: "Q-Button-PNG", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        let button = UIButton()
+        button.setImage(image, for: .normal)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.imageEdgeInsets = UIEdgeInsets(top: 2, left: 2, bottom: 2, right: 2)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+//        button.frame.size.width = 30
+//        button.frame.size.height = 30
+        return button
+    }()
+    
+    let nexilisLogo: UIButton = {
+        let image = UIImage(named: "pb_powered_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        let button = UIButton()
+        button.setImage(image, for: .normal)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.imageEdgeInsets = UIEdgeInsets(top: 2, left: 2, bottom: 2, right: 2)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+//        button.frame.size.width = 30
+//        button.frame.size.height = 30
+        return button
+    }()
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        UIDevice.current.isProximityMonitoringEnabled = false
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    deinit {
+        UIDevice.current.isProximityMonitoringEnabled = false
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onShowAC"), object: nil, userInfo: nil)
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+        effectView.frame = view.frame
+        view.insertSubview(effectView, at: 0)
+        
+        view.addSubview(status)
+        view.addSubview(profiles)
+        view.addSubview(name)
+        
+        status.anchor(left: view.leftAnchor, bottom: profiles.topAnchor, right: view.rightAnchor, paddingBottom: 30, centerX: view.centerXAnchor)
+        profiles.anchor(centerX: view.centerXAnchor, centerY: view.centerYAnchor, width: 150, height: 150)
+        name.anchor(top: profiles.bottomAnchor, left: view.leftAnchor, right: view.rightAnchor, paddingTop: 5, paddingLeft: 20, paddingRight: 20, centerX: view.centerXAnchor)
+        definesPresentationContext = true
+        
+        if isOutgoing {
+            outgoingView()
+        } else if isOnGoing {
+            ongoingView()
+        } else {
+            incomingView()
+        }
+        
+        UIDevice.current.isProximityMonitoringEnabled = true
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(onStatusCall(_:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusCall), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onReceiveMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onCallFCM(notification:)), name: NSNotification.Name(rawValue: Nexilis.callFCM), object: nil)
+        
+        if let u = self.user {
+            self.users.append(u)
+            if isOutgoing && ticketId.isEmpty {
+//                if onGoingCC.isEmpty {
+//                    Nexilis.shared.callManager.startCall(handle: u.pin)
+//                } else {
+//                    API.initiateCCall(sParty: u.pin)
+//                }
+                if callFCM {
+                    DispatchQueue.global().async {
+                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: u.pin, type: "1"), timeout: 30 * 1000) {
+                            if response.isOk() {
+                            } else {
+                                DispatchQueue.main.async {
+                                    self.status.text = "Busy"
+                                    self.end.isEnabled = false
+                                }
+                            }
+                        } else {
+                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                            banner.show()
+                        }
+                    }
+                } else {
+                    Nexilis.ringbacktonePlayer?.play()
+                    API.initiateCCall(sParty: u.pin)
+                }
+            } else if !ticketId.isEmpty {
+                if isOutgoing {
+                    API.ccs(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: false)
+                    if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getIncomingCallCS(f_pin_opposite: u.pin), timeout: 30 * 1000){
+                        if response.mBodies[CoreMessage_TMessageKey.ERRCOD] != "01" {
+                            self.didEnd(sender: true)
+                        }
+                    }
+                } else {
+                    API.csa(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: false)
+                }
+            }
+        }
+    }
+    
+    @objc func onCallFCM(notification: NSNotification) {
+        DispatchQueue.main.async {
+            let data:[AnyHashable : Any] = notification.userInfo!
+            if let l_pin = data["l_pin"] as? String {
+                Nexilis.ringbacktonePlayer?.play()
+                API.initiateCCall(sParty: l_pin)
+            }
+        }
+    }
+    
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        end.circle()
+        reject.circle()
+        accept.circle()
+        invite.circle()
+        speaker.circle()
+    }
+    
+    private func getUserData(completion: @escaping (User?) -> ()) {
+        if let user = self.user {
+            completion(user)
+            return
+        }
+        var user: User?
+        DispatchQueue.global().async {
+            Database.shared.database?.inTransaction({ fmdb, rollback in
+                do {
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name, image_id from BUDDY where f_pin = '\(self.data)'"), cursor.next() {
+                        user = User(pin: cursor.string(forColumnIndex: 0) ?? "",
+                                    firstName: cursor.string(forColumnIndex: 1) ?? "",
+                                    lastName: cursor.string(forColumnIndex: 2) ?? "",
+                                    thumb: cursor.string(forColumnIndex: 3) ?? "")
+                        cursor.close()
+                    }
+                } catch {
+                    rollback.pointee = true
+                    print("Access database error: \(error.localizedDescription)")
+                }
+            })
+        }
+        completion(user)
+    }
+    
+    private func outgoingView() {
+        view.addSubview(end)
+        end.anchor(bottom: view.bottomAnchor, paddingBottom: 60, centerX: view.centerXAnchor, width: buttonSize, height: buttonSize)
+        
+        end.addTarget(self, action: #selector(didPressEnd(sender:)), for: .touchUpInside)
+    }
+    
+    private func incomingView() {
+        status.text = "Incoming..."
+        
+        stack.spacing = buttonSize
+        
+        view.addSubview(stack)
+        
+        stack.anchor(bottom: view.bottomAnchor, paddingBottom: 60, centerX: view.centerXAnchor, width: buttonSize * 3, height: buttonSize)
+        
+        stack.addArrangedSubview(reject)
+        stack.addArrangedSubview(accept)
+        
+        reject.addTarget(self, action: #selector(didReject(sender:)), for: .touchUpInside)
+        accept.addTarget(self, action: #selector(didAccept(sender:)), for: .touchUpInside)
+    }
+    
+    private func ongoingView() {
+        status.text = "Connecting..."
+        
+        stack.spacing = buttonSize / 2
+        
+        view.addSubview(stack)
+        
+        stack.anchor(bottom: view.bottomAnchor, paddingBottom: 60, centerX: view.centerXAnchor, width: buttonSize * 4, height: buttonSize)
+        
+        stack.addArrangedSubview(invite)
+        stack.addArrangedSubview(end)
+        stack.addArrangedSubview(speaker)
+        
+        invite.addTarget(self, action: #selector(didInvite(sender:)), for: .touchUpInside)
+        end.addTarget(self, action: #selector(didPressEnd(sender:)), for: .touchUpInside)
+        speaker.addTarget(self, action: #selector(didSpeaker(sender:)), for: .touchUpInside)
+        
+        if !ticketId.isEmpty {
+            self.view.addSubview(self.stackViewToolbar2)
+            self.stackViewToolbar2.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                self.stackViewToolbar2.centerYAnchor.constraint(equalTo: self.view.centerYAnchor),
+                self.stackViewToolbar2.leftAnchor.constraint(equalTo: self.view.leftAnchor, constant: 10.0)
+            ])
+            self.stackViewToolbar2.axis = .vertical
+            self.stackViewToolbar2.distribution = .equalSpacing
+            self.stackViewToolbar2.alignment = .center
+            self.stackViewToolbar2.spacing = 5
+            
+            view.addSubview(buttonWB)
+            buttonWB.translatesAutoresizingMaskIntoConstraints = false
+            buttonWB.frame.size = CGSize(width: 40.0, height: 40.0)
+            NSLayoutConstraint.activate([
+                buttonWB.widthAnchor.constraint(equalToConstant: 40.0),
+                buttonWB.heightAnchor.constraint(equalToConstant: 40.0)
+            ])
+            buttonWB.backgroundColor = .lightGray
+            buttonWB.setImage(UIImage(systemName: "ipad.landscape", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium, scale: .default)), for: .normal)
+            buttonWB.circle()
+            buttonWB.tintColor = .black
+            buttonWB.addTarget(self, action: #selector(didTapWBButton), for: .touchUpInside)
+            
+            view.addSubview(buttonChat)
+            buttonChat.translatesAutoresizingMaskIntoConstraints = false
+            buttonChat.frame.size = CGSize(width: 40.0, height: 40.0)
+            NSLayoutConstraint.activate([
+                buttonChat.widthAnchor.constraint(equalToConstant: 40.0),
+                buttonChat.heightAnchor.constraint(equalToConstant: 40.0)
+            ])
+            buttonChat.backgroundColor = .lightGray
+            buttonChat.setImage(UIImage(systemName: "bubble.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium, scale: .default)), for: .normal)
+            buttonChat.circle()
+            buttonChat.tintColor = .black
+            buttonChat.addTarget(self, action: #selector(didTapChatButton), for: .touchUpInside)
+        }
+        
+        self.view.addSubview(poweredByView)
+        self.poweredByView.translatesAutoresizingMaskIntoConstraints = false
+        let constraintRightPowered =  self.poweredByView.rightAnchor.constraint(equalTo: self.view.rightAnchor, constant: -10.0)
+        let constraintBottomPowered = self.poweredByView.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: -10.0)
+        NSLayoutConstraint.activate([
+            constraintRightPowered,
+            constraintBottomPowered,
+            nexilisLogo.widthAnchor.constraint(equalToConstant: 30.0),
+            nexilisLogo.heightAnchor.constraint(equalToConstant: 30.0)
+        ])
+        
+        poweredByView.addArrangedSubview(poweredByLabel)
+        poweredByView.addArrangedSubview(nexilisLogo)
+        stackViewToolbar2.addArrangedSubview(buttonWB)
+        stackViewToolbar2.addArrangedSubview(buttonChat)
+        
+    }
+    
+    
+    
+    
+    // MARK: - Action
+    
+    @objc func didTapChatButton(){
+        let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        let members: String = SecureUserDefaults.shared.value(forKey: "membersCC") ?? ""
+        let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+        let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+        editorPersonalVC.hidesBottomBarWhenPushed = true
+        editorPersonalVC.unique_l_pin = officer
+        editorPersonalVC.fromNotification = true
+        editorPersonalVC.isContactCenter = true
+        editorPersonalVC.fPinContacCenter = members
+        editorPersonalVC.complaintId = ticketId
+        editorPersonalVC.onGoingCC = true
+        editorPersonalVC.isRequestContactCenter = false
+        editorPersonalVC.users = users
+        editorPersonalVC.fromVCAC = true
+        let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
+        navigationController.modalPresentationStyle = .overCurrentContext
+        navigationController.navigationBar.tintColor = .white
+        navigationController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        navigationController.navigationBar.isTranslucent = false
+        navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+        navigationController.navigationBar.barStyle = .black
+        let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+        UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+        let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+        navigationController.navigationBar.titleTextAttributes = textAttributes
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+        }
+    }
+    
+    @objc func didTapWBButton(){
+        if(wbVC == nil){
+            wbVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "wbVC") as? WhiteboardViewController
+            if(wbRoomId.isEmpty){
+                let me = User.getMyPin()!
+                let tid = CoreMessage_TMessageUtil.getTID()
+                wbRoomId = "\(me)wbvc\(tid)"
+                wbVC!.roomId = wbRoomId
+                var destinations = [String]()
+                var destString = ""
+                for d in users{
+                    destinations.append(d.pin)
+                    if destString.isEmpty{
+                        destString = d.pin
+                    } else {
+                        destString = destString + ",\(d.pin)"
+                    }
+                }
+                wbVC!.destinations = destinations
+                wbVC!.sendInit()
+                SecureUserDefaults.shared.set("\(me),\(destString)", forKey: "wb_vc")
+            }
+            else {
+                self.wbTimer.invalidate()
+                self.buttonWB.backgroundColor = .lightGray
+                wbVC!.roomId = wbRoomId
+                wbVC!.sendJoin()
+            }
+        }
+        wbVC!.close = {
+            DispatchQueue.main.async {
+                if self.wbVC!.view.isDescendant(of: self.view){
+                    self.wbVC!.view.removeFromSuperview()
+                }
+//                self.buttonDecline.isHidden = false
+//                self.buttonSpeaker.isHidden = false
+//                self.buttonAddParticipant.isHidden = false
+//                self.buttonRotate.isHidden = false
+//                if(!self.wbRoomId.isEmpty){
+//                    DispatchQueue.main.async {
+//                        self.wbTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(self.runTimer), userInfo: nil, repeats: true)
+//                    }
+//                }
+            }
+        }
+//        self.buttonDecline.isHidden = true
+//        self.buttonSpeaker.isHidden = true
+//        self.buttonAddParticipant.isHidden = true
+//        self.buttonRotate.isHidden = true
+        addChild(wbVC!)
+        wbVC!.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(wbVC!.view)
+        onScreenConstraintWB = [
+            wbVC!.view.topAnchor.constraint(equalTo: self.view.topAnchor),
+            wbVC!.view.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
+            wbVC!.view.rightAnchor.constraint(equalTo: self.view.rightAnchor),
+            wbVC!.view.leftAnchor.constraint(equalTo: self.view.leftAnchor),
+        ]
+           NSLayoutConstraint.activate(onScreenConstraintWB)
+             
+           // Notify the child view controller that the move is complete.
+           wbVC!.didMove(toParent: self)
+//        self.navigationController?.setNavigationBarHidden(false, animated: true)
+//        controller.modalPresentationStyle = .overCurrentContext
+//        self.navigationController?.present(controller, animated: true)
+    }
+    
+    @objc func didSpeaker(sender: Any?) {
+        isSpeaker = !isSpeaker
+        speaker.isSelected = isSpeaker
+        if isSpeaker {
+            UIDevice.current.isProximityMonitoringEnabled = false
+        } else {
+            UIDevice.current.isProximityMonitoringEnabled = true
+        }
+        Nexilis.setSpeaker(isSpeaker)
+    }
+    
+    @objc func didInvite(sender: Any?) {
+        let controller = QmeraCallContactViewController()
+        controller.isDismiss = { user in
+            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+            if !onGoingCC.isEmpty {
+                DispatchQueue.global().async {
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: user.pin, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "1"))
+                }
+                DispatchQueue.main.async {
+                    self.isAddCall = user.pin
+                }
+            } else {
+                self.users.append(user)
+                // Start Calling
+//                Nexilis.shared.callManager.startCall(handle: user.pin)
+                API.initiateCCall(sParty: user.pin)
+            }
+        }
+        controller.selectedUser.append(contentsOf: users)
+        present(CustomNavigationController(rootViewController: controller), animated: true, completion: nil)
+    }
+    
+    @objc func didPressEnd(sender: Any?) {
+        let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        if !onGoingCC.isEmpty {
+            self.isEndByMe = true
+            self.didEnd(sender: nil)
+            return
+        }
+        let alert = LibAlertController(title: "End Audio Call".localized(), message: "Are you sure you want to end audio call?".localized(), preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
+        alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {(_) in
+            DispatchQueue.main.async {
+                self.timer?.invalidate()
+                self.timer = nil
+                self.status.text = "Audio Call Ended".localized()
+                self.end.isEnabled = false
+                self.invite.isEnabled = false
+                self.speaker.isEnabled = false
+            }
+            self.isEndByMe = true
+            self.didEnd(sender: nil)
+        }))
+        self.present(alert, animated: true, completion: nil)
+    }
+    
+    @objc func didEnd(sender: Any?) {
+        if self.buttonWB.isDescendant(of: self.view){
+            self.buttonWB.removeFromSuperview()
+        }
+        if self.buttonChat.isDescendant(of: self.view){
+            self.buttonChat.removeFromSuperview()
+        }
+        poweredByView.isHidden = true
+        let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        if !onGoingCC.isEmpty {
+            if sender != nil && sender is Bool {
+                let controller = self.presentedViewController
+                if controller != nil {
+                    controller!.dismiss(animated: true)
+                }
+                self.dismiss(animated: false, completion: nil)
+                let requester = onGoingCC.components(separatedBy: ",")[0]
+                let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
+                let startTimeCC: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
+                DispatchQueue.global().async {
+                    if sender as! Bool == true {
+                        let date = "\(Date().currentTimeMillis())"
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            do {
+                                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
+                                    "type" : "1",
+                                    "title" : "Contact Center".localized(),
+                                    "time" : startTimeCC,
+                                    "f_pin" : officer,
+                                    "data" : complaintId,
+                                    "time_end" : date,
+                                    "complaint_id" : complaintId,
+                                    "members" : "",
+                                    "requester": requester
+                                ], replace: true)
+                            } catch {
+                                rollback.pointee = true
+                                print("Access database error: \(error.localizedDescription)")
+                            }
+                        })
+                    }
+                    SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
+                    SecureUserDefaults.shared.removeValue(forKey: "membersCC")
+                    SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
+                    SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
+                }
+                return
+            }
+            let alert = LibAlertController(title: "Interaction with Call Center is in progress".localized(), message: "Are you sure you want to end the Call Center?".localized(), preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
+            alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {(_) in
+                self.dismiss(animated: false, completion: nil)
+                let requester = onGoingCC.components(separatedBy: ",")[0]
+                let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
+                let idMe = User.getMyPin()!
+                let startTimeCC: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
+                DispatchQueue.global().async {
+                    let date = "\(Date().currentTimeMillis())"
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        do {
+                            _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
+                                "type" : "1",
+                                "title" : "Contact Center".localized(),
+                                "time" : startTimeCC,
+                                "f_pin" : officer,
+                                "data" : complaintId,
+                                "time_end" : date,
+                                "complaint_id" : complaintId,
+                                "members" : "",
+                                "requester": requester
+                            ], replace: true)
+                        } catch {
+                            rollback.pointee = true
+                            print("Access database error: \(error.localizedDescription)")
+                        }
+                    })
+                    if officer == idMe {
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.endCallCenter(complaint_id: complaintId, l_pin: requester))
+                    } else {
+                        if requester == idMe {
+                            _ = Nexilis.write(message: CoreMessage_TMessageBank.endCallCenter(complaint_id: complaintId, l_pin: officer))
+                        } else {
+                            _ = Nexilis.write(message: CoreMessage_TMessageBank.leaveCCRoomInvite(ticket_id: complaintId))
+                        }
+                    }
+                    SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
+                    SecureUserDefaults.shared.removeValue(forKey: "membersCC")
+                    SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
+                    SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
+                }
+//                if let user = self.user, let call = Nexilis.shared.callManager.call(with: user.pin) {
+//                    Nexilis.shared.callManager.end(call: call)
+//                } else {
+                    API.terminateCall(sParty: nil)
+//                }
+            }))
+            self.present(alert, animated: true, completion: nil)
+        } else {
+            let controller = self.presentedViewController
+            if controller != nil {
+                controller!.dismiss(animated: true)
+            }
+            if isEndByMe {
+//                for i in 0..<Nexilis.shared.callManager.calls.count {
+//                    Nexilis.shared.callManager.end(call: Nexilis.shared.callManager.calls[i])
+//                }
+                API.terminateCall(sParty: nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    self.dismiss(animated: false, completion: nil)
+                }
+            } else {
+//                if let user = self.user, let call = Nexilis.shared.callManager.call(with: user.pin) {
+//                    Nexilis.shared.callManager.end(call: call)
+//                } else {
+                    API.terminateCall(sParty: nil)
+//                }
+                self.dismiss(animated: false, completion: nil)
+            }
+        }
+    }
+    
+    @objc func didReject(sender: Any?) {
+        if isOutgoing {
+            Nexilis.ringbacktonePlayer?.stop()
+        } else {
+            Nexilis.ringtonePlayer?.stop()
+        }
+        didEnd(sender: sender)
+    }
+    
+    @objc func didAccept(sender: Any?) {
+        if isOutgoing {
+            Nexilis.ringbacktonePlayer?.stop()
+        } else {
+            Nexilis.ringtonePlayer?.stop()
+        }
+        NSLayoutConstraint.deactivate(stack.constraints)
+        stack.subviews.forEach { subview in
+            subview.removeFromSuperview()
+        }
+        ongoingView()
+        UIView.animate(withDuration: 0.3, animations: {
+            self.view.layoutIfNeeded()
+        })
+        API.receiveCCall(sParty: user?.pin)
+    }
+    
+    // MARK: - Communication
+    
+    @objc func onReceiveMessage(notification: NSNotification) {
+        DispatchQueue.main.async {
+            let data:[AnyHashable : Any] = notification.userInfo!
+            if let dataMessage = data["message"] as? TMessage {
+                if (dataMessage.getCode() == CoreMessage_TMessageCode.PUSH_MEMBER_ROOM_CONTACT_CENTER) {
+                    let data = dataMessage.getBody(key: CoreMessage_TMessageKey.DATA)
+                    if !data.isEmpty {
+                        if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                            var members = ""
+                            let idMe = User.getMyPin()!
+                            for json in jsonArray {
+                                if "\(json)" != idMe {
+                                    if members.isEmpty {
+                                        members = "\(json)"
+                                    } else {
+                                        members += ",\(json)"
+                                    }
+                                }
+                            }
+                            SecureUserDefaults.shared.set(members, forKey: "inEditorPersonal")
+                        }
+                    }
+                    self.users.append(User.getData(pin: dataMessage.getPIN())!)
+                }
+            }
+        }
+    }
+    
+    @objc func onStatusCall(_ notification: NSNotification) {
+        if let data = notification.userInfo,
+           let state = data["state"] as? Int,
+           let message = data["message"] as? String
+        {
+            let arrayMessage = message.split(separator: ",")
+            if state == Nexilis.AUDIO_CALL_RINGING || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_RINGING) {
+                if users.count == 1 {
+                    DispatchQueue.main.async {
+                        self.status.text = "Ringing..."
+                    }
+                }
+            } else if state == Nexilis.AUDIO_CALL_OFFHOOK || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_OFFHOOK) {
+                if isOutgoing {
+                    Nexilis.ringbacktonePlayer?.stop()
+                }
+                if users.count == 1 && firstCall {
+                    DispatchQueue.main.async {
+                        if !self.ticketId.isEmpty {
+                            NSLayoutConstraint.deactivate(self.stack.constraints)
+                            self.stack.subviews.forEach { subview in
+                                subview.removeFromSuperview()
+                            }
+                            UIView.animate(withDuration: 0.3, animations: {
+                                self.view.layoutIfNeeded()
+                            })
+                        }
+                        self.ongoingView()
+                        let connectDate = Date()
+                        self.timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                            let format = Utils.callDurationFormatter.string(from: Date().timeIntervalSince(connectDate))
+                            self.status.text = format
+                        }
+                        self.timer?.fire()
+                        self.firstCall = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+//                            API.adjustVolume(fValue: 10.0)
+                        })
+                    }
+                }
+                if (!isOutgoing || !firstCall), users.count >= 1, let user = User.getData(pin: String(arrayMessage[1])), !users.contains(user) {
+                    self.users.append(user)
+                    let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+                    if !onGoingCC.isEmpty {
+                        DispatchQueue.main.async {
+                            var members = ""
+                            for user in self.users {
+                                if members.isEmpty {
+                                    members = "\(user.pin)"
+                                } else {
+                                    members = ",\(user.pin)"
+                                }
+                            }
+                            SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
+                        }
+                    }
+                }
+            } else if state == Nexilis.AUDIO_CALL_END || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_END) {
+                if isOutgoing {
+                    Nexilis.ringbacktonePlayer?.stop()
+                } else {
+                    Nexilis.ringtonePlayer?.stop()
+                }
+                let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+                if let pin = arrayMessage.first, let index = users.firstIndex(of: User(pin: String(pin))) {
+                    users.remove(at: index)
+                    if !onGoingCC.isEmpty && users.count != 0 {
+                        let requester = onGoingCC.components(separatedBy: ",")[0]
+                        let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                        if pin == requester || pin == officer {
+                            DispatchQueue.main.async {
+                                if self.viewIfLoaded?.window != nil {
+                                    let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
+                                    imageView.tintColor = .white
+                                    let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
+                                    banner.show()
+                                }
+                                self.timer?.invalidate()
+                                self.timer = nil
+                                self.status.text = "Call Center Session has ended..."
+                                self.end.isEnabled = false
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                                self.didEnd(sender: true)
+                            }
+                            return
+                        }
+                    } else if !onGoingCC.isEmpty && users.count == 0 {
+                        DispatchQueue.main.async {
+                            if self.viewIfLoaded?.window != nil {
+                                let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
+                                banner.show()
+                            }
+                            self.timer?.invalidate()
+                            self.timer = nil
+                            self.status.text = "Call Center Session has ended..."
+                            self.end.isEnabled = false
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            self.didEnd(sender: true)
+                        }
+                        return
+                    } else if users.count == 0 {
+                        DispatchQueue.main.async {
+                            self.timer?.invalidate()
+                            self.timer = nil
+                            self.status.text = "Audio Call Ended".localized()
+                            self.end.isEnabled = false
+                            self.invite.isEnabled = false
+                            self.speaker.isEnabled = false
+                            let controller = self.presentedViewController
+                            if controller != nil {
+                                controller!.dismiss(animated: true)
+                            }
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            self.didEnd(sender: true)
+                        }
+                        return
+                    }
+                }
+//                if users.count == 0 {
+//                    DispatchQueue.main.async {
+//                        self.dismiss(animated: false, completion: nil)
+//                    }
+//                }
+            } else if state == Nexilis.OFFLINE { // Offline
+                if isOutgoing {
+                    Nexilis.ringbacktonePlayer?.stop()
+                } else {
+                    Nexilis.ringtonePlayer?.stop()
+                }
+                let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+                if let pin = arrayMessage.first, let index = users.firstIndex(of: User(pin: String(pin))) {
+                    users.remove(at: index)
+                    if !onGoingCC.isEmpty && users.count != 0 {
+                        DispatchQueue.main.async {
+                            var members = ""
+                            for user in self.users {
+                                if members.isEmpty {
+                                    members = "\(user.pin)"
+                                } else {
+                                    members = ",\(user.pin)"
+                                }
+                            }
+                            SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
+                        }
+                    }
+                }
+                if users.count == 0 {
+                    DispatchQueue.main.async {
+                        self.status.text = "Offline..."
+                        self.end.isEnabled = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            self.didEnd(sender: false)
+                        }
+                    }
+                }
+            } else if state == Nexilis.BUSY { // Busy
+                if isOutgoing {
+                    Nexilis.ringbacktonePlayer?.stop()
+                } else {
+                    Nexilis.ringtonePlayer?.stop()
+                }
+                let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+                if let pin = arrayMessage.first, let index = users.firstIndex(of: User(pin: String(pin))) {
+                    users.remove(at: index)
+                    if !onGoingCC.isEmpty && users.count != 0 {
+                        DispatchQueue.main.async {
+                            var members = ""
+                            for user in self.users {
+                                if members.isEmpty {
+                                    members = "\(user.pin)"
+                                } else {
+                                    members = ",\(user.pin)"
+                                }
+                            }
+                            SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
+                        }
+                    }
+                }
+                if users.count == 0 {
+                    DispatchQueue.main.async {
+                        self.status.text = "Busy..."
+                        self.end.isEnabled = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            self.didEnd(sender: false)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+}
+
+extension QmeraAudioViewController : WhiteboardReceiver {
+    
+    func incomingWB(roomId: String) {
+        //print("incoming wb")
+        self.wbTimer.invalidate()
+        if(wbRoomId.isEmpty){
+            //print("wbroom empty")
+            DispatchQueue.main.async {
+                self.wbTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(self.runTimer), userInfo: nil, repeats: true)
+            }
+            let me = User.getMyPin()!
+            var destString = ""
+            for d in users{
+                if d.pin == roomId.components(separatedBy: "wbvc")[0] {
+                    continue
+                }
+                if destString.isEmpty{
+                    destString = d.pin
+                } else {
+                    destString = destString + ",\(d.pin)"
+                }
+            }
+            if destString.isEmpty {
+                SecureUserDefaults.shared.set("\(roomId.components(separatedBy: "wbvc")[0]),\(me)", forKey: "wb_vc")
+            } else {
+                SecureUserDefaults.shared.set("\(roomId.components(separatedBy: "wbvc")[0]),\(me),\(destString)", forKey: "wb_vc")
+            }
+            wbRoomId = roomId
+        }
+    }
+    
+    func cancel(roomId: String) {
+        DispatchQueue.main.async {
+            self.wbTimer.invalidate()
+            self.wbBlink = false
+            self.buttonWB.backgroundColor = .lightGray
+            self.buttonWB.setNeedsDisplay()
+        }
+        wbRoomId = ""
+    }
+    
+    @objc func runTimer(){
+        DispatchQueue.main.async {
+            self.wbBlink = !self.wbBlink
+            if(self.wbBlink){
+                //print("set wb blink on")
+                self.buttonWB.backgroundColor = .green
+            }
+            else {
+                //print("set wb blink off")
+                self.buttonWB.backgroundColor = .lightGray
+            }
+            self.buttonWB.setNeedsDisplay()
+        }
+    }
+    
+}

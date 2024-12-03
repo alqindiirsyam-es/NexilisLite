@@ -1,0 +1,2534 @@
+//
+//  Utils.swift
+//  Runner
+//
+//  Created by Rifqy Fakhrul Rijal on 13/08/20.
+//  Copyright © 2020 The Chromium Authors. All rights reserved.
+//
+
+import Foundation
+import UIKit
+import NotificationBannerSwift
+import nuSDKService
+import CoreLocation
+import CryptoKit
+import LocalAuthentication
+//import var CommonCrypto.CC_MD5_DIGEST_LENGTH
+//import func CommonCrypto.CC_MD5
+//import typealias CommonCrypto.CC_LONG
+
+public final class Utils {
+    public static let M_USER_ANDROID_ID = "UNK"
+    public static let CPAAS_VERSION = "UCPaaS-Nexilis.3.2.8"
+    
+    public static func getCurrentTime()->Int64 {
+        return Int64(Date().timeIntervalSince1970)
+    }
+    
+    public static func getCurrentTimeMillis()->Int64 {
+        return Int64(Date().timeIntervalSince1970 * 1000)
+    }
+    
+    public static func getCurrentTimeNanos()->Int64 {
+        return Int64(Date().timeIntervalSince1970 * 1000_000_000)
+    }
+    
+    public static func getElapsedRealtime() -> Int64 {
+        return Int64((ProcessInfo().systemUptime).rounded()) // SystemClock.elapsedRealtime();
+    }
+    
+    public static func getElapsedRealtimeMillis() -> Int64 {
+        return Int64((ProcessInfo().systemUptime * 1000).rounded()) // SystemClock.elapsedRealtime();
+    }
+    
+    public static func getElapsedRealtimeNanos() -> Int64 {
+        return Int64((ProcessInfo().systemUptime * 1000_000_000).rounded()) // SystemClock.elapsedRealtimeNano();
+    }
+    
+    public static func getForceAnonymous() -> Bool {
+        if let value: Bool = SecureUserDefaults.shared.value(forKey: "force_anonymous") {
+            return value
+        }
+        return false
+    }
+    
+    public static func setForceAnonymous(value: Bool){
+        SecureUserDefaults.shared.set(value, forKey: "force_anonymous")
+    }
+    
+    public static func getSetProfile() -> Bool {
+        if let value: Bool = SecureUserDefaults.shared.value(forKey: "is_change_profile") {
+            return value
+        }
+        return false
+    }
+    
+    public static func setProfile(value: Bool){
+        SecureUserDefaults.shared.set(value, forKey: "is_change_profile")
+    }
+    
+    static func setIconCenterAnim2(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "pb_fb_icon_center_self_mode2")
+    }
+    
+    static func getIconCenterAnim2() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_fb_icon_center_self_mode2") {
+            return value
+        }
+        return ""
+    }
+    
+    static func setIconCenterAnim4(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "pb_fb_icon_center_self_mode4")
+    }
+    
+    static func getIconCenterAnim4() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_fb_icon_center_self_mode4") {
+            return value
+        }
+        return ""
+    }
+    
+    static func setURLFirstTab(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_first_tab")
+    }
+    
+    static func setURLThirdTab(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_third_tab")
+    }
+    
+    static func setURLBase(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_base")
+    }
+    
+    static func setURLQMS(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_qms")
+    }
+    
+    static func setIconDock(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_icon_dock")
+    }
+    
+    static func setIconSS(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_icon_ss")
+    }
+    
+    static func setBackground(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_background")
+    }
+    
+    static func setURLPrivacyPolicy(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_privacy_policy")
+    }
+    
+    static func setEnablePrivacyPolicy(value: Bool){
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_enable_privacy_policy")
+    }
+    
+    static func setCustomTab(cust: String){
+        SecureUserDefaults.shared.set(cust, forKey: "custom_tab")
+    }
+    
+    static func setACTheme(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_ac_theme")
+    }
+    
+    static func setButtonURL(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_button_url")
+    }
+    
+    static func setCustomButtons(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_custom_buttons")
+    }
+    
+    public static func getCustomButtons() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_custom_buttons") {
+            return value
+        }
+        return ""
+    }
+    
+    static func setCustomFBIcon(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_button_icon")
+    }
+    
+    static func getCustomFBIcon() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_button_icon") {
+            return value
+        }
+        return ""
+    }
+    
+    static func setEnableMobileBuilder(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_enable_mobile_builder")
+    }
+    public static func getEnableMobileBuilder() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_enable_mobile_builder") {
+            return value
+        }
+        return "0"
+    }
+    
+    static func setFinishInitPrefs(value: Bool){
+        SecureUserDefaults.shared.set(value, forKey: "finish_init_prefs")
+    }
+    
+    public static func getFinishInitPrefsr() -> Bool {
+        if let value: Bool = SecureUserDefaults.shared.value(forKey: "finish_init_prefs") {
+            return value
+        }
+        return false
+    }
+    
+    static func setConfigModeFB(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "fb_config_mode")
+    }
+    
+    static func getConfigModeFB() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "fb_config_mode") {
+            return value
+        }
+        return "1"
+    }
+    
+    static func setAfterConfigFB(value: Bool) {
+        SecureUserDefaults.shared.set(value, forKey: "after_fb_config_mode")
+    }
+    
+    static func getAfterConfigFB() -> Bool {
+        if let value: Bool = SecureUserDefaults.shared.value(forKey: "after_fb_config_mode") {
+            return value
+        }
+        return false
+    }
+    
+    static func setCookiesMobile(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "cookies_mobile")
+    }
+
+    public static func getCookiesMobile() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "cookies_mobile") {
+            return value
+        }
+        return ""
+    }
+    
+    static func getBackground() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background") {
+            return value
+        }
+        return ""
+    }
+    
+    static func setBackgroundLight(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_background_light")
+    }
+
+    static func getBackgroundLight() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background_light") {
+            return value
+        }
+        return ""
+    }
+    
+    static func setBackgroundDark(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_background_dark")
+    }
+
+    static func getBackgroundDark() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background_dark") {
+            return value
+        }
+        return ""
+    }
+    
+    static func setMaxRetryUpload(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "max_retry_upload")
+    }
+
+    static func getMaxRetryUpload() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "max_retry_upload") {
+            return value
+        }
+        return "5"
+    }
+    
+    static func setMaxRetryTimeUpload(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "max_retry_time_upload")
+    }
+
+    static func getMaxRetryTimeUpload() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "max_retry_time_upload") {
+            return value
+        }
+        return "60000"
+    }
+    
+    static func setWhatsappCenter(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "whatsapp_center")
+    }
+
+    static func getWhatsappCenter() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "whatsapp_center") {
+            return value
+        }
+        return "08115881946"
+    }
+    
+    static func setSMSCenter(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "sms_center")
+    }
+
+    static func getSMSCenter() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "sms_center") {
+            return value
+        }
+        return "081290009799"
+    }
+    
+    static func setCallCenter(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "call_center")
+    }
+
+    static func getCallCenter() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "call_center") {
+            return value
+        }
+        return "1500046"
+    }
+    
+    static func setValidTrans(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "enable_valid_trans")
+    }
+
+    static func getValidTrans() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "enable_valid_trans") {
+            return value
+        }
+        return "0"
+    }
+    
+    static func setFeatureAccess(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_feature_access")
+    }
+
+    static func getFeatureAccess() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_feature_access") {
+            return value
+        }
+        return ""
+    }
+    static func setChatbotGreetings(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "chatbot_greetings")
+    }
+
+    static func getChatbotGreetings() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "chatbot_greetings") {
+            return value
+        }
+        return "Welcome..."
+    }
+    
+    
+    public static func sGetCurrentDateTime(sFormat: String!) -> String! {
+        let todaysDate = NSDate()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = sFormat
+        return dateFormatter.string(from: todaysDate as Date)
+    }
+    
+//    public static func getMD5(string: String) -> Data {
+//        let length = Int(CC_MD5_DIGEST_LENGTH)
+//        let messageData = string.data(using:.utf8)!
+//        var digestData = Data(count: length)
+//
+//        _ = digestData.withUnsafeMutableBytes { digestBytes -> UInt8 in
+//            messageData.withUnsafeBytes { messageBytes -> UInt8 in
+//                if let messageBytesBaseAddress = messageBytes.baseAddress, let digestBytesBlindMemory = digestBytes.bindMemory(to: UInt8.self).baseAddress {
+//                    let messageLength = CC_LONG(messageData.count)
+//                    CC_MD5(messageBytesBaseAddress, messageLength, digestBytesBlindMemory)
+//                }
+//                return 0
+//            }
+//        }
+//        return digestData
+//    }
+    
+    public static let callDurationFormatter: DateComponentsFormatter = {
+        let dateFormatter: DateComponentsFormatter
+        dateFormatter = DateComponentsFormatter()
+        dateFormatter.unitsStyle = .positional
+        dateFormatter.allowedUnits = [.minute, .second]
+        dateFormatter.zeroFormattingBehavior = .pad
+        
+        return dateFormatter
+    }()
+    
+    public static func previewMessageText(chat: Chat) -> Any {
+        if chat.credential == "1" && chat.lock == "2" {
+            return ("🚫 _"+"Message has expired".localized()+"_").richText(group_id: chat.pin)
+        } else if chat.credential == "1" {
+            return "Confidential Message".localized().richText(group_id: chat.pin)
+        } else if chat.attachmentFlag == "27" {
+            return ("📄 " + "Live Streaming".localized()).richText(group_id: chat.pin)
+        } else if chat.attachmentFlag == "26" {
+            return ("📄 " + "Seminar".localized()).richText(group_id: chat.pin)
+        } else if !chat.image.isEmpty {
+            if !chat.messageText.isEmpty {
+                return "📷 \(chat.messageText)".richText(group_id: chat.pin)
+            } else {
+                return ("📷 " + "Photo".localized()).richText(group_id: chat.pin)
+            }
+        }
+        else if !chat.video.isEmpty {
+            if !chat.messageText.isEmpty {
+                return "📹 \(chat.messageText)".richText(group_id: chat.pin)
+            } else {
+                return ("📹 " + "Video".localized()).richText(group_id: chat.pin)
+            }
+        }
+        else if !chat.file.isEmpty {
+            if chat.messageScope == "18" {
+                return ("📄 Form").richText(group_id: chat.pin)
+            }
+            return ("📄 " + chat.messageText.components(separatedBy: "|")[0]).richText(group_id: chat.pin)
+        } else if chat.attachmentFlag == "11" {
+            return ("❤️ " + "Sticker".localized()).richText(group_id: chat.pin)
+        }
+        else {
+            return chat.messageText.richText(group_id: chat.pin)
+        }
+    }
+    
+    static func getURLBase() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_url_base") {
+            return value
+        }
+        return "https://nexilis.io/"
+    }
+    
+    static func getIconDock() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_icon_dock") {
+            return value
+        }
+        return ""
+    }
+    
+    static func getUrlDock() -> String? {
+        return Utils.getURLBase() + "get_file_from_path?img=" + Utils.getIconDock()
+    }
+    
+    static func setDefaultCC(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "default_cc")
+    }
+    
+    static func getDefaultCC() -> String? {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "default_cc") {
+            return value
+        }
+        return nil
+    }
+    
+    static func setFloatingAnim(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "fb_floating_anim")
+    }
+    
+    static func getFloatingAnim() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "fb_floating_anim") {
+            return value
+        }
+        return "1~1"
+    }
+    
+    static func setFBIconBg(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "fb_icon_with_bg")
+    }
+    
+    static func getFBIconBg() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "fb_icon_with_bg") {
+            return value
+        }
+        return "1"
+    }
+    
+    static func setFBItemBg(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "fb_item_with_bg")
+    }
+    
+    static func getFBItemBg() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "fb_item_with_bg") {
+            return value
+        }
+        return "1"
+    }
+    
+    static func setDomainOpr(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "domain_opr")
+    }
+    
+    static func getDomainOpr() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "domain_opr") {
+            return value
+        }
+        return "https://nexilis.io/"
+    }
+    
+    static func setIpPortOpr(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "ip_opr")
+    }
+    
+    static func getIpOpr() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "ip_opr") {
+            return value
+        }
+        return "34.101.172.194:42823"
+    }
+    
+    static func setHarcodedIp(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "harcoded_ip")
+    }
+    
+    static func getHarcodedIp() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "harcoded_ip") {
+            return value
+        }
+        return ""
+    }
+    
+    static func setUserAgent(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "user_agent")
+    }
+    
+    public static func getUserAgent() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "user_agent") {
+            return value
+        }
+        return "easySoftIndonesia"
+    }
+    
+    public static func fetchDataWithCookiesAndUserAgent(from url: URL, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(Utils.getUserAgent(), forHTTPHeaderField: "User-Agent")
+        request.setValue(Utils.getCookiesMobile(), forHTTPHeaderField: "Cookie")
+        //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
+        let urlConfig = URLSessionConfiguration.default
+        let sessionDelegate = SelfSignedURLSessionDelegate()
+        let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
+        let task = session.dataTask(with: request, completionHandler: completion)
+        task.resume()
+    }
+    
+    public static func postDataWithCookiesAndUserAgent(from url: URL, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
+        let apiKey: String = SecureUserDefaults.shared.value(forKey: "apiKey") ?? ""
+        let f_pin: String = User.getMyPin() ?? ""
+        let parameters = [
+            "app_id": APIS.getAppNm(),
+            "apikey": apiKey,
+            "f_pin": f_pin
+        ]
+        var jsonArray: [[String: Any]] = []
+        jsonArray.append(parameters)
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: jsonArray, options: []) else {
+            //print("Error: Unable to convert JSON array to data")
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(Utils.getUserAgent(), forHTTPHeaderField: "User-Agent")
+        request.setValue(Utils.getCookiesMobile(), forHTTPHeaderField: "Cookie")
+        request.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = jsonData
+        //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
+        let urlConfig = URLSessionConfiguration.default
+        let sessionDelegate = SelfSignedURLSessionDelegate()
+        let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
+        let task = session.dataTask(with: request, completionHandler: completion)
+        task.resume()
+    }
+    
+    public static func resetValueSuperApp() {
+        Utils.setURLFirstTab(value: "")
+        Utils.setURLThirdTab(value: "")
+        Utils.setURLWv3(value: "")
+        Utils.setURLWv4(value: "")
+        Utils.setURLWv5(value: "")
+        Utils.setURLWv6(value: "")
+        Utils.setCustomTab(cust: "")
+        Utils.setIconDock(value: "")
+        Utils.setBackground(value: "")
+        Utils.setBackgroundLight(value: "")
+        Utils.setBackgroundDark(value: "")
+        Utils.setBackgroundTab1(value: "")
+        Utils.setBackgroundTab2(value: "")
+        Utils.setBackgroundTab3(value: "")
+        Utils.setBackgroundTab4(value: "")
+        Utils.setBackgroundTab5(value: "")
+        Utils.setBackgroundTab6(value: "")
+        Utils.setCpaasMode(mode: 0)
+        Utils.setCustomButtons(value: "")
+        Utils.setIconDock(value: "")
+        Utils.setTab1Icon(value: "")
+        Utils.setTab2Icon(value: "")
+        Utils.setTab3Icon(value: "")
+        Utils.setTab4Icon(value: "")
+        Utils.setTab5Icon(value: "")
+        Utils.setTab6Icon(value: "")
+        Utils.setButtonIcon(value: "")
+        Utils.setReverseTab(value: "")
+        Utils.setIconDockSize(value: "")
+    }
+    
+    public static func setValueInitialApp(data: String) {
+        if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [[String: Any?]] {
+            do {
+                for json in jsonArray {
+                    if Array(json.keys)[0] == "app_builder_url_first_tab" {
+                        Utils.setURLFirstTab(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_url_third_tab" {
+                        Utils.setURLThirdTab(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_custom_tab" {
+                        Utils.setCustomTab(cust: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_url_base" {
+                        Utils.setURLBase(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_url_qms" {
+                        Utils.setURLQMS(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_icon_dock" {
+                        Utils.setIconDock(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_icon_ss" {
+                        Utils.setIconSS(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_background" {
+                        Utils.setBackground(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_url_privacy_policy" {
+                        Utils.setURLPrivacyPolicy(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_enable_privacy_policy" {
+                        Utils.setEnablePrivacyPolicy(value: Array(json.values)[0] as! String == "1" ? true : false)
+                    }
+                    if Array(json.keys)[0] == "pb_fb_icon_center_self_mode2" {
+                        Utils.setIconCenterAnim2(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "pb_fb_icon_center_self_mode4" {
+                        Utils.setIconCenterAnim4(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_ac_theme" {
+                        Utils.setACTheme(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_button_url" {
+                        Utils.setButtonURL(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_custom_buttons" {
+                        Utils.setCustomButtons(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_enable_mobile_builder" {
+                        Utils.setEnableMobileBuilder(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_enable_mobile_builder" {
+                        Utils.setEnableMobileBuilder(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "fb_config_mode" {
+                        Utils.setConfigModeFB(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_button_icon" {
+                        Utils.setCustomFBIcon(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "fb_floating_anim" {
+                        Utils.setFloatingAnim(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "fb_icon_with_bg" {
+                        Utils.setFBIconBg(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "fb_item_with_bg" {
+                        Utils.setFBItemBg(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "user_agent" {
+                        Utils.setUserAgent(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_background_light" {
+                        Utils.setBackgroundLight(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "app_builder_background_dark" {
+                        Utils.setBackgroundDark(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "sms_center" {
+                        Utils.setSMSCenter(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "whatsapp_center" {
+                        Utils.setWhatsappCenter(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "call_center" {
+                        Utils.setCallCenter(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "enable_valid_trans" {
+                        Utils.setValidTrans(value: Array(json.values)[0] as! String)
+                    }
+                    if Array(json.keys)[0] == "chatbot_greetings" {
+                        Utils.setValidTrans(value: Array(json.values)[0] as! String)
+                    }
+                }
+            } catch {
+            }
+        }
+    }
+    
+    public static var inTabChats = false
+    
+    public static var longitude = ""
+    public static var latitude = ""
+    
+    private static let I_BB = 48   // 0
+    private static let I_BBT_1 = 57 // 9
+    private static let I_BAT_1 = 65 // A
+    private static let I_BBT_2 = 90 // Z
+    private static let I_BAT_2 = 97 // a
+    private static let I_BA = 122  // z
+
+    private static let IC_BB = 33   // !
+    private static let IC_BBT_1 = 47 // /
+    private static let IC_BAT_1 = 58 // :
+    private static let IC_BBT_2 = 64 // @
+    private static let IC_BAT_2 = 91 // [
+    private static let IC_BBT_3 = 96 // @
+    private static let IC_BAT_3 = 123 // [
+    private static let IC_BA = 126  // `
+
+    private static var icIGNORE = Set<Int>()
+
+    private static func initIcIgnore() {
+        icIGNORE.insert(10)// \r
+        icIGNORE.insert(13)// \n
+        icIGNORE.insert(32)// <space>
+    }
+    
+    public static func decrypt(str: String) -> String {
+        var arr: [Character]
+        var iRandom = 0
+        var sDecrypt: String
+        iRandom = Int(str.substring(from: 0, to: 0)) ?? 0
+        sDecrypt = getPalindrom(str: str.substring(from: 1, to: nil))
+        arr = Array(sDecrypt)
+        for i in 0..<arr.count {
+            if (isSpecialChar(ch: arr[i])) {
+                arr[i] = getBeforecChar(ch: arr[i], inc: iRandom)
+            } else {
+                arr[i] = getBeforeChar(ch: arr[i], inc: iRandom)
+            }
+        }
+        return String(arr)
+    }
+    
+    private static func isSpecialChar(ch: Character) -> Bool {
+        let ch = Int(ch.asciiValue ?? 0)
+        return (ch >= IC_BB && ch <= IC_BBT_1) || (ch >= IC_BAT_1 && ch <= IC_BBT_2) || (ch >= IC_BAT_2 && ch <= IC_BBT_3) || (ch >= IC_BAT_3 && ch <= IC_BA)
+    }
+    
+    private static func getPalindrom(str: String) -> String {
+        let arr: [Character] = Array(str)
+        var arr2: [Character] = Array(arr)
+
+        for i in 0..<arr.count {
+            arr2[i] = arr[arr.count - (i + 1)]
+        }
+        return String(arr2)
+    }
+    
+    private static func getBeforeChar(ch: Character, inc: Int) -> Character {
+        if icIGNORE.isEmpty {
+            initIcIgnore()
+        }
+        var iAscii = ch
+        let iAsciiBefore = iAscii
+
+        if (icIGNORE.contains(Int(iAscii.asciiValue ?? 0))) {
+            return iAscii;
+        }
+
+        if Int(iAscii.asciiValue ?? 0) > I_BA || Int(iAscii.asciiValue ?? 0) < I_BB {
+        } else {
+            if !icIGNORE.contains(Int(iAscii.asciiValue ?? 0)) {
+                iAscii = Character(UnicodeScalar(Int(iAscii.asciiValue ?? 0) - inc)!)
+                if (I_BAT_1 > Int(iAscii.asciiValue ?? 0) && Int(iAsciiBefore.asciiValue ?? 0) >= I_BAT_1) {
+                    iAscii = Character(UnicodeScalar((I_BBT_1 + 1) - (I_BAT_1 - Int(iAscii.asciiValue ?? 0)))!)
+                }
+                if (I_BAT_2 > Int(iAscii.asciiValue ?? 0) && Int(iAsciiBefore.asciiValue ?? 0) >= I_BAT_2) {
+                    iAscii = Character(UnicodeScalar((I_BBT_2 + 1) - (I_BAT_2 - Int(iAscii.asciiValue ?? 0)))!)
+                }
+                if (Int(iAscii.asciiValue ?? 0) < I_BB) {
+                    iAscii = Character(UnicodeScalar((I_BA + 1) + (Int(iAscii.asciiValue ?? 0) - I_BB))!)
+                }
+            }
+        }
+        return iAscii
+    }
+    
+    private static func getBeforecChar(ch: Character, inc: Int) -> Character {
+        var iAscii = ch
+        let iAsciiBefore = iAscii
+        if (Int(iAscii.asciiValue ?? 0) > IC_BA || Int(iAscii.asciiValue ?? 0) < IC_BB) {
+        } else {
+            iAscii = Character(UnicodeScalar(Int(iAscii.asciiValue ?? 0) - inc)!)
+            if (Int(iAscii.asciiValue ?? 0) < IC_BB) {
+                iAscii = Character(UnicodeScalar((IC_BA + 1) + (Int(iAscii.asciiValue ?? 0) - IC_BB))!)
+                if (Int(iAscii.asciiValue ?? 0) < IC_BAT_3 && Int(iAscii.asciiValue ?? 0) > IC_BBT_3) {
+                    iAscii = Character(UnicodeScalar((IC_BBT_3 + 1) - (IC_BAT_3 - Int(iAscii.asciiValue ?? 0)))!)
+                }
+            }
+            if (IC_BAT_3 > Int(iAscii.asciiValue ?? 0) && Int(iAsciiBefore.asciiValue ?? 0) >= IC_BAT_3) {
+                iAscii = Character(UnicodeScalar((IC_BBT_3 + 1) - (IC_BAT_3 - Int(iAscii.asciiValue ?? 0)))!)
+            }
+            if (IC_BAT_2 > Int(iAscii.asciiValue ?? 0) && Int(iAsciiBefore.asciiValue ?? 0) >= IC_BAT_2) {
+                iAscii = Character(UnicodeScalar((IC_BBT_2 + 1) - (IC_BAT_2 - Int(iAscii.asciiValue ?? 0)))!)
+            }
+            if (IC_BAT_1 > Int(iAscii.asciiValue ?? 0) && Int(iAsciiBefore.asciiValue ?? 0) >= IC_BAT_1) {
+                iAscii = Character(UnicodeScalar((IC_BBT_1 + 1) - (IC_BAT_1 - Int(iAscii.asciiValue ?? 0)))!)
+            }
+        }
+        return iAscii
+    }
+    
+    public static func addBackground(view: UIView?) {
+        do {
+            if let view = view {
+                DispatchQueue.global().async {
+                    DispatchQueue.main.async {
+                        let listBg = Utils.getBackgroundLight().isEmpty && Utils.getBackgroundDark().isEmpty ? Utils.getBackground() :
+                        UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? Utils.getBackgroundDark() : Utils.getBackgroundLight()
+                        if listBg.isEmpty {
+                           return
+                        }
+                        var bgChoosen = ""
+                        let arrayBg = listBg.split(separator: ",")
+                        bgChoosen = String(arrayBg[Int.random(in: 0..<arrayBg.count)])
+                        let urlString = Utils.getURLBase() + "get_file_from_path?img=" + bgChoosen
+                        if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                            DispatchQueue.main.async() {
+                                let backgroundImage = cachedImage
+                                let backgroundImageView = UIImageView(frame: view.bounds)
+                                backgroundImageView.image = backgroundImage
+                                backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                                view.insertSubview(backgroundImageView, at: 0)
+                                view.sendSubviewToBack(backgroundImageView)
+                            }
+                            return
+                        }
+                        Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
+                            guard let data = data, error == nil else { return }
+                            // always update the UI from the main thread
+                            DispatchQueue.main.async() {
+                                if UIImage(data: data) != nil {
+                                    let backgroundImage = UIImage(data: data)!
+                                    let backgroundImageView = UIImageView(frame: view.bounds)
+                                    backgroundImageView.image = backgroundImage
+                                    backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                                    view.insertSubview(backgroundImageView, at: 0)
+                                    view.sendSubviewToBack(backgroundImageView)
+                                    ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch {
+            
+        }
+    }
+    
+    public static func randomizeBackground(view: UIView?) {
+        do {
+            if let view = view {
+                DispatchQueue.global().async {
+                    DispatchQueue.main.async {
+                        let listBg = Utils.getBackgroundLight().isEmpty && Utils.getBackgroundDark().isEmpty ? Utils.getBackground() :
+                        UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? Utils.getBackgroundDark() : Utils.getBackgroundLight()
+                        if listBg.isEmpty {
+                           return
+                        }
+                        var bgChoosen = ""
+                        let arrayBg = listBg.split(separator: ",")
+                        bgChoosen = String(arrayBg[Int.random(in: 0..<arrayBg.count)])
+                        let urlString = Utils.getURLBase() + "get_file_from_path?img=" + bgChoosen
+                        if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                            DispatchQueue.main.async() {
+                                let backgroundImage = cachedImage
+                                let backgroundImageView = view.subviews[0] as? UIImageView
+                                backgroundImageView?.image = backgroundImage
+                            }
+                            return
+                        }
+                        Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
+                            guard let data = data, error == nil else { return }
+                            // always update the UI from the main thread
+                            DispatchQueue.main.async() {
+                                if UIImage(data: data) != nil {
+                                    let backgroundImage = UIImage(data: data)!
+                                    let backgroundImageView = view.subviews[0] as? UIImageView
+                                    backgroundImageView?.image = backgroundImage
+                                    ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch {
+            
+        }
+    }
+    
+    public static let ERR83 = "83:App Name is null".localized()
+    public static let ERR97 = "97:Account is empty".localized()
+    public static let ERR91 = "91:Service not implemented".localized()
+    public static let ERR96 = "96:Activity is null".localized()
+    public static let ERR23 = "23:Unsupported Android Version".localized()
+    public static let ERR101 = "101:Unable to access server. Check your connection and try again later".localized()
+    public static let ERR00 = "00:Success".localized()
+    public static let ERR85 = "85:You must Sign In or Sign Up to use this feature".localized()
+    public static let ERR106 = "106:Illegal State. Be sure call API connect and #callback state onSuccess called".localized()
+    public static let ERR92 = "92:Username is empty".localized()
+    public static let ERR90 = "90:Invalid Api, you already set userName in API connect".localized()
+    public static let ERR84 = "84:Feature Disabled".localized()
+    
+    public static func setConnectionID(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "connection_id")
+    }
+
+    public static func getConnectionID() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "connection_id") {
+            return value
+        }
+        return ""
+    }
+    
+    public static func setLimitValidTrans(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_set_valid_trans")
+    }
+
+    public static func getLimitValidTrans() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_set_valid_trans") {
+            return value
+        }
+        return "100000"
+    }
+    
+    public static func setLoginMultipleFPin(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_login_multiple_f_pin")
+    }
+
+    public static func getLoginMultipleFPin() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_login_multiple_f_pin") {
+            return value
+        }
+        return ""
+    }
+    
+    public static func setPrefTheme(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "first_pref_theme")
+    }
+    public static func getPrefTheme() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "first_pref_theme") {
+            return value
+        }
+        return ""
+    }
+    public static func setMyTheme(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "my_theme")
+    }
+    public static func getMyTheme() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "my_theme") {
+            return value
+        }
+        return ""
+    }
+    public static func setIsLoadThemeFromOther(value: Bool) {
+        SecureUserDefaults.shared.set(value, forKey: "load_theme_from_other")
+    }
+    public static func getIsLoadThemeFromOther() -> Bool {
+        if let value: Bool = SecureUserDefaults.shared.value(forKey: "load_theme_from_other") {
+            return value
+        }
+        return false
+    }
+    public static func setURLWv3(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_webview_3")
+    }
+    public static func getURLWv3() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_url_webview_3") {
+            return value
+        }
+        return ""
+    }
+    public static func setURLWv4(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_webview_4")
+    }
+    public static func getURLWv4() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_url_webview_4") {
+            return value
+        }
+        return ""
+    }
+    public static func setURLWv5(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_webview_5")
+    }
+    public static func getURLWv5() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_url_webview_5") {
+            return value
+        }
+        return ""
+    }
+    public static func setURLWv6(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_webview_6")
+    }
+    public static func getURLWv6() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_url_webview_6") {
+            return value
+        }
+        return ""
+    }
+    public static func setBackgroundTab1(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_background_1")
+    }
+    public static func getBackgroundTab1() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background_1") {
+            return value
+        }
+        return ""
+    }
+    public static func setBackgroundTab2(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_background_2")
+    }
+    public static func getBackgroundTab2() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background_2") {
+            return value
+        }
+        return ""
+    }
+    public static func setBackgroundTab3(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_background_3")
+    }
+    public static func getBackgroundTab3() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background_3") {
+            return value
+        }
+        return ""
+    }
+    public static func setBackgroundTab4(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_background_4")
+    }
+    public static func getBackgroundTab4() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background_4") {
+            return value
+        }
+        return ""
+    }
+    public static func setBackgroundTab5(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_background_5")
+    }
+    public static func getBackgroundTab5() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background_5") {
+            return value
+        }
+        return ""
+    }
+    public static func setBackgroundTab6(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_background_6")
+    }
+    public static func getBackgroundTab6() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background_6") {
+            return value
+        }
+        return ""
+    }
+    public static func setCpaasMode(mode: Int){
+        SecureUserDefaults.shared.set(mode+1, forKey: "cpaas_mode")
+    }
+    public static func setTab1Icon(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "tab1_icon")
+    }
+    public static func getTab1Icon() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "tab1_icon") {
+            return value
+        }
+        return ""
+    }
+    public static func setTab2Icon(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "tab2_icon")
+    }
+    public static func getTab2Icon() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "tab2_icon") {
+            return value
+        }
+        return ""
+    }
+    public static func setTab3Icon(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "tab3_icon")
+    }
+    public static func getTab3Icon() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "tab3_icon") {
+            return value
+        }
+        return ""
+    }
+    public static func setTab4Icon(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "tab4_icon")
+    }
+    public static func getTab4Icon() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "tab4_icon") {
+            return value
+        }
+        return ""
+    }
+    public static func setTab5Icon(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "tab5_icon")
+    }
+    public static func getTab5Icon() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "tab5_icon") {
+            return value
+        }
+        return ""
+    }
+    public static func setTab6Icon(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "tab6_icon")
+    }
+    public static func getTab6Icon() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "tab6_icon") {
+            return value
+        }
+        return ""
+    }
+    public static func setButtonIcon(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_button_icon")
+    }
+    public static func getButtonIcon() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_button_icon") {
+            return value
+        }
+        return ""
+    }
+    public static func setReverseTab(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "reverse_tab_color")
+    }
+    public static func getReverseTab() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "reverse_tab_color") {
+            return value
+        }
+        return "0"
+    }
+    public static func setIconDockSize(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "icon_size")
+    }
+    public static func getIconDockSize() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "icon_size") {
+            return value
+        }
+        return "0"
+    }
+    static func setDebugBC(value: [String: String]) {
+        SecureUserDefaults.shared.set(value, forKey: "debugBc")
+    }
+    static func getDebugBC() -> [String: String]? {
+        if let value: [String: String] = SecureUserDefaults.shared.value(forKey: "debugBc") {
+            return value
+        }
+        return nil
+    }
+    
+    public static func setPassEncDB(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_db_encrypt_pass")
+    }
+    public static func getPassEncDB() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_db_encrypt_pass") {
+            return value
+        }
+        return ""
+    }
+    
+    static func getPasswordDB() -> String? {
+        do {
+            let p = getPassEncDB()
+            if p.isEmpty {
+                var keyData = Data(count: 32) // 256-bit key
+                let result = keyData.withUnsafeMutableBytes {
+                    SecRandomCopyBytes(kSecRandomDefault, 32, $0.baseAddress!)
+                }
+                if result == errSecSuccess {
+                    let encrypt = try MasterKeyUtil.shared.encryptD(data: keyData)
+                    setPassEncDB(value: encrypt.base64EncodedString())
+                    
+                    let keyTemp = keyData.base64EncodedString()
+                    keyData.resetBytes(in: 0..<keyData.count)
+                    return keyTemp
+                    
+                } else {
+                    print("Error generating random bytes: \(result)")
+                    return nil
+                }
+            }
+            
+            let decrypt = try MasterKeyUtil.shared.decryptD(data: Data(base64Encoded: p)!)
+            return decrypt.base64EncodedString()
+        } catch {
+            return nil
+        }
+    }
+    
+    public static func shouldRequestAuthentication() -> Bool {
+        if let lastAuthTime: Date = SecureUserDefaults.shared.value(forKey: "lastAuthenticationTime") {
+            let elapsedTime = Date().timeIntervalSince(lastAuthTime)
+            return elapsedTime > (60 * 5)
+        }
+        return true
+    }
+
+    public static func authenticateWithBiometrics(completion: @escaping (Bool, String?) -> Void) {
+        guard shouldRequestAuthentication() else {
+            completion(true, nil)
+            return
+        }
+
+        let context = LAContext()
+        let reason = "Authenticate to access secure data"
+
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) {
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, error in
+                if success {
+                    // Store the time of successful authentication
+                    SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
+                    completion(true, nil)
+                } else {
+                    let errorMessage = error?.localizedDescription ?? "Authentication failed"
+                    completion(false, errorMessage)
+                }
+            }
+        } else {
+            completion(false, "Biometric authentication is not available")
+        }
+    }
+    
+    static func showAlert(title: String, message: String) {
+        let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alertController.addAction(UIAlertAction(title: "OK", style: .default))
+        UIApplication.shared.visibleViewController?.present(alertController, animated: true)
+    }
+}
+public extension UIImage {
+    var jpeg: Data? { jpegData(compressionQuality: 1) }  // QUALITY min = 0 / max = 1
+    var png: Data? { pngData() }
+}
+
+public extension Data {
+    var uiImage: UIImage? { UIImage(data: self) }
+}
+public enum ModelIphone : String {
+
+//Simulator
+case simulator     = "simulator/sandbox",
+
+//iPod
+iPod1              = "iPod 1",
+iPod2              = "iPod 2",
+iPod3              = "iPod 3",
+iPod4              = "iPod 4",
+iPod5              = "iPod 5",
+iPod6              = "iPod 6",
+iPod7              = "iPod 7",
+
+//iPad
+iPad2              = "iPad 2",
+iPad3              = "iPad 3",
+iPad4              = "iPad 4",
+iPadAir            = "iPad Air ",
+iPadAir2           = "iPad Air 2",
+iPadAir3           = "iPad Air 3",
+iPadAir4           = "iPad Air 4",
+iPadAir5           = "iPad Air 5",
+iPad5              = "iPad 5", //iPad 2017
+iPad6              = "iPad 6", //iPad 2018
+iPad7              = "iPad 7", //iPad 2019
+iPad8              = "iPad 8", //iPad 2020
+iPad9              = "iPad 9", //iPad 2021
+iPad10             = "iPad 10", //iPad 2022
+
+//iPad Mini
+iPadMini           = "iPad Mini",
+iPadMini2          = "iPad Mini 2",
+iPadMini3          = "iPad Mini 3",
+iPadMini4          = "iPad Mini 4",
+iPadMini5          = "iPad Mini 5",
+iPadMini6          = "iPad Mini 6",
+
+//iPad Pro
+iPadPro9_7         = "iPad Pro 9.7\"",
+iPadPro10_5        = "iPad Pro 10.5\"",
+iPadPro11          = "iPad Pro 11\"",
+iPadPro2_11        = "iPad Pro 11\" 2nd gen",
+iPadPro3_11        = "iPad Pro 11\" 3rd gen",
+iPadPro12_9        = "iPad Pro 12.9\"",
+iPadPro2_12_9      = "iPad Pro 2 12.9\"",
+iPadPro3_12_9      = "iPad Pro 3 12.9\"",
+iPadPro4_12_9      = "iPad Pro 4 12.9\"",
+iPadPro5_12_9      = "iPad Pro 5 12.9\"",
+
+//iPhone
+iPhone4            = "iPhone 4",
+iPhone4S           = "iPhone 4S",
+iPhone5            = "iPhone 5",
+iPhone5S           = "iPhone 5S",
+iPhone5C           = "iPhone 5C",
+iPhone6            = "iPhone 6",
+iPhone6Plus        = "iPhone 6 Plus",
+iPhone6S           = "iPhone 6S",
+iPhone6SPlus       = "iPhone 6S Plus",
+iPhoneSE           = "iPhone SE",
+iPhone7            = "iPhone 7",
+iPhone7Plus        = "iPhone 7 Plus",
+iPhone8            = "iPhone 8",
+iPhone8Plus        = "iPhone 8 Plus",
+iPhoneX            = "iPhone X",
+iPhoneXS           = "iPhone XS",
+iPhoneXSMax        = "iPhone XS Max",
+iPhoneXR           = "iPhone XR",
+iPhone11           = "iPhone 11",
+iPhone11Pro        = "iPhone 11 Pro",
+iPhone11ProMax     = "iPhone 11 Pro Max",
+iPhoneSE2          = "iPhone SE 2nd gen",
+iPhone12Mini       = "iPhone 12 Mini",
+iPhone12           = "iPhone 12",
+iPhone12Pro        = "iPhone 12 Pro",
+iPhone12ProMax     = "iPhone 12 Pro Max",
+iPhone13Mini       = "iPhone 13 Mini",
+iPhone13           = "iPhone 13",
+iPhone13Pro        = "iPhone 13 Pro",
+iPhone13ProMax     = "iPhone 13 Pro Max",
+iPhoneSE3          = "iPhone SE 3nd gen",
+iPhone14           = "iPhone 14",
+iPhone14Plus       = "iPhone 14 Plus",
+iPhone14Pro        = "iPhone 14 Pro",
+iPhone14ProMax     = "iPhone 14 Pro Max",
+iPhone15           = "iPhone 15",
+iPhone15Plus       = "iPhone 15 Plus",
+iPhone15Pro        = "iPhone 15 Pro",
+iPhone15ProMax     = "iPhone 15 Pro Max",
+
+// Apple Watch
+AppleWatch1         = "Apple Watch 1gen",
+AppleWatchS1        = "Apple Watch Series 1",
+AppleWatchS2        = "Apple Watch Series 2",
+AppleWatchS3        = "Apple Watch Series 3",
+AppleWatchS4        = "Apple Watch Series 4",
+AppleWatchS5        = "Apple Watch Series 5",
+AppleWatchSE        = "Apple Watch Special Edition",
+AppleWatchS6        = "Apple Watch Series 6",
+AppleWatchS7        = "Apple Watch Series 7",
+
+//Apple TV
+AppleTV1           = "Apple TV 1gen",
+AppleTV2           = "Apple TV 2gen",
+AppleTV3           = "Apple TV 3gen",
+AppleTV4           = "Apple TV 4gen",
+AppleTV_4K         = "Apple TV 4K",
+AppleTV2_4K        = "Apple TV 4K 2gen",
+AppleTV3_4K        = "Apple TV 4K 3gen",
+
+unrecognized       = "?unrecognized?"
+}
+
+// #-#-#-#-#-#-#-#-#-#-#-#-#
+// MARK: UIDevice extensions
+// #-#-#-#-#-#-#-#-#-#-#-#-#
+
+    public extension UIDevice {
+    
+    var type: ModelIphone {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let modelCode = withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                ptr in String.init(validatingUTF8: ptr)
+            }
+        }
+    
+        let modelMap : [String: ModelIphone] = [
+    
+            //Simulator
+            "i386"      : .simulator,
+            "x86_64"    : .simulator,
+    
+            //iPod
+            "iPod1,1"   : .iPod1,
+            "iPod2,1"   : .iPod2,
+            "iPod3,1"   : .iPod3,
+            "iPod4,1"   : .iPod4,
+            "iPod5,1"   : .iPod5,
+            "iPod7,1"   : .iPod6,
+            "iPod9,1"   : .iPod7,
+    
+            //iPad
+            "iPad2,1"   : .iPad2,
+            "iPad2,2"   : .iPad2,
+            "iPad2,3"   : .iPad2,
+            "iPad2,4"   : .iPad2,
+            "iPad3,1"   : .iPad3,
+            "iPad3,2"   : .iPad3,
+            "iPad3,3"   : .iPad3,
+            "iPad3,4"   : .iPad4,
+            "iPad3,5"   : .iPad4,
+            "iPad3,6"   : .iPad4,
+            "iPad6,11"  : .iPad5, //iPad 2017
+            "iPad6,12"  : .iPad5,
+            "iPad7,5"   : .iPad6, //iPad 2018
+            "iPad7,6"   : .iPad6,
+            "iPad7,11"  : .iPad7, //iPad 2019
+            "iPad7,12"  : .iPad7,
+            "iPad11,6"  : .iPad8, //iPad 2020
+            "iPad11,7"  : .iPad8,
+            "iPad12,1"  : .iPad9, //iPad 2021
+            "iPad12,2"  : .iPad9,
+            "iPad13,18" : .iPad10,
+            "iPad13,19" : .iPad10,
+    
+            //iPad Mini
+            "iPad2,5"   : .iPadMini,
+            "iPad2,6"   : .iPadMini,
+            "iPad2,7"   : .iPadMini,
+            "iPad4,4"   : .iPadMini2,
+            "iPad4,5"   : .iPadMini2,
+            "iPad4,6"   : .iPadMini2,
+            "iPad4,7"   : .iPadMini3,
+            "iPad4,8"   : .iPadMini3,
+            "iPad4,9"   : .iPadMini3,
+            "iPad5,1"   : .iPadMini4,
+            "iPad5,2"   : .iPadMini4,
+            "iPad11,1"  : .iPadMini5,
+            "iPad11,2"  : .iPadMini5,
+            "iPad14,1"  : .iPadMini6,
+            "iPad14,2"  : .iPadMini6,
+    
+            //iPad Pro
+            "iPad6,3"   : .iPadPro9_7,
+            "iPad6,4"   : .iPadPro9_7,
+            "iPad7,3"   : .iPadPro10_5,
+            "iPad7,4"   : .iPadPro10_5,
+            "iPad6,7"   : .iPadPro12_9,
+            "iPad6,8"   : .iPadPro12_9,
+            "iPad7,1"   : .iPadPro2_12_9,
+            "iPad7,2"   : .iPadPro2_12_9,
+            "iPad8,1"   : .iPadPro11,
+            "iPad8,2"   : .iPadPro11,
+            "iPad8,3"   : .iPadPro11,
+            "iPad8,4"   : .iPadPro11,
+            "iPad8,9"   : .iPadPro2_11,
+            "iPad8,10"  : .iPadPro2_11,
+            "iPad13,4"  : .iPadPro3_11,
+            "iPad13,5"  : .iPadPro3_11,
+            "iPad13,6"  : .iPadPro3_11,
+            "iPad13,7"  : .iPadPro3_11,
+            "iPad8,5"   : .iPadPro3_12_9,
+            "iPad8,6"   : .iPadPro3_12_9,
+            "iPad8,7"   : .iPadPro3_12_9,
+            "iPad8,8"   : .iPadPro3_12_9,
+            "iPad8,11"  : .iPadPro4_12_9,
+            "iPad8,12"  : .iPadPro4_12_9,
+            "iPad13,8"  : .iPadPro5_12_9,
+            "iPad13,9"  : .iPadPro5_12_9,
+            "iPad13,10" : .iPadPro5_12_9,
+            "iPad13,11" : .iPadPro5_12_9,
+    
+            //iPad Air
+            "iPad4,1"   : .iPadAir,
+            "iPad4,2"   : .iPadAir,
+            "iPad4,3"   : .iPadAir,
+            "iPad5,3"   : .iPadAir2,
+            "iPad5,4"   : .iPadAir2,
+            "iPad11,3"  : .iPadAir3,
+            "iPad11,4"  : .iPadAir3,
+            "iPad13,1"  : .iPadAir4,
+            "iPad13,2"  : .iPadAir4,
+            "iPad13,16" : .iPadAir5,
+            "iPad13,17" : .iPadAir5,
+    
+            //iPhone
+            "iPhone3,1" : .iPhone4,
+            "iPhone3,2" : .iPhone4,
+            "iPhone3,3" : .iPhone4,
+            "iPhone4,1" : .iPhone4S,
+            "iPhone5,1" : .iPhone5,
+            "iPhone5,2" : .iPhone5,
+            "iPhone5,3" : .iPhone5C,
+            "iPhone5,4" : .iPhone5C,
+            "iPhone6,1" : .iPhone5S,
+            "iPhone6,2" : .iPhone5S,
+            "iPhone7,1" : .iPhone6Plus,
+            "iPhone7,2" : .iPhone6,
+            "iPhone8,1" : .iPhone6S,
+            "iPhone8,2" : .iPhone6SPlus,
+            "iPhone8,4" : .iPhoneSE,
+            "iPhone9,1" : .iPhone7,
+            "iPhone9,3" : .iPhone7,
+            "iPhone9,2" : .iPhone7Plus,
+            "iPhone9,4" : .iPhone7Plus,
+            "iPhone10,1" : .iPhone8,
+            "iPhone10,4" : .iPhone8,
+            "iPhone10,2" : .iPhone8Plus,
+            "iPhone10,5" : .iPhone8Plus,
+            "iPhone10,3" : .iPhoneX,
+            "iPhone10,6" : .iPhoneX,
+            "iPhone11,2" : .iPhoneXS,
+            "iPhone11,4" : .iPhoneXSMax,
+            "iPhone11,6" : .iPhoneXSMax,
+            "iPhone11,8" : .iPhoneXR,
+            "iPhone12,1" : .iPhone11,
+            "iPhone12,3" : .iPhone11Pro,
+            "iPhone12,5" : .iPhone11ProMax,
+            "iPhone12,8" : .iPhoneSE2,
+            "iPhone13,1" : .iPhone12Mini,
+            "iPhone13,2" : .iPhone12,
+            "iPhone13,3" : .iPhone12Pro,
+            "iPhone13,4" : .iPhone12ProMax,
+            "iPhone14,4" : .iPhone13Mini,
+            "iPhone14,5" : .iPhone13,
+            "iPhone14,2" : .iPhone13Pro,
+            "iPhone14,3" : .iPhone13ProMax,
+            "iPhone14,6" : .iPhoneSE3,
+            "iPhone14,7" : .iPhone14,
+            "iPhone14,8" : .iPhone14Plus,
+            "iPhone15,2" : .iPhone14Pro,
+            "iPhone15,3" : .iPhone14ProMax,
+            "iPhone15,4" : .iPhone15,
+            "iPhone15,5" : .iPhone15Plus,
+            "iPhone16,1" : .iPhone15Pro,
+            "iPhone16,2" : .iPhone15ProMax,
+            
+            // Apple Watch
+            "Watch1,1" : .AppleWatch1,
+            "Watch1,2" : .AppleWatch1,
+            "Watch2,6" : .AppleWatchS1,
+            "Watch2,7" : .AppleWatchS1,
+            "Watch2,3" : .AppleWatchS2,
+            "Watch2,4" : .AppleWatchS2,
+            "Watch3,1" : .AppleWatchS3,
+            "Watch3,2" : .AppleWatchS3,
+            "Watch3,3" : .AppleWatchS3,
+            "Watch3,4" : .AppleWatchS3,
+            "Watch4,1" : .AppleWatchS4,
+            "Watch4,2" : .AppleWatchS4,
+            "Watch4,3" : .AppleWatchS4,
+            "Watch4,4" : .AppleWatchS4,
+            "Watch5,1" : .AppleWatchS5,
+            "Watch5,2" : .AppleWatchS5,
+            "Watch5,3" : .AppleWatchS5,
+            "Watch5,4" : .AppleWatchS5,
+            "Watch5,9" : .AppleWatchSE,
+            "Watch5,10" : .AppleWatchSE,
+            "Watch5,11" : .AppleWatchSE,
+            "Watch5,12" : .AppleWatchSE,
+            "Watch6,1" : .AppleWatchS6,
+            "Watch6,2" : .AppleWatchS6,
+            "Watch6,3" : .AppleWatchS6,
+            "Watch6,4" : .AppleWatchS6,
+            "Watch6,6" : .AppleWatchS7,
+            "Watch6,7" : .AppleWatchS7,
+            "Watch6,8" : .AppleWatchS7,
+            "Watch6,9" : .AppleWatchS7,
+    
+            //Apple TV
+            "AppleTV1,1" : .AppleTV1,
+            "AppleTV2,1" : .AppleTV2,
+            "AppleTV3,1" : .AppleTV3,
+            "AppleTV3,2" : .AppleTV3,
+            "AppleTV5,3" : .AppleTV4,
+            "AppleTV6,2" : .AppleTV_4K,
+            "AppleTV11,1" : .AppleTV2_4K,
+            "AppleTV14,1" : .AppleTV3_4K
+        ]
+    
+        guard let mcode = modelCode, let map = String(validatingUTF8: mcode), let model = modelMap[map] else { return ModelIphone.unrecognized }
+        if model == .simulator {
+            if let simModelCode = ProcessInfo().environment["SIMULATOR_MODEL_IDENTIFIER"] {
+                if let simMap = String(validatingUTF8: simModelCode), let simModel = modelMap[simMap] {
+                    return simModel
+                }
+            }
+        }
+        return model
+    }
+}
+
+public class CustomNavigationController: UINavigationController {
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        self.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .black : .white
+        Utils.addBackground(view: self.view)
+    }
+    
+    public override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        Utils.randomizeBackground(view: self.view)
+    }
+    
+    public override init(rootViewController: UIViewController) {
+        super.init(rootViewController: rootViewController)
+    }
+    
+    required init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+public class DialogUnableAccess: UIViewController {
+    
+    public let content = "To verify your identity for signing in on a new device, we need access to your main device. Please turn on your primary device. If it's not accessible, contact us to undergo a KYC verification process.".localized()
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        self.view.backgroundColor = .black.withAlphaComponent(0.5)
+        
+        let container = UIView()
+        self.view.addSubview(container)
+        container.anchor(top: self.view.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 30, paddingLeft: 20, paddingRight: 20)
+        container.layer.cornerRadius = 20.0
+        container.clipsToBounds = true
+        container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        
+        let title = UILabel()
+        title.text = "Unable to access your primary device".localized()
+        title.font = .systemFont(ofSize: 14, weight: .medium)
+        title.numberOfLines = 0
+        title.textAlignment = .center
+        title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        container.addSubview(title)
+        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, width: 270)
+        
+        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageWarning)
+        imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: 5, width: 30, height: 30)
+        
+        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageChat)
+        imageChat.anchor(top: container.topAnchor, left: title.rightAnchor, paddingTop: 10, paddingLeft: 5, width: 30, height: 30)
+        
+        let contentS = UILabel()
+        contentS.text = content
+        contentS.font = .systemFont(ofSize: 12)
+        contentS.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        contentS.numberOfLines = 0
+        container.addSubview(contentS)
+        contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 15, paddingLeft: 15, paddingRight: 10)
+        
+        let buttonKYC = UIButton(type: .custom)
+        let backgroundImageKYC = resizeImage(image: UIImage(named: "pb_security_kyc_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonKYC.setBackgroundImage(backgroundImageKYC, for: .normal)
+        buttonKYC.imageView?.contentMode = .scaleAspectFill
+        buttonKYC.addTarget(self, action: #selector(kycTapped), for: .touchUpInside)
+        buttonKYC.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonKYC)
+        buttonKYC.anchor(top: contentS.bottomAnchor, paddingTop: 15, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let buttonTryAgain = UIButton(type: .custom)
+        let backgroundImageTryAgain = resizeImage(image: UIImage(named: "pb_security_try_again", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonTryAgain.setBackgroundImage(backgroundImageTryAgain, for: .normal)
+        buttonTryAgain.imageView?.contentMode = .scaleAspectFill
+        buttonTryAgain.addTarget(self, action: #selector(tryAgainTapped), for: .touchUpInside)
+        buttonTryAgain.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonTryAgain)
+        buttonTryAgain.anchor(top: contentS.bottomAnchor, right: buttonKYC.leftAnchor, paddingTop: 15, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let buttonCancel = UIButton(type: .custom)
+        let backgroundImageCancel = resizeImage(image: UIImage(named: "pb_security_cancel", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonCancel.setBackgroundImage(backgroundImageCancel, for: .normal)
+        buttonCancel.imageView?.contentMode = .scaleAspectFill
+        buttonCancel.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        buttonCancel.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonCancel)
+        buttonCancel.anchor(top: contentS.bottomAnchor, left: buttonKYC.rightAnchor, paddingTop: 15, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let footer = UILabel()
+        footer.text = "We value your security".localized()
+        footer.font = .systemFont(ofSize: 12)
+        footer.textColor = .gray
+        footer.numberOfLines = 0
+        container.addSubview(footer)
+        footer.anchor(top: buttonCancel.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingBottom: 5, paddingRight: 10)
+        
+    }
+    
+    @objc func kycTapped() {
+        //print("kycTapped")
+        APIS.openContactCenter()
+        self.dismiss(animated: true)
+    }
+    
+    @objc func tryAgainTapped() {
+        //print("tryAgainTapped")
+        if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
+            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+            imageView.tintColor = .white
+            let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+            banner.show()
+            return
+        }
+        Nexilis.showLoader()
+        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getAlertNewSignIn(brand: "\(UIDevice().type)", latitude: Utils.latitude, longitude: Utils.longitude), timeout: 30 * 1000) {
+            if response.isOk() {
+                Nexilis.hideLoader(completion: {
+                    self.dismiss(animated: true) {
+                        let dialog = DialogVerifyYou()
+                        dialog.modalTransitionStyle = .crossDissolve
+                        dialog.modalPresentationStyle = .overCurrentContext
+                        UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                    }
+                })
+            } else {
+                Nexilis.hideLoader(completion: {
+                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    banner.show()
+                })
+            }
+        }
+    }
+    
+    @objc func cancelTapped() {
+        Utils.setLoginMultipleFPin(value: "")
+        self.dismiss(animated: true)
+    }
+}
+
+public class DialogVerifyYou: UIViewController {
+    
+    public let content = "To help keep your Account safe, We wants to make sure it's really you trying to Sign-In\n\nA secure notification containing a verification code was just sent to your main Device".localized()
+    let textFieldCode = UITextField()
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        self.view.backgroundColor = .black.withAlphaComponent(0.5)
+        
+        let container = UIView()
+        self.view.addSubview(container)
+        container.anchor(top: self.view.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 30, paddingLeft: 20, paddingRight: 20)
+        container.layer.cornerRadius = 20.0
+        container.clipsToBounds = true
+        container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        
+        let title = UILabel()
+        title.text = "Verify it's you".localized()
+        title.font = .systemFont(ofSize: 14, weight: .medium)
+        title.numberOfLines = 0
+        title.textAlignment = .center
+        title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        container.addSubview(title)
+        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: 270)
+        
+        let imageAsk = UIImageView(image: UIImage(named: "pb_security_ask", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageAsk)
+        imageAsk.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: 5, width: 30, height: 30)
+        
+        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageChat)
+        imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 20, width: 30, height: 30)
+
+        let contentS = UILabel()
+        contentS.text = content
+        contentS.font = .systemFont(ofSize: 12)
+        contentS.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        contentS.numberOfLines = 0
+        container.addSubview(contentS)
+        contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 15, paddingLeft: 15, paddingRight: 10)
+        
+        let containerText = UIView()
+        container.addSubview(containerText)
+        containerText.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 10, paddingLeft: 15, paddingRight: 15, height: 40)
+        containerText.layer.cornerRadius = 8.0
+        containerText.clipsToBounds = true
+        containerText.layer.borderWidth = 3
+        containerText.layer.borderColor = UIColor.blueTextField.cgColor
+        
+        let containerEnterCode = UIView()
+        container.addSubview(containerEnterCode)
+        containerEnterCode.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, paddingTop: 2, paddingLeft: 30, height: 20, maxWidth: 150)
+        containerEnterCode.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        
+        let titleEnterCode = UILabel()
+        containerEnterCode.addSubview(titleEnterCode)
+        titleEnterCode.text = "Enter Code".localized()
+        titleEnterCode.font = .systemFont(ofSize: 12, weight: .medium)
+        titleEnterCode.textColor = .blueTextField
+        titleEnterCode.textAlignment = .center
+        titleEnterCode.anchor(top: containerEnterCode.topAnchor, left: containerEnterCode.leftAnchor, bottom: containerEnterCode.bottomAnchor, right: containerEnterCode.rightAnchor, paddingLeft: 10, paddingRight: 10)
+        
+        let buttonSubmit = UIButton(type: .custom)
+        containerText.addSubview(buttonSubmit)
+        buttonSubmit.anchor(top: containerText.topAnchor, bottom: containerText.bottomAnchor, right: containerText.rightAnchor, paddingTop: 5, paddingBottom: 5, paddingRight: 5, width: 100)
+        buttonSubmit.backgroundColor = .blueTextField
+        buttonSubmit.setTitle("Submit".localized(), for: .normal)
+        buttonSubmit.titleLabel?.font = .systemFont(ofSize: 10, weight: .medium)
+        buttonSubmit.layer.cornerRadius = 5.0
+        buttonSubmit.clipsToBounds = true
+        buttonSubmit.addTarget(self, action: #selector(submitTapped), for: .touchUpInside)
+        
+        container.addSubview(textFieldCode)
+        textFieldCode.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, right: buttonSubmit.leftAnchor, paddingTop: 20, paddingLeft: 25, paddingRight: 5, height: 25)
+        textFieldCode.keyboardType = .numberPad
+        
+        let footer = UILabel()
+        footer.text = "We value your security".localized()
+        footer.font = .systemFont(ofSize: 12)
+        footer.textColor = .gray
+        footer.numberOfLines = 0
+        container.addSubview(footer)
+        footer.anchor(top: containerText.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingTop: 8, paddingBottom: 5, paddingRight: 10)
+        
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissView))
+        tapGesture.cancelsTouchesInView = false
+        self.view.addGestureRecognizer(tapGesture)
+        
+    }
+    
+    @objc func submitTapped() {
+        //print("submitTapped")
+        if textFieldCode.text!.isEmpty {
+            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+            imageView.tintColor = .white
+            let banner = FloatingNotificationBanner(title: "Code can't be empty".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+            banner.show()
+            return
+        }
+        if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
+            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+            imageView.tintColor = .white
+            let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+            banner.show()
+            return
+        }
+        Nexilis.showLoader()
+        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getShieldSecurityValidateToken(token: textFieldCode.text!), timeout: 30 * 1000) {
+            if response.isOk() {
+                Nexilis.hideLoader(completion: {
+                    let fPin = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
+                    let device_id = response.getBody(key: CoreMessage_TMessageKey.IMEI, default_value: "")
+                    self.deleteAllRecordDatabase()
+                    if(!fPin.isEmpty) {
+//                            Nexilis.changeUser(f_pin: device_id)
+                        Utils.setLoginMultipleFPin(value: "")
+                        SecureUserDefaults.shared.set(device_id, forKey: "device_id")
+                        Utils.setProfile(value: true)
+                        SecureUserDefaults.shared.sync()
+                        // pos registration
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: fPin))
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                            Nexilis.hideLoader(completion: {
+                                let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(title: "Successfully Sign-In".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                                banner.show()
+                                if Nexilis.showFB {
+                                    Nexilis.floatingButton.removeFromSuperview()
+                                    Nexilis.floatingButton = FloatingButton()
+                                    let viewController = (UIApplication.shared.windows.first?.rootViewController)!
+                                    Nexilis.addFB(viewController: viewController, fromMAB: true)
+                                }
+                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
+                                self.dismiss(animated: true)
+                            })
+                        })
+                    }
+                })
+            } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "4t" {
+                Nexilis.hideLoader(completion: {
+                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "Invalid Code".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    banner.show()
+                    self.dismiss(animated: true)
+                })
+            } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "3t" {
+                Nexilis.hideLoader(completion: {
+                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "Expired Code".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    banner.show()
+                    self.dismiss(animated: true)
+                })
+            } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "4u" {
+                Nexilis.hideLoader(completion: {
+                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "You have been blocked".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    banner.show()
+                    self.dismiss(animated: true)
+                })
+            } else {
+                Nexilis.hideLoader(completion: {
+                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    banner.show()
+                })
+            }
+        }
+    }
+    
+    @objc func dismissView() {
+        if textFieldCode.isFirstResponder {
+            textFieldCode.resignFirstResponder()
+        } else {
+            self.dismiss(animated: true)
+        }
+    }
+}
+
+public class DialogSignIn: UIViewController {
+    
+    public var valueDevice = "Galaxy S21 Ultra 5G"
+    public var valueTime = "14:02"
+    public var valueLocation = "Surakarta, Central Java"
+    public var valueToken = ""
+    public var valueUser = ""
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        self.view.backgroundColor = .black.withAlphaComponent(0.5)
+        
+        let container = UIView()
+        self.view.addSubview(container)
+        container.anchor(top: self.view.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 30, paddingLeft: 20, paddingRight: 20)
+        container.layer.cornerRadius = 20.0
+        container.clipsToBounds = true
+        container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        
+        let title = UILabel()
+        title.text = "New Sign-In Detected".localized()
+        title.font = .systemFont(ofSize: 14, weight: .medium)
+        title.numberOfLines = 0
+        title.textAlignment = .center
+        title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        container.addSubview(title)
+        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: 270)
+        
+        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageWarning)
+        imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: 5, width: 30, height: 30)
+        
+        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageChat)
+        imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 20, width: 30, height: 30)
+        
+        let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
+        let sContent1 = "We detected a new Sign-In to your Account".localized()
+        let sContent2 = "Device".localized()
+        let sContent3 = "Time".localized()
+        let sContent4 = "Location".localized()
+        let sContent5 = "Your Account is at risk if this wasn't you.".localized()
+        let fullString = sContent1 + "\n\u{2022}\u{00a0}\u{00a0}" + sContent2 + String(repeating: "\u{00a0}", count: (lang == "id" ? 6 : 10)) + ": " + valueDevice + "\n\u{2022}\u{00a0}\u{00a0}" + sContent3 + String(repeating: "\u{00a0}", count: 13) + ": " + valueTime + "\n\u{2022}\u{00a0}\u{00a0}" + sContent4 + String(repeating: "\u{00a0}", count: (lang == "id" ? 13 : 6)) + ": " + valueLocation + "\n\n" + sContent5;
+        let contentFull = NSMutableAttributedString(string: fullString)
+        contentFull.addAttributes([.font: UIFont.systemFont(ofSize: 12)], range: NSRange(location: 0, length: fullString.count))
+        if let range = fullString.range(of: valueDevice) {
+            let index = fullString.distance(from: fullString.startIndex, to: range.lowerBound)
+            contentFull.addAttributes([.font: UIFont.systemFont(ofSize: 12, weight: .medium)], range: NSRange(location: index, length: valueDevice.count))
+        }
+        if let range = fullString.range(of: valueTime) {
+            let index = fullString.distance(from: fullString.startIndex, to: range.lowerBound)
+            contentFull.addAttributes([.font: UIFont.systemFont(ofSize: 12, weight: .medium)], range: NSRange(location: index, length: valueTime.count))
+        }
+        if let range = fullString.range(of: valueLocation) {
+            let index = fullString.distance(from: fullString.startIndex, to: range.lowerBound)
+            contentFull.addAttributes([.font: UIFont.systemFont(ofSize: 12, weight: .medium)], range: NSRange(location: index, length: valueLocation.count))
+        }
+        
+        let contentS = UILabel()
+        contentS.attributedText = contentFull
+        contentS.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        contentS.numberOfLines = 0
+        container.addSubview(contentS)
+        contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 15, paddingLeft: 15, paddingRight: 10)
+        
+        let buttonCC = UIButton(type: .custom)
+        let backgroundImageKYC = resizeImage(image: UIImage(named: "pb_startup_cc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonCC.setBackgroundImage(backgroundImageKYC, for: .normal)
+        buttonCC.imageView?.contentMode = .scaleAspectFill
+        buttonCC.addTarget(self, action: #selector(ccTapped), for: .touchUpInside)
+        buttonCC.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonCC)
+        buttonCC.anchor(top: contentS.bottomAnchor, paddingTop: 10, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let buttonVerify = UIButton(type: .custom)
+        let backgroundImageTryAgain = resizeImage(image: UIImage(named: "pb_security_verify_device", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonVerify.setBackgroundImage(backgroundImageTryAgain, for: .normal)
+        buttonVerify.imageView?.contentMode = .scaleAspectFill
+        buttonVerify.addTarget(self, action: #selector(verifyTapped), for: .touchUpInside)
+        buttonVerify.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonVerify)
+        buttonVerify.anchor(top: contentS.bottomAnchor, right: buttonCC.leftAnchor, paddingTop: 10, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let buttonBlock = UIButton(type: .custom)
+        let backgroundImageCancel = resizeImage(image: UIImage(named: "pb_security_block_device", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonBlock.setBackgroundImage(backgroundImageCancel, for: .normal)
+        buttonBlock.imageView?.contentMode = .scaleAspectFill
+        buttonBlock.addTarget(self, action: #selector(blockTapped), for: .touchUpInside)
+        buttonBlock.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonBlock)
+        buttonBlock.anchor(top: contentS.bottomAnchor, left: buttonCC.rightAnchor, paddingTop: 10, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let footer = UILabel()
+        footer.text = "We value your security".localized()
+        footer.font = .systemFont(ofSize: 12)
+        footer.textColor = .gray
+        footer.numberOfLines = 0
+        container.addSubview(footer)
+        footer.anchor(top: buttonBlock.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingBottom: 5, paddingRight: 10)
+        
+    }
+    
+    @objc func ccTapped() {
+        //print("ccTapped")
+        APIS.openContactCenter()
+        self.dismiss(animated: true)
+    }
+    
+    @objc func verifyTapped() {
+        //print("verifyTapped")
+        self.dismiss(animated: true) {
+            let dialog = DialogVerificationCode()
+            dialog.valueDevice = self.valueDevice
+            dialog.valueCode = self.valueToken
+            dialog.modalTransitionStyle = .crossDissolve
+            dialog.modalPresentationStyle = .overCurrentContext
+            UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+        }
+    }
+    
+    @objc func blockTapped() {
+        //print("blockTapped")
+        if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
+            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+            imageView.tintColor = .white
+            let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+            banner.show()
+            return
+        }
+        Nexilis.showLoader()
+        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getBlockAccess(userId: valueUser), timeout: 30 * 1000) {
+            if response.isOk() {
+                Nexilis.hideLoader(completion: {
+                    let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "The other device has been blocked".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
+                    banner.show()
+                    
+                    self.dismiss(animated: true)
+                })
+            } else {
+                Nexilis.hideLoader(completion: {
+                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    banner.show()
+                })
+            }
+        }
+    }
+}
+
+public class DialogVerificationCode: UIViewController {
+    
+    public var valueDevice = "Galaxy S21 Ultra 5G"
+    public var valueAccount = "1001001234."
+    public var valueCode = "900214"
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        self.view.backgroundColor = .black.withAlphaComponent(0.5)
+        
+        let container = UIView()
+        self.view.addSubview(container)
+        container.anchor(top: self.view.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 30, paddingLeft: 20, paddingRight: 20)
+        container.layer.cornerRadius = 20.0
+        container.clipsToBounds = true
+        container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        
+        let title = UILabel()
+        title.text = "Nexilis Verification Code".localized()
+        title.font = .systemFont(ofSize: 14, weight: .medium)
+        title.numberOfLines = 0
+        title.textAlignment = .center
+        title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        container.addSubview(title)
+        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: 270)
+        
+        let imageInfo = UIImageView(image: UIImage(named: "pb_security_information", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageInfo)
+        imageInfo.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: 5, width: 30, height: 30)
+        
+        let imageMail = UIImageView(image: UIImage(named: "pb_security_message", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageMail)
+        imageMail.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 20, width: 30, height: 30)
+        
+        let sContent1 = "We received a request to verify the Sign-In from".localized()
+        let sContent2 = "to your Account".localized()
+        let sContent3 = "Your Nexilis verification code is".localized()
+        let sContent4 = "(do not forward or give this code to anyone)".localized()
+        let sContent5 = "If you did not request this code, it is possible that someone else is trying to access the Account.".localized()
+        let fullString = sContent1 + " " + valueDevice + " " + sContent2 + " " + valueAccount + " " + sContent3 + ":\n\n" + valueCode + " " + sContent4 + "\n\n" + sContent5;
+        let contentFull = NSMutableAttributedString(string: fullString)
+        contentFull.addAttributes([.font: UIFont.systemFont(ofSize: 12), .foregroundColor: (self.traitCollection.userInterfaceStyle == .dark ? UIColor.white : UIColor.black)], range: NSRange(location: 0, length: fullString.count))
+        if let range = fullString.range(of: valueDevice) {
+            let index = fullString.distance(from: fullString.startIndex, to: range.lowerBound)
+            contentFull.addAttributes([.font: UIFont.systemFont(ofSize: 12, weight: .medium)], range: NSRange(location: index, length: valueDevice.count))
+        }
+        if let range = fullString.range(of: valueAccount) {
+            let index = fullString.distance(from: fullString.startIndex, to: range.lowerBound)
+            contentFull.addAttributes([.foregroundColor: UIColor.blueTextField], range: NSRange(location: index, length: valueAccount.count))
+        }
+        if let range = fullString.range(of: valueCode) {
+            let index = fullString.distance(from: fullString.startIndex, to: range.lowerBound)
+            contentFull.addAttributes([.font: UIFont.systemFont(ofSize: 18, weight: .medium)], range: NSRange(location: index, length: valueCode.count))
+        }
+        if let range = fullString.range(of: sContent4) {
+            let index = fullString.distance(from: fullString.startIndex, to: range.lowerBound)
+            contentFull.addAttributes([.foregroundColor: UIColor.systemRed], range: NSRange(location: index, length: sContent4.count))
+        }
+        
+        let contentS = UILabel()
+        contentS.attributedText = contentFull
+        contentS.numberOfLines = 0
+        container.addSubview(contentS)
+        contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 15, paddingLeft: 15, paddingRight: 10)
+        
+        let footer = UILabel()
+        footer.text = "We value your security".localized()
+        footer.font = .systemFont(ofSize: 12)
+        footer.textColor = .gray
+        footer.numberOfLines = 0
+        container.addSubview(footer)
+        footer.anchor(top: contentS.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingTop: 10, paddingBottom: 5, paddingRight: 10)
+        
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissView))
+        tapGesture.cancelsTouchesInView = false
+        self.view.addGestureRecognizer(tapGesture)
+        
+    }
+    
+    @objc func dismissView() {
+        self.dismiss(animated: true)
+    }
+}
+
+public class DialogSecurityShield: UIViewController {
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        self.view.backgroundColor = .black.withAlphaComponent(0.5)
+        
+        let container = UIView()
+        self.view.addSubview(container)
+        container.anchor(top: self.view.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 30, paddingLeft: 20, paddingRight: 20)
+        container.layer.cornerRadius = 20.0
+        container.clipsToBounds = true
+        container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        
+        let title = UILabel()
+        title.text = "Your Account is Protected".localized()
+        title.font = .systemFont(ofSize: 14, weight: .medium)
+        title.numberOfLines = 0
+        title.textAlignment = .center
+        title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        container.addSubview(title)
+        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: 270)
+        
+        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning_green", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageWarning)
+        imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: 5, width: 30, height: 30)
+        
+        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageChat)
+        imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 20, width: 30, height: 30)
+        
+        let sContent1 = "Security Shield has been activated for your Peace of Mind...".localized()
+        let sContent2 = "Account & Transaction Protection".localized()
+        let sContent3 = "Early Threat Detection".localized()
+        let sContent4 = "Emergency Data Control".localized()
+        let sContent5 = "Please feel free to contact us for more information.".localized()
+        let fullString = sContent1 + "\n\u{2022}" + String(repeating: "\u{00a0}", count: 2) + sContent2 + "\n\u{2022}" + String(repeating: "\u{00a0}", count: 2) + sContent3 + "\n\u{2022}" + String(repeating: "\u{00a0}", count: 2) + sContent4 + "\n" + sContent5;
+        
+        let contentS = UILabel()
+        contentS.text = fullString
+        contentS.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        contentS.numberOfLines = 0
+        contentS.font = .systemFont(ofSize: 12)
+        container.addSubview(contentS)
+        contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 15, paddingLeft: 15, paddingRight: 10)
+        
+        let buttonCC = UIButton(type: .custom)
+        let backgroundImageKYC = resizeImage(image: UIImage(named: "pb_startup_cc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonCC.setBackgroundImage(backgroundImageKYC, for: .normal)
+        buttonCC.imageView?.contentMode = .scaleAspectFill
+        buttonCC.addTarget(self, action: #selector(ccTapped), for: .touchUpInside)
+        buttonCC.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonCC)
+        buttonCC.anchor(top: contentS.bottomAnchor, paddingTop: 10, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let buttonActive = UIButton(type: .custom)
+        let backgroundImageTryAgain = resizeImage(image: UIImage(named: "pb_startup_activate", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonActive.setBackgroundImage(backgroundImageTryAgain, for: .normal)
+        buttonActive.imageView?.contentMode = .scaleAspectFill
+        buttonActive.addTarget(self, action: #selector(activateTapped), for: .touchUpInside)
+        buttonActive.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonActive)
+        buttonActive.anchor(top: contentS.bottomAnchor, right: buttonCC.leftAnchor, paddingTop: 10, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let buttonDeactive = UIButton(type: .custom)
+        let backgroundImageCancel = resizeImage(image: UIImage(named: "pb_startup_deactivate", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonDeactive.setBackgroundImage(backgroundImageCancel, for: .normal)
+        buttonDeactive.imageView?.contentMode = .scaleAspectFill
+        buttonDeactive.addTarget(self, action: #selector(deactiveTapped), for: .touchUpInside)
+        buttonDeactive.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonDeactive)
+        buttonDeactive.anchor(top: contentS.bottomAnchor, left: buttonCC.rightAnchor, paddingTop: 10, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let footer = UILabel()
+        footer.text = "We value your security".localized()
+        footer.font = .systemFont(ofSize: 12)
+        footer.textColor = .gray
+        footer.numberOfLines = 0
+        container.addSubview(footer)
+        footer.anchor(top: buttonDeactive.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingBottom: 5, paddingRight: 10)
+        
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissView))
+        tapGesture.cancelsTouchesInView = false
+        self.view.addGestureRecognizer(tapGesture)
+        
+    }
+    
+    @objc func ccTapped() {
+        //print("ccTapped")
+        APIS.openContactCenter()
+        self.dismiss(animated: true)
+    }
+    
+    @objc func activateTapped() {
+        //print("activateTapped")
+        self.dismiss(animated: true)
+    }
+    
+    @objc func deactiveTapped() {
+        //print("deactiveTapped")
+        self.dismiss(animated: true)
+    }
+    
+    @objc func dismissView() {
+        self.dismiss(animated: true)
+    }
+}
+
+public class DialogTransactionApproval: UIViewController {
+    
+    public var valueLink = "https://hdtrack.com"
+    public var valueAmount = "$142.90"
+    public var packetId = ""
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        self.view.backgroundColor = .black.withAlphaComponent(0.5)
+        
+        let container = UIView()
+        self.view.addSubview(container)
+        container.anchor(top: self.view.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 30, paddingLeft: 20, paddingRight: 20)
+        container.layer.cornerRadius = 20.0
+        container.clipsToBounds = true
+        container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        
+        let title = UILabel()
+        title.text = "Transaction Approval Request".localized()
+        title.font = .systemFont(ofSize: 14, weight: .medium)
+        title.numberOfLines = 0
+        title.textAlignment = .center
+        title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        container.addSubview(title)
+        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: 270)
+        
+        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageWarning)
+        imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: 5, width: 30, height: 30)
+        
+        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageChat)
+        imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 20, width: 30, height: 30)
+        
+        let sContent1 = "We have detected a".localized()
+        let sContent1a = "Rp."
+        let sContent2 = "transaction using credit card no. XXXX-XXXX-XXXX-1234 on".localized()
+        let sContent3 = "Before processing your payment, kindly verify and confirm the transaction details.".localized()
+        let fullString = sContent1 + " " + sContent1a + " " + formatText(valueAmount) + " " + sContent2 + " " + valueLink + ".\n\n" + sContent3
+        let contentFull = NSMutableAttributedString(string: fullString)
+        contentFull.addAttributes([.font: UIFont.systemFont(ofSize: 12), .foregroundColor: (self.traitCollection.userInterfaceStyle == .dark ? UIColor.white : UIColor.black)], range: NSRange(location: 0, length: fullString.count))
+        if let range = fullString.range(of: valueLink) {
+            let index = fullString.distance(from: fullString.startIndex, to: range.lowerBound)
+            contentFull.addAttributes([.foregroundColor: UIColor.red, .underlineStyle: NSUnderlineStyle.single.rawValue, .link: URL(string: valueLink)!], range: NSRange(location: index, length: valueLink.count))
+        }
+        
+        let contentS = UILabel()
+        contentS.attributedText = contentFull
+        contentS.numberOfLines = 0
+        container.addSubview(contentS)
+        contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 15, paddingLeft: 15, paddingRight: 10)
+        contentS.isUserInteractionEnabled = true
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(labelTapped))
+        contentS.addGestureRecognizer(tapGesture)
+        
+        let buttonCC = UIButton(type: .custom)
+        let backgroundImageKYC = resizeImage(image: UIImage(named: "pb_startup_cc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonCC.setBackgroundImage(backgroundImageKYC, for: .normal)
+        buttonCC.imageView?.contentMode = .scaleAspectFill
+        buttonCC.addTarget(self, action: #selector(ccTapped), for: .touchUpInside)
+        buttonCC.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonCC)
+        buttonCC.anchor(top: contentS.bottomAnchor, paddingTop: 10, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let buttonApprove = UIButton(type: .custom)
+        let backgroundImageTryAgain = resizeImage(image: UIImage(named: "pb_security_approve", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonApprove.setBackgroundImage(backgroundImageTryAgain, for: .normal)
+        buttonApprove.imageView?.contentMode = .scaleAspectFill
+        buttonApprove.addTarget(self, action: #selector(approveTapped), for: .touchUpInside)
+        buttonApprove.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonApprove)
+        buttonApprove.anchor(top: contentS.bottomAnchor, right: buttonCC.leftAnchor, paddingTop: 10, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let buttonReject = UIButton(type: .custom)
+        let backgroundImageCancel = resizeImage(image: UIImage(named: "pb_security_reject", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: UIScreen.main.bounds.width / 3 - 20, height: 35))
+        buttonReject.setBackgroundImage(backgroundImageCancel, for: .normal)
+        buttonReject.imageView?.contentMode = .scaleAspectFill
+        buttonReject.addTarget(self, action: #selector(rejectTapped), for: .touchUpInside)
+        buttonReject.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        container.addSubview(buttonReject)
+        buttonReject.anchor(top: contentS.bottomAnchor, left: buttonCC.rightAnchor, paddingTop: 10, width: UIScreen.main.bounds.width / 3 - 20, height: 35)
+        
+        let footer = UILabel()
+        footer.text = "We value your security".localized()
+        footer.font = .systemFont(ofSize: 12)
+        footer.textColor = .gray
+        footer.numberOfLines = 0
+        container.addSubview(footer)
+        footer.anchor(top: buttonReject.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingBottom: 5, paddingRight: 10)
+        
+    }
+    
+    @objc func ccTapped() {
+        //print("ccTapped")
+        APIS.openContactCenter()
+        self.dismiss(animated: true)
+    }
+    
+    @objc func approveTapped() {
+        //print("approveTapped")
+//        _ = Nexilis.responseString(packetId: packetId, message: "00", timeout: 3000)
+        self.dismiss(animated: true)
+    }
+    
+    @objc func rejectTapped() {
+        //print("rejectTapped")
+//        _ = Nexilis.responseString(packetId: packetId, message: "00", timeout: 3000)
+        self.dismiss(animated: true)
+    }
+    
+    @objc func labelTapped(sender: UITapGestureRecognizer) {
+        guard let url = URL(string: valueLink) else { return }
+        UIApplication.shared.open(url)
+    }
+    
+    func formatText(_ s: String) -> String {
+        let text = s
+        if text.isEmpty { return "" }
+        
+        let cleanString = text.replacingOccurrences(of: "[^\\d]", with: "", options: .regularExpression)
+        
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "en_US")
+        let formattedString = formatter.string(from: NSNumber(value: Int(cleanString)!)) ?? ""
+        
+        return formattedString
+    }
+}
+
+public class ValidationTransactionLimit: UIViewController, UITextFieldDelegate {
+    var textField = UITextField()
+    var formatter = NumberFormatter()
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        navigationController?.navigationBar.tintColor = .white
+        navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
+        
+        let title = UILabel()
+        title.text = "Set a transation validation amount".localized()
+        title.font = .systemFont(ofSize: 18, weight: .medium)
+        title.numberOfLines = 0
+        title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+        self.view.addSubview(title)
+        title.anchor(top: self.view.safeAreaLayoutGuide.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 10, paddingLeft: 20, paddingRight: 20)
+        
+        let content = UILabel()
+        content.text = "Any transaction over this amount will display an alert and require you to accept the alert to validate before proceeding with the transaction".localized()
+        content.font = .systemFont(ofSize: 14)
+        content.numberOfLines = 0
+        content.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+        self.view.addSubview(content)
+        content.anchor(top: title.bottomAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 5, paddingLeft: 20, paddingRight: 20)
+        
+        self.view.addSubview(textField)
+        textField.anchor(top: content.bottomAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 5, paddingLeft: 20, paddingRight: 20, height: 40)
+        textField.textAlignment = .center
+        textField.keyboardType = .numberPad
+        textField.layer.borderWidth = 1
+        textField.layer.borderColor = UIColor.gray.cgColor
+        textField.layer.cornerRadius = 10
+        textField.clipsToBounds = true
+        textField.text = formatText(Utils.getLimitValidTrans())
+        
+        textField.delegate = self
+        
+    }
+    
+    public override func viewDidAppear(_ animated: Bool) {
+        navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
+        
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Submit".localized(), style: .plain, target: self, action: #selector(submit))
+        
+        let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
+        let navBarAppearance = UINavigationBarAppearance()
+        navBarAppearance.configureWithOpaqueBackground()
+        navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
+        navBarAppearance.titleTextAttributes = attributes
+        navigationController?.navigationBar.standardAppearance = navBarAppearance
+        navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
+        self.navigationController?.navigationBar.topItem?.title = "Validation Transaction Limit".localized()
+        self.navigationController?.navigationBar.setNeedsLayout()
+        self.title = "Validation Transaction Limit".localized()
+    }
+    
+    @objc func submit() {
+        if !textField.text!.isEmpty {
+            var text = textField.text!
+            text = text.replacingOccurrences(of: ",", with: "", options: .regularExpression)
+            Utils.setLimitValidTrans(value: text)
+            let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+            imageView.tintColor = .white
+            let banner = FloatingNotificationBanner(title: "Successfully changed".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+            banner.show()
+            self.navigationController?.popViewController(animated: true)
+        }
+    }
+    
+    public func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        guard string != "\n" else {
+           return true
+        }
+        let currentText = textField.text ?? ""
+        let newText = (currentText as NSString).replacingCharacters(in: range, with: string)
+        let formattedNumber = formatText(newText)
+        if formattedNumber.count <= 13 {
+            textField.text = formattedNumber
+        }
+       return false
+    }
+
+    func formatText(_ s: String) -> String {
+        let text = s
+        if text.isEmpty { return "" }
+        
+        let cleanString = text.replacingOccurrences(of: "[^\\d]", with: "", options: .regularExpression)
+        
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "en_US")
+        let formattedString = formatter.string(from: NSNumber(value: Int(cleanString)!)) ?? ""
+        
+        return formattedString
+    }
+}
+
+class LocationManager: NSObject, CLLocationManagerDelegate {
+    private var locationManager = CLLocationManager()
+
+    override init() {
+        super.init()
+
+        self.locationManager.delegate = self
+        self.locationManager.requestWhenInUseAuthorization()
+        self.locationManager.startUpdatingLocation()
+        
+        if let location = locationManager.location {
+            let latitude = location.coordinate.latitude
+            let longitude = location.coordinate.longitude
+            Utils.latitude = "\(latitude)"
+            Utils.longitude = "\(longitude)"
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        //print("didUpdateLocations")
+        if let location = locations.last {
+            let latitude = location.coordinate.latitude
+            let longitude = location.coordinate.longitude
+            Utils.latitude = "\(latitude)"
+            Utils.longitude = "\(longitude)"
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        //print("Failed to find user's location: \(error.localizedDescription)")
+    }
+}
+
+public class SecureUserDefaults {
+    static let shared = SecureUserDefaults()
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    // Save a value
+    func set<T: Codable>(_ value: T, forKey key: String) {
+        let encoder = JSONEncoder()
+        guard let encodedData = try? encoder.encode(value),
+              let encryptedData = try? MasterKeyUtil.shared.encryptP(data: encodedData) else {
+//            print("Failed to encrypt data")
+            return
+        }
+        defaults.set(encryptedData, forKey: key)
+    }
+
+    // Retrieve a value
+    func value<T: Codable>(forKey key: String) -> T? {
+        guard let encryptedData = defaults.data(forKey: key),
+              let decryptedData = try? MasterKeyUtil.shared.decryptP(data: encryptedData) else {
+//            print("Failed to decrypt data \(key)")
+            return nil
+        }
+        let decoder = JSONDecoder()
+        return try? decoder.decode(T.self, from: decryptedData)
+    }
+
+    // Remove a value
+    func removeValue(forKey key: String) {
+        defaults.removeObject(forKey: key)
+    }
+    
+    func sync() {
+        defaults.synchronize()
+    }
+}
+

@@ -1,0 +1,11 @@
+framework module nuSDKService {
+  umbrella header "nuSDKService.h"
+  export *
+
+  module * { export * }
+}
+
+module nuSDKService.Swift {
+  header "nuSDKService-Swift.h"
+  requires objc
+}

@@ -1,0 +1,166 @@
+//
+//  Chat.swift
+//  Qmera
+//
+//  Created by Yayan Dwi on 14/10/21.
+//
+
+import Foundation
+
+public class Chat: Model {
+    
+    public let fpin: String
+    public let pin: String
+    public let messageId: String
+    public let counter: String
+    public var messageText: String
+    public let serverDate: String
+    public let image: String
+    public let video: String
+    public let file: String
+    public let attachmentFlag: String
+    public let messageScope: String
+    public let name: String
+    public let profile: String
+    public let official: String
+    public let status: String
+    public let credential: String
+    public var lock: String
+    
+    public init(pin: String) {
+        self.fpin = ""
+        self.pin = pin
+        self.messageId = ""
+        self.counter = ""
+        self.messageText = ""
+        self.serverDate = ""
+        self.image = ""
+        self.video = ""
+        self.file = ""
+        self.attachmentFlag = ""
+        self.messageScope = ""
+        self.name = ""
+        self.profile = ""
+        self.official = ""
+        self.status = ""
+        self.credential = ""
+        self.lock = ""
+    }
+    
+    public init(fpin:String, pin: String, messageId: String, counter: String, messageText: String, serverDate: String, image: String, video: String, file: String, attachmentFlag: String, messageScope: String, name: String, profile: String, official: String, status: String, credential: String, lock: String) {
+        self.fpin = fpin
+        self.pin = pin
+        self.messageId = messageId
+        self.counter = counter
+        self.messageText = messageText
+        self.serverDate = serverDate
+        self.image = image
+        self.video = video
+        self.file = file
+        self.attachmentFlag = attachmentFlag
+        self.messageScope = messageScope
+        self.name = name
+        self.profile = profile
+        self.official = official
+        self.status = status
+        self.credential = credential
+        self.lock = lock
+    }
+    
+    public static func == (lhs: Chat, rhs: Chat) -> Bool {
+        return lhs.pin == rhs.pin
+    }
+    
+    public var description: String {
+        return ""
+    }
+    
+    public static func getMessageFromSearch(text: String = "") -> [String] {
+        var messages: [String] = []
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            do {
+                let query = "select message_id FROM MESSAGE where message_text LIKE '%\(text)%'"
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
+                    while cursorData.next() {
+                        let data = cursorData.string(forColumnIndex: 0) ?? ""
+                        messages.append(data)
+                    }
+                    cursorData.close()
+                }
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+        return messages
+    }
+    
+//    public static func getUcList() {
+//        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+//            let query = " select ms.message_id from MESSAGE_SUMMARY ms"
+//            if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
+//                while cursorData.next() {
+//                    print("HMMKAMPRET2 \(cursorData.string(forColumnIndex: 0))")
+//                }
+//                cursorData.close()
+//            }
+//        })
+//    }
+    
+    public static func getData(messageId: String = "") -> [Chat] {
+        var chats: [Chat] = []
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            do {
+                let query = """
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.message_id = m.message_id and ms.l_pin = b.f_pin \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")
+                            union
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock from MESSAGE_SUMMARY ms, MESSAGE m where ms.message_id = m.message_id and ms.l_pin = '-999' \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")
+                            union
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.f_name || ' (\("Lounge".localized()))', b.image_id profile, b.official, m.status, m.credential, m.lock from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.message_id = m.message_id and ms.l_pin = b.group_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")
+                            union
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, c.f_name || ' (' || b.title || ')', c.image_id profile, '', m.status, m.credential, m.lock from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where ms.message_id = m.message_id and ms.l_pin = b.chat_id and b.group_id = c.group_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")
+                            order by 6 desc
+                            """
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
+                    while cursorData.next() {
+                        let chat = Chat(fpin: cursorData.string(forColumnIndex: 0) ?? "",
+                                        pin: cursorData.string(forColumnIndex: 1) ?? "",
+                                        messageId: cursorData.string(forColumnIndex: 2) ?? "",
+                                        counter: cursorData.string(forColumnIndex: 3) ?? "",
+                                        messageText: cursorData.string(forColumnIndex: 4) ?? "",
+                                        serverDate: cursorData.string(forColumnIndex: 5) ?? "",
+                                        image: cursorData.string(forColumnIndex: 6) ?? "",
+                                        video: cursorData.string(forColumnIndex: 7) ?? "",
+                                        file: cursorData.string(forColumnIndex: 8) ?? "",
+                                        attachmentFlag: cursorData.string(forColumnIndex: 9) ?? "",
+                                        messageScope: cursorData.string(forColumnIndex: 10) ?? "",
+                                        name: cursorData.string(forColumnIndex: 11) ?? "",
+                                        profile: cursorData.string(forColumnIndex: 12) ?? "",
+                                        official: cursorData.string(forColumnIndex: 13) ?? "",
+                                        status: cursorData.string(forColumnIndex: 14) ?? "",
+                                        credential: cursorData.string(forColumnIndex: 15) ?? "",
+                                        lock: cursorData.string(forColumnIndex: 16) ?? "")
+                        chats.append(chat)
+                    }
+                    cursorData.close()
+    //                if chats.count == 0 {
+    //                    if let cursorCounter = Database.shared.getRecords(fmdb: fmdb, query: "SELECT SUM(counter) FROM MESSAGE_SUMMARY"), cursorCounter.next() {
+    //                        if cursorCounter.int(forColumnIndex: 0) != 0 {
+    //                            _ = Database.shared.updateAllRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+    //                                "counter" : 0
+    //                            ])
+    //                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+    //                        }
+    //                        cursorCounter.close()
+    //                    }
+    //                }
+                }
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+        return chats
+    }
+    
+}
