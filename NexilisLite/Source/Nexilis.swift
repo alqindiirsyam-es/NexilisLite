@@ -193,7 +193,7 @@ public class Nexilis: NSObject {
                 
                 if let me = User.getMyPin() {
                     if !Utils.getForceAnonymous() && Utils.getSetProfile() {
-                        Database.shared.openDatabase()
+                        _ = Database.shared.openDatabase()
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                             do {
                                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT * FROM BUDDY where f_pin = '\(me)' ") {

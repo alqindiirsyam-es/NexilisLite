@@ -27,7 +27,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
     public override func viewDidLoad() {
         super.viewDidLoad()
         
-        self.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .black : .white
+//        self.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .black : .white
         self.navigationController?.navigationBar.topItem?.backButtonTitle = ""
         
         tableView.delegate = self
@@ -394,7 +394,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
     
     public override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         let headerView = UIView()
-        if (section == 2 && Item.menus["Config"]!.count > 0) || section == 3 {
+        if (section == 2 && Item.menus["Config"]!.count > 0) || section == 3 || (section == 1 && Item.menus["Config"]!.count > 0) {
             headerView.backgroundColor = .clear
             
             let lineView = UIView()
@@ -413,7 +413,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
     }
     
     public override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        if section == 2 || section == 3 {
+        if section == 2 || section == 3 || section == 1 {
             return 6
         }
         return 1

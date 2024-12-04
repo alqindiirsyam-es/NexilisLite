@@ -107,7 +107,9 @@ public class MasterKeyUtil {
             Nexilis.dispatch?.wait()
             Nexilis.dispatch = nil
             if !result {
-                Utils.showAlert(title: "Failed to get Master Key".localized(), message: "Biometric authentication hasn't been set up/Biometric invalid.".localized())
+                DispatchQueue.main.async {
+                    Utils.showAlert(title: "Failed to get Master Key".localized(), message: "Biometric authentication hasn't been set up/Biometric invalid.".localized())
+                }
                 throw NSError(domain: "KeychainError", code: -99, userInfo: nil)
             }
         }

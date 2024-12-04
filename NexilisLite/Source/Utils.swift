@@ -1216,7 +1216,11 @@ public final class Utils {
     
     static func showAlert(title: String, message: String) {
         let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alertController.addAction(UIAlertAction(title: "OK", style: .default))
+        alertController.addAction(UIAlertAction(title: "OK", style: .default, handler: {(_) in
+            if Database.shared.database == nil {
+                exit(979)
+            }
+        }))
         UIApplication.shared.visibleViewController?.present(alertController, animated: true)
     }
 }
