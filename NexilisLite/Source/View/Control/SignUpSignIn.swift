@@ -157,10 +157,9 @@ public class SignUpSignIn: UIViewController {
                         if(!id.isEmpty) {
 //                            Nexilis.changeUser(f_pin: id)
                             Utils.setProfile(value: true)
-                            SecureUserDefaults.shared.sync()
                             // pos registration
                             _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
-                            DispatchQueue.main.async {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
                                 Nexilis.hideLoader(completion: {
                                     let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                     imageView.tintColor = .white
@@ -186,7 +185,7 @@ public class SignUpSignIn: UIViewController {
                                     }
                                     self.isDismiss?(thumb)
                                 })
-                            }
+                            })
                         }
                     }
                 } else {
@@ -364,7 +363,6 @@ public class SignUpSignIn: UIViewController {
 //                            Nexilis.changeUser(f_pin: device_id)
                             SecureUserDefaults.shared.set(device_id, forKey: "device_id")
                             Utils.setProfile(value: true)
-                            SecureUserDefaults.shared.sync()
                             // pos registration
                             _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
@@ -413,7 +411,6 @@ public class SignUpSignIn: UIViewController {
                             }
                         })
                         Utils.setProfile(value: true)
-                        SecureUserDefaults.shared.sync()
     //                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "updateFifthTab"), object: nil, userInfo: nil)
                         DispatchQueue.main.async {
                             Nexilis.hideLoader(completion: {

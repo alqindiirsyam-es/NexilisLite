@@ -150,10 +150,9 @@ public class ChangeDeviceViewController: UIViewController {
                         if(!id.isEmpty) {
 //                            Nexilis.changeUser(f_pin: id)
                             Utils.setProfile(value: true)
-                            SecureUserDefaults.shared.sync()
                             // pos registration
                             _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
-                            DispatchQueue.main.async {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
                                 Nexilis.hideLoader(completion: {
                                     let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                     imageView.tintColor = .white
@@ -179,7 +178,7 @@ public class ChangeDeviceViewController: UIViewController {
                                     }
                                     self.isDismiss?(thumb)
                                 })
-                            }
+                            })
                         }
                     }
                 } else {
@@ -267,18 +266,58 @@ public class ChangeDeviceViewController: UIViewController {
                 } else {
                     self.deleteAllRecordDatabase()
                     let id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
+                    let f_pin = response.getBody(key: CoreMessage_TMessageKey.F_PIN_REAL, default_value: "")
                     let thumb = response.getBody(key: CoreMessage_TMessageKey.THUMB_ID, default_value: "")
                     let device_id = response.getBody(key: CoreMessage_TMessageKey.IMEI, default_value: id)
                     let last_sign = response.getBody(key: CoreMessage_TMessageKey.LAST_SIGN, default_value: "0")
                     //print("last sign: \(last_sign)")
+                    if last_sign != "0" {
+                        Utils.setLoginMultipleFPin(value: f_pin)
+                        DispatchQueue.main.async {
+                            let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Multiple Login Detected...".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
+                            banner.show()
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                            Nexilis.hideLoader(completion: {
+                                if Nexilis.showFB {
+                                    Nexilis.floatingButton.removeFromSuperview()
+                                    Nexilis.floatingButton = FloatingButton()
+                                    let viewController = (UIApplication.shared.windows.first?.rootViewController)!
+                                    Nexilis.addFB(viewController: viewController, fromMAB: true)
+                                }
+                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
+                                if self.fromChangeNamePass{
+                                    var vc = self.navigationController?.presentingViewController
+                                    while vc?.presentingViewController != nil {
+                                        vc = vc?.presentingViewController
+                                    }
+                                    vc?.dismiss(animated: true, completion: nil)
+                                }
+                                else if !self.forceLogin {
+                                    self.navigationController?.popViewController(animated: true)
+                                } else {
+                                    self.navigationController?.dismiss(animated: true)
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
+                                    let dialog = DialogUnableAccess()
+                                    dialog.modalTransitionStyle = .crossDissolve
+                                    dialog.modalPresentationStyle = .overCurrentContext
+                                    UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                })
+                            })
+                        })
+                        return
+                    }
+                    self.deleteAllRecordDatabase()
                     if(!id.isEmpty) {
-//                        Nexilis.changeUser(f_pin: device_id)
+//                            Nexilis.changeUser(f_pin: device_id)
                         SecureUserDefaults.shared.set(device_id, forKey: "device_id")
                         Utils.setProfile(value: true)
-                        SecureUserDefaults.shared.sync()
                         // pos registration
                         _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
-                        DispatchQueue.main.async {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
                             Nexilis.hideLoader(completion: {
                                 let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                 imageView.tintColor = .white
@@ -305,7 +344,7 @@ public class ChangeDeviceViewController: UIViewController {
                                 }
                                 self.isDismiss?(thumb)
                             })
-                        }
+                        })
                     }
                 }
             } else {

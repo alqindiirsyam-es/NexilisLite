@@ -164,7 +164,6 @@ public class ChangeNamePassswordViewController: UIViewController {
                                 }
                             })
                             Utils.setProfile(value: true)
-                            SecureUserDefaults.shared.sync()
         //                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "updateFifthTab"), object: nil, userInfo: nil)
                             DispatchQueue.main.async {
                                 Nexilis.hideLoader(completion: {

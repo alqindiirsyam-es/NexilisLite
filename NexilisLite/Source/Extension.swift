@@ -11,6 +11,7 @@ import UIKit
 import SDWebImage
 import ImageIO
 import MobileCoreServices
+import CommonCrypto
 
 extension Date {
     
@@ -547,10 +548,8 @@ extension String {
             let langDefault = UserDefaults.standard.stringArray(forKey: "AppleLanguages")
             if langDefault![0].contains("id") {
                 SecureUserDefaults.shared.set("id", forKey: "i18n_language")
-                SecureUserDefaults.shared.sync()
             } else {
                 SecureUserDefaults.shared.set("en", forKey: "i18n_language")
-                SecureUserDefaults.shared.sync()
             }
         }
         let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? ""
@@ -1311,63 +1310,116 @@ public class ImageCache {
     public static let shared = ImageCache()
     private let cache = NSCache<NSString, UIImage>()
     private let cacheGif = NSCache<NSString, NSData>()
+    private var cacheKeyMap: [String: String] = [:]
 
     private init() {
-        loadCache()
-        NotificationCenter.default.addObserver(self, selector: #selector(saveCache), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        if let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let cacheDirectory = documentsDirectory.appendingPathComponent("fileCacheImage")
+            loadCacheFromDisk(directory: cacheDirectory)
+            
+            let cacheGifDirectory = documentsDirectory.appendingPathComponent("fileCacheGif")
+            loadCacheFromDisk(directory: cacheGifDirectory)
+        }
     }
 
     public func save(image: UIImage, forKey key: String) {
-        cache.setObject(image, forKey: key as NSString)
-        cacheKeys.append(key)
-        saveCache()
+        let sanitizedKey = sanitizeKey(key)
+        cache.setObject(image, forKey: sanitizedKey as NSString)
+        cacheKeyMap[key] = sanitizedKey
+        if let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let cacheDirectory = documentsDirectory.appendingPathComponent("fileCacheImage")
+            saveCacheToDisk(directory: cacheDirectory)
+        }
     }
     
     public func saveGif(data: NSData, forKey key: String) {
-        cacheGif.setObject(data, forKey: key as NSString)
-        cacheKeys.append(key)
-        saveCache()
+        let sanitizedKey = sanitizeKey(key)
+        cacheGif.setObject(data, forKey: sanitizedKey as NSString)
+        cacheKeyMap[key] = sanitizedKey
+        if let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let cacheDirectory = documentsDirectory.appendingPathComponent("fileCacheGif")
+            saveCacheToDisk(directory: cacheDirectory)
+        }
     }
 
     public func image(forKey key: String) -> UIImage? {
-        return cache.object(forKey: key as NSString)
+        let sanitizedKey = sanitizeKey(key)
+        return cache.object(forKey: sanitizedKey as NSString)
     }
     public func imageGif(forKey key: String) -> NSData? {
-        return cacheGif.object(forKey: key as NSString)
+        let sanitizedKey = sanitizeKey(key)
+        return cacheGif.object(forKey: sanitizedKey as NSString)
     }
     
-    private var cacheKeys: [String] = []
-    private func loadCache() {
-        if let cachedData: Data = SecureUserDefaults.shared.value(forKey: "imageCache") {
-            if let decodedCache = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(cachedData) as? [String: Data] {
-                for (key, valueData) in decodedCache {
-                    if let image = UIImage(data: valueData) {
-                        cache.setObject(image, forKey: key as NSString)
-                        cacheKeys.append(key)
-                    }
-                    let dataGif = NSData(data: valueData)
-                    cacheGif.setObject(dataGif, forKey: key as NSString)
-                    cacheKeys.append(key)
+    func saveCacheToDisk(directory: URL) {
+        let fileManager = FileManager.default
+
+        if !fileManager.fileExists(atPath: directory.path) {
+            do {
+                try fileManager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+            } catch {
+                return
+            }
+        }
+
+        let mappingFilePath = directory.appendingPathComponent("keyMapping.json")
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: cacheKeyMap, options: [])
+            try jsonData.write(to: mappingFilePath)
+        } catch {
+            return
+        }
+
+        for (originalKey, sanitizedKey) in cacheKeyMap {
+            if let image = cache.object(forKey: sanitizedKey as NSString),
+               let imageData = image.pngData() {
+                let filePath = directory.appendingPathComponent("\(sanitizedKey).png")
+                do {
+                    try imageData.write(to: filePath)
+                } catch {
                 }
             }
         }
     }
+    
+    func loadCacheFromDisk(directory: URL) {
+        let fileManager = FileManager.default
 
-    @objc private func saveCache() {
-        var cacheDictionary = [String: Data]()
-        for key in cacheKeys {
-            if let dataGif = cacheGif.object(forKey: key as NSString) {
-                cacheDictionary[key] = Data(referencing: dataGif)
-            } else {
-                if let image = cache.object(forKey: key as NSString) {
-                    if let imageData = image.pngData() {
-                        cacheDictionary[key] = imageData
-                    }
+        // Load mapping
+        let mappingFilePath = directory.appendingPathComponent("keyMapping.json")
+        guard let jsonData = try? Data(contentsOf: mappingFilePath),
+              let loadedMapping = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] else {
+            return
+        }
+
+        if cacheKeyMap.count == 0 {
+            cacheKeyMap = loadedMapping
+        }
+
+        // Load images
+        do {
+            let fileURLs = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            for fileURL in fileURLs {
+                if fileURL.lastPathComponent == "keyMapping.json" { continue } // Skip mapping file
+
+                let sanitizedKey = fileURL.deletingPathExtension().lastPathComponent
+                if let imageData = try? Data(contentsOf: fileURL),
+                   let image = UIImage(data: imageData) {
+                    cache.setObject(image, forKey: sanitizedKey as NSString)
                 }
             }
+        } catch {
+//            print("Failed to load cache from disk: \(error)")
         }
-        let encodedData = try? NSKeyedArchiver.archivedData(withRootObject: cacheDictionary, requiringSecureCoding: false)
-        SecureUserDefaults.shared.set(encodedData, forKey: "imageCache")
+    }
+    
+    private func sanitizeKey(_ key: String) -> String {
+        let data = Data(key.utf8)
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        data.withUnsafeBytes {
+            _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &hash)
+        }
+        return hash.map { String(format: "%02x", $0) }.joined()
     }
 }
 

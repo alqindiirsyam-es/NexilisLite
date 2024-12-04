@@ -1823,7 +1823,6 @@ public class DialogVerifyYou: UIViewController {
                         Utils.setLoginMultipleFPin(value: "")
                         SecureUserDefaults.shared.set(device_id, forKey: "device_id")
                         Utils.setProfile(value: true)
-                        SecureUserDefaults.shared.sync()
                         // pos registration
                         _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: fPin))
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {

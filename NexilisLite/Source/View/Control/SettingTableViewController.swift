@@ -534,7 +534,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
 //                            Nexilis.changeUser(f_pin: id)
                             SecureUserDefaults.shared.set(id, forKey: "me")
                             Utils.setProfile(value: false)
-                            SecureUserDefaults.shared.sync()
                             if Utils.getForceAnonymous() {
                                 self.deleteAllRecordDatabase()
                                 SecureUserDefaults.shared.removeValue(forKey: "device_id")

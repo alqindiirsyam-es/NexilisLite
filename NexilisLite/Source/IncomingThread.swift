@@ -241,12 +241,10 @@ class IncomingThread {
 //                            Nexilis.changeUser(f_pin: id)
                     SecureUserDefaults.shared.set(id, forKey: "me")
                     Utils.setProfile(value: false)
-                    SecureUserDefaults.shared.sync()
                     if Utils.getForceAnonymous() {
                         viewController?.deleteAllRecordDatabase()
                         SecureUserDefaults.shared.removeValue(forKey: "device_id")
                         Nexilis.destroyAll()
-                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
                     }
                     DispatchQueue.main.async {
                         Nexilis.hideLoader(completion: {
