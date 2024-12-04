@@ -88,7 +88,8 @@ public class Download {
                             let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                             let url = documentDir.appendingPathComponent(filename)
                             //print("write file \(url.path)")
-                            try successResponse.write(to: url)
+                            let dResponse = try FileEncryption.shared.decryptToMemory(successResponse, MasterKeyUtil.shared.getServerKey())
+                            try dResponse.write(to: url)
                             Nexilis.removeDownload(forKey: filename)
                             completion(filename,100)
                         }

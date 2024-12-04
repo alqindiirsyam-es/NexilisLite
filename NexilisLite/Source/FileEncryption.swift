@@ -33,6 +33,46 @@ public class FileEncryption {
         }
     }
     
+    func readSecure(filename: String) throws -> Data? {
+        let fileManager = FileManager.default
+        let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let secureDir = documentDir.appendingPathComponent("secure")
+        let fileURL = secureDir.appendingPathComponent(filename)
+        return try decryptToMemory(fileURL)
+    }
+    
+    func writeSecure(filename: String? = nil, fileURL : URL? = nil) throws -> [Any]? {
+        let fileManager = FileManager.default
+        let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let secureDir = documentDir.appendingPathComponent("secure")
+        guard let inputFilename = filename ?? fileURL?.lastPathComponent else { return nil }
+        let inputURL = fileURL ?? documentDir.appendingPathComponent(inputFilename)
+        let outputURL = secureDir.appendingPathComponent(inputFilename)
+        guard let data = encryptFile(inputURL) else { return nil }
+        try data.write(to: outputURL)
+        do {
+            try fileManager.removeItem(at: inputURL)
+            print("File deleted successfully")
+        } catch {
+            print("Error deleting file: \(error)")
+        }
+        return [outputURL.lastPathComponent, outputURL]
+    }
+    
+    func isSecureExists(filename: String) -> Bool {
+        let fileManager = FileManager.default
+        do {
+            let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let secureDir = documentDir.appendingPathComponent("secure")
+            let outputURL = secureDir.appendingPathComponent(filename)
+            return fileManager.fileExists(atPath: outputURL.path)
+        } catch {
+            return false
+        }
+        
+        
+    }
+    
     func wipeData(_ data: inout Data) {
         data.resetBytes(in: 0..<data.count)
         data.count = 0
@@ -97,7 +137,7 @@ public class FileEncryption {
             return try AES.GCM.open(sealedBox, using: MasterKeyUtil.shared.getMasterKey())
         } catch {
             print("Decryption failed: \(error)")
-            return nil
+            return encryptedData
         }
     }
 
@@ -106,10 +146,9 @@ public class FileEncryption {
         return decryptToMemory(encryptedData)
     }
     
-    func decryptToMemory(_ encryptedURL: URL, _ key: SymmetricKey) throws -> Data? {
+    func decryptToMemory(_ encryptedData: Data, _ key: SymmetricKey) throws -> Data {
         let keyData = key.withUnsafeBytes { Data($0) }
         
-        let encryptedData = try Data(contentsOf: encryptedURL)
         let iv = encryptedData.prefix(kCCBlockSizeAES128)
         let cipherText = encryptedData.suffix(from: kCCBlockSizeAES128)
         let decryptedData = Data(count: cipherText.count + kCCBlockSizeAES128)
@@ -136,7 +175,7 @@ public class FileEncryption {
         }
 
         guard status == kCCSuccess else {
-            throw NSError(domain: "DecryptionError", code: Int(status), userInfo: nil)
+            return encryptedData
         }
 
         finalData.count = numBytesDecrypted

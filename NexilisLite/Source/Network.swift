@@ -195,18 +195,33 @@ public class Network {
     public func uploadHTTP(_ endUrl: String, files: [URL] = [], filename: [String] = [], parameters: [String : Any] = [:], completion: @escaping (Bool, Double, [String:Any]?)->()) -> UploadRequest {
         
         var filesIn = [URL]()
+        var filesTempServer = [URL]()
         filesIn.append(contentsOf: files)
-        
         if !filename.isEmpty {
             do {
                 let fileManager = FileManager.default
                 let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                let tempDir = documentDir.appendingPathComponent("temp")
+                if !fileManager.fileExists(atPath: tempDir.path) {
+                    do {
+                        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
+                    } catch {
+                        print("Error creating directory: \(error)")
+                    }
+                }
                 for name in filename {
                     let fileDir = documentDir.appendingPathComponent(name)
                     let path = fileDir.path
                     if FileManager.default.fileExists(atPath: path) {
                         let fileURL = URL(fileURLWithPath: path)
+                        let filenameServer = "\(name)"
+                        let fileDirServer = tempDir.appendingPathComponent(filenameServer)
+                        let fileURLServer = URL(fileURLWithPath: fileDirServer.path)
+                        try FileEncryption.shared.encryptFile(fileURL, fileURLServer, MasterKeyUtil.shared.getServerKey())
+//                        let dataSecure = try FileEncryption.shared.encryptFile(fileURL)
+//                        dataSecure?.write(to: fileURLSecure)
                         filesIn.append(fileURL)
+                        filesTempServer.append(fileURLServer)
                     }
                 }
             }
@@ -237,8 +252,8 @@ public class Network {
                 //print(multipartFormData)
             }
             
-            for i in 0..<filesIn.count {
-                multipartFormData.append(filesIn[i], withName: "file\(i+1)", fileName: filesIn[i].lastPathComponent, mimeType: "application/octet-stream")
+            for i in 0..<filesTempServer.count {
+                multipartFormData.append(filesTempServer[i], withName: "file\(i+1)", fileName: filesTempServer[i].lastPathComponent, mimeType: "application/octet-stream")
                 Nexilis.putUploadFile(forKey: filesIn[i].lastPathComponent, uploader: self)
                 //print(multipartFormData)
             }
@@ -247,7 +262,7 @@ public class Network {
         .responseJSON { result in
             if let response = result.response, response.statusCode == 200, let successResponse = result.value as? [String:Any] {
                 //print("Response success")
-                for url in filesIn {
+                for url in filesTempServer {
                     Nexilis.removeUploadFile(forKey: url.lastPathComponent)
                 }
                 completion(true,100,successResponse)
