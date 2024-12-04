@@ -14,7 +14,7 @@ import nuSDKService
 
 public class APIS: NSObject {
     public static func connect(appName: String, apiKey: String, delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
-        APIS.appNm = appName
+        APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         Nexilis.connect(apiKey: apiKey, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
     }
     

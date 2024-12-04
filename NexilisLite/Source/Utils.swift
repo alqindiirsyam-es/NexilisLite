@@ -253,6 +253,17 @@ public final class Utils {
         return "5"
     }
     
+    static func setAuthenticationDuration(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "authentication_duration")
+    }
+
+    static func getAuthenticationDuration() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "authentication_duration") {
+            return value
+        }
+        return "5"
+    }
+    
     static func setMaxRetryTimeUpload(value: String) {
         SecureUserDefaults.shared.set(value, forKey: "max_retry_time_upload")
     }
@@ -521,11 +532,9 @@ public final class Utils {
     
     public static func postDataWithCookiesAndUserAgent(from url: URL, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
         let apiKey: String = SecureUserDefaults.shared.value(forKey: "apiKey") ?? ""
-        let f_pin: String = User.getMyPin() ?? ""
         let parameters = [
             "app_id": APIS.getAppNm(),
-            "apikey": apiKey,
-            "f_pin": f_pin
+            "apikey": apiKey
         ]
         var jsonArray: [[String: Any]] = []
         jsonArray.append(parameters)
@@ -1184,7 +1193,9 @@ public final class Utils {
     public static func shouldRequestAuthentication() -> Bool {
         if let lastAuthTime: Date = SecureUserDefaults.shared.value(forKey: "lastAuthenticationTime") {
             let elapsedTime = Date().timeIntervalSince(lastAuthTime)
-            return elapsedTime > (60 * 5)
+            let durationAuth = Double(Utils.getAuthenticationDuration()) ?? 5
+            print("durationAuth \(durationAuth)")
+            return elapsedTime > durationAuth
         }
         return true
     }
@@ -1196,7 +1207,7 @@ public final class Utils {
         }
 
         let context = LAContext()
-        let reason = "Authenticate to access secure data"
+        let reason = "Authenticate to access secure data".localized()
 
         if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) {
             context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, error in

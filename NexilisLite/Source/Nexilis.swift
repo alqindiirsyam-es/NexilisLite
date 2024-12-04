@@ -403,13 +403,13 @@ public class Nexilis: NSObject {
                                 tmp.removeValue(forKey: "alert_message")
                                 jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
                                 if jsonData["upload_max_retry"]! != nil {
-                                    let umr = jsonData["upload_max_retry"] as? Int
-                                    Utils.setMaxRetryUpload(value: "\(umr ?? 0)")
+                                    let umr = jsonData["upload_max_retry"] as! String
+                                    Utils.setMaxRetryUpload(value: umr)
                                     jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
                                 }
                                 if jsonData["upload_max_time"]! != nil {
-                                    let umt = jsonData["upload_max_time"] as? Int64
-                                    Utils.setMaxRetryTimeUpload(value: "\(umt ?? 0)")
+                                    let umt = jsonData["upload_max_time"] as! String
+                                    Utils.setMaxRetryTimeUpload(value: umt)
                                     jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
                                 }
                                 if jsonData["default_fb"]! != nil {
@@ -417,6 +417,10 @@ public class Nexilis: NSObject {
                                         Utils.setConfigModeFB(value: jsonData["default_fb"] as! String)
                                     }
                                     jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
+                                }
+                                if jsonData["authentication_duration"]! != nil {
+                                    let ad = jsonData["authentication_duration"] as! String
+                                    Utils.setAuthenticationDuration(value: ad)
                                 }
                             }
                             if let convertJsonFA = try? JSONSerialization.data(withJSONObject: jsonFA, options: .prettyPrinted) {
