@@ -416,6 +416,11 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
                             if result2 {
                                 if progress == 100 {
                                     self.sendMsg(startTime: startTime, endTime: endTime)
+                                    do {
+                                        try FileEncryption.shared.writeSecure(filename: self.fileId)
+                                    } catch {
+                                        
+                                    }
                                 }
                             }
                         }
@@ -427,6 +432,11 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
                 if result2 {
                     if progress == 100 {
                         self.sendMsg(startTime: startTime, endTime: endTime)
+                        do {
+                            try FileEncryption.shared.writeSecure(filename: self.fileId)
+                        } catch {
+                            
+                        }
                     }
                 }
             }

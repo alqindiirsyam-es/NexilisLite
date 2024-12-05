@@ -710,17 +710,19 @@ class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                         if let dirPath = paths.first {
                             let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["video_id"] as! String)
                             let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["file_id"] as! String)
-                            if ((row["video_id"] as! String) != "") {
-                                if FileManager.default.fileExists(atPath: videoURL.path){
-                                    row["progress"] = 100.0
+                            do {
+                                if ((row["video_id"] as! String) != "") {
+                                    if FileManager.default.fileExists(atPath: videoURL.path) || FileEncryption.shared.isSecureExists(filename: row["video_id"] as! String){
+                                        row["progress"] = 100.0
+                                    } else {
+                                        row["progress"] = 0.0
+                                    }
                                 } else {
-                                    row["progress"] = 0.0
-                                }
-                            } else {
-                                if FileManager.default.fileExists(atPath: fileURL.path){
-                                    row["progress"] = 100.0
-                                } else {
-                                    row["progress"] = 0.0
+                                    if FileManager.default.fileExists(atPath: fileURL.path) || FileEncryption.shared.isSecureExists(filename: row["file_id"] as! String){
+                                        row["progress"] = 100.0
+                                    } else {
+                                        row["progress"] = 0.0
+                                    }
                                 }
                             }
                         }
@@ -1643,10 +1645,23 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                                 if let dirPath = paths.first {
                                     let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(dataMessages[indexPath.row]["image_id"] as! String)
-                                    if FileManager.default.fileExists(atPath: imageURL.path) {
-                                        let image    = UIImage(contentsOfFile: imageURL.path)
-                                        UIPasteboard.general.image = image
-                                        self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                    if FileManager.default.fileExists(atPath: imageURL.path) || FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
+                                        if FileManager.default.fileExists(atPath: imageURL.path) {
+                                            let image    = UIImage(contentsOfFile: imageURL.path)
+                                            UIPasteboard.general.image = image
+                                            self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                        }
+                                        else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
+                                            do {
+                                                if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                    let image = UIImage(data: imageData)
+                                                    UIPasteboard.general.image = image
+                                                    self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                                }
+                                            } catch {
+                                                
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1664,10 +1679,23 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                                 if let dirPath = paths.first {
                                     let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(dataMessages[indexPath.row]["image_id"] as! String)
-                                    if FileManager.default.fileExists(atPath: imageURL.path) {
-                                        let image    = UIImage(contentsOfFile: imageURL.path)
-                                        UIPasteboard.general.image = image
-                                        self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                    if FileManager.default.fileExists(atPath: imageURL.path) || FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent ) {
+                                        if FileManager.default.fileExists(atPath: imageURL.path) {
+                                            let image    = UIImage(contentsOfFile: imageURL.path)
+                                            UIPasteboard.general.image = image
+                                            self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                        }
+                                        else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
+                                            do {
+                                                if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                    let image = UIImage(data: imageData)
+                                                    UIPasteboard.general.image = image
+                                                    self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                                }
+                                            } catch {
+                                                
+                                            }
+                                        }
                                     }
                                 }
                             }

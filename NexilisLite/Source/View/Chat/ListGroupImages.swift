@@ -142,12 +142,20 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
             let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageId)
             DispatchQueue.main.async {
                 let image : UIImage? =  {
-                    if let img = Nexilis.imageCache.object(forKey: imageId as NSString) {
-                        return img
-                    }
-                    else if let img = UIImage(contentsOfFile: imageURL.path)?.resize(target: CGSize(width: 1000, height: 1000)) {
+                    do {
+                        if let img = Nexilis.imageCache.object(forKey: imageId as NSString) {
+                            return img
+                        }
+                        else if let img = UIImage(contentsOfFile: imageURL.path)?.resize(target: CGSize(width: 1000, height: 1000)) {
                             Nexilis.imageCache.setObject(img, forKey: imageId as NSString)
                             return img
+                        } else if let imgData = try FileEncryption.shared.readSecure(filename: imageId) {
+                            let img = UIImage(data: imgData)?.resize(target: CGSize(width: 1000, height: 1000))
+                            Nexilis.imageCache.setObject(img!, forKey: imageId as NSString)
+                            return img
+                        }
+                    } catch {
+                        
                     }
                     return nil
                 }()
@@ -168,7 +176,7 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
                     containerImages.image = image
                 }
             }
-            if !FileManager.default.fileExists(atPath: imageURL.path) {
+            if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                 let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
                 let blurEffectView = UIVisualEffectView(effect: blurEffect)
                 blurEffectView.frame = CGRect(x: 0, y: 0, width: containerImages.frame.size.width, height: containerImages.frame.size.height)
@@ -341,17 +349,34 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
             if let dirPath = paths.first {
                 let imageId = listGroupingImages[indexPath.row].imageId
                 let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageId)
-                if !FileManager.default.fileExists(atPath: imageURL.path) {
+                if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                     Download().startHTTP(forKey: listGroupingImages[indexPath.row].imageId) { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
                         
-                        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.listGroupingImages[indexPath.row].imageId)
-                        let image    = UIImage(contentsOfFile: imageURL.path)
-                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                        if save {
-                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                        do {
+                            
+                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as! String
+                            let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.listGroupingImages[indexPath.row].imageId)
+                            if FileManager.default.fileExists(atPath: imageURL.path){
+                                let image    = UIImage(contentsOfFile: imageURL.path)
+                                let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                if save {
+                                    UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                }
+                            }
+                            else if FileEncryption.shared.isSecureExists(filename: secureName){
+                                if let imageData = try FileEncryption.shared.readSecure(filename: secureName) {
+                                    let image    = UIImage(data: imageData)
+                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                    if save {
+                                        UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                    }
+                                }
+                            }
+                        } catch {
+                            
                         }
                         
                         DispatchQueue.main.async { [self] in
@@ -627,14 +652,33 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
         if let dirPath = paths.first {
             let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(image)
-            var imagePath = UIImage(contentsOfFile: imageURL.path)
-            if imagePath == nil {
-                Download().startHTTP(forKey: image) { (name, progress) in
-                    guard progress == 100 else {
-                        return
+            var imagePath : UIImage?
+            do {
+                if FileManager.default.fileExists(atPath: imageURL.path) {
+                    imagePath = UIImage(contentsOfFile: imageURL.path)
+                }
+                else if FileEncryption.shared.isSecureExists(filename: image) {
+                    if let imageData = try FileEncryption.shared.readSecure(filename: image) {
+                        imagePath = UIImage(data: imageData)
                     }
                 }
-                imagePath = UIImage(named: "Send-Image", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                if imagePath == nil {
+                    Download().startHTTP(forKey: image) { (name, progress) in
+                        guard progress == 100 else {
+                            return
+                        }
+                        do {
+                            try FileEncryption.shared.writeSecure(filename: image)
+                        }
+                        catch {
+                            
+                        }
+                    }
+                    imagePath = UIImage(named: "Send-Image", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                }
+            }
+            catch {
+                
             }
             let imageWidth = imagePath!.size.width
             let imageHeight = imagePath!.size.height

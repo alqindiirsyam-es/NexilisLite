@@ -195,6 +195,11 @@ class OutgoingThread {
                                                 print("Access database error: \(error.localizedDescription)")
                                             }
                                         })
+                                        do {
+                                            try FileEncryption.shared.writeSecure(filename: fileName)
+                                        } catch {
+                                            
+                                        }
                                     } else {
                                         self.retryUpload(message: message, fileName: fileName)
                                     }
@@ -228,6 +233,11 @@ class OutgoingThread {
                                         print("Access database error: \(error.localizedDescription)")
                                     }
                                 })
+                                do{
+                                    try FileEncryption.shared.writeSecure(filename: fileName)
+                                } catch {
+                                    
+                                }
                             } else {
                                 self.retryUpload(message: message, fileName: fileName)
                             }

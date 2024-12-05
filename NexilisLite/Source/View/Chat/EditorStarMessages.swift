@@ -499,7 +499,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 
                 let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(videoChat)
                 let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
-                if !FileManager.default.fileExists(atPath: imageURL.path) || !FileManager.default.fileExists(atPath: videoURL.path){
+                if !FileManager.default.fileExists(atPath: imageURL.path) && !FileManager.default.fileExists(atPath: videoURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) && !FileEncryption.shared.isSecureExists(filename: videoURL.lastPathComponent){
                     let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
                     let blurEffectView = UIVisualEffectView(effect: blurEffect)
                     blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
@@ -577,24 +577,47 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             let finalExtFile = arrExtFile![arrExtFile!.count - 1]
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(fileChat)
-                if let dataFile = try? Data(contentsOf: fileURL) {
-                    var sizeOfFile = Int(dataFile.count / 1000000)
-                    if (sizeOfFile < 1) {
-                        sizeOfFile = Int(dataFile.count / 1000)
-                        if (finalExtFile.count > 4) {
-                            messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
-                        }else {
-                            messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    if let dataFile = try? Data(contentsOf: fileURL) {
+                        var sizeOfFile = Int(dataFile.count / 1000000)
+                        if (sizeOfFile < 1) {
+                            sizeOfFile = Int(dataFile.count / 1000)
+                            if (finalExtFile.count > 4) {
+                                messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
+                            }else {
+                                messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
+                            }
+                        } else {
+                            if (finalExtFile.count > 4) {
+                                messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
+                            }else {
+                                messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
+                            }
                         }
                     } else {
-                        if (finalExtFile.count > 4) {
-                            messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
-                        }else {
-                            messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
-                        }
+                        messageText.text = ""
                     }
-                } else {
-                    messageText.text = ""
+                }
+                else if FileEncryption.shared.isSecureExists(filename: fileChat) {
+                    if let dataFile = try? FileEncryption.shared.readSecure(filename: fileChat) {
+                        var sizeOfFile = Int(dataFile.count / 1000000)
+                        if (sizeOfFile < 1) {
+                            sizeOfFile = Int(dataFile.count / 1000)
+                            if (finalExtFile.count > 4) {
+                                messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
+                            }else {
+                                messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
+                            }
+                        } else {
+                            if (finalExtFile.count > 4) {
+                                messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
+                            }else {
+                                messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
+                            }
+                        }
+                    } else {
+                        messageText.text = ""
+                    }
                 }
             }
             
@@ -989,13 +1012,13 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["video_id"] as! String)
                             let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["file_id"] as! String)
                             if ((row["video_id"] as! String) != "") {
-                                if FileManager.default.fileExists(atPath: videoURL.path){
+                                if FileManager.default.fileExists(atPath: videoURL.path) || FileEncryption.shared.isSecureExists(filename: videoURL.lastPathComponent){
                                     row["progress"] = 100.0
                                 } else {
                                     row["progress"] = 0.0
                                 }
                             } else {
-                                if FileManager.default.fileExists(atPath: fileURL.path){
+                                if FileManager.default.fileExists(atPath: fileURL.path) || FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent){
                                     row["progress"] = 100.0
                                 } else {
                                     row["progress"] = 0.0
@@ -1074,6 +1097,20 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     previewImageVC.modalPresentationStyle = .custom
                     previewImageVC.modalTransitionStyle  = .crossDissolve
                     self.present(previewImageVC, animated: true, completion: nil)
+                } else if FileEncryption.shared.isSecureExists(filename: sender.image_id) {
+                    do {
+                        let data = try FileEncryption.shared.readSecure(filename: sender.image_id)
+                        let image = UIImage(data: data!)
+                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                        previewImageVC.image = image
+                        previewImageVC.isHiddenTextField = true
+                        previewImageVC.modalPresentationStyle = .custom
+                        previewImageVC.modalTransitionStyle  = .crossDissolve
+                        self.present(previewImageVC, animated: true, completion: nil)
+                    }
+                    catch {
+                        print("Error reading secure file")
+                    }
                 } else {
                     for view in sender.imageView.subviews {
                         if view is UIImageView {
@@ -1092,11 +1129,32 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             return
                         }
                         
-                        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.image_id)
-                        let image    = UIImage(contentsOfFile: imageURL.path)
-                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                        if save {
-                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                        do {
+                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as! String
+                            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                            if let dirPath = paths.first {
+                                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.image_id)
+                                if FileManager.default.fileExists(atPath: imageURL.path) {
+                                    let image    = UIImage(contentsOfFile: imageURL.path)
+                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                    if save {
+                                        UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                    }
+                                }
+                                else if FileEncryption.shared.isSecureExists(filename: secureName) {
+                                    if let secureData = try FileEncryption.shared.readSecure(filename: secureName) {
+                                        let image = UIImage(data: secureData)
+                                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                        if save {
+                                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                        }
+                                    }
+                                }
+                            }
+                        } catch {
+                            
                         }
                         
                         DispatchQueue.main.async {
@@ -1115,6 +1173,21 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     playerVC.modalPresentationStyle = .custom
                     playerVC.player = player
                     self.present(playerVC, animated: true, completion: nil)
+                } else if FileEncryption.shared.isSecureExists(filename: sender.video_id) {
+                    do {
+                        if let secureData = try FileEncryption.shared.readSecure(filename: sender.video_id) {
+                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                            let tempPath = cachesDirectory.appendingPathComponent(sender.video_id)
+                            try secureData.write(to: tempPath)
+                            let player = AVPlayer(url: tempPath as URL)
+                            let playerVC = AVPlayerViewController()
+                            playerVC.modalPresentationStyle = .custom
+                            playerVC.player = player
+                            self.present(playerVC, animated: true, completion: nil)
+                        }
+                    } catch {
+                        
+                    }
                 } else {
                     for view in sender.imageView.subviews {
                         if view is UIImageView {
@@ -1157,14 +1230,33 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
                                 return
                             }
-                            let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                            if save {
-                                let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.video_id)
-                                PHPhotoLibrary.shared().performChanges({
-                                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
-                                }) { saved, error in
-                                    
+                            do {
+                                if let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as? String {
+                                    let secureData = try FileEncryption.shared.readSecure(filename: secureName)
+                                    let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                    let tempPath = cachesDirectory.appendingPathComponent(name)
+                                    try secureData!.write(to: tempPath)
+                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                    if save {
+                                        PHPhotoLibrary.shared().performChanges({
+                                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempPath)
+                                        }) { saved, error in
+                                            
+                                        }
+                                    }
+                                } else {
+                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                    if save {
+                                        let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.video_id)
+                                        PHPhotoLibrary.shared().performChanges({
+                                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
+                                        }) { saved, error in
+                                            
+                                        }
+                                    }
                                 }
+                            } catch {
+                                
                             }
                             let idx = self.dataMessages.firstIndex(where: { $0["video_id"] as! String == sender.video_id})
                             if idx != nil {
@@ -1187,6 +1279,25 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     previewController.modalPresentationStyle = .custom
                     
                     self.present(previewController, animated: true)
+                } else if FileEncryption.shared.isSecureExists(filename: sender.file_id) {
+                    do {
+                        if let docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
+                            
+                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                            let tempPath = cachesDirectory.appendingPathComponent(sender.file_id)
+                            try docData.write(to: tempPath)
+                            self.previewItem = tempPath as NSURL
+                            let previewController = QLPreviewController()
+                            let rightBarButton = UIBarButtonItem()
+                            previewController.navigationItem.rightBarButtonItem = rightBarButton
+                            previewController.dataSource = self
+                            previewController.modalPresentationStyle = .custom
+                        }
+                    } catch {
+                        
+                    }
+                    
+                    
                 } else {
                     for view in sender.containerFile.subviews {
                         if !(view is UIImageView) && !(view is UILabel) {
@@ -1227,6 +1338,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
                                 return
+                            }
+                            do {
+                                try FileEncryption.shared.writeSecure(filename: name)
+                            } catch {
+                                
                             }
                             let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as! String == sender.file_id})
                             if idx != nil {
@@ -1415,6 +1531,17 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             let image    = UIImage(contentsOfFile: imageURL.path)
                             UIPasteboard.general.image = image
                             self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                        } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
+                            do {
+                                if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                    let image    = UIImage(data: imageData)
+                                    UIPasteboard.general.image = image
+                                    self.showToast(message: "Image coppied to clipboard".localized(), seconds: 1)
+                                }
+                            } catch {
+                                
+                            }
+                            
                         }
                     }
                 }
@@ -1461,6 +1588,17 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                     let image    = UIImage(contentsOfFile: imageURL.path)
                                     UIPasteboard.general.image = image
                                     self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
+                                    do {
+                                        if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                            let image    = UIImage(data: imageData)
+                                            UIPasteboard.general.image = image
+                                            self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                        }
+                                    } catch {
+                                        
+                                    }
+                                    
                                 }
                             }
                         }

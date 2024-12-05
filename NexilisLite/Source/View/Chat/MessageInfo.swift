@@ -713,7 +713,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource 
                     
                     let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(videoChat)
                     let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
-                    if !FileManager.default.fileExists(atPath: imageURL.path) || !FileManager.default.fileExists(atPath: videoURL.path) {
+                    if !FileManager.default.fileExists(atPath: imageURL.path) && !FileManager.default.fileExists(atPath: videoURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) && !FileEncryption.shared.isSecureExists(filename: videoURL.lastPathComponent) {
                         let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
                         let blurEffectView = UIVisualEffectView(effect: blurEffect)
                         blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
@@ -786,24 +786,47 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource 
                 let finalExtFile = arrExtFile[arrExtFile.count - 1]
                 if let dirPath = paths.first {
                     let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(fileChat)
-                    if let dataFile = try? Data(contentsOf: fileURL) {
-                        var sizeOfFile = Int(dataFile.count / 1000000)
-                        if (sizeOfFile < 1) {
-                            sizeOfFile = Int(dataFile.count / 1000)
-                            if (finalExtFile.count > 4) {
-                                messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
-                            }else {
-                                messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
+                    if FileManager.default.fileExists(atPath: fileURL.path) {
+                        if let dataFile = try? Data(contentsOf: fileURL) {
+                            var sizeOfFile = Int(dataFile.count / 1000000)
+                            if (sizeOfFile < 1) {
+                                sizeOfFile = Int(dataFile.count / 1000)
+                                if (finalExtFile.count > 4) {
+                                    messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
+                                }else {
+                                    messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
+                                }
+                            } else {
+                                if (finalExtFile.count > 4) {
+                                    messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
+                                }else {
+                                    messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
+                                }
                             }
                         } else {
-                            if (finalExtFile.count > 4) {
-                                messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
-                            }else {
-                                messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
-                            }
+                            messageText.text = ""
                         }
-                    } else {
-                        messageText.text = ""
+                    }
+                    else if FileEncryption.shared.isSecureExists(filename: fileChat) {
+                        if let dataFile = try? FileEncryption.shared.readSecure(filename: fileChat) {
+                            var sizeOfFile = Int(dataFile.count / 1000000)
+                            if (sizeOfFile < 1) {
+                                sizeOfFile = Int(dataFile.count / 1000)
+                                if (finalExtFile.count > 4) {
+                                    messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
+                                }else {
+                                    messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
+                                }
+                            } else {
+                                if (finalExtFile.count > 4) {
+                                    messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
+                                }else {
+                                    messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
+                                }
+                            }
+                        } else {
+                            messageText.text = ""
+                        }
                     }
                 }
                 

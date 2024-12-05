@@ -627,13 +627,13 @@ public class EditorGroup: UIViewController {
                             let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["video_id"] as! String)
                             let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["file_id"] as! String)
                             if ((row["video_id"] as! String) != "") {
-                                if FileManager.default.fileExists(atPath: videoURL.path){
+                                if FileManager.default.fileExists(atPath: videoURL.path) || FileEncryption.shared.isSecureExists(filename: row["video_id"] as! String){
                                     row["progress"] = 100.0
                                 } else {
                                     row["progress"] = 0.0
                                 }
                             } else {
-                                if FileManager.default.fileExists(atPath: fileURL.path){
+                                if FileManager.default.fileExists(atPath: fileURL.path) || FileEncryption.shared.isSecureExists(filename: row["file_id"] as! String){
                                     row["progress"] = 100.0
                                 } else {
                                     row["progress"] = 0.0
@@ -1921,16 +1921,32 @@ public class EditorGroup: UIViewController {
                         guard progress == 100 else {
                             return
                         }
-                        let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                        let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                        let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                        if let dirPath = paths.first {
-                            let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["image_id"] as! String)
-                            let image    = UIImage(contentsOfFile: imageURL.path)
-                            let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                            if save {
-                                UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                        do {
+                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as! String
+                            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                            if let dirPath = paths.first {
+                                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["image_id"] as! String)
+                                if FileManager.default.fileExists(atPath: imageURL.path) {
+                                    let image    = UIImage(contentsOfFile: imageURL.path)
+                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                    if save {
+                                        UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                    }
+                                }
+                                else if FileEncryption.shared.isSecureExists(filename: secureName) {
+                                    if let secureData = try FileEncryption.shared.readSecure(filename: secureName) {
+                                        let image = UIImage(data: secureData)
+                                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                        if save {
+                                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                        }
+                                    }
+                                }
                             }
+                        } catch {
+                            
                         }
                         DispatchQueue.main.async { [self] in
                             let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as! String)
@@ -1945,26 +1961,49 @@ public class EditorGroup: UIViewController {
                         guard progress == 100 else {
                             return
                         }
-                        let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                        let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                        let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                        if let dirPath = paths.first {
-                            let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["video_id"] as! String)
-                            let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                            if save {
-                                PHPhotoLibrary.shared().performChanges({
-                                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
-                                }) { saved, error in
-                                    
+                        do {
+                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as! String
+                            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                            if let dirPath = paths.first {
+                                let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["video_id"] as! String)
+                                if FileManager.default.fileExists(atPath: videoURL.path) {
+                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                    if save {
+                                        PHPhotoLibrary.shared().performChanges({
+                                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
+                                        }) { saved, error in
+                                            
+                                        }
+                                    }
+                                }
+                                else if FileEncryption.shared.isSecureExists(filename: secureName) {
+                                    if let secureData = try FileEncryption.shared.readSecure(filename: secureName) {
+                                        let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                        let tempPath = cachesDirectory.appendingPathComponent(name)
+                                        try secureData.write(to: tempPath)
+                                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                        if save {
+                                            PHPhotoLibrary.shared().performChanges({
+                                                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempPath)
+                                            }) { saved, error in
+                                                
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            DispatchQueue.main.async { [self] in
+                                let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as! String)
+                                let row = dataMessages.filter({$0["chat_date"] as! String == dataMessages[index]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == message_id})
+                                if row != nil && section != nil{
+                                    tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .automatic)
                                 }
                             }
                         }
-                        DispatchQueue.main.async { [self] in
-                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as! String)
-                            let row = dataMessages.filter({$0["chat_date"] as! String == dataMessages[index]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == message_id})
-                            if row != nil && section != nil{
-                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .automatic)
-                            }
+                        catch {
+                            
                         }
                     }
                 }
@@ -1972,6 +2011,11 @@ public class EditorGroup: UIViewController {
                     Download().startHTTP(forKey: dataMessages[index]["file_id"] as! String) { (name, progress) in
                         guard progress == 100 else {
                             return
+                        }
+                        do {
+                            try FileEncryption.shared.writeSecure(filename: name)
+                        } catch {
+                            
                         }
                         DispatchQueue.main.async { [self] in
                             let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as! String)
@@ -3189,6 +3233,17 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                         UIPasteboard.general.image = image
                                         self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
                                     }
+                                    else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
+                                        do {
+                                            if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                let image = UIImage(data: imageData)
+                                                UIPasteboard.general.image = image
+                                                self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                            }
+                                        } catch {
+                                            
+                                        }
+                                    }
                                 }
                             }
                             return
@@ -3209,6 +3264,16 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                         let image    = UIImage(contentsOfFile: imageURL.path)
                                         UIPasteboard.general.image = image
                                         self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                    } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
+                                        do {
+                                            if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                let image = UIImage(data: imageData)
+                                                UIPasteboard.general.image = image
+                                                self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                            }
+                                        } catch {
+                                            
+                                        }
                                     }
                                 }
                             }
@@ -3386,9 +3451,9 @@ extension EditorGroup: UICollectionViewDelegate, UICollectionViewDataSource {
 }
 
 extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
-//    public func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-//        checkNewMessage(tableView: tableView)
-//    }
+    //    public func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+    //        checkNewMessage(tableView: tableView)
+    //    }
     
     public func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         if self.tableChatView.alpha != 1.0 {
@@ -3484,7 +3549,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 var text = textFieldSend.text ?? ""
                 let nameMention = (listMentionWithText[indexPath.row].firstName + " " + listMentionWithText[indexPath.row].lastName).trimmingCharacters(in: .whitespaces)
                 let replacementText = "@\(nameMention)"
-
+                
                 // Replace the old text with the new text using the replaceSubrange(_:with:) method
                 if let startIndex = text.index(text.startIndex, offsetBy: rangeReplacement.location, limitedBy: text.endIndex),
                    let endIndex = text.index(startIndex, offsetBy: rangeReplacement.length, limitedBy: text.endIndex) {
@@ -3532,7 +3597,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
-                if !FileManager.default.fileExists(atPath: fileURL.path) {
+                if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
                     return
                 }
             }
@@ -3542,10 +3607,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             if attachmentFlag == "27" || attachmentFlag == "26" {
                 let streamingController = (attachmentFlag == "27") ? QmeraCreateStreamingViewController() : CreateSeminarViewController()
                 switch(attachmentFlag){
-                    case "27":
-                        (streamingController as! QmeraCreateStreamingViewController).isJoin = true
-                    default:
-                        (streamingController as! CreateSeminarViewController).isJoin = true
+                case "27":
+                    (streamingController as! QmeraCreateStreamingViewController).isJoin = true
+                default:
+                    (streamingController as! CreateSeminarViewController).isJoin = true
                 }
                 if let messageText = message["message_text"],
                    let messageText = messageText as? String,
@@ -3554,10 +3619,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                         json["blog"] = message["blog_id"] ?? nil
                     }
                     switch(attachmentFlag){
-                        case "27":
-                            (streamingController as! QmeraCreateStreamingViewController).data = json
-                        default:
-                            (streamingController as! CreateSeminarViewController).data = json
+                    case "27":
+                        (streamingController as! QmeraCreateStreamingViewController).data = json
+                    default:
+                        (streamingController as! CreateSeminarViewController).data = json
                     }
                 }
                 let streamingNav = CustomNavigationController(rootViewController: streamingController)
@@ -3659,7 +3724,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                 if let dirPath = paths.first {
                     let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
-                    if !FileManager.default.fileExists(atPath: fileURL.path) {
+                    if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
                         showSelectedImage = false
                     }
                 }
@@ -4143,14 +4208,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     listImageThumb[i].contentMode = .scaleAspectFill
                     let widthHeightImage: CGFloat = 120
                     switch i {
-                        case 0:
-                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, paddingTop: 5, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
-                        case 1:
-                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingTop: 5, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
-                        case 2:
-                            listImageThumb[i].anchor(left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingLeft: 5, paddingBottom: 5, width: widthHeightImage, height: widthHeightImage)
-                        default:
-                            listImageThumb[i].anchor(left: listImageThumb[2].rightAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingBottom: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
+                    case 0:
+                        listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, paddingTop: 5, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
+                    case 1:
+                        listImageThumb[i].anchor(top: containerMessage.topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingTop: 5, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
+                    case 2:
+                        listImageThumb[i].anchor(left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingLeft: 5, paddingBottom: 5, width: widthHeightImage, height: widthHeightImage)
+                    default:
+                        listImageThumb[i].anchor(left: listImageThumb[2].rightAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingBottom: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
                     }
                     let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                     let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
@@ -4162,23 +4227,23 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                                 return img
                             }
                             else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                    Nexilis.imageCache.setObject(img, forKey: listImages[i].thumbId as NSString)
-                                    return img
+                                Nexilis.imageCache.setObject(img, forKey: listImages[i].thumbId as NSString)
+                                return img
                             }
                             return nil
                         }()
-//                        let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
+                        //                        let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
                         listImageThumb[i].image = image
-
+                        
                         let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(listImages[i].imageId)
-                        if !FileManager.default.fileExists(atPath: imageURL.path) {
+                        if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                             let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
                             let blurEffectView = UIVisualEffectView(effect: blurEffect)
                             blurEffectView.frame = CGRect(x: 0, y: 0, width: listImageThumb[i].frame.size.width, height: listImageThumb[i].frame.size.height)
                             blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
                             listImageThumb[i].addSubview(blurEffectView)
                         }
-
+                        
                     }
                     let containerTimeStatus = UIView()
                     listImageThumb[i].addSubview(containerTimeStatus)
@@ -4282,17 +4347,17 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                             return img
                         }
                         else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
-                                return img
+                            Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                            return img
                         }
                         return nil
                     }()
-    //                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
+                    //                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
                     imageThumb.image = image
                     
                     let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(videoChat)
                     let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
-                    if !FileManager.default.fileExists(atPath: imageURL.path) || !FileManager.default.fileExists(atPath: videoURL.path){
+                    if !FileManager.default.fileExists(atPath: imageURL.path) && !FileManager.default.fileExists(atPath: videoURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) && !FileEncryption.shared.isSecureExists(filename: videoURL.lastPathComponent){
                         let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
                         let blurEffectView = UIVisualEffectView(effect: blurEffect)
                         blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
@@ -4377,24 +4442,47 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             let finalExtFile = arrExtFile![arrExtFile!.count - 1]
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(fileChat)
-                if let dataFile = try? Data(contentsOf: fileURL) {
-                    var sizeOfFile = Int(dataFile.count / 1000000)
-                    if (sizeOfFile < 1) {
-                        sizeOfFile = Int(dataFile.count / 1000)
-                        if (finalExtFile.count > 4) {
-                            messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
-                        }else {
-                            messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
-                        }
-                    } else {
-                        if (finalExtFile.count > 4) {
-                            messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
-                        }else {
-                            messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    if let dataFile = try? Data(contentsOf: fileURL) {
+                        var sizeOfFile = Int(dataFile.count / 1000000)
+                        if (sizeOfFile < 1) {
+                            sizeOfFile = Int(dataFile.count / 1000)
+                            if (finalExtFile.count > 4) {
+                                messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
+                            }else {
+                                messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
+                            }
+                        } else {
+                            if (finalExtFile.count > 4) {
+                                messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
+                            }else {
+                                messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
+                            }
                         }
                     }
-                } else {
-                    messageText.text = ""
+                }
+                else if FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
+                    do {
+                        if let dataFile = try FileEncryption.shared.readSecure(filename: fileURL.lastPathComponent) {
+                            var sizeOfFile = Int(dataFile.count / 1000000)
+                            if (sizeOfFile < 1) {
+                                sizeOfFile = Int(dataFile.count / 1000)
+                                if (finalExtFile.count > 4) {
+                                    messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
+                                }else {
+                                    messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
+                                }
+                            } else {
+                                if (finalExtFile.count > 4) {
+                                    messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
+                                }else {
+                                    messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
+                                }
+                            }
+                        }
+                    } catch {
+                        
+                    }
                 }
             }
             
@@ -4595,9 +4683,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     let sessionDelegate = SelfSignedURLSessionDelegate()
                     let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
                     let slp = SwiftLinkPreview(session: session,
-                                   workQueue: SwiftLinkPreview.defaultWorkQueue,
-                                   responseQueue: DispatchQueue.main,
-                                       cache: DisabledCache.instance)
+                                               workQueue: SwiftLinkPreview.defaultWorkQueue,
+                                               responseQueue: DispatchQueue.main,
+                                               cache: DisabledCache.instance)
                     let preview = slp.preview(text,
                                               onSuccess: { result in
                         let title = result.title ?? "No Title"
@@ -4759,12 +4847,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                                 return img
                             }
                             else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                    Nexilis.imageCache.setObject(img, forKey: thumb_chat as NSString)
-                                    return img
+                                Nexilis.imageCache.setObject(img, forKey: thumb_chat as NSString)
+                                return img
                             }
                             return nil
                         }()
-//                        let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
+                        //                        let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
                         let imageThumb = UIImageView(image: image)
                         containerReply.addSubview(imageThumb)
                         imageThumb.layer.cornerRadius = 2.0
@@ -4965,6 +5053,20 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     previewImageVC.modalPresentationStyle = .custom
                     previewImageVC.modalTransitionStyle  = .crossDissolve
                     self.present(previewImageVC, animated: true, completion: nil)
+                } else if FileEncryption.shared.isSecureExists(filename: sender.image_id) {
+                    do {
+                        let data = try FileEncryption.shared.readSecure(filename: sender.image_id)
+                        let image = UIImage(data: data!)
+                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                        previewImageVC.image = image
+                        previewImageVC.isHiddenTextField = true
+                        previewImageVC.modalPresentationStyle = .custom
+                        previewImageVC.modalTransitionStyle  = .crossDissolve
+                        self.present(previewImageVC, animated: true, completion: nil)
+                    }
+                    catch {
+                        print("Error reading secure file")
+                    }
                 } else {
                     for view in sender.imageView.subviews {
                         if view is UIImageView {
@@ -4982,14 +5084,33 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                         guard progress == 100 else {
                             return
                         }
-                        
-                        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.image_id)
-                        let image    = UIImage(contentsOfFile: imageURL.path)
-                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                        if save {
-                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                        do {
+                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as! String
+                            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                            if let dirPath = paths.first {
+                                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.image_id)
+                                if FileManager.default.fileExists(atPath: imageURL.path) {
+                                    let image    = UIImage(contentsOfFile: imageURL.path)
+                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                    if save {
+                                        UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                    }
+                                }
+                                else if FileEncryption.shared.isSecureExists(filename: secureName) {
+                                    if let secureData = try FileEncryption.shared.readSecure(filename: secureName) {
+                                        let image = UIImage(data: secureData)
+                                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                        if save {
+                                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                        }
+                                    }
+                                }
+                            }
+                        } catch {
+                            
                         }
-                        
                         DispatchQueue.main.async {
                             activityIndicator.stopAnimating()
                             self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
@@ -5006,6 +5127,21 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     playerVC.modalPresentationStyle = .custom
                     playerVC.player = player
                     self.present(playerVC, animated: true, completion: nil)
+                } else if FileEncryption.shared.isSecureExists(filename: sender.video_id) {
+                    do {
+                        if let secureData = try FileEncryption.shared.readSecure(filename: sender.video_id) {
+                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                            let tempPath = cachesDirectory.appendingPathComponent(sender.video_id)
+                            try secureData.write(to: tempPath)
+                            let player = AVPlayer(url: tempPath as URL)
+                            let playerVC = AVPlayerViewController()
+                            playerVC.modalPresentationStyle = .custom
+                            playerVC.player = player
+                            self.present(playerVC, animated: true, completion: nil)
+                        }
+                    } catch {
+                        
+                    }
                 } else {
                     for view in sender.imageView.subviews {
                         if view is UIImageView {
@@ -5048,122 +5184,169 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
                                 return
                             }
-                            let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                            if save {
-                                let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.video_id)
-                                PHPhotoLibrary.shared().performChanges({
-                                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
-                                }) { saved, error in
+                            do {
+                                if FileManager.default.fileExists(atPath: videoURL.path) {
+                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                    if save {
+                                        let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.video_id)
+                                        PHPhotoLibrary.shared().performChanges({
+                                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
+                                        }) { saved, error in
+                                            
+                                        }
+                                    }
+                                }
+                                else if FileEncryption.shared.isSecureExists(filename: videoURL.lastPathComponent) {
+                                    if let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as? String {
+                                        let secureData = try FileEncryption.shared.readSecure(filename: secureName)
+                                        let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                        let tempPath = cachesDirectory.appendingPathComponent(name)
+                                        try secureData!.write(to: tempPath)
+                                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                        if save {
+                                            PHPhotoLibrary.shared().performChanges({
+                                                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempPath)
+                                            }) { saved, error in
+                                                
+                                            }
+                                        }
+                                    }
+                                }
+                                let idx = self.dataMessages.firstIndex(where: { $0["video_id"] as! String == sender.video_id})
+                                if idx != nil {
+                                    self.dataMessages[idx!]["progress"] = progress
+                                    self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
+                                }
+                            }
+                            catch {
+                                
+                            }
+                        }
+                    }
+                }
+            } else if (sender.file_id != "") {
+                if let dirPath = paths.first {
+                    let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.file_id)
+                    if FileManager.default.fileExists(atPath: fileURL.path) {
+                        self.previewItem = fileURL as NSURL
+                        let previewController = QLPreviewController()
+                        let rightBarButton = UIBarButtonItem()
+                        previewController.navigationItem.rightBarButtonItem = rightBarButton
+                        previewController.dataSource = self
+                        previewController.modalPresentationStyle = .custom
+                        
+                        self.present(previewController, animated: true)
+                    } else if FileEncryption.shared.isSecureExists(filename: sender.file_id) {
+                        do {
+                            if let docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
+                                
+                                let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                let tempPath = cachesDirectory.appendingPathComponent(sender.file_id)
+                                try docData.write(to: tempPath)
+                                self.previewItem = tempPath as NSURL
+                                let previewController = QLPreviewController()
+                                let rightBarButton = UIBarButtonItem()
+                                previewController.navigationItem.rightBarButtonItem = rightBarButton
+                                previewController.dataSource = self
+                                previewController.modalPresentationStyle = .custom
+                                self.present(previewController,animated: true)
+                            }
+                        }
+                        catch {
+                            
+                        }
+                    } else {
+                        for view in sender.containerFile.subviews {
+                            if !(view is UIImageView) && !(view is UILabel) {
+                                view.removeFromSuperview()
+                            }
+                        }
+                        let containerLoading = UIView()
+                        sender.containerFile.addSubview(containerLoading)
+                        containerLoading.translatesAutoresizingMaskIntoConstraints = false
+                        containerLoading.centerYAnchor.constraint(equalTo: sender.containerFile.centerYAnchor).isActive = true
+                        containerLoading.leadingAnchor.constraint(equalTo: sender.labelFile.trailingAnchor, constant: 5).isActive = true
+                        containerLoading.trailingAnchor.constraint(equalTo: sender.containerFile.trailingAnchor, constant: -5).isActive = true
+                        containerLoading.widthAnchor.constraint(equalToConstant: 30).isActive = true
+                        containerLoading.heightAnchor.constraint(equalToConstant: 30).isActive = true
+                        let circlePath = UIBezierPath(arcCenter: CGPoint(x: 15, y: 15), radius: 10, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
+                        let trackShape = CAShapeLayer()
+                        trackShape.path = circlePath.cgPath
+                        trackShape.fillColor = UIColor.clear.cgColor
+                        trackShape.lineWidth = 5
+                        trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
+                        containerLoading.layer.addSublayer(trackShape)
+                        let shapeLoading = CAShapeLayer()
+                        shapeLoading.path = circlePath.cgPath
+                        shapeLoading.fillColor = UIColor.clear.cgColor
+                        shapeLoading.lineWidth = 3
+                        shapeLoading.strokeEnd = 0
+                        shapeLoading.strokeColor = UIColor.blueBubbleColor.cgColor
+                        containerLoading.layer.addSublayer(shapeLoading)
+                        let imageupload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
+                        imageupload.tintColor = .white
+                        containerLoading.addSubview(imageupload)
+                        imageupload.translatesAutoresizingMaskIntoConstraints = false
+                        imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
+                        imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
+                        
+                        Download().startHTTP(forKey: sender.file_id) { (name, progress) in
+                            DispatchQueue.main.async {
+                                guard progress == 100 else {
+                                    shapeLoading.strokeEnd = CGFloat(progress / 100)
+                                    return
+                                }
+                                do {
+                                    try FileEncryption.shared.writeSecure(filename: name)
+                                } catch {
                                     
                                 }
-                            }
-                            let idx = self.dataMessages.firstIndex(where: { $0["video_id"] as! String == sender.video_id})
-                            if idx != nil {
-                                self.dataMessages[idx!]["progress"] = progress
-                                self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
-                            }
-                        }
-                    }
-                }
-            }
-        } else if (sender.file_id != "") {
-            if let dirPath = paths.first {
-                let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.file_id)
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    self.previewItem = fileURL as NSURL
-                    let previewController = QLPreviewController()
-                    let rightBarButton = UIBarButtonItem()
-                    previewController.navigationItem.rightBarButtonItem = rightBarButton
-                    previewController.dataSource = self
-                    previewController.modalPresentationStyle = .custom
-                    
-                    self.present(previewController, animated: true)
-                } else {
-                    for view in sender.containerFile.subviews {
-                        if !(view is UIImageView) && !(view is UILabel) {
-                            view.removeFromSuperview()
-                        }
-                    }
-                    let containerLoading = UIView()
-                    sender.containerFile.addSubview(containerLoading)
-                    containerLoading.translatesAutoresizingMaskIntoConstraints = false
-                    containerLoading.centerYAnchor.constraint(equalTo: sender.containerFile.centerYAnchor).isActive = true
-                    containerLoading.leadingAnchor.constraint(equalTo: sender.labelFile.trailingAnchor, constant: 5).isActive = true
-                    containerLoading.trailingAnchor.constraint(equalTo: sender.containerFile.trailingAnchor, constant: -5).isActive = true
-                    containerLoading.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                    containerLoading.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    let circlePath = UIBezierPath(arcCenter: CGPoint(x: 15, y: 15), radius: 10, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
-                    let trackShape = CAShapeLayer()
-                    trackShape.path = circlePath.cgPath
-                    trackShape.fillColor = UIColor.clear.cgColor
-                    trackShape.lineWidth = 5
-                    trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
-                    containerLoading.layer.addSublayer(trackShape)
-                    let shapeLoading = CAShapeLayer()
-                    shapeLoading.path = circlePath.cgPath
-                    shapeLoading.fillColor = UIColor.clear.cgColor
-                    shapeLoading.lineWidth = 3
-                    shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.blueBubbleColor.cgColor
-                    containerLoading.layer.addSublayer(shapeLoading)
-                    let imageupload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
-                    imageupload.tintColor = .white
-                    containerLoading.addSubview(imageupload)
-                    imageupload.translatesAutoresizingMaskIntoConstraints = false
-                    imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
-                    imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
-                    
-                    Download().startHTTP(forKey: sender.file_id) { (name, progress) in
-                        DispatchQueue.main.async {
-                            guard progress == 100 else {
-                                shapeLoading.strokeEnd = CGFloat(progress / 100)
-                                return
-                            }
-                            let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as! String == sender.file_id})
-                            if idx != nil {
-                                self.dataMessages[idx!]["progress"] = progress
-                                self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            DispatchQueue.main.async {
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.message_id})
-                if idx == nil {
-                    return
-                }
-                let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-                if section == nil {
-                    return
-                }
-                let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == self.dataMessages[idx!]["message_id"] as! String})
-                if row == nil {
-                    return
-                }
-                let indexPath = IndexPath(row: row!, section: section!)
-                self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    if let cell = self.tableChatView.cellForRow(at: indexPath) {
-                        let containerMessage = cell.contentView.subviews[1]
-                        let idMe = User.getMyPin() as String?
-                        if (self.dataMessages[idx!]["f_pin"] as? String == idMe) {
-                            containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .blueBubbleColor
+                                let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as! String == sender.file_id})
+                                if idx != nil {
+                                    self.dataMessages[idx!]["progress"] = progress
+                                    self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
                                 }
                             }
-                        } else {
-                            containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .whiteBubbleColor
+                        }
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.message_id})
+                    if idx == nil {
+                        return
+                    }
+                    let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
+                    if section == nil {
+                        return
+                    }
+                    let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == self.dataMessages[idx!]["message_id"] as! String})
+                    if row == nil {
+                        return
+                    }
+                    let indexPath = IndexPath(row: row!, section: section!)
+                    self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        if let cell = self.tableChatView.cellForRow(at: indexPath) {
+                            let containerMessage = cell.contentView.subviews[1]
+                            let idMe = User.getMyPin() as String?
+                            if (self.dataMessages[idx!]["f_pin"] as? String == idMe) {
+                                containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
+                                        containerMessage.backgroundColor = .clear
+                                    } else {
+                                        containerMessage.backgroundColor = .blueBubbleColor
+                                    }
+                                }
+                            } else {
+                                containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
+                                        containerMessage.backgroundColor = .clear
+                                    } else {
+                                        containerMessage.backgroundColor = .whiteBubbleColor
+                                    }
                                 }
                             }
                         }
@@ -5172,430 +5355,430 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             }
         }
     }
-    
-    @objc func handleLongPressLink(_ gestureRecognizer: UILongPressGestureRecognizer) {
-        func showMenuContext() {
-            if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended{
-                timerCheckLink?.invalidate()
-            } else if gestureRecognizer.state == .began {
-                timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false, block: {_ in
-                    let interaction = UIContextMenuInteraction(delegate: self)
-                    gestureRecognizer.view!.addInteraction(interaction)
-                    guard let interaction = gestureRecognizer.view!.interactions.first,
-                          let data = Data(base64Encoded: "X3ByZXNlbnRNZW51QXRMb2NhdGlvbjo="),
-                          let str = String(data: data, encoding: .utf8)
-                    else {
-                        return
-                    }
-                    let selector = NSSelectorFromString(str)
-                    guard interaction.responds(to: selector) else {
-                        return
-                    }
-                    let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
-                    impactHeavy.impactOccurred()
-                    interaction.perform(selector, with: self.view)
-                    self.showMenuContext = true
-                })
-            }
-        }
-        if gestureRecognizer.state == .began {
-            let touchPoint = gestureRecognizer.location(in: self.view)
-            touchedSubview = self.view.hitTest(touchPoint, with: nil) ?? UIView()
-            if !(touchedSubview is UILabel) {
-                showMenuContext()
-            }
-        }
-        guard let label = touchedSubview as? UILabel else { return }
-        let touchPointLabel = gestureRecognizer.location(in: label)
-
-        if let text = label.text, let range = getWordRange(at: touchPointLabel, in: label) {
-            let word = String(text[range])
-            if word.starts(with: "www.") || word.starts(with: "https://") || word.starts(with: "http://") {
-                if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended {
+        
+        @objc func handleLongPressLink(_ gestureRecognizer: UILongPressGestureRecognizer) {
+            func showMenuContext() {
+                if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended{
                     timerCheckLink?.invalidate()
-                    if label.isHighlighted {
-                        var stringURl = word
-                        if stringURl.starts(with: "www.") {
-                            stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-                        }
-                        guard let url = URL(string: stringURl) else { return }
-                        UIApplication.shared.open(url)
-                        label.attributedText = removeHighlightedText(for: text, in: range, label: label)
-                    }
                 } else if gestureRecognizer.state == .began {
-                    label.attributedText = highlightedText(for: text, in: range, label: label)
-                    timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
-                        UIPasteboard.general.string = word
-                        self.showToast(message: "Link Copied".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
-                        label.attributedText = self.removeHighlightedText(for: text, in: range, label: label)
+                    timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false, block: {_ in
+                        let interaction = UIContextMenuInteraction(delegate: self)
+                        gestureRecognizer.view!.addInteraction(interaction)
+                        guard let interaction = gestureRecognizer.view!.interactions.first,
+                              let data = Data(base64Encoded: "X3ByZXNlbnRNZW51QXRMb2NhdGlvbjo="),
+                              let str = String(data: data, encoding: .utf8)
+                        else {
+                            return
+                        }
+                        let selector = NSSelectorFromString(str)
+                        guard interaction.responds(to: selector) else {
+                            return
+                        }
+                        let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
+                        impactHeavy.impactOccurred()
+                        interaction.perform(selector, with: self.view)
+                        self.showMenuContext = true
                     })
                 }
+            }
+            if gestureRecognizer.state == .began {
+                let touchPoint = gestureRecognizer.location(in: self.view)
+                touchedSubview = self.view.hitTest(touchPoint, with: nil) ?? UIView()
+                if !(touchedSubview is UILabel) {
+                    showMenuContext()
+                }
+            }
+            guard let label = touchedSubview as? UILabel else { return }
+            let touchPointLabel = gestureRecognizer.location(in: label)
+            
+            if let text = label.text, let range = getWordRange(at: touchPointLabel, in: label) {
+                let word = String(text[range])
+                if word.starts(with: "www.") || word.starts(with: "https://") || word.starts(with: "http://") {
+                    if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended {
+                        timerCheckLink?.invalidate()
+                        if label.isHighlighted {
+                            var stringURl = word
+                            if stringURl.starts(with: "www.") {
+                                stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
+                            }
+                            guard let url = URL(string: stringURl) else { return }
+                            UIApplication.shared.open(url)
+                            label.attributedText = removeHighlightedText(for: text, in: range, label: label)
+                        }
+                    } else if gestureRecognizer.state == .began {
+                        label.attributedText = highlightedText(for: text, in: range, label: label)
+                        timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
+                            UIPasteboard.general.string = word
+                            self.showToast(message: "Link Copied".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                            label.attributedText = self.removeHighlightedText(for: text, in: range, label: label)
+                        })
+                    }
+                } else {
+                    showMenuContext()
+                }
             } else {
                 showMenuContext()
             }
-        } else {
-            showMenuContext()
-        }
-    }
-    
-    func getWordRange(at point: CGPoint, in label: UILabel) -> Range<String.Index>? {
-        guard let text = label.text else { return nil }
-        
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(size: .zero)
-        let textStorage = NSTextStorage(attributedString: label.attributedText ?? NSAttributedString())
-        
-        layoutManager.addTextContainer(textContainer)
-        textStorage.addLayoutManager(layoutManager)
-        
-        textContainer.lineFragmentPadding = 0.0
-        textContainer.lineBreakMode = label.lineBreakMode
-        textContainer.maximumNumberOfLines = label.numberOfLines
-        textContainer.size = label.bounds.size
-        
-        let characterIndex = layoutManager.characterIndex(for: point, in: textContainer, fractionOfDistanceBetweenInsertionPoints: nil)
-        
-        if characterIndex == text.count - 1 {
-            return nil
-        }
-        var wordStartIndex = characterIndex
-        while wordStartIndex > 0 && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != " " && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != "\n" {
-            wordStartIndex -= 1
         }
         
-        var wordEndIndex = characterIndex
-        while wordEndIndex < text.count && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != " " && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != "\n" {
-            wordEndIndex += 1
+        func getWordRange(at point: CGPoint, in label: UILabel) -> Range<String.Index>? {
+            guard let text = label.text else { return nil }
+            
+            let layoutManager = NSLayoutManager()
+            let textContainer = NSTextContainer(size: .zero)
+            let textStorage = NSTextStorage(attributedString: label.attributedText ?? NSAttributedString())
+            
+            layoutManager.addTextContainer(textContainer)
+            textStorage.addLayoutManager(layoutManager)
+            
+            textContainer.lineFragmentPadding = 0.0
+            textContainer.lineBreakMode = label.lineBreakMode
+            textContainer.maximumNumberOfLines = label.numberOfLines
+            textContainer.size = label.bounds.size
+            
+            let characterIndex = layoutManager.characterIndex(for: point, in: textContainer, fractionOfDistanceBetweenInsertionPoints: nil)
+            
+            if characterIndex == text.count - 1 {
+                return nil
+            }
+            var wordStartIndex = characterIndex
+            while wordStartIndex > 0 && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != " " && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != "\n" {
+                wordStartIndex -= 1
+            }
+            
+            var wordEndIndex = characterIndex
+            while wordEndIndex < text.count && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != " " && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != "\n" {
+                wordEndIndex += 1
+            }
+            
+            return text.index(text.startIndex, offsetBy: wordStartIndex)..<text.index(text.startIndex, offsetBy: wordEndIndex)
         }
         
-        return text.index(text.startIndex, offsetBy: wordStartIndex)..<text.index(text.startIndex, offsetBy: wordEndIndex)
-    }
-
-    func highlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
-        let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
-        mutableAttributedString.addAttribute(.backgroundColor, value: UIColor.lightGray.withAlphaComponent(0.5), range: NSRange(range, in: text))
-        label.isHighlighted = true
-        return mutableAttributedString
-    }
-    
-    func removeHighlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
-        let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
-        mutableAttributedString.removeAttribute(.backgroundColor, range: NSRange(range, in: text))
-        label.isHighlighted = false
-        return mutableAttributedString
-    }
-    
-    @objc func tapMessageText(_ sender: ObjectGesture) {
-        var stringURl = sender.message_id
-        if stringURl.lowercased().starts(with: "www.") {
-            stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
+        func highlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
+            let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
+            mutableAttributedString.addAttribute(.backgroundColor, value: UIColor.lightGray.withAlphaComponent(0.5), range: NSRange(range, in: text))
+            label.isHighlighted = true
+            return mutableAttributedString
         }
-        guard let url = URL(string: stringURl) else { return }
-        UIApplication.shared.open(url)
-    }
-    
-//    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-//        if copySession || forwardSession || deleteSession {
-//            return nil
-//        }
-//        let idMe = User.getMyPin() as String?
-//        if (dataMessages[indexPath.row]["f_pin"] as? String != idMe) {
-//            return nil
-//        }
-//        let messageInfoVC = MessageInfo()
-//        self.navigationController?.show(messageInfoVC, sender: nil)
-//        return UISwipeActionsConfiguration()
-//    }
-//
-//    public func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-//        if copySession || forwardSession || deleteSession {
-//            return nil
-//        }
-//        let action = UIContextualAction(style: .normal,
-//                                        title: "") { [weak self] (action, view, completionHandler) in
-//                                            self?.handleReply(indexPath: indexPath)
-//                                            completionHandler(true)
-//        }
-//        action.backgroundColor = .white
-//        action.image = UIImage(systemName: "arrowshape.turn.up.left.fill")?.withTintColor(.black, renderingMode: .alwaysOriginal)
-//        return UISwipeActionsConfiguration(actions: [action])
-//    }
-    
-    private func handleReply(indexPath: IndexPath, dataMessagesImage: [String: Any?] = [:], reffId: String = "") {
-        var dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
-        if reffId.isEmpty {
-            self.deleteReplyView()
-            if dataMessagesImage.count != 0 {
-                dataMessages = [dataMessagesImage]
+        
+        func removeHighlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
+            let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
+            mutableAttributedString.removeAttribute(.backgroundColor, range: NSRange(range, in: text))
+            label.isHighlighted = false
+            return mutableAttributedString
+        }
+        
+        @objc func tapMessageText(_ sender: ObjectGesture) {
+            var stringURl = sender.message_id
+            if stringURl.lowercased().starts(with: "www.") {
+                stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
+            }
+            guard let url = URL(string: stringURl) else { return }
+            UIApplication.shared.open(url)
+        }
+        
+        //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        //        if copySession || forwardSession || deleteSession {
+        //            return nil
+        //        }
+        //        let idMe = User.getMyPin() as String?
+        //        if (dataMessages[indexPath.row]["f_pin"] as? String != idMe) {
+        //            return nil
+        //        }
+        //        let messageInfoVC = MessageInfo()
+        //        self.navigationController?.show(messageInfoVC, sender: nil)
+        //        return UISwipeActionsConfiguration()
+        //    }
+        //
+        //    public func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        //        if copySession || forwardSession || deleteSession {
+        //            return nil
+        //        }
+        //        let action = UIContextualAction(style: .normal,
+        //                                        title: "") { [weak self] (action, view, completionHandler) in
+        //                                            self?.handleReply(indexPath: indexPath)
+        //                                            completionHandler(true)
+        //        }
+        //        action.backgroundColor = .white
+        //        action.image = UIImage(systemName: "arrowshape.turn.up.left.fill")?.withTintColor(.black, renderingMode: .alwaysOriginal)
+        //        return UISwipeActionsConfiguration(actions: [action])
+        //    }
+        
+        private func handleReply(indexPath: IndexPath, dataMessagesImage: [String: Any?] = [:], reffId: String = "") {
+            var dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
+            if reffId.isEmpty {
+                self.deleteReplyView()
+                if dataMessagesImage.count != 0 {
+                    dataMessages = [dataMessagesImage]
+                } else {
+                    self.textFieldSend.becomeFirstResponder()
+                }
+                self.reffId = dataMessages[indexPath.row]["message_id"] as? String
             } else {
-                self.textFieldSend.becomeFirstResponder()
+                dataMessages = self.dataMessages.filter({ $0["message_id"] as! String == reffId })
+                self.reffId = reffId
             }
-            self.reffId = dataMessages[indexPath.row]["message_id"] as? String
-        } else {
-            dataMessages = self.dataMessages.filter({ $0["message_id"] as! String == reffId })
-            self.reffId = reffId
-        }
-        UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
-            self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50
-            if self.contraintBottomMention.constant > 0 {
-                self.contraintBottomMention.constant = self.contraintBottomMention.constant + 50
-            }
-        }, completion: nil)
-        if (self.currentIndexpath != nil) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
-            }
-        } else {
-            self.tableChatView.scrollToBottom()
-        }
-        
-        self.viewTextfield.addSubview(self.containerPreviewReply)
-        self.containerPreviewReply.translatesAutoresizingMaskIntoConstraints = false
-        self.containerPreviewReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
-        self.containerPreviewReply.topAnchor.constraint(equalTo: self.viewTextfield.topAnchor).isActive = true
-        if !self.containerLink.isDescendant(of: self.viewTextfield) {
-            self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.textFieldSend.topAnchor)
-        } else {
-            self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.containerLink.topAnchor)
-        }
-        self.bottomAnchorPreviewReply.isActive = true
-        self.containerPreviewReply.trailingAnchor.constraint(equalTo: self.viewTextfield.trailingAnchor).isActive = true
-        self.containerPreviewReply.backgroundColor = .secondaryColor
-        
-        let leftReply = UIView()
-        self.containerPreviewReply.addSubview(leftReply)
-        leftReply.translatesAutoresizingMaskIntoConstraints = false
-        leftReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
-        leftReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor).isActive = true
-        leftReply.bottomAnchor.constraint(equalTo: self.containerPreviewReply.bottomAnchor).isActive = true
-        leftReply.widthAnchor.constraint(equalToConstant: 3).isActive = true
-        leftReply.backgroundColor = .orangeColor
-        
-        let titleReply = UILabel()
-        self.containerPreviewReply.addSubview(titleReply)
-        titleReply.translatesAutoresizingMaskIntoConstraints = false
-        titleReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
-        titleReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor, constant: 10).isActive = true
-        titleReply.font = UIFont.systemFont(ofSize: 12).bold
-        let idMe = User.getMyPin() as String?
-        if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-            titleReply.text = "You".localized()
-        } else {
-            if dataMessages[indexPath.row]["f_pin"] as? String != "-999" {
-                let dataPerson = self.getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"] as! String, message_id: dataMessages[indexPath.row]["message_id"] as! String)
-                titleReply.text = dataPerson["name"]
+            UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
+                self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50
+                if self.contraintBottomMention.constant > 0 {
+                    self.contraintBottomMention.constant = self.contraintBottomMention.constant + 50
+                }
+            }, completion: nil)
+            if (self.currentIndexpath != nil) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
+                }
             } else {
-                titleReply.text = "Bot"
+                self.tableChatView.scrollToBottom()
             }
-        }
-        titleReply.textColor = .orangeColor
-        
-        let contentReply = UILabel()
-        self.containerPreviewReply.addSubview(contentReply)
-        contentReply.translatesAutoresizingMaskIntoConstraints = false
-        contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
-        contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
-        contentReply.font = UIFont.systemFont(ofSize: 10)
-        let message_text = dataMessages[indexPath.row]["message_text"] as! String
-        let attachment_flag = dataMessages[indexPath.row]["attachment_flag"] as! String
-        let thumb_chat = dataMessages[indexPath.row]["thumb_id"] as! String
-        let image_chat = dataMessages[indexPath.row]["image_id"] as! String
-        let video_chat = dataMessages[indexPath.row]["video_id"] as! String
-        let file_chat = dataMessages[indexPath.row]["file_id"] as! String
-        if (attachment_flag == "0" && thumb_chat == "") {
-            contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
-        } else if (attachment_flag == "1" || image_chat != "") {
-            if (message_text == "") {
-                contentReply.text = "📷 Photo".localized()
+            
+            self.viewTextfield.addSubview(self.containerPreviewReply)
+            self.containerPreviewReply.translatesAutoresizingMaskIntoConstraints = false
+            self.containerPreviewReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
+            self.containerPreviewReply.topAnchor.constraint(equalTo: self.viewTextfield.topAnchor).isActive = true
+            if !self.containerLink.isDescendant(of: self.viewTextfield) {
+                self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.textFieldSend.topAnchor)
             } else {
+                self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.containerLink.topAnchor)
+            }
+            self.bottomAnchorPreviewReply.isActive = true
+            self.containerPreviewReply.trailingAnchor.constraint(equalTo: self.viewTextfield.trailingAnchor).isActive = true
+            self.containerPreviewReply.backgroundColor = .secondaryColor
+            
+            let leftReply = UIView()
+            self.containerPreviewReply.addSubview(leftReply)
+            leftReply.translatesAutoresizingMaskIntoConstraints = false
+            leftReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
+            leftReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor).isActive = true
+            leftReply.bottomAnchor.constraint(equalTo: self.containerPreviewReply.bottomAnchor).isActive = true
+            leftReply.widthAnchor.constraint(equalToConstant: 3).isActive = true
+            leftReply.backgroundColor = .orangeColor
+            
+            let titleReply = UILabel()
+            self.containerPreviewReply.addSubview(titleReply)
+            titleReply.translatesAutoresizingMaskIntoConstraints = false
+            titleReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
+            titleReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor, constant: 10).isActive = true
+            titleReply.font = UIFont.systemFont(ofSize: 12).bold
+            let idMe = User.getMyPin() as String?
+            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                titleReply.text = "You".localized()
+            } else {
+                if dataMessages[indexPath.row]["f_pin"] as? String != "-999" {
+                    let dataPerson = self.getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"] as! String, message_id: dataMessages[indexPath.row]["message_id"] as! String)
+                    titleReply.text = dataPerson["name"]
+                } else {
+                    titleReply.text = "Bot"
+                }
+            }
+            titleReply.textColor = .orangeColor
+            
+            let contentReply = UILabel()
+            self.containerPreviewReply.addSubview(contentReply)
+            contentReply.translatesAutoresizingMaskIntoConstraints = false
+            contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
+            contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
+            contentReply.font = UIFont.systemFont(ofSize: 10)
+            let message_text = dataMessages[indexPath.row]["message_text"] as! String
+            let attachment_flag = dataMessages[indexPath.row]["attachment_flag"] as! String
+            let thumb_chat = dataMessages[indexPath.row]["thumb_id"] as! String
+            let image_chat = dataMessages[indexPath.row]["image_id"] as! String
+            let video_chat = dataMessages[indexPath.row]["video_id"] as! String
+            let file_chat = dataMessages[indexPath.row]["file_id"] as! String
+            if (attachment_flag == "0" && thumb_chat == "") {
                 contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+            } else if (attachment_flag == "1" || image_chat != "") {
+                if (message_text == "") {
+                    contentReply.text = "📷 Photo".localized()
+                } else {
+                    contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+                }
+            } else if (attachment_flag == "2" || video_chat != "") {
+                if (message_text == "") {
+                    contentReply.text = "📹 Video".localized()
+                } else {
+                    contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+                }
+            } else if (attachment_flag == "6" || file_chat != ""){
+                contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
+            } else if (attachment_flag == "11") {
+                contentReply.text = "❤️ Sticker"
+            } else if attachment_flag == "27" {
+                contentReply.text = "📄 " + "Live Streaming".localized()
+            } else if attachment_flag == "26" {
+                contentReply.text = "📄 " + "Seminar".localized()
             }
-        } else if (attachment_flag == "2" || video_chat != "") {
-            if (message_text == "") {
-                contentReply.text = "📹 Video".localized()
-            } else {
-                contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
-            }
-        } else if (attachment_flag == "6" || file_chat != ""){
-            contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
-        } else if (attachment_flag == "11") {
-            contentReply.text = "❤️ Sticker"
-        } else if attachment_flag == "27" {
-            contentReply.text = "📄 " + "Live Streaming".localized()
-        } else if attachment_flag == "26" {
-            contentReply.text = "📄 " + "Seminar".localized()
-        }
-        contentReply.textColor = .gray
-        
-        let buttonCancelReply = UIButton(type: .custom)
-        self.containerPreviewReply.addSubview(buttonCancelReply)
-        buttonCancelReply.translatesAutoresizingMaskIntoConstraints = false
-        buttonCancelReply.trailingAnchor.constraint(equalTo: self.containerPreviewReply.trailingAnchor, constant: -10).isActive = true
-        buttonCancelReply.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
-        buttonCancelReply.setImage(UIImage(systemName: "xmark.circle" , withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular, scale: .default)), for: .normal)
-        buttonCancelReply.addTarget(nil, action: #selector(self.deleteReplyView), for: .touchUpInside)
-        buttonCancelReply.backgroundColor = .clear
-        buttonCancelReply.tintColor = .mainColor
-        
-        if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
-            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-            if let dirPath = paths.first {
-                let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumb_chat)
-                let image : UIImage? =  {
-                    if let img = Nexilis.imageCache.object(forKey: thumb_chat as NSString) {
-                        return img
-                    }
-                    else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
+            contentReply.textColor = .gray
+            
+            let buttonCancelReply = UIButton(type: .custom)
+            self.containerPreviewReply.addSubview(buttonCancelReply)
+            buttonCancelReply.translatesAutoresizingMaskIntoConstraints = false
+            buttonCancelReply.trailingAnchor.constraint(equalTo: self.containerPreviewReply.trailingAnchor, constant: -10).isActive = true
+            buttonCancelReply.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
+            buttonCancelReply.setImage(UIImage(systemName: "xmark.circle" , withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular, scale: .default)), for: .normal)
+            buttonCancelReply.addTarget(nil, action: #selector(self.deleteReplyView), for: .touchUpInside)
+            buttonCancelReply.backgroundColor = .clear
+            buttonCancelReply.tintColor = .mainColor
+            
+            if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
+                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                if let dirPath = paths.first {
+                    let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumb_chat)
+                    let image : UIImage? =  {
+                        if let img = Nexilis.imageCache.object(forKey: thumb_chat as NSString) {
+                            return img
+                        }
+                        else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
                             Nexilis.imageCache.setObject(img, forKey: thumb_chat as NSString)
                             return img
+                        }
+                        return nil
+                    }()
+                    //                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
+                    let imageThumb = UIImageView(image: image)
+                    self.containerPreviewReply.addSubview(imageThumb)
+                    imageThumb.layer.cornerRadius = 2.0
+                    imageThumb.clipsToBounds = true
+                    imageThumb.translatesAutoresizingMaskIntoConstraints = false
+                    imageThumb.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
+                    imageThumb.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
+                    imageThumb.widthAnchor.constraint(equalToConstant: 30).isActive = true
+                    imageThumb.heightAnchor.constraint(equalToConstant: 30).isActive = true
+                    
+                    if (attachment_flag == "2") {
+                        let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
+                        imageThumb.addSubview(imagePlay)
+                        imagePlay.clipsToBounds = true
+                        imagePlay.translatesAutoresizingMaskIntoConstraints = false
+                        imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+                        imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
+                        imagePlay.widthAnchor.constraint(equalToConstant: 10).isActive = true
+                        imagePlay.heightAnchor.constraint(equalToConstant: 10).isActive = true
+                        imagePlay.tintColor = .white
                     }
-                    return nil
-                }()
-//                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
-                let imageThumb = UIImageView(image: image)
-                self.containerPreviewReply.addSubview(imageThumb)
-                imageThumb.layer.cornerRadius = 2.0
-                imageThumb.clipsToBounds = true
-                imageThumb.translatesAutoresizingMaskIntoConstraints = false
-                imageThumb.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
-                imageThumb.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
-                imageThumb.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                imageThumb.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                
-                if (attachment_flag == "2") {
-                    let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
-                    imageThumb.addSubview(imagePlay)
-                    imagePlay.clipsToBounds = true
-                    imagePlay.translatesAutoresizingMaskIntoConstraints = false
-                    imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
-                    imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
-                    imagePlay.widthAnchor.constraint(equalToConstant: 10).isActive = true
-                    imagePlay.heightAnchor.constraint(equalToConstant: 10).isActive = true
-                    imagePlay.tintColor = .white
                 }
             }
+            if (attachment_flag == "11") {
+                let imageSticker = UIImageView(image: UIImage(named: (message_text.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
+                self.containerPreviewReply.addSubview(imageSticker)
+                imageSticker.layer.cornerRadius = 2.0
+                imageSticker.clipsToBounds = true
+                imageSticker.translatesAutoresizingMaskIntoConstraints = false
+                imageSticker.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
+                imageSticker.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
+                imageSticker.widthAnchor.constraint(equalToConstant: 30).isActive = true
+                imageSticker.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            }
         }
-        if (attachment_flag == "11") {
-            let imageSticker = UIImageView(image: UIImage(named: (message_text.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
-            self.containerPreviewReply.addSubview(imageSticker)
-            imageSticker.layer.cornerRadius = 2.0
-            imageSticker.clipsToBounds = true
-            imageSticker.translatesAutoresizingMaskIntoConstraints = false
-            imageSticker.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
-            imageSticker.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
-            imageSticker.widthAnchor.constraint(equalToConstant: 30).isActive = true
-            imageSticker.heightAnchor.constraint(equalToConstant: 30).isActive = true
-        }
-    }
-    
-    func scrollToFirstSearchMessage(indexScroll: Int = 1) {
-        if textSearch.count < 2 {
-            return
-        }
-        var lastIndex = 0
-        let messageTextForSearch: [[String: Any?]] = self.dataMessages.reversed()
-        for idx in 0..<messageTextForSearch.count {
-            if (messageTextForSearch[idx]["message_text"] as! String).lowercased().contains(textSearch) {
-                lastIndex += 1
-                if lastIndex < indexScroll {
-                    continue
-                }
-                lastScrollIdxSearch = lastIndex
-                let section = self.dataDates.firstIndex(of: messageTextForSearch[idx]["chat_date"] as! String)
-                if section == nil {
-                    return
-                }
-                let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == messageTextForSearch[idx]["message_id"] as! String})
-                if row == nil {
-                    return
-                }
-                let indexPath = IndexPath(row: row!, section: section!)
-                self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    if let cell = self.tableChatView.cellForRow(at: indexPath) {
-                        let containerMessage = cell.contentView.subviews[1]
-                        let idMe = User.getMyPin() as String?
-                        if (messageTextForSearch[idx]["f_pin"] as? String == idMe) {
-                            containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .blueBubbleColor
+        
+        func scrollToFirstSearchMessage(indexScroll: Int = 1) {
+            if textSearch.count < 2 {
+                return
+            }
+            var lastIndex = 0
+            let messageTextForSearch: [[String: Any?]] = self.dataMessages.reversed()
+            for idx in 0..<messageTextForSearch.count {
+                if (messageTextForSearch[idx]["message_text"] as! String).lowercased().contains(textSearch) {
+                    lastIndex += 1
+                    if lastIndex < indexScroll {
+                        continue
+                    }
+                    lastScrollIdxSearch = lastIndex
+                    let section = self.dataDates.firstIndex(of: messageTextForSearch[idx]["chat_date"] as! String)
+                    if section == nil {
+                        return
+                    }
+                    let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == messageTextForSearch[idx]["message_id"] as! String})
+                    if row == nil {
+                        return
+                    }
+                    let indexPath = IndexPath(row: row!, section: section!)
+                    self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        if let cell = self.tableChatView.cellForRow(at: indexPath) {
+                            let containerMessage = cell.contentView.subviews[1]
+                            let idMe = User.getMyPin() as String?
+                            if (messageTextForSearch[idx]["f_pin"] as? String == idMe) {
+                                containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
+                                        containerMessage.backgroundColor = .clear
+                                    } else {
+                                        containerMessage.backgroundColor = .blueBubbleColor
+                                    }
                                 }
-                            }
-                        } else {
-                            containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .whiteBubbleColor
+                            } else {
+                                containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
+                                        containerMessage.backgroundColor = .clear
+                                    } else {
+                                        containerMessage.backgroundColor = .whiteBubbleColor
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                titleSearchMatches.isHidden = false
-                if countMatchesSearch != 0 {
-                    if countMatchesSearch > 1 {
-                        titleSearchMatches.text = "\(lastScrollIdxSearch) " + "of".localized() + " \(countMatchesSearch) " + "matches".localized()
+                    titleSearchMatches.isHidden = false
+                    if countMatchesSearch != 0 {
+                        if countMatchesSearch > 1 {
+                            titleSearchMatches.text = "\(lastScrollIdxSearch) " + "of".localized() + " \(countMatchesSearch) " + "matches".localized()
+                        } else {
+                            titleSearchMatches.text = "\(countMatchesSearch) " + "matches".localized()
+                        }
                     } else {
-                        titleSearchMatches.text = "\(countMatchesSearch) " + "matches".localized()
+                        titleSearchMatches.text = "Not found".localized()
                     }
-                } else {
-                    titleSearchMatches.text = "Not found".localized()
+                    if lastScrollIdxSearch == countMatchesSearch || countMatchesSearch == 0 {
+                        buttonUp.isEnabled = false
+                        buttonUp.tintColor = .gray
+                    } else {
+                        buttonUp.isEnabled = true
+                        buttonUp.tintColor = .mainColor
+                    }
+                    if countMatchesSearch == 0 || lastScrollIdxSearch == 1 || countMatchesSearch == 1 {
+                        buttonDown.isEnabled = false
+                        buttonDown.tintColor = .gray
+                    } else {
+                        buttonDown.isEnabled = true
+                        buttonDown.tintColor = .mainColor
+                    }
+                    break
                 }
-                if lastScrollIdxSearch == countMatchesSearch || countMatchesSearch == 0 {
-                    buttonUp.isEnabled = false
-                    buttonUp.tintColor = .gray
-                } else {
-                    buttonUp.isEnabled = true
-                    buttonUp.tintColor = .mainColor
-                }
-                if countMatchesSearch == 0 || lastScrollIdxSearch == 1 || countMatchesSearch == 1 {
-                    buttonDown.isEnabled = false
-                    buttonDown.tintColor = .gray
-                } else {
-                    buttonDown.isEnabled = true
-                    buttonDown.tintColor = .mainColor
-                }
-                break
             }
         }
-    }
-    
-    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        let indexPath = tableChatView.indexPathsForVisibleRows?.first
-        if indexPath != nil {
-            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-            let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
-                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                let headerView = listViewOnSection[sect]
-                headerView.isHidden = true
-            }
-        }
-    }
-    
-    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate {
+        
+        public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
             let indexPath = tableChatView.indexPathsForVisibleRows?.first
             if indexPath != nil {
                 let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
                 let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
+                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
                     let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
                     let headerView = listViewOnSection[sect]
                     headerView.isHidden = true
                 }
             }
         }
+        
+        public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            if !decelerate {
+                let indexPath = tableChatView.indexPathsForVisibleRows?.first
+                if indexPath != nil {
+                    let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+                    let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
+                    if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
+                        let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+                        let headerView = listViewOnSection[sect]
+                        headerView.isHidden = true
+                    }
+                }
+            }
+        }
     }
-}
-
+    
 extension EditorGroup: UISearchBarDelegate {
     
     public func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
@@ -5606,3 +5789,4 @@ extension EditorGroup: UISearchBarDelegate {
         scrollToFirstSearchMessage()
     }
 }
+    

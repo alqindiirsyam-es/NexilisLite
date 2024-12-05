@@ -41,16 +41,17 @@ public class FileEncryption {
         return try decryptToMemory(fileURL)
     }
     
-    func writeSecure(filename: String? = nil, fileURL : URL? = nil) throws -> [Any]? {
+    func writeSecure(filename: String? = nil, fileURL : URL? = nil, data: Data? = nil) throws -> [Any]? {
         let fileManager = FileManager.default
         let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let secureDir = documentDir.appendingPathComponent("secure")
         guard let inputFilename = filename ?? fileURL?.lastPathComponent else { return nil }
         let inputURL = fileURL ?? documentDir.appendingPathComponent(inputFilename)
         let outputURL = secureDir.appendingPathComponent(inputFilename)
-        guard let data = encryptFile(inputURL) else { return nil }
-        try data.write(to: outputURL)
+        guard let finalData = data ?? readDataFromFile(fileURL: inputURL) else { return nil }
+        let encryptedData = encryptFile(finalData)
         do {
+            try encryptedData?.write(to: outputURL)
             try fileManager.removeItem(at: inputURL)
             print("File deleted successfully")
         } catch {
@@ -73,6 +74,16 @@ public class FileEncryption {
         
     }
     
+    func listSecure() throws -> [URL] {
+        let fileManager = FileManager.default
+        do {
+            let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let secureDir = documentDir.appendingPathComponent("secure")
+            let files = try fileManager.contentsOfDirectory(at: secureDir, includingPropertiesForKeys: nil, options: [])
+            return files
+        }
+    }
+    
     func wipeData(_ data: inout Data) {
         data.resetBytes(in: 0..<data.count)
         data.count = 0
@@ -80,8 +91,12 @@ public class FileEncryption {
     
     func encryptFile(_ fileURL: URL) -> Data? {
         guard let fileData = readDataFromFile(fileURL: fileURL) else { return nil }
+        return encryptFile(fileData)
+    }
+    
+    func encryptFile(_ data: Data) -> Data? {
         do {
-            let sealedBox = try AES.GCM.seal(fileData, using: MasterKeyUtil.shared.getMasterKey())
+            let sealedBox = try AES.GCM.seal(data, using: MasterKeyUtil.shared.getMasterKey())
             return sealedBox.combined
         } catch {
             print("Encryption failed: \(error)")

@@ -423,6 +423,20 @@ public class Nexilis: NSObject {
                                     let ad = jsonData["authentication_duration"] as! String
                                     Utils.setAuthenticationDuration(value: ad)
                                 }
+                                if jsonData["secure_folder_encrypt_key"]! != nil {
+                                    do {
+                                        if let documentsDirectoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                                            let secureURL = documentsDirectoryURL.appendingPathComponent("secure")
+                                            if !FileManager.default.fileExists(atPath: secureURL.path){
+                                                 try FileManager.default.createDirectory(at: secureURL, withIntermediateDirectories: true, attributes: nil)
+                                            }
+                                        }
+                                        try MasterKeyUtil.shared.generateAndStoreServerKey(jsonData["secure_folder_encrypt_key"] as! String)
+                                    }
+                                    catch {
+                                        
+                                    }
+                                }
                             }
                             if let convertJsonFA = try? JSONSerialization.data(withJSONObject: jsonFA, options: .prettyPrinted) {
                                 if let jsonFAString = String(data: convertJsonFA, encoding: .utf8) {
@@ -1589,13 +1603,27 @@ public class Nexilis: NSObject {
     }
     
     static func resizedImage(at url: URL, for size: CGSize) -> UIImage? {
-        guard let image = UIImage(contentsOfFile: url.path) else {
+        var image : UIImage?
+        if FileManager.default.fileExists(atPath: url.path){
+            image = UIImage(contentsOfFile: url.path)
+        }
+        else if FileEncryption.shared.isSecureExists(filename: url.lastPathComponent) {
+            do {
+                if let imageData = try FileEncryption.shared.readSecure(filename: url.lastPathComponent) {
+                    image = UIImage(data: imageData)
+                }
+            }
+            catch {
+                
+            }
+        }
+        if image == nil {
             return nil
         }
         
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { (context) in
-            image.draw(in: CGRect(origin: .zero, size: size))
+            image!.draw(in: CGRect(origin: .zero, size: size))
         }
     }
     
@@ -2511,14 +2539,50 @@ extension Nexilis: MessageDelegate {
                                     } else {
                                         UIApplication.shared.visibleViewController?.present(previewImageVC, animated: true, completion: nil)
                                     }
+                                } else if FileEncryption.shared.isSecureExists(filename: image) {
+                                    do {
+                                        let data = try FileEncryption.shared.readSecure(filename: image)
+                                        let image = UIImage(data: data!)
+                                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                                        previewImageVC.image = image
+                                        previewImageVC.isHiddenTextField = true
+                                        previewImageVC.modalPresentationStyle = .overFullScreen
+                                        previewImageVC.modalTransitionStyle  = .crossDissolve
+                                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                            UIApplication.shared.visibleViewController?.navigationController?.present(previewImageVC, animated: true, completion: nil)
+                                        } else {
+                                            UIApplication.shared.visibleViewController?.present(previewImageVC, animated: true, completion: nil)
+                                        }
+                                    } catch {
+                                        
+                                    }
                                 } else {
                                     Download().startHTTP(forKey: image) { (name, progress) in
                                         guard progress == 100 else {
                                             return
                                         }
+                                        
+                                        do {
+                                            try FileEncryption.shared.writeSecure(filename: image)
+                                        } catch {
+                                            
+                                        }
                 
                                         DispatchQueue.main.async {
-                                            let image    = UIImage(contentsOfFile: imageURL.path)
+                                            var image : UIImage?
+                                            if FileManager.default.fileExists(atPath: imageURL.path) {
+                                                image    = UIImage(contentsOfFile: imageURL.path)
+                                            }
+                                            else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
+                                                do {
+                                                    if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                        image = UIImage(data: imageData)
+                                                    }
+                                                } catch {
+                                                    
+                                                }
+                                            }
+                                            
                                             let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
                                             previewImageVC.image = image
                                             previewImageVC.isHiddenTextField = true
@@ -2560,23 +2624,56 @@ extension Nexilis: MessageDelegate {
                                     } else {
                                         UIApplication.shared.visibleViewController?.present(previewController, animated: true, completion: nil)
                                     }
+                                } else if FileEncryption.shared.isSecureExists(filename: file) {
+                                    do {
+                                        if let docData = try FileEncryption.shared.readSecure(filename: file) {
+                                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                            let tempPath = cachesDirectory.appendingPathComponent(file)
+                                            try docData.write(to: tempPath)
+                                            previewItem = tempPath as NSURL
+                                            let previewController = QLPreviewController()
+                                            let rightBarButton = UIBarButtonItem()
+                                            previewController.navigationItem.rightBarButtonItem = rightBarButton
+                                            previewController.dataSource = self
+                                            previewController.modalPresentationStyle = .overFullScreen
+                                            
+                                            if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                                UIApplication.shared.visibleViewController?.navigationController?.present(previewController, animated: true, completion: nil)
+                                            } else {
+                                                UIApplication.shared.visibleViewController?.present(previewController, animated: true, completion: nil)
+                                            }
+                                        }
+                                    } catch {
+                                        
+                                    }
                                 } else {
                                     Download().startHTTP(forKey: file) { (name, progress) in
                                         DispatchQueue.main.async {
                                             guard progress == 100 else {
                                                 return
                                             }
-                                            previewItem = fileURL as NSURL
-                                            let previewController = QLPreviewController()
-                                            let rightBarButton = UIBarButtonItem()
-                                            previewController.navigationItem.rightBarButtonItem = rightBarButton
-                                            previewController.dataSource = self
-                                            previewController.modalPresentationStyle = .overFullScreen
-                
-                                            if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                                UIApplication.shared.visibleViewController?.navigationController?.present(previewController, animated: true, completion: nil)
-                                            } else {
-                                                UIApplication.shared.visibleViewController?.present(previewController, animated: true, completion: nil)
+                                            do {
+                                                let secureFilename = try FileEncryption.shared.writeSecure(filename: name)
+                                                if let docData = try FileEncryption.shared.readSecure(filename: secureFilename?[0] as! String) {
+                                                    let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                                    let tempPath = cachesDirectory.appendingPathComponent(file)
+                                                    try docData.write(to: tempPath)
+                                                    previewItem = tempPath as NSURL
+                                                    let previewController = QLPreviewController()
+                                                    let rightBarButton = UIBarButtonItem()
+                                                    previewController.navigationItem.rightBarButtonItem = rightBarButton
+                                                    previewController.dataSource = self
+                                                    previewController.modalPresentationStyle = .overFullScreen
+                                                    
+                                                    if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                                        UIApplication.shared.visibleViewController?.navigationController?.present(previewController, animated: true, completion: nil)
+                                                    } else {
+                                                        UIApplication.shared.visibleViewController?.present(previewController, animated: true, completion: nil)
+                                                    }
+                                                }
+                                            }
+                                            catch {
+                                                
                                             }
                                         }
                                     }
