@@ -142,6 +142,7 @@ public class Nexilis: NSObject {
         do {
             try MasterKeyUtil.shared.generateAndStoreMasterKey()
             try MasterKeyUtil.shared.generateAndStorePrefsKey()
+            Utils.setCertificatePinningWebview(value: Utils.decrypt(str: "6]qaAhNXHAxGKAOsFZmoIRUIn2Hp3rdfGAOFEfcnY4SIZ"))
         } catch {
         }
         

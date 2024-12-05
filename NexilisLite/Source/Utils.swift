@@ -348,6 +348,17 @@ public final class Utils {
         return dateFormatter.string(from: todaysDate as Date)
     }
     
+    static func setCertificatePinningWebview(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "certificate_pinning_webview")
+    }
+
+    public static func getCertificatePinningWebview() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "certificate_pinning_webview") {
+            return value
+        }
+        return ""
+    }
+    
 //    public static func getMD5(string: String) -> Data {
 //        let length = Int(CC_MD5_DIGEST_LENGTH)
 //        let messageData = string.data(using:.utf8)!
@@ -2507,7 +2518,7 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
 }
 
 public class SecureUserDefaults {
-    static let shared = SecureUserDefaults()
+    public static let shared = SecureUserDefaults()
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -2515,7 +2526,7 @@ public class SecureUserDefaults {
     }
 
     // Save a value
-    func set<T: Codable>(_ value: T, forKey key: String) {
+    public func set<T: Codable>(_ value: T, forKey key: String) {
         let encoder = JSONEncoder()
         guard let encodedData = try? encoder.encode(value),
               let encryptedData = try? MasterKeyUtil.shared.encryptP(data: encodedData) else {
@@ -2526,7 +2537,7 @@ public class SecureUserDefaults {
     }
 
     // Retrieve a value
-    func value<T: Codable>(forKey key: String) -> T? {
+    public func value<T: Codable>(forKey key: String) -> T? {
         guard let encryptedData = defaults.data(forKey: key),
               let decryptedData = try? MasterKeyUtil.shared.decryptP(data: encryptedData) else {
 //            print("Failed to decrypt data \(key)")
@@ -2537,12 +2548,8 @@ public class SecureUserDefaults {
     }
 
     // Remove a value
-    func removeValue(forKey key: String) {
+    public func removeValue(forKey key: String) {
         defaults.removeObject(forKey: key)
-    }
-    
-    func sync() {
-        defaults.synchronize()
     }
 }
 

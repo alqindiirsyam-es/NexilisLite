@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0E0CBC6D2A8644203AA0DB5C /* Pods_NexilisLite_NexilisLiteTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FC7278BDB36CCEF632B12110 /* Pods_NexilisLite_NexilisLiteTests.framework */; };
 		CD1E6E6D2A0B7C3600BF871F /* NexilisLite.docc in Sources */ = {isa = PBXBuildFile; fileRef = CD1E6E6C2A0B7C3600BF871F /* NexilisLite.docc */; };
 		CD1E6E732A0B7C3600BF871F /* NexilisLite.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CD1E6E682A0B7C3600BF871F /* NexilisLite.framework */; };
 		CD1E6E782A0B7C3600BF871F /* NexilisLiteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E6E772A0B7C3600BF871F /* NexilisLiteTests.swift */; };
@@ -217,7 +216,6 @@
 		CDDF467A2A2EF0A700049A19 /* ScreenSharingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDDF46792A2EF0A700049A19 /* ScreenSharingViewController.swift */; };
 		CDE3BED92C86E3A000B0BF36 /* pb_call_in.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = CDE3BED62C86E3A000B0BF36 /* pb_call_in.mp3 */; };
 		CDE3BEDA2C86E3A000B0BF36 /* pb_call_out.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = CDE3BED72C86E3A000B0BF36 /* pb_call_out.mp3 */; };
-		D7C555033B5169B92C3E5655 /* Pods_NexilisLite.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D25E4968C9AB01451C6FEA4 /* Pods_NexilisLite.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -251,11 +249,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		2286875318512FECCF9DD2D5 /* Pods-NexilisLite-NexilisLiteTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NexilisLite-NexilisLiteTests.debug.xcconfig"; path = "Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests.debug.xcconfig"; sourceTree = "<group>"; };
-		3BF74C8A0491A2D9CFD5036F /* Pods-NexilisLite.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NexilisLite.debug.xcconfig"; path = "Target Support Files/Pods-NexilisLite/Pods-NexilisLite.debug.xcconfig"; sourceTree = "<group>"; };
-		5634B1BB53E714D616AC0339 /* Pods-NexilisLite.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NexilisLite.release.xcconfig"; path = "Target Support Files/Pods-NexilisLite/Pods-NexilisLite.release.xcconfig"; sourceTree = "<group>"; };
-		759E699FA5E58242CC4AD45F /* Pods-NexilisLite-NexilisLiteTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NexilisLite-NexilisLiteTests.release.xcconfig"; path = "Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests.release.xcconfig"; sourceTree = "<group>"; };
-		7D25E4968C9AB01451C6FEA4 /* Pods_NexilisLite.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_NexilisLite.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD1E6E682A0B7C3600BF871F /* NexilisLite.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = NexilisLite.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD1E6E6B2A0B7C3600BF871F /* NexilisLite.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NexilisLite.h; sourceTree = "<group>"; };
 		CD1E6E6C2A0B7C3600BF871F /* NexilisLite.docc */ = {isa = PBXFileReference; lastKnownFileType = folder.documentationcatalog; path = NexilisLite.docc; sourceTree = "<group>"; };
@@ -476,7 +469,6 @@
 		CDDF46792A2EF0A700049A19 /* ScreenSharingViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ScreenSharingViewController.swift; sourceTree = "<group>"; };
 		CDE3BED62C86E3A000B0BF36 /* pb_call_in.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = pb_call_in.mp3; sourceTree = "<group>"; };
 		CDE3BED72C86E3A000B0BF36 /* pb_call_out.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = pb_call_out.mp3; sourceTree = "<group>"; };
-		FC7278BDB36CCEF632B12110 /* Pods_NexilisLite_NexilisLiteTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_NexilisLite_NexilisLiteTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -484,7 +476,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D7C555033B5169B92C3E5655 /* Pods_NexilisLite.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -493,7 +484,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				CD1E6E732A0B7C3600BF871F /* NexilisLite.framework in Frameworks */,
-				0E0CBC6D2A8644203AA0DB5C /* Pods_NexilisLite_NexilisLiteTests.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -517,8 +507,6 @@
 				CD1E79142A0CA43600BF871F /* SDWebImage.framework */,
 				CD1E79152A0CA43600BF871F /* SnapKit.framework */,
 				CD1E79162A0CA43600BF871F /* Toast_Swift.framework */,
-				7D25E4968C9AB01451C6FEA4 /* Pods_NexilisLite.framework */,
-				FC7278BDB36CCEF632B12110 /* Pods_NexilisLite_NexilisLiteTests.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -527,10 +515,6 @@
 			isa = PBXGroup;
 			children = (
 				CD46A0BE2A0CE4FD009E4C87 /* NexilisLite.podspec */,
-				3BF74C8A0491A2D9CFD5036F /* Pods-NexilisLite.debug.xcconfig */,
-				5634B1BB53E714D616AC0339 /* Pods-NexilisLite.release.xcconfig */,
-				2286875318512FECCF9DD2D5 /* Pods-NexilisLite-NexilisLiteTests.debug.xcconfig */,
-				759E699FA5E58242CC4AD45F /* Pods-NexilisLite-NexilisLiteTests.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -916,13 +900,11 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = CD1E6E7C2A0B7C3600BF871F /* Build configuration list for PBXNativeTarget "NexilisLite" */;
 			buildPhases = (
-				04BA19F1F3328DB84CA3450C /* [CP] Check Pods Manifest.lock */,
 				CD1E6E632A0B7C3600BF871F /* Headers */,
 				CD1E6E642A0B7C3600BF871F /* Sources */,
 				CD1E6E652A0B7C3600BF871F /* Frameworks */,
 				CD1E6E662A0B7C3600BF871F /* Resources */,
 				CD469E162A0CA6C9009E4C87 /* Embed Frameworks */,
-				6CBA06F8A3EDD9E9F4E3E3F0 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -938,12 +920,9 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = CD1E6E7F2A0B7C3600BF871F /* Build configuration list for PBXNativeTarget "NexilisLiteTests" */;
 			buildPhases = (
-				3FE251F6F0AD0D52A6241402 /* [CP] Check Pods Manifest.lock */,
 				CD1E6E6E2A0B7C3600BF871F /* Sources */,
 				CD1E6E6F2A0B7C3600BF871F /* Frameworks */,
 				CD1E6E702A0B7C3600BF871F /* Resources */,
-				8BBEF7E204C8A2B6A2ED4970 /* [CP] Embed Pods Frameworks */,
-				8DCAA429A19A02EFDE64AEEA /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -1142,104 +1121,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		04BA19F1F3328DB84CA3450C /* [CP] Check Pods Manifest.lock */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
-				"${PODS_ROOT}/Manifest.lock",
-			);
-			name = "[CP] Check Pods Manifest.lock";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-NexilisLite-checkManifestLockResult.txt",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		3FE251F6F0AD0D52A6241402 /* [CP] Check Pods Manifest.lock */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
-				"${PODS_ROOT}/Manifest.lock",
-			);
-			name = "[CP] Check Pods Manifest.lock";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-NexilisLite-NexilisLiteTests-checkManifestLockResult.txt",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		6CBA06F8A3EDD9E9F4E3E3F0 /* [CP] Copy Pods Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite/Pods-NexilisLite-resources-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Copy Pods Resources";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite/Pods-NexilisLite-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-NexilisLite/Pods-NexilisLite-resources.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		8BBEF7E204C8A2B6A2ED4970 /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-frameworks-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		8DCAA429A19A02EFDE64AEEA /* [CP] Copy Pods Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-resources-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Copy Pods Resources";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-resources.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		CD1E6E642A0B7C3600BF871F /* Sources */ = {
@@ -1517,7 +1398,6 @@
 		};
 		CD1E6E7D2A0B7C3600BF871F /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3BF74C8A0491A2D9CFD5036F /* Pods-NexilisLite.debug.xcconfig */;
 			buildSettings = {
 				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
 				CODE_SIGN_STYLE = Automatic;
@@ -1557,7 +1437,6 @@
 		};
 		CD1E6E7E2A0B7C3600BF871F /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 5634B1BB53E714D616AC0339 /* Pods-NexilisLite.release.xcconfig */;
 			buildSettings = {
 				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
 				CODE_SIGN_STYLE = Automatic;
@@ -1597,7 +1476,6 @@
 		};
 		CD1E6E802A0B7C3600BF871F /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 2286875318512FECCF9DD2D5 /* Pods-NexilisLite-NexilisLiteTests.debug.xcconfig */;
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = "$(inherited)";
 				CODE_SIGN_STYLE = Automatic;
@@ -1615,7 +1493,6 @@
 		};
 		CD1E6E812A0B7C3600BF871F /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 759E699FA5E58242CC4AD45F /* Pods-NexilisLite-NexilisLiteTests.release.xcconfig */;
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = "$(inherited)";
 				CODE_SIGN_STYLE = Automatic;

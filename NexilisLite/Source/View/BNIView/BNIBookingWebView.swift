@@ -9,6 +9,7 @@ import Foundation
 import UIKit
 import WebKit
 import Speech
+import CommonCrypto
 
 public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScrollViewDelegate, UIGestureRecognizerDelegate, WKScriptMessageHandler, SFSpeechRecognizerDelegate {
     var webView = WKWebView()
@@ -580,12 +581,52 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     }
     
     public func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
-            let credential = URLCredential(trust: challenge.protectionSpace.serverTrust!)
-            completionHandler(.useCredential, credential)
-        }
-        else {
+        guard let serverTrust = challenge.protectionSpace.serverTrust else {
             completionHandler(.cancelAuthenticationChallenge, nil)
+            return
         }
+        if let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0),
+           let pinnedCertificateHash = getCertificateHash(from: serverCertificate),
+           pinnedCertificateHash == Utils.getCertificatePinningWebview() {
+            let credential = URLCredential(trust: serverTrust)
+            completionHandler(.useCredential, credential) // Certificate matches, proceed
+        } else {
+            completionHandler(.cancelAuthenticationChallenge, nil) // Certificate doesn't match, cancel
+        }
+    }
+    
+    private func getCertificateHash(from certificate: SecCertificate) -> String? {
+        guard let publicKey = getPublicKey(from: certificate) else { return nil }
+        return hashPublicKey(publicKey)
+    }
+    
+    private func getPublicKey(from certificate: SecCertificate) -> Data? {
+        var trust: SecTrust?
+        let policy = SecPolicyCreateBasicX509()
+        let status = SecTrustCreateWithCertificates(certificate, policy, &trust)
+
+        guard status == errSecSuccess, let trust = trust else { return nil }
+
+        guard let publicKey = SecTrustCopyKey(trust) else { return nil }
+
+        var error: Unmanaged<CFError>?
+        if let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) {
+            return publicKeyData as Data
+        } else {
+            print("Error extracting public key: \(String(describing: error?.takeRetainedValue()))")
+            return nil
+        }
+    }
+
+    private func hashPublicKey(_ publicKey: Data) -> String? {
+        // SHA-256 hash
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        publicKey.withUnsafeBytes {
+            _ = CC_SHA256($0.baseAddress, CC_LONG(publicKey.count), &hash)
+        }
+
+        // Base64 encode the hash
+        let base64Hash = Data(hash).base64EncodedString()
+        return "sha256/\(base64Hash)"
     }
 }
