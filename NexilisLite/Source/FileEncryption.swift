@@ -197,5 +197,22 @@ public class FileEncryption {
         return finalData
     }
     
+    func wipeFolder() {
+        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let secureDir = documentsDirectory.appendingPathComponent("secure")
+        if FileManager.default.fileExists(atPath: secureDir.path) {
+            do {
+                let fileNames = try FileManager.default.contentsOfDirectory(atPath: secureDir.path)
+                for fileName in fileNames {
+                    let filePath = secureDir.appendingPathComponent(fileName)
+                    try FileManager.default.removeItem(atPath: secureDir.path)
+                }
+                try FileManager.default.removeItem(atPath: secureDir.path)
+                print("Secure folder deleted successfully")
+            } catch {
+                print("Error deleting secure folder")
+            }
+        }
+    }
     
 }

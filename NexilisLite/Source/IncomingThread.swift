@@ -244,6 +244,7 @@ class IncomingThread {
                     if Utils.getForceAnonymous() {
                         viewController?.deleteAllRecordDatabase()
                         SecureUserDefaults.shared.removeValue(forKey: "device_id")
+                        FileEncryption.shared.wipeFolder()
                         Nexilis.destroyAll()
                     }
                     DispatchQueue.main.async {

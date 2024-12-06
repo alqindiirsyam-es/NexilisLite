@@ -548,6 +548,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             if Utils.getForceAnonymous() {
                                 self.deleteAllRecordDatabase()
                                 SecureUserDefaults.shared.removeValue(forKey: "device_id")
+                                FileEncryption.shared.wipeFolder()
                                 Nexilis.destroyAll()
                                 _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
                             }
