@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		1241AEBC2D017E8C0088175A /* MasterKeyUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1241AEBB2D017E8C0088175A /* MasterKeyUtil.swift */; };
 		1241AEBD2D017E8C0088175A /* FileEncryption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1241AEBA2D017E8C0088175A /* FileEncryption.swift */; };
+		12C36CEB2D0299630095BEC1 /* SecureFolderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */; };
 		3AA890FECDE6363EFE1216A2 /* Pods_NexilisLite.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 05DE800165B7FA8135DD726B /* Pods_NexilisLite.framework */; };
 		6727D8C17B895F1A290AA89B /* Pods_NexilisLite_NexilisLiteTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F397F48A7642BC0DB5A8D144 /* Pods_NexilisLite_NexilisLiteTests.framework */; };
 		CD1E6E6D2A0B7C3600BF871F /* NexilisLite.docc in Sources */ = {isa = PBXBuildFile; fileRef = CD1E6E6C2A0B7C3600BF871F /* NexilisLite.docc */; };
@@ -256,6 +257,7 @@
 		05DE800165B7FA8135DD726B /* Pods_NexilisLite.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_NexilisLite.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		1241AEBA2D017E8C0088175A /* FileEncryption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEncryption.swift; sourceTree = "<group>"; };
 		1241AEBB2D017E8C0088175A /* MasterKeyUtil.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MasterKeyUtil.swift; sourceTree = "<group>"; };
+		12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureFolderView.swift; sourceTree = "<group>"; };
 		2B2ED86C8610C9011EBC7B85 /* Pods-NexilisLite-NexilisLiteTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NexilisLite-NexilisLiteTests.release.xcconfig"; path = "Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests.release.xcconfig"; sourceTree = "<group>"; };
 		36C68FFC41F4DA0F806DD5BD /* Pods-NexilisLite.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NexilisLite.debug.xcconfig"; path = "Target Support Files/Pods-NexilisLite/Pods-NexilisLite.debug.xcconfig"; sourceTree = "<group>"; };
 		506228B53B8F36AD707C0E89 /* Pods-NexilisLite.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NexilisLite.release.xcconfig"; path = "Target Support Files/Pods-NexilisLite/Pods-NexilisLite.release.xcconfig"; sourceTree = "<group>"; };
@@ -669,6 +671,7 @@
 		CD1E716D2A0BA86100BF871F /* Chat */ = {
 			isa = PBXGroup;
 			children = (
+				12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */,
 				CD7054E92AD39DE2003741BF /* ChatGPTBotView.swift */,
 				CD1E71742A0BA86100BF871F /* CustomTextView.swift */,
 				CD1E71722A0BA86100BF871F /* EditorGroup.swift */,
@@ -1259,6 +1262,7 @@
 				CD1E721A2A0BA86100BF871F /* NotifSound.swift in Sources */,
 				CD1E724F2A0BA86100BF871F /* SetInternalCSAccount.swift in Sources */,
 				CDA461222AB99E09001CD010 /* ConfigureFloatingButton.swift in Sources */,
+				12C36CEB2D0299630095BEC1 /* SecureFolderView.swift in Sources */,
 				CD1E721C2A0BA86100BF871F /* ContactCallViewController.swift in Sources */,
 				CD5A73AE2A77642D000541A5 /* MessageInfo.swift in Sources */,
 				CD1E723B2A0BA86100BF871F /* GroupDescViewController.swift in Sources */,

@@ -117,6 +117,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item.menus["Personal"] = [
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                                Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
                                 Item(icon: UIImage(systemName: "person.crop.rectangle"), title: "Change Admin / Internal Password".localized()),
                                 Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
                                 Item(icon: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, title: "Set Internal Account".localized()),
@@ -126,12 +127,14 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item.menus["Personal"] = [
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                                Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
                                 Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
                             ]
                         } else {
                             Item.menus["Personal"] = [
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                     Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                                Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
                                 Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                             ]
                         }
@@ -185,6 +188,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                         Item.menus["Personal"] = [
                             Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                            Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
                             Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                         ]
                         if Nexilis.showButtonFB {
@@ -323,6 +327,8 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             switch menu.title {
             case "Personal Information".localized():
                 cell.accessoryType = .disclosureIndicator
+            case "Secure Folder".localized():
+                cell.accessoryType = .disclosureIndicator
             case "Access Admin / Internal Features".localized():
                 cell.accessoryType = .disclosureIndicator
             case "Sign-In to Web".localized():
@@ -433,6 +439,11 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     self.makeMenu()
                     self.tableView.reloadData()
                 }
+                navigationController?.show(controller, sender: nil)
+            }
+        } else if item.title == "Secure Folder" {
+            if(Nexilis.checkIsChangePerson()){
+                let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "secureFolderView") as! SecureFolderViewController
                 navigationController?.show(controller, sender: nil)
             }
         } else if item.title == "Access Admin / Internal Features".localized() || item.title == "Change Admin / Internal Password".localized() {
