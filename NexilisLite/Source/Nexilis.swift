@@ -193,7 +193,7 @@ public class Nexilis: NSObject {
                 getFeatureAccess()
                 
                 if let me = User.getMyPin() {
-                    if !Utils.getForceAnonymous() && Utils.getSetProfile() {
+                    if Utils.getSetProfile() {
                         _ = Database.shared.openDatabase()
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                             do {
