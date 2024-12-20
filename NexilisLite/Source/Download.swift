@@ -89,7 +89,13 @@ public class Download {
                             let url = documentDir.appendingPathComponent(filename)
                             //print("write file \(url.path)")
                             let dResponse = try FileEncryption.shared.decryptToMemory(successResponse, MasterKeyUtil.shared.getServerKey())
-                            try dResponse.write(to: url)
+                            let imageOr = UIImage(data: successResponse)
+                            let imageDec = UIImage(data: dResponse)
+                            if imageDec != nil {
+                                try dResponse.write(to: url)
+                            } else {
+                                try successResponse.write(to: url)
+                            }
                             Nexilis.removeDownload(forKey: filename)
                             completion(filename,100)
                         }

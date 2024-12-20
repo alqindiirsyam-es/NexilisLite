@@ -392,7 +392,22 @@ extension NSObject {
                     }
                 }
             }
-        } catch {}
+        } catch {
+            completion(false, false, placeholderImage)
+            Download().startHTTP(forKey: url) { (name, progress) in
+                guard progress == 100 else {
+                    return
+                }
+                
+                DispatchQueue.main.async {
+                    if tableView != nil {
+                        tableView!.beginUpdates()
+                        tableView!.reloadRows(at: [indexPath!], with: .none)
+                        tableView!.endUpdates()
+                    }
+                }
+            }
+        }
     }
     
     func loadImage(named: String, placeholderImage: UIImage?, completion: @escaping (UIImage?, Bool) -> ()) {
