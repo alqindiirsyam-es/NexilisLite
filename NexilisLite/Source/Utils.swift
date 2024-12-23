@@ -484,6 +484,17 @@ public final class Utils {
         return "0"
     }
     
+    static func setHistoryPullFB(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "history_pull_fb")
+    }
+    
+    static func getHistoryPullFB() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "history_pull_fb") {
+            return value
+        }
+        return ""
+    }
+    
     static func setFBItemBg(value: String){
         SecureUserDefaults.shared.set(value, forKey: "fb_item_with_bg")
     }
@@ -719,6 +730,12 @@ public final class Utils {
                     }
                     if Array(json.keys)[i] == "fb_icon_center" {
                         Utils.setIconCenter(value: Array(json.values)[i] as! String)
+                    }
+                }
+                Utils.setFinishInitPrefs(value: true)
+                DispatchQueue.main.async {
+                    if Nexilis.showFB && Nexilis.floatingButton.superview != nil {
+                        Nexilis.floatingButton.setImageWithURL(!Utils.getIconDock().isEmpty && Nexilis.fromMAB)
                     }
                 }
             } catch {
@@ -2556,7 +2573,6 @@ public class SecureUserDefaults {
         let encoder = JSONEncoder()
         guard let encodedData = try? encoder.encode(value),
               let encryptedData = try? MasterKeyUtil.shared.encryptP(data: encodedData) else {
-//            print("Failed to encrypt data")
             return
         }
         defaults.set(encryptedData, forKey: key)

@@ -90,7 +90,6 @@ public class FloatingButton: UIView {
         nexilis_button = UIImageView()
         nexilis_button.translatesAutoresizingMaskIntoConstraints = false
         nexilis_button.isUserInteractionEnabled = true
-        var dataImage: Data?
         if configModeFB == MODE_VERTICAL_ANIMATION || configModeFB == MODE_HORIZONTAL_ANIMATION {
             defaultWidthFB = widthFBAnim
             if configModeFB == MODE_HORIZONTAL_ANIMATION {
@@ -112,31 +111,17 @@ public class FloatingButton: UIView {
             }
         } else {
             if !Utils.getIconDock().isEmpty && configModeFB == MODE_VERTICAL_FLOATING_BUTTON && Nexilis.fromMAB {
-                setImageWithURL(Utils.getIconDock())
+                setImageWithURL(true)
             } else {
                 if configModeFB == MODE_HORIZONTAL_SIDE_TAB || configModeFB == MODE_VERTICAL_SIDE_TAB {
                     defaultWidthFB = widthFBSideTab
                     defaultHeightFB = heightFBSideTab
                 }
-                if !Utils.getIconCenter().isEmpty {
-                    print("HUHU GG \(Utils.getIconCenter())")
-                    setImageWithURL(Utils.getIconCenter())
+                if !Utils.getIconCenter().isEmpty && configModeFB == MODE_VERTICAL_FLOATING_BUTTON {
+                    setImageWithURL(false)
                 } else {
                     nexilis_button.image = UIImage(named: configModeFB == MODE_VERTICAL_SIDE_TAB ? "pb_side_tab_vtc" : configModeFB == MODE_HORIZONTAL_SIDE_TAB ? "pb_side_tab" : "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 }
-            }
-        }
-        
-        func setImageWithURL(_ url: String) {
-            dataImage = try? Data(contentsOf: URL(string: url)!)
-            if dataImage != nil {
-                if let image = UIImage(data: dataImage!) {
-                    nexilis_button.image = image
-                } else {
-                    nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                }
-            } else {
-                nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             }
         }
         
@@ -257,6 +242,22 @@ public class FloatingButton: UIView {
         UIApplication.shared.windows.first?.rootViewController?.view.addGestureRecognizer(tapGesture)
     }
     
+    public func setImageWithURL(_ isDocked: Bool) {
+        if configModeFB != MODE_VERTICAL_FLOATING_BUTTON {
+            return
+        }
+        let dataImage = try? Data(contentsOf: URL(string: (isDocked ? Utils.getUrlDock() : Utils.getIconCenter())!)!)
+        if dataImage != nil {
+            if let image = UIImage(data: dataImage!) {
+                nexilis_button.image = image
+            } else {
+                nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+            }
+        } else {
+            nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        }
+    }
+    
     private func checkDelayAnimation() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: { [self] in
             if !isShow {
@@ -318,7 +319,11 @@ public class FloatingButton: UIView {
             return
         }
         if groupView.subviews.count == 0 {
-            getDefaultButton()
+            if !Utils.getHistoryPullFB().isEmpty {
+                setFBFromPull()
+            } else {
+                getDefaultButton()
+            }
         }
         DispatchQueue.global().async { [self] in
             if !Utils.getCustomButtons().isEmpty && configModeFB != MODE_HORIZONTAL_SIDE_TAB && configModeFB != MODE_HORIZONTAL_ANIMATION && configModeFB != MODE_VERTICAL_SIDE_TAB && Nexilis.fromMAB {
@@ -354,79 +359,86 @@ public class FloatingButton: UIView {
             }
             if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullFloatingButton(), timeout: 30 * 1000){
                 if response.isOk() {
-                    let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
-                    if !data.isEmpty {
-                        if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-                            DispatchQueue.main.async { [self] in
-                                let filteredData = jsonArray.filter({ $0["mode"] as? Int == Int(configModeFB) })
-                                if filteredData.count != 0 {
-                                    groupView.subviews.forEach({ $0.removeFromSuperview() })
-                                    countMenuFB = CGFloat(filteredData.count > 5 ? 5 : filteredData.count)
-                                    for json in filteredData {
-                                        let package_id = json["package_id"] as! String
-                                        let app_id = (json["app_id"] as? String) ?? ""
-                                        let icon = (json["icon"] as? String) ?? ""
-                                        let mode = "\((json["mode"] as? Int) ?? 1)"
-                                        let newButton = UIButton()
-                                        if mode != configModeFB {
-                                            continue
-                                        }
-                                        if mode == MODE_HORIZONTAL_SIDE_TAB {
-                                            newButton.widthAnchor.constraint(equalToConstant: defaultHeightFB - 10).isActive = true
-                                            newButton.heightAnchor.constraint(equalToConstant: defaultHeightFB - 10).isActive = true
-                                        } else if mode == MODE_HORIZONTAL_ANIMATION {
-                                            newButton.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
-                                            newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
-                                        } else if mode == MODE_VERTICAL_SIDE_TAB {
-                                            newButton.imageView?.contentMode = .scaleAspectFit
-                                        } else {
-                                            newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
-                                        }
-                                        newButton.translatesAutoresizingMaskIntoConstraints = false
-                                        var indexTap = 0
-                                        if package_id.contains("_fb"){
-                                            let listSplit = package_id.split(separator: "_", maxSplits: 1)
-                                            let idxFB = listSplit.firstIndex(where: { $0.contains("fb") }) ?? 0
-                                            let numIdx = listSplit[idxFB]
-                                            indexTap = Int(String(numIdx).substring(from: 2, to: numIdx.count)) ?? 0
-                                        }
-                                        if indexTap == Nexilis.IDX_CHAT {
-                                            newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_chat" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_chat" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_chat" : "pb_button_chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        } else if indexTap == Nexilis.IDX_CONVERSATION {
-                                            newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_chat" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_conversation" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_conversation" : "pb_button_chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        } else if indexTap == Nexilis.IDX_CALL {
-                                            newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_call" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_call" : "pb_button_call", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        } else if indexTap == Nexilis.IDX_CC {
-                                            newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_cc" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_cc" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_cc" : "pb_button_cc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        } else if indexTap == Nexilis.IDX_STREAM {
-                                            newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_stream" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_stream" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_stream" : "pb_button_stream", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        } else if indexTap == Nexilis.IDX_SOCIAL_COMMERCE {
-                                            newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_commerce" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_social_commerce" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_commerce" : "pb_button_commerce", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        } else if indexTap == Nexilis.IDX_NEWS {
-                                            newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_news" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_news" : "pb_button_news", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        } else if indexTap == Nexilis.IDX_POST {
-                                            newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_post" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_post" : "pb_button_post", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        } else if indexTap == Nexilis.IDX_NOTIF_CENTER {
-                                            newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_notif_center" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_notif_center" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_notif_center" : "pb_button_notification", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        } else {
-                                            newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_more" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_more" : "pb_button_others", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
-                                        }
-                                        if !icon.isEmpty {
-                                            DispatchQueue.global().async { [self] in
-                                                getDataImageFromUrl(from: URL(string: Utils.getURLBase() + "get_file_from_path?img=" + icon)!) { data, response, error in
-                                                    guard let data = data, error == nil else { return }
-                                                    DispatchQueue.main.async {
-                                                        newButton.setImage(UIImage(data: data), for: .normal)
-                                                    }
-                                                }
+                    Utils.setHistoryPullFB(value: response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: ""))
+                    setFBFromPull()
+                }
+            }
+        }
+    }
+    
+    private func setFBFromPull() {
+        DispatchQueue.main.async {
+            let data = Utils.getHistoryPullFB()
+            if !data.isEmpty {
+                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                    DispatchQueue.main.async { [self] in
+                        let filteredData = jsonArray.filter({ $0["mode"] as? Int == Int(configModeFB) })
+                        if filteredData.count != 0 {
+                            groupView.subviews.forEach({ $0.removeFromSuperview() })
+                            countMenuFB = CGFloat(filteredData.count > 5 ? 5 : filteredData.count)
+                            for json in filteredData {
+                                let package_id = json["package_id"] as! String
+                                let app_id = (json["app_id"] as? String) ?? ""
+                                let icon = (json["icon"] as? String) ?? ""
+                                let mode = "\((json["mode"] as? Int) ?? 1)"
+                                let newButton = UIButton()
+                                if mode != configModeFB {
+                                    continue
+                                }
+                                if mode == MODE_HORIZONTAL_SIDE_TAB {
+                                    newButton.widthAnchor.constraint(equalToConstant: defaultHeightFB - 10).isActive = true
+                                    newButton.heightAnchor.constraint(equalToConstant: defaultHeightFB - 10).isActive = true
+                                } else if mode == MODE_HORIZONTAL_ANIMATION {
+                                    newButton.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
+                                    newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
+                                } else if mode == MODE_VERTICAL_SIDE_TAB {
+                                    newButton.imageView?.contentMode = .scaleAspectFit
+                                } else {
+                                    newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
+                                }
+                                newButton.translatesAutoresizingMaskIntoConstraints = false
+                                var indexTap = 0
+                                if package_id.contains("_fb"){
+                                    let listSplit = package_id.split(separator: "_", maxSplits: 1)
+                                    let idxFB = listSplit.firstIndex(where: { $0.contains("fb") }) ?? 0
+                                    let numIdx = listSplit[idxFB]
+                                    indexTap = Int(String(numIdx).substring(from: 2, to: numIdx.count)) ?? 0
+                                }
+                                if indexTap == Nexilis.IDX_CHAT {
+                                    newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_chat" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_chat" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_chat" : "pb_button_chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else if indexTap == Nexilis.IDX_CONVERSATION {
+                                    newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_chat" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_conversation" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_conversation" : "pb_button_chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else if indexTap == Nexilis.IDX_CALL {
+                                    newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_call" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_call" : "pb_button_call", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else if indexTap == Nexilis.IDX_CC {
+                                    newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_cc" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_cc" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_cc" : "pb_button_cc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else if indexTap == Nexilis.IDX_STREAM {
+                                    newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_stream" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_stream" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_stream" : "pb_button_stream", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else if indexTap == Nexilis.IDX_SOCIAL_COMMERCE {
+                                    newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_commerce" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_social_commerce" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_commerce" : "pb_button_commerce", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else if indexTap == Nexilis.IDX_NEWS {
+                                    newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_news" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_news" : "pb_button_news", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else if indexTap == Nexilis.IDX_POST {
+                                    newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_post" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_post" : "pb_button_post", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else if indexTap == Nexilis.IDX_NOTIF_CENTER {
+                                    newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_notif_center" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_notif_center" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_notif_center" : "pb_button_notification", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else {
+                                    newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_more" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_more" : "pb_button_others", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                }
+                                if !icon.isEmpty {
+                                    DispatchQueue.global().async { [self] in
+                                        getDataImageFromUrl(from: URL(string: Utils.getURLBase() + "get_file_from_path?img=" + icon)!) { data, response, error in
+                                            guard let data = data, error == nil else { return }
+                                            DispatchQueue.main.async {
+                                                newButton.setImage(UIImage(data: data), for: .normal)
                                             }
                                         }
-                                        groupView.addArrangedSubview(newButton)
-                                        newButton.restorationIdentifier = package_id
-                                        newButton.accessibilityIdentifier = app_id
-                                        newButton.addTarget(self, action: #selector(fbTap), for: .touchUpInside)
                                     }
                                 }
+                                groupView.addArrangedSubview(newButton)
+                                newButton.restorationIdentifier = package_id
+                                newButton.accessibilityIdentifier = app_id
+                                newButton.addTarget(self, action: #selector(fbTap), for: .touchUpInside)
                             }
                         }
                     }

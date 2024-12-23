@@ -343,19 +343,19 @@ public class Nexilis: NSObject {
                 if let data = data, let responseString = String(data: data, encoding: .utf8) {
                     if let json = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any?] {
                         do {
-                            let dataArray: [[String: Any?]] = [json]
-                            if !dataArray.isEmpty && !Utils.getIsLoadThemeFromOther() {
-                                if let jsonData = try? JSONSerialization.data(withJSONObject: dataArray, options: .prettyPrinted) {
-                                    // Convert to JSON String
-                                    let jsonString = String(data: jsonData, encoding: .utf8)
-                                    Utils.setPrefTheme(value: jsonString ?? "")
-                                    Utils.setValueInitialApp(data: jsonString ?? "")
-                                } else {
-                                }
-                            }
-                            Utils.setFinishInitPrefs(value: true)
                             if Utils.getBEId().isEmpty {
                                 Utils.setBEId(value: "\(json["be_id"]!!)")
+                                getPullPrefs()
+                            } else {
+                                let dataArray: [[String: Any?]] = [json]
+                                if !dataArray.isEmpty && !Utils.getIsLoadThemeFromOther() {
+                                    if let jsonData = try? JSONSerialization.data(withJSONObject: dataArray, options: .prettyPrinted) {
+                                        // Convert to JSON String
+                                        let jsonString = String(data: jsonData, encoding: .utf8)
+                                        Utils.setPrefTheme(value: jsonString ?? "")
+                                        Utils.setValueInitialApp(data: jsonString ?? "")
+                                    }
+                                }
                             }
                         } catch {
                         }
