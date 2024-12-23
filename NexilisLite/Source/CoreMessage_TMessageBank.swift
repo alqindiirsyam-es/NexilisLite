@@ -2519,6 +2519,7 @@ public class CoreMessage_TMessageBank {
         tMessage.mCode = CoreMessage_TMessageCode.PULL_PREFS
         tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
         tMessage.mBodies[CoreMessage_TMessageKey.F_PIN] = me
+        tMessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         if !key.isEmpty {
             tMessage.mBodies[CoreMessage_TMessageKey.KEY] = key
         }

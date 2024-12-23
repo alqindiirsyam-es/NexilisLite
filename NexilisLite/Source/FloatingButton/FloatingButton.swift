@@ -57,6 +57,8 @@ public class FloatingButton: UIView {
     final let MODE_HORIZONTAL_SIDE_TAB = "4"
     final let MODE_VERTICAL_SIDE_TAB = "5"
     
+    var configModeFB = "1"
+    
     var countMenuFB: CGFloat = 6 {
         didSet {
             if isShow {
@@ -83,20 +85,22 @@ public class FloatingButton: UIView {
         panGesture = UIPanGestureRecognizer(target: self, action: #selector(draggedView(_:)))
         addGestureRecognizer(panGesture!)
         
+        configModeFB = Utils.getConfigModeFB()
+        
         nexilis_button = UIImageView()
         nexilis_button.translatesAutoresizingMaskIntoConstraints = false
         nexilis_button.isUserInteractionEnabled = true
         var dataImage: Data?
-        if Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION || Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION {
+        if configModeFB == MODE_VERTICAL_ANIMATION || configModeFB == MODE_HORIZONTAL_ANIMATION {
             defaultWidthFB = widthFBAnim
-            if Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION {
+            if configModeFB == MODE_HORIZONTAL_ANIMATION {
                 defaultHeightFB = heightFBAnim + 30
             } else {
                 defaultHeightFB = heightFBAnim
             }
-            var urlGif = URL(string: Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION ? Utils.getIconCenterAnim2() : Utils.getIconCenterAnim4())
+            var urlGif = URL(string: configModeFB == MODE_VERTICAL_ANIMATION ? Utils.getIconCenterAnim2() : Utils.getIconCenterAnim4())
             if (urlGif == nil) {
-                urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION ? "pb_def_icon_mode2" : "pb_def_icon_mode4", withExtension: "gif")! //resourcesMediaBundle
+                urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: configModeFB == MODE_VERTICAL_ANIMATION ? "pb_def_icon_mode2" : "pb_def_icon_mode4", withExtension: "gif")! //resourcesMediaBundle
             }
             nexilis_button.sd_setImage(with: urlGif) { [self] (image, error, cacheType, imageURL) in
                 if error == nil {
@@ -107,30 +111,39 @@ public class FloatingButton: UIView {
                 }
             }
         } else {
-            if !Utils.getIconDock().isEmpty && Utils.getConfigModeFB() == MODE_VERTICAL_FLOATING_BUTTON {
-                dataImage = try? Data(contentsOf: URL(string: Utils.getUrlDock()!)!)
-                if dataImage != nil {
-                    if let image = UIImage(data: dataImage!) {
-                        nexilis_button.image = image
-                    } else {
-                        nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                    }
+            if !Utils.getIconDock().isEmpty && configModeFB == MODE_VERTICAL_FLOATING_BUTTON && Nexilis.fromMAB {
+                setImageWithURL(Utils.getIconDock())
+            } else {
+                if configModeFB == MODE_HORIZONTAL_SIDE_TAB || configModeFB == MODE_VERTICAL_SIDE_TAB {
+                    defaultWidthFB = widthFBSideTab
+                    defaultHeightFB = heightFBSideTab
+                }
+                if !Utils.getIconCenter().isEmpty {
+                    print("HUHU GG \(Utils.getIconCenter())")
+                    setImageWithURL(Utils.getIconCenter())
+                } else {
+                    nexilis_button.image = UIImage(named: configModeFB == MODE_VERTICAL_SIDE_TAB ? "pb_side_tab_vtc" : configModeFB == MODE_HORIZONTAL_SIDE_TAB ? "pb_side_tab" : "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                }
+            }
+        }
+        
+        func setImageWithURL(_ url: String) {
+            dataImage = try? Data(contentsOf: URL(string: url)!)
+            if dataImage != nil {
+                if let image = UIImage(data: dataImage!) {
+                    nexilis_button.image = image
                 } else {
                     nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 }
             } else {
-                if Utils.getConfigModeFB() == MODE_HORIZONTAL_SIDE_TAB || Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB {
-                    defaultWidthFB = widthFBSideTab
-                    defaultHeightFB = heightFBSideTab
-                }
-                nexilis_button.image = UIImage(named: Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB ? "pb_side_tab_vtc" : Utils.getConfigModeFB() == MODE_HORIZONTAL_SIDE_TAB ? "pb_side_tab" : "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             }
         }
         
         backgroundColor = .clear
-        frame = CGRect(x: UIScreen.main.bounds.width - defaultWidthFB, y: (UIScreen.main.bounds.height / 2) - defaultHeightFB, width: Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB ? 50 + defaultWidthFB : Utils.getConfigModeFB() == MODE_HORIZONTAL_SIDE_TAB ? UIScreen.main.bounds.width - defaultWidthFB : defaultWidthFB, height: Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB ? heightVerticalSideTab : defaultHeightFB)
+        frame = CGRect(x: UIScreen.main.bounds.width - defaultWidthFB, y: (UIScreen.main.bounds.height / 2) - defaultHeightFB, width: configModeFB == MODE_VERTICAL_SIDE_TAB ? 50 + defaultWidthFB : configModeFB == MODE_HORIZONTAL_SIDE_TAB ? UIScreen.main.bounds.width - defaultWidthFB : defaultWidthFB, height: configModeFB == MODE_VERTICAL_SIDE_TAB ? heightVerticalSideTab : defaultHeightFB)
         
-        if Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION || Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION {
+        if configModeFB == MODE_VERTICAL_ANIMATION || configModeFB == MODE_HORIZONTAL_ANIMATION {
             if configAnim == 0 { //left to right
                 lastRunAnimationHrz = 1
             } else if configAnim == 1 { //right to left
@@ -157,7 +170,7 @@ public class FloatingButton: UIView {
         nexilis_button.widthAnchor.constraint(equalToConstant: defaultWidthFB).isActive = true
         nexilis_button.heightAnchor.constraint(equalToConstant: defaultHeightFB).isActive = true
         nexilis_button.leftAnchor.constraint(equalTo: leftAnchor).isActive = true
-        if Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB {
+        if configModeFB == MODE_VERTICAL_SIDE_TAB {
             nexilis_button.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
         } else {
             nexilis_button.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
@@ -165,7 +178,7 @@ public class FloatingButton: UIView {
         
         scrollView = UIScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        if Utils.getFBItemBg() == "1" && Utils.getConfigModeFB() == MODE_VERTICAL_FLOATING_BUTTON {
+        if Utils.getFBItemBg() == "1" && configModeFB == MODE_VERTICAL_FLOATING_BUTTON {
             scrollView.layer.borderWidth = 1.0
             scrollView.layer.borderColor = UIColor.white.cgColor
             scrollView.layer.cornerRadius = 8.0
@@ -174,7 +187,7 @@ public class FloatingButton: UIView {
         }
         addSubview(scrollView)
         
-        if Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB {
+        if configModeFB == MODE_VERTICAL_SIDE_TAB {
             let bgImage = resizeImage(image: UIImage(named: "pb_button_background_vtcst", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: widthVerticalSideTab, height: heightVerticalSideTab))
             scrollView.backgroundColor = UIColor.init(patternImage: bgImage)
             
@@ -182,14 +195,14 @@ public class FloatingButton: UIView {
             scrollView.centerYAnchor.constraint(equalTo: nexilis_button.centerYAnchor).isActive = true
             scrollView.widthAnchor.constraint(equalToConstant: widthVerticalSideTab).isActive = true
             scrollView.heightAnchor.constraint(equalToConstant: heightVerticalSideTab).isActive = true
-        } else if Utils.getConfigModeFB() != MODE_HORIZONTAL_SIDE_TAB {
+        } else if configModeFB != MODE_HORIZONTAL_SIDE_TAB {
             scrollView.topAnchor.constraint(equalTo: topAnchor).isActive = true
-            if Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION {
+            if configModeFB == MODE_VERTICAL_ANIMATION {
                 scrollView.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
                 scrollView.leftAnchor.constraint(equalTo: nexilis_button.rightAnchor, constant: -20).isActive = true
                 scrollView.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB + 10).isActive = true
                 scrollView.isHidden = true
-            } else if Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION {
+            } else if configModeFB == MODE_HORIZONTAL_ANIMATION {
                 scrollView.bottomAnchor.constraint(equalTo: nexilis_button.topAnchor).isActive = true
                 scrollView.leftAnchor.constraint(equalTo: nexilis_button.leftAnchor).isActive = true
                 scrollView.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB * (countMenuFB - 1)).isActive = true
@@ -208,29 +221,29 @@ public class FloatingButton: UIView {
         
         groupView = UIStackView()
         groupView.translatesAutoresizingMaskIntoConstraints = false
-        groupView.axis = (Utils.getConfigModeFB() == MODE_HORIZONTAL_SIDE_TAB || Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION) ? .horizontal : .vertical
-        if Utils.getConfigModeFB() != MODE_HORIZONTAL_SIDE_TAB && Utils.getConfigModeFB() != MODE_HORIZONTAL_ANIMATION {
+        groupView.axis = (configModeFB == MODE_HORIZONTAL_SIDE_TAB || configModeFB == MODE_HORIZONTAL_ANIMATION) ? .horizontal : .vertical
+        if configModeFB != MODE_HORIZONTAL_SIDE_TAB && configModeFB != MODE_HORIZONTAL_ANIMATION {
             groupView.distribution = .fillEqually
         }
 
         scrollView.addSubview(groupView)
 
-        if Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB {
+        if configModeFB == MODE_VERTICAL_SIDE_TAB {
             groupView.spacing = 10.0
             groupView.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor).isActive = true
             groupView.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor).isActive = true
             groupView.heightAnchor.constraint(equalToConstant: heightVerticalSideTab - 20).isActive = true
             groupView.widthAnchor.constraint(equalToConstant: 30).isActive = true
-        } else if Utils.getConfigModeFB() == MODE_HORIZONTAL_SIDE_TAB {
+        } else if configModeFB == MODE_HORIZONTAL_SIDE_TAB {
             groupView.leftAnchor.constraint(equalTo: scrollView.leftAnchor).isActive = true
             groupView.rightAnchor.constraint(equalTo: scrollView.rightAnchor).isActive = true
             groupView.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor).isActive = true
             groupView.heightAnchor.constraint(equalToConstant: defaultHeightFB - 10).isActive = true
         } else {
-            groupView.widthAnchor.constraint(equalToConstant: Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION ? defaultWidthHeightMenuFB * (countMenuFB - 1) : defaultWidthHeightMenuFB).isActive = true
-            groupView.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION ? 0 : 5).isActive = true
-            groupView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION ? 0 : -5).isActive = true
-            groupView.leftAnchor.constraint(equalTo: scrollView.leftAnchor, constant: Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION ? 0 : 6).isActive = true
+            groupView.widthAnchor.constraint(equalToConstant: configModeFB == MODE_HORIZONTAL_ANIMATION ? defaultWidthHeightMenuFB * (countMenuFB - 1) : defaultWidthHeightMenuFB).isActive = true
+            groupView.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: configModeFB == MODE_HORIZONTAL_ANIMATION ? 0 : 5).isActive = true
+            groupView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: configModeFB == MODE_HORIZONTAL_ANIMATION ? 0 : -5).isActive = true
+            groupView.leftAnchor.constraint(equalTo: scrollView.leftAnchor, constant: configModeFB == MODE_HORIZONTAL_ANIMATION ? 0 : 6).isActive = true
         }
         
         pullButton()
@@ -308,7 +321,7 @@ public class FloatingButton: UIView {
             getDefaultButton()
         }
         DispatchQueue.global().async { [self] in
-            if !Utils.getCustomButtons().isEmpty && Utils.getConfigModeFB() != MODE_HORIZONTAL_SIDE_TAB && Utils.getConfigModeFB() != MODE_HORIZONTAL_ANIMATION && Utils.getConfigModeFB() != MODE_VERTICAL_SIDE_TAB {
+            if !Utils.getCustomButtons().isEmpty && configModeFB != MODE_HORIZONTAL_SIDE_TAB && configModeFB != MODE_HORIZONTAL_ANIMATION && configModeFB != MODE_VERTICAL_SIDE_TAB && Nexilis.fromMAB {
                 DispatchQueue.main.async { [self] in
                     groupView.subviews.forEach({ $0.removeFromSuperview() })
                     let customButtons = Utils.getCustomButtons().components(separatedBy: ",")
@@ -345,7 +358,7 @@ public class FloatingButton: UIView {
                     if !data.isEmpty {
                         if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                             DispatchQueue.main.async { [self] in
-                                let filteredData = jsonArray.filter({ $0["mode"] as? Int == Int(Utils.getConfigModeFB()) })
+                                let filteredData = jsonArray.filter({ $0["mode"] as? Int == Int(configModeFB) })
                                 if filteredData.count != 0 {
                                     groupView.subviews.forEach({ $0.removeFromSuperview() })
                                     countMenuFB = CGFloat(filteredData.count > 5 ? 5 : filteredData.count)
@@ -355,7 +368,7 @@ public class FloatingButton: UIView {
                                         let icon = (json["icon"] as? String) ?? ""
                                         let mode = "\((json["mode"] as? Int) ?? 1)"
                                         let newButton = UIButton()
-                                        if mode != Utils.getConfigModeFB() {
+                                        if mode != configModeFB {
                                             continue
                                         }
                                         if mode == MODE_HORIZONTAL_SIDE_TAB {
@@ -373,8 +386,9 @@ public class FloatingButton: UIView {
                                         var indexTap = 0
                                         if package_id.contains("_fb"){
                                             let listSplit = package_id.split(separator: "_", maxSplits: 1)
-                                            let numIdx = listSplit[listSplit.firstIndex(where: { $0.contains("fb") }) ?? 0]
-                                            indexTap = Int(String(numIdx).substring(from: 2, to: numIdx.count))!
+                                            let idxFB = listSplit.firstIndex(where: { $0.contains("fb") }) ?? 0
+                                            let numIdx = listSplit[idxFB]
+                                            indexTap = Int(String(numIdx).substring(from: 2, to: numIdx.count)) ?? 0
                                         }
                                         if indexTap == Nexilis.IDX_CHAT {
                                             newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_chat" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_chat" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_chat" : "pb_button_chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
@@ -429,7 +443,7 @@ public class FloatingButton: UIView {
     }
     
     func getDefaultButton() {
-        let mode = Utils.getConfigModeFB()
+        let mode = configModeFB
         var data = [Nexilis.IDX_NOTIF_CENTER, Nexilis.IDX_CC, Nexilis.IDX_CONVERSATION, Nexilis.IDX_CALL, Nexilis.IDX_STREAM]
         if Nexilis.defaultFloatingButton.count > 0 {
             data = Nexilis.defaultFloatingButton
@@ -490,14 +504,14 @@ public class FloatingButton: UIView {
         let size = UIScreen.main.bounds
         let widthScreen = size.width
         let heightScreen = size.height
-        let minimumx: CGFloat = Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION && isShow ? widthFBAnim + defaultWidthHeightMenuFB : Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION && isShow ? 60 : 40
-        let maximumx = Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION && isShow ? widthScreen - widthFBAnim - defaultWidthHeightMenuFB : Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION && isShow ? widthScreen - 10 - defaultWidthHeightMenuFB : widthScreen - 40
+        let minimumx: CGFloat = configModeFB == MODE_HORIZONTAL_ANIMATION && isShow ? widthFBAnim + defaultWidthHeightMenuFB : configModeFB == MODE_VERTICAL_ANIMATION && isShow ? 60 : 40
+        let maximumx = configModeFB == MODE_HORIZONTAL_ANIMATION && isShow ? widthScreen - widthFBAnim - defaultWidthHeightMenuFB : configModeFB == MODE_VERTICAL_ANIMATION && isShow ? widthScreen - 10 - defaultWidthHeightMenuFB : widthScreen - 40
         let maxMinXSideTab = isShow ? center.x : widthScreen + (center.x - widthScreen)
         let translation = sender.translation(in: self)
         var xPos = center.x + translation.x
         var yPos = center.y + translation.y
         bringSubviewToFront(self)
-        if Utils.getConfigModeFB() == MODE_HORIZONTAL_SIDE_TAB || Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB {
+        if configModeFB == MODE_HORIZONTAL_SIDE_TAB || configModeFB == MODE_VERTICAL_SIDE_TAB {
             xPos = maxMinXSideTab
         } else {
             if (xPos < minimumx) {
@@ -508,8 +522,8 @@ public class FloatingButton: UIView {
             }
         }
         if(isShow) {
-            let minimumy = Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB ? heightVerticalSideTab - 100 : Utils.getConfigModeFB() == MODE_HORIZONTAL_SIDE_TAB ? 50 : Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION ? defaultWidthHeightMenuFB * 2 + 10 : Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION ? defaultHeightFB + defaultWidthHeightMenuFB : self.frame.size.height - 120 + ((5 - countMenuFB) * 25)
-            let maximumy = Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB ? heightScreen - (heightVerticalSideTab - 100) : Utils.getConfigModeFB() == MODE_HORIZONTAL_SIDE_TAB ? heightScreen - 50 : Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION ? heightScreen - defaultWidthHeightMenuFB - 30 : Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION ? heightScreen - defaultHeightFB - 30 : heightScreen - 50
+            let minimumy = configModeFB == MODE_VERTICAL_SIDE_TAB ? heightVerticalSideTab - 100 : configModeFB == MODE_HORIZONTAL_SIDE_TAB ? 50 : configModeFB == MODE_HORIZONTAL_ANIMATION ? defaultWidthHeightMenuFB * 2 + 10 : configModeFB == MODE_VERTICAL_ANIMATION ? defaultHeightFB + defaultWidthHeightMenuFB : self.frame.size.height - 120 + ((5 - countMenuFB) * 25)
+            let maximumy = configModeFB == MODE_VERTICAL_SIDE_TAB ? heightScreen - (heightVerticalSideTab - 100) : configModeFB == MODE_HORIZONTAL_SIDE_TAB ? heightScreen - 50 : configModeFB == MODE_HORIZONTAL_ANIMATION ? heightScreen - defaultWidthHeightMenuFB - 30 : configModeFB == MODE_VERTICAL_ANIMATION ? heightScreen - defaultHeightFB - 30 : heightScreen - 50
             if(yPos < minimumy) {
                 yPos = minimumy
             }
@@ -531,8 +545,8 @@ public class FloatingButton: UIView {
         if lastPosY != nil {
             lastPosY = nil
         }
-        SecureUserDefaults.shared.set(center.x, forKey: "xlastPosFB")
-        SecureUserDefaults.shared.set(center.y, forKey: "ylastPosFB")
+//        SecureUserDefaults.shared.set(center.x, forKey: "xlastPosFB")
+//        SecureUserDefaults.shared.set(center.y, forKey: "ylastPosFB")
     }
     
     @objc func imageFBUpdate(notification: NSNotification) {
@@ -618,6 +632,8 @@ public class FloatingButton: UIView {
                 mySettingDelegate?.settingDelegate()
             } else {
                 let navigationController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "settingNav") as! UINavigationController
+                let vc = navigationController.rootViewController as! SettingTableViewController
+                vc.fromAPI = true
                 Utils.addBackground(view: navigationController.view)
                 navigationController.modalPresentationStyle = .fullScreen
                 navigationController.navigationBar.tintColor = .white
@@ -658,14 +674,14 @@ public class FloatingButton: UIView {
             var height = CGFloat((defaultWidthHeightMenuFB * countMenuFB) + defaultHeightFB + 5) //defaultWidthHeightMenuFB
             var width = frame.width
             var xPosition = frame.origin.x
-            if Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION {
+            if configModeFB == MODE_VERTICAL_ANIMATION {
                 height = CGFloat((defaultWidthHeightMenuFB * (countMenuFB - 2)) + defaultHeightFB - 5)
                 width = frame.width + defaultWidthHeightMenuFB
                 if xPosition > UIScreen.main.bounds.width - defaultWidthFB - defaultWidthHeightMenuFB {
                     xPosition = UIScreen.main.bounds.width - defaultWidthFB - defaultWidthHeightMenuFB
                 }
                 scrollView.isHidden = false
-            } else if Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION {
+            } else if configModeFB == MODE_HORIZONTAL_ANIMATION {
                 height = defaultHeightFB + defaultWidthHeightMenuFB
                 width = defaultWidthHeightMenuFB * (countMenuFB - 1)
                 if xPosition > UIScreen.main.bounds.width - width {
@@ -677,12 +693,12 @@ public class FloatingButton: UIView {
                 lastPosY = frame.origin.y
                 yPosition = 25
             }
-            if Utils.getConfigModeFB() != MODE_HORIZONTAL_SIDE_TAB &&  Utils.getConfigModeFB() != MODE_VERTICAL_SIDE_TAB {
+            if configModeFB != MODE_HORIZONTAL_SIDE_TAB &&  configModeFB != MODE_VERTICAL_SIDE_TAB {
                 frame = CGRect(x: xPosition, y: yPosition, width: width, height: height)
             } else {
                 UIView.animate(withDuration: 0.5, animations: { [self] in
                     var vst: CGFloat = 0.0
-                    if Utils.getConfigModeFB() == MODE_VERTICAL_SIDE_TAB {
+                    if configModeFB == MODE_VERTICAL_SIDE_TAB {
                         vst = UIScreen.main.bounds.width - defaultWidthFB - widthVerticalSideTab
                         let size = UIScreen.main.bounds
                         let heightScreen = size.height
@@ -709,10 +725,10 @@ public class FloatingButton: UIView {
             }
             var height = CGFloat((defaultWidthHeightMenuFB * countMenuFB) + defaultHeightFB + 5) //defaultWidthHeightMenuFB
             var width = defaultWidthFB
-            if Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION {
+            if configModeFB == MODE_VERTICAL_ANIMATION {
                 height = CGFloat((defaultWidthHeightMenuFB * 3) + defaultHeightFB - 5)
                 scrollView.isHidden = true
-            } else if Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION {
+            } else if configModeFB == MODE_HORIZONTAL_ANIMATION {
                 height = defaultHeightFB + defaultWidthHeightMenuFB
                 width = defaultWidthFB
             }
@@ -720,14 +736,14 @@ public class FloatingButton: UIView {
             if lastPosY != nil {
                 yPosition = lastPosY!
             }
-            if Utils.getConfigModeFB() != MODE_HORIZONTAL_SIDE_TAB && Utils.getConfigModeFB() != MODE_VERTICAL_SIDE_TAB {
+            if configModeFB != MODE_HORIZONTAL_SIDE_TAB && configModeFB != MODE_VERTICAL_SIDE_TAB {
                 frame = CGRect(x: frame.origin.x, y: yPosition, width: width, height: defaultHeightFB)
             } else {
                 UIView.animate(withDuration: 0.5, animations: { [self] in
                     frame.origin.x = UIScreen.main.bounds.width - defaultWidthFB
                 })
             }
-            if Utils.getConfigModeFB() == MODE_VERTICAL_ANIMATION || Utils.getConfigModeFB() == MODE_HORIZONTAL_ANIMATION {
+            if configModeFB == MODE_VERTICAL_ANIMATION || configModeFB == MODE_HORIZONTAL_ANIMATION {
                 checkDelayAnimation()
             }
         }

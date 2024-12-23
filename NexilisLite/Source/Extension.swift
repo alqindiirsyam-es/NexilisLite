@@ -374,7 +374,7 @@ extension NSObject {
                             tableView!.reloadRows(at: [indexPath!], with: .none)
                             tableView!.endUpdates()
                         }
-                        if type(of: self).urlStore[tmpAddress] == name {
+                        if type(of: self).urlStore[tmpAddress] == name && tableView == nil {
                             if FileManager().fileExists(atPath: file.path) {
                                 let image = UIImage(contentsOfFile: file.path)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
                                 completion(true, true, isCircle ? image?.circleMasked : image)

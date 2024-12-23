@@ -40,6 +40,7 @@ public class Nexilis: NSObject {
     static var dispatch: DispatchGroup?
     
     public static var showFB = false
+    public static var fromMAB = false
     
     let callManager = CallManager()
     
@@ -132,6 +133,7 @@ public class Nexilis: NSObject {
     
     public static func connect(apiKey: String, delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         showFB = showButton
+        Nexilis.fromMAB = fromMAB
         
         Nexilis.shared.createDelegate()
         
@@ -336,7 +338,30 @@ public class Nexilis: NSObject {
     
     private static func getPullPrefs() {
         DispatchQueue.global().async {
-            _ = Nexilis.write(message: CoreMessage_TMessageBank.getPrefs())
+            let urlString = Utils.getBEId().isEmpty ? Utils.getDomainOpr() + "nexilis/logics/get_baseurl_new?key=\(Nexilis.sAPIKey)" : Utils.getDomainOpr() + "nexilis/logics/get_prefs?be=\(Utils.getBEId())&appId=\(APIS.getAppNm())"
+            Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
+                if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                    if let json = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any?] {
+                        do {
+                            let dataArray: [[String: Any?]] = [json]
+                            if !dataArray.isEmpty && !Utils.getIsLoadThemeFromOther() {
+                                if let jsonData = try? JSONSerialization.data(withJSONObject: dataArray, options: .prettyPrinted) {
+                                    // Convert to JSON String
+                                    let jsonString = String(data: jsonData, encoding: .utf8)
+                                    Utils.setPrefTheme(value: jsonString ?? "")
+                                    Utils.setValueInitialApp(data: jsonString ?? "")
+                                } else {
+                                }
+                            }
+                            Utils.setFinishInitPrefs(value: true)
+                            if Utils.getBEId().isEmpty {
+                                Utils.setBEId(value: "\(json["be_id"]!!)")
+                            }
+                        } catch {
+                        }
+                    }
+                }
+            }
         }
     }
     
@@ -982,7 +1007,7 @@ public class Nexilis: NSObject {
         } else if index == IDX_POST {
             
         } else if index == IDX_CONVERSATION {
-            APIS.startConversation()
+            APIS.openConversation()
         } else if index == IDX_FAVORITEMESSAGE {
             APIS.openFavoriteMessage()
         } else {

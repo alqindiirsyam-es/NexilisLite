@@ -145,6 +145,18 @@ class ContactCallViewController: UIViewController {
         
     }
     
+    override func viewDidAppear(_ animated: Bool) {
+        if (!isAddParticipantVideo) {
+            let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
+            let navBarAppearance = UINavigationBarAppearance()
+            navBarAppearance.configureWithOpaqueBackground()
+            navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
+            navBarAppearance.titleTextAttributes = attributes
+            navigationController?.navigationBar.standardAppearance = navBarAppearance
+            navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
+        }
+    }
+    
     func getData() {
         dataPerson.removeAll()
         let idMe = User.getMyPin() as String?

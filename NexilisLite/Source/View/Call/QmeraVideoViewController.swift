@@ -405,7 +405,7 @@ class QmeraVideoViewController: UIViewController {
                         }
                     }
                 } else {
-                    Nexilis.ringtonePlayer?.play()
+                    Nexilis.ringbacktonePlayer?.play()
                     API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
                 }
             } else {
@@ -590,6 +590,7 @@ class QmeraVideoViewController: UIViewController {
             } else {
                 API.csa(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: true)
             }
+            Nexilis.ringtonePlayer?.stop()
         }
         DispatchQueue.main.async {
             self.myImage.removeFromSuperview()

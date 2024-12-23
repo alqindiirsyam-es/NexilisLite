@@ -13,7 +13,12 @@ import KeychainAccess
 
 public class Database {
     
-    public init() {}
+    public init() {
+        let databasePath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] + "/encrypted_db_es.db"
+        if FileManager.default.fileExists(atPath: databasePath) {
+            database = setupDatabaseQueue(withPath: databasePath)
+        }
+    }
     
     public static let shared = Database()
     
@@ -48,12 +53,12 @@ public class Database {
             
             database?.inDatabase({(fmdb) in
                 fmdb.setKey(key)
-    //            print("Open Done")
+                print("Open Done")
             })
             database?.inTransaction({(fmdb, rollback) in
                 do {
                     try createDatabase(fmdb: fmdb)
-    //                print("Create Done")
+                    print("Create Done")
                 } catch {
                 }
             })

@@ -373,7 +373,7 @@ public class APIS: NSObject {
         }
     }
     
-    public static func startConversation() {
+    public static func openConversation() {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()

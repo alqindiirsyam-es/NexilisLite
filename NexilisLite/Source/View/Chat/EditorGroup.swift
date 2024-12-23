@@ -337,7 +337,7 @@ public class EditorGroup: UIViewController {
         
         if !isHistoryCC {
             let groupId = dataGroup["group_id"] as! String
-            let chatId = dataGroup["chat_id"] as! String
+            let chatId = dataTopic["chat_id"] as! String
             let dataGT: [String] = [groupId, chatId]
             SecureUserDefaults.shared.set(dataGT, forKey: "inEditorGroup")
             
