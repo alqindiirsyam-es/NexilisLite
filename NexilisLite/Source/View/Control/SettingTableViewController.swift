@@ -105,9 +105,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
                 Item(icon: UIImage(systemName: "arrow.up.and.person.rectangle.portrait"), title: "Sign-Up/Sign-In".localized()),
             ]
-            if Nexilis.showButtonFB {
-                Item.menus["Personal"]?.append(Item(icon: UIImage(systemName: "gearshape.circle"), title: "Configure Floating Button".localized()))
-            }
         } else {
             Database.shared.database?.inTransaction({ fmdb, rollback in
                 do {

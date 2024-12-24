@@ -4004,7 +4004,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     }
                 })
             }
-            let data = self.dataMessages.filter({ $0["isSelected"] as! Bool == true })
+            let data = self.dataMessages.filter({ $0["isSelected"] as? Bool == true })
             for i in 0..<data.count {
                 let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == data[i]["message_id"] as? String})
                 if idx != nil{
@@ -4066,7 +4066,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 title.centerXAnchor.constraint(equalTo: container.centerXAnchor),
                 title.centerYAnchor.constraint(equalTo:container.centerYAnchor),
             ])
-            let countSelected = dataMessages.filter({ $0["isSelected"] as! Bool == true }).count
+            let countSelected = dataMessages.filter({ $0["isSelected"] as? Bool == true }).count
             title.text = "\(countSelected) " + "Selected".localized()
             title.textColor = .mainColor
             title.font = UIFont.systemFont(ofSize: 15.0).bold
@@ -4106,7 +4106,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             button.isUserInteractionEnabled = true
             button.addGestureRecognizer(buttonGesture)
             
-            let selectedMessage = dataMessages.filter({ $0["isSelected"] as! Bool == true })
+            let selectedMessage = dataMessages.filter({ $0["isSelected"] as? Bool == true })
             if selectedMessage.count > 0 {
                 for i in 0..<selectedMessage.count {
                     if let isGroupingImages = groupImages[selectedMessage[i]["message_id"] as! String] {
@@ -4169,7 +4169,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
     
     @objc func sessionAction() {
         if copySession {
-            let dataMessages = self.dataMessages.filter({ $0["isSelected"] as! Bool == true })
+            let dataMessages = self.dataMessages.filter({ $0["isSelected"] as? Bool == true })
             let countSelected = dataMessages.count
             if countSelected == 0 {
                 return

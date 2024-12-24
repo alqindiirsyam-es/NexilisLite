@@ -651,21 +651,7 @@ public class FloatingButton: UIView {
             if mySettingDelegate != nil {
                 mySettingDelegate?.settingDelegate()
             } else {
-                let navigationController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "settingNav") as! UINavigationController
-                let vc = navigationController.rootViewController as! SettingTableViewController
-                vc.fromAPI = true
-                Utils.addBackground(view: navigationController.view)
-                navigationController.modalPresentationStyle = .fullScreen
-                navigationController.navigationBar.tintColor = .white
-                navigationController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-                navigationController.navigationBar.isTranslucent = false
-                navigationController.navigationBar.overrideUserInterfaceStyle = .dark
-                navigationController.navigationBar.barStyle = .black
-                let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-                let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-                navigationController.navigationBar.titleTextAttributes = textAttributes
-                UIApplication.shared.rootViewController?.present(navigationController, animated: true, completion: nil)
+                APIS.openSetting()
             }
             hideButton()
         }
