@@ -125,12 +125,12 @@ class OutgoingThread {
     }
     
     private func process(message: TMessage) {
-        //print("outgoing process", message.toLogString())
+        print("outgoing process", message.toLogString())
         if self.isWait {
             queue.append(message)
             return
         }
-        if message.getCode() == CoreMessage_TMessageCode.SEND_CHAT {
+        if message.getCode() == CoreMessage_TMessageCode.SEND_CHAT || message.getCode() == CoreMessage_TMessageCode.EDIT_MESSAGE {
             sendChat(message: message)
         } else if message.getCode() == CoreMessage_TMessageCode.DELETE_CTEXT {
             deleteMessage(message: message)

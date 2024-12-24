@@ -84,7 +84,7 @@ class IncomingThread {
             onInitForumInfoBatch(message: message)
         } else if message.getCode() == CoreMessage_TMessageCode.UPLOAD_FILE {
             uploadFile(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEND_CHAT {
+        } else if message.getCode() == CoreMessage_TMessageCode.SEND_CHAT || message.getCode() == CoreMessage_TMessageCode.EDIT_MESSAGE {
             receiveMessage(message: message)
         } else if message.getCode() == CoreMessage_TMessageCode.UPDATE_CTEXT {
             receiveMessageStatus(message: message)

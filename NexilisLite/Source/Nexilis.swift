@@ -249,7 +249,6 @@ public class Nexilis: NSObject {
                             addFB(viewController: viewController!, fromMAB: fromMAB)
                         }
                         if let rootViewController = viewController {
-                            // Check if dark mode is enabled
                             let isDarkMode = rootViewController.traitCollection.userInterfaceStyle == .dark
                             if isDarkMode {
                                 UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
@@ -366,44 +365,42 @@ public class Nexilis: NSObject {
     }
     
     private static func getPullGroupNoMember() {
-        DispatchQueue.global().async {
-            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullGroupNoMember(), timeout: 30 * 1000), response.isOk() {
-                let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
-                //print("KUACAU \(data)")
-                if !data.isEmpty {
-                    if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            do {
-                                for json in jsonArray {
-                                    let group_id = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.GROUP_ID)
-                                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "GROUP_NM", cvalues: [
-                                        "group_id" : group_id,
-                                        "f_name" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.GROUP_NAME),
-                                        "scope_id" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID),
-                                        "image_id": CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.THUMB_ID),
-                                        "quote": CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.QUOTE),
-                                        "last_update" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LAST_UPDATE),
-                                        "created_by" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CREATED_BY),
-                                        "created_date" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CREATED_DATE),
-                                        "ex_block" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.BLOCK),
-                                        "folder_id" : "",
-                                        "chat_modifier" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CHAT_MODIFIER),
-                                        "group_type" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_ORGANIZATION),
-                                        "parent" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID),
-                                        "level" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL),
-                                        "is_open" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_OPEN),
-                                        "official" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.OFFICIAL_ACCOUNT),
-                                        "level_edu" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL_EDU),
-                                        "materi_edu" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MATERI_EDU),
-                                        "is_education" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_EDUCATION)
-                                    ], replace: true)
-                                }
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
+        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullGroupNoMember(), timeout: 30 * 1000), response.isOk() {
+            let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
+            //print("KUACAU \(data)")
+            if !data.isEmpty {
+                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        do {
+                            for json in jsonArray {
+                                let group_id = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.GROUP_ID)
+                                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "GROUP_NM", cvalues: [
+                                    "group_id" : group_id,
+                                    "f_name" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.GROUP_NAME),
+                                    "scope_id" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID),
+                                    "image_id": CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.THUMB_ID),
+                                    "quote": CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.QUOTE),
+                                    "last_update" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LAST_UPDATE),
+                                    "created_by" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CREATED_BY),
+                                    "created_date" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CREATED_DATE),
+                                    "ex_block" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.BLOCK),
+                                    "folder_id" : "",
+                                    "chat_modifier" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CHAT_MODIFIER),
+                                    "group_type" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_ORGANIZATION),
+                                    "parent" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID),
+                                    "level" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL),
+                                    "is_open" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_OPEN),
+                                    "official" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.OFFICIAL_ACCOUNT),
+                                    "level_edu" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL_EDU),
+                                    "materi_edu" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MATERI_EDU),
+                                    "is_education" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_EDUCATION)
+                                ], replace: true)
                             }
-                        })
-                    }
+                        } catch {
+                            rollback.pointee = true
+                            print("Access database error: \(error.localizedDescription)")
+                        }
+                    })
                 }
             }
         }
@@ -499,34 +496,32 @@ public class Nexilis: NSObject {
     }
     
     private static func getPullWorkingArea() {
-        DispatchQueue.global().asyncAfter(deadline: .now(), execute: {
-            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getWorkingAreaContactCenter(), timeout: 30 * 1000), response.isOk() {
-                let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
-                if !data.isEmpty {
-                    if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            do {
-                                for json in jsonArray {
-                                    var parent = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID)
-                                    if parent.isEmpty {
-                                        parent = "-99"
-                                    }
-                                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "WORKING_AREA", cvalues: [
-                                        "area_id" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.WORKING_AREA),
-                                        "name" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.NAME),
-                                        "parent" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID),
-                                        "level" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL)
-                                    ], replace: true)
+        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getWorkingAreaContactCenter(), timeout: 30 * 1000), response.isOk() {
+            let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
+            if !data.isEmpty {
+                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        do {
+                            for json in jsonArray {
+                                var parent = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID)
+                                if parent.isEmpty {
+                                    parent = "-99"
                                 }
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
+                                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "WORKING_AREA", cvalues: [
+                                    "area_id" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.WORKING_AREA),
+                                    "name" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.NAME),
+                                    "parent" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID),
+                                    "level" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL)
+                                ], replace: true)
                             }
-                        })
-                    }
+                        } catch {
+                            rollback.pointee = true
+                            print("Access database error: \(error.localizedDescription)")
+                        }
+                    })
                 }
             }
-        })
+        }
     }
     
     public static func showForceSignIn() {
@@ -587,8 +582,8 @@ public class Nexilis: NSObject {
             SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
             SecureUserDefaults.shared.removeValue(forKey: "membersCC")
             SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
-            if UIApplication.shared.applicationState == .active {
-                DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                if UIApplication.shared.applicationState == .active {
                     let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                     imageView.tintColor = .white
                     let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
@@ -662,9 +657,13 @@ public class Nexilis: NSObject {
         API.terminateCall(sParty: nil)
     }
     
-    public static func addQueueMessage(message: TMessage) {
+    public static func addQueueMessage(message: TMessage, isEditMessage: Bool = false) {
 //        OutgoingThread.default.addQueue(message: message)
-        InquiryThread.default.addQueue(message: message)
+        if isEditMessage {
+            OutgoingThread.default.addQueue(message: message)
+        } else {
+            InquiryThread.default.addQueue(message: message)
+        }
     }
     
     public static func deleteQueueMessage(message: TMessage) {
@@ -1260,6 +1259,7 @@ public class Nexilis: NSObject {
     }
     
     static func saveMessage(message: TMessage, withStatus: Bool = true) {
+        print("save message \(message.toLogString())")
         guard let me = User.getMyPin() else {
             return
         }
@@ -1273,13 +1273,13 @@ public class Nexilis: NSObject {
         }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'") {
-                    if cursor.next() {
-                        //print("message exist")
-                        return
-                    }
-                    cursor.close()
-                }
+//                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'") {
+//                    if cursor.next() {
+//                        //print("message exist")
+//                        return
+//                    }
+//                    cursor.close()
+//                }
                 let l_pin = message.getBody(key : CoreMessage_TMessageKey.L_PIN, default_value : "")
                 let scope = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_SCOPE_ID, default_value : "3")
                 let status = message.getBody(key : CoreMessage_TMessageKey.STATUS, default_value : "")
@@ -1287,6 +1287,7 @@ public class Nexilis: NSObject {
                 let broadcast_flag = message.getBody(key: CoreMessage_TMessageKey.BROADCAST_FLAG, default_value: "0")
                 let is_call_center = message.getBody(key: CoreMessage_TMessageKey.IS_CALL_CENTER, default_value: "0")
                 let call_center_id = message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID, default_value: "")
+                let last_edited = message.getBodyAsLong(key: CoreMessage_TMessageKey.LAST_EDIT, default_value: 0)
                 //print("prepare save db")
                 do {
                     _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
@@ -1317,7 +1318,8 @@ public class Nexilis: NSObject {
                         "local_timestamp" : message.getBody(key: CoreMessage_TMessageKey.LOCAL_TIMESTAMP, default_value : String(Date().currentTimeMillis())),
                         "broadcast_flag" : broadcast_flag,
                         "is_call_center" : is_call_center,
-                        "call_center_id" : call_center_id
+                        "call_center_id" : call_center_id,
+                        "last_edited" : last_edited
                     ], replace: true)
                 } catch {
                     rollback.pointee = true
@@ -1825,13 +1827,20 @@ public class Nexilis: NSObject {
         case .denied:
             permissionCheck = false
         case .undetermined:
+            Nexilis.dispatch = DispatchGroup()
+            Nexilis.dispatch?.enter()
             AVAudioSession.sharedInstance().requestRecordPermission({ (granted) in
                 if granted {
                     permissionCheck = true
                 } else {
                     permissionCheck = false
                 }
+                if let dispatch = Nexilis.dispatch {
+                    dispatch.leave()
+                }
             })
+            Nexilis.dispatch?.wait()
+            Nexilis.dispatch = nil
         default:
             break
         }
@@ -1923,28 +1932,38 @@ extension UIFont {
     static let FONT_SELECT = 0
 
     @objc class func libSystemFont(ofSize size: CGFloat) -> UIFont? {
-        jbs_registerFont(withFilenameString: LibFontName.regular)
+        if UIFont(name: LibFontName.regular, size: size) == nil {
+            jbs_registerFont(withFilenameString: LibFontName.regular)
+        }
         return UIFont(name: LibFontName.regular, size: size)
     }
     
     @objc class func libSystemFontWeight(ofSize size: CGFloat, weight: UIFont.Weight) -> UIFont? {
         if weight == .medium {
-            jbs_registerFont(withFilenameString: LibFontName.medium)
+            if UIFont(name: LibFontName.medium, size: size) == nil {
+                jbs_registerFont(withFilenameString: LibFontName.medium)
+            }
             return UIFont(name: LibFontName.medium, size: size)
         } else if weight == .semibold {
-            jbs_registerFont(withFilenameString: LibFontName.boldItalic)
+            if UIFont(name: LibFontName.boldItalic, size: size) == nil {
+                jbs_registerFont(withFilenameString: LibFontName.boldItalic)
+            }
             return UIFont(name: LibFontName.boldItalic, size: size)
         }
         return UIFont(name: LibFontName.regular, size: size)
     }
 
     @objc class func libBoldSystemFont(ofSize size: CGFloat) -> UIFont? {
-        jbs_registerFont(withFilenameString: LibFontName.bold)
+        if UIFont(name: LibFontName.bold, size: size) == nil {
+            jbs_registerFont(withFilenameString: LibFontName.bold)
+        }
         return UIFont(name: LibFontName.bold, size: size)
     }
 
     @objc class func libItalicSystemFont(ofSize size: CGFloat) -> UIFont? {
-        jbs_registerFont(withFilenameString: LibFontName.italic)
+        if UIFont(name: LibFontName.italic, size: size) == nil {
+            jbs_registerFont(withFilenameString: LibFontName.italic)
+        }
         return UIFont(name: LibFontName.italic, size: size)
     }
 
@@ -2789,19 +2808,21 @@ extension Nexilis: MessageDelegate {
                         } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
                             permissionCheck = 0
                         } else {
+                            Nexilis.dispatch = DispatchGroup()
+                            Nexilis.dispatch?.enter()
                             AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
                                 if granted == true {
                                     permissionCheck = 1
                                 } else {
                                     permissionCheck = 0
                                 }
+                                if let dispatch = Nexilis.dispatch {
+                                    dispatch.leave()
+                                }
                             })
+                            Nexilis.dispatch?.wait()
+                            Nexilis.dispatch = nil
                         }
-                        
-                        while permissionCheck == -1 {
-                            sleep(1)
-                        }
-                        
                         if permissionCheck == 0 {
                             let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow camera permission in your settings".localized(), preferredStyle: .alert)
                             alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
@@ -3153,17 +3174,20 @@ extension Nexilis: MessageDelegate {
                         } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
                             permissionCheck = 0
                         } else {
+                            Nexilis.dispatch = DispatchGroup()
+                            Nexilis.dispatch?.enter()
                             AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
                                 if granted == true {
                                     permissionCheck = 1
                                 } else {
                                     permissionCheck = 0
                                 }
+                                if let dispatch = Nexilis.dispatch {
+                                    dispatch.leave()
+                                }
                             })
-                        }
-                        
-                        while permissionCheck == -1 {
-                            sleep(1)
+                            Nexilis.dispatch?.wait()
+                            Nexilis.dispatch = nil
                         }
                         
                         if permissionCheck == 0 {

@@ -201,6 +201,61 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
+    public static func editMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String, last_edit: Int64 = 0) -> TMessage {
+        let me = User.getMyPin()!
+        let tmessage = TMessage()
+        tmessage.mCode = CoreMessage_TMessageCode.EDIT_MESSAGE
+        tmessage.mStatus = me + CoreMessage_TMessageUtil.getTID()
+        tmessage.mPIN = me
+        tmessage.mL_PIN = l_pin
+        tmessage.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = message_id.isEmpty ? me + CoreMessage_TMessageUtil.getTID() : message_id
+        tmessage.mBodies[CoreMessage_TMessageKey.F_PIN] = me
+        tmessage.mBodies[CoreMessage_TMessageKey.L_PIN] = l_pin
+        tmessage.mBodies[CoreMessage_TMessageKey.SERVER_DATE] = String(Date().currentTimeMillis())
+        tmessage.mBodies[CoreMessage_TMessageKey.LOCAL_TIMESTAMP] = String(Date().currentTimeMillis())
+        tmessage.mBodies[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] = message_scope_id
+        tmessage.mBodies[CoreMessage_TMessageKey.STATUS] = status
+        tmessage.mBodies[CoreMessage_TMessageKey.MESSAGE_TEXT] = message_text.toStupidString()
+        tmessage.mBodies[CoreMessage_TMessageKey.CREDENTIAL] = credential
+        tmessage.mBodies[CoreMessage_TMessageKey.ATTACHMENT_FLAG] = attachment_flag
+        tmessage.mBodies[CoreMessage_TMessageKey.BLOG_ID] = ex_blog_id
+        tmessage.mBodies[CoreMessage_TMessageKey.BODY] = message_large_text
+        tmessage.mBodies[CoreMessage_TMessageKey.CONNECTED] = "1"
+        tmessage.mBodies[CoreMessage_TMessageKey.FORMAT] = ex_format
+        tmessage.mBodies[CoreMessage_TMessageKey.IS_CALL_CENTER] = is_call_center
+        tmessage.mBodies[CoreMessage_TMessageKey.CALL_CENTER_ID] = call_center_id
+        tmessage.mBodies[CoreMessage_TMessageKey.F_USER_ID] = me
+        tmessage.mBodies[CoreMessage_TMessageKey.QUANTITY] = "1"
+        if !opposite_pin.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.OPPOSITE_PIN] = opposite_pin
+        }
+        
+        if !image_id.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.IMAGE_ID] = image_id
+        }
+        if !audio_id.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.AUDIO_ID] = audio_id
+        }
+        if !video_id.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.VIDEO_ID] = video_id
+        }
+        if !file_id.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.FILE_ID] = file_id
+        }
+        if !thumb_id.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.THUMB_ID] = thumb_id
+        }
+        if !reff_id.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.REF_ID] = reff_id
+        }
+        tmessage.mBodies[CoreMessage_TMessageKey.READ_RECEIPTS] = read_receipts
+        if !chat_id.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.CHAT_ID] = chat_id
+        }
+        tmessage.mBodies[CoreMessage_TMessageKey.LAST_EDIT] = "\(last_edit)"
+        return tmessage
+    }
+    
     public static func getUpdateRead(p_chat_id: String, p_f_pin: String, p_scope_id: String, qty: Int) -> TMessage {
         let me = User.getMyPin()!
         let tmessage = TMessage()

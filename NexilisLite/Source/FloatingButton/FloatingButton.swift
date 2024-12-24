@@ -246,16 +246,24 @@ public class FloatingButton: UIView {
         if configModeFB != MODE_VERTICAL_FLOATING_BUTTON {
             return
         }
-        let dataImage = try? Data(contentsOf: URL(string: (isDocked ? Utils.getUrlDock() : Utils.getIconCenter())!)!)
-        if dataImage != nil {
-            if let image = UIImage(data: dataImage!) {
-                nexilis_button.image = image
-            } else {
-                nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        let task = URLSession.shared.dataTask(with: URL(string: (isDocked ? Utils.getUrlDock() : Utils.getIconCenter())!)!) { dataImage, response, error in
+            if let error = error {
+                print("Failed to load data: \(error)")
+                return
             }
-        } else {
-            nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+            DispatchQueue.main.async { [self] in
+                if dataImage != nil && UIImage(data: dataImage!) != nil {
+                    if let image = UIImage(data: dataImage!) {
+                        nexilis_button.image = image
+                    } else {
+                        nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                    }
+                } else {
+                    nexilis_button.image = UIImage(named: Utils.getFBIconBg() == "1" ? "pb_button" : "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                }
+            }
         }
+        task.resume()
     }
     
     private func checkDelayAnimation() {

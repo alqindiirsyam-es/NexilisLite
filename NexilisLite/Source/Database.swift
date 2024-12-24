@@ -53,12 +53,12 @@ public class Database {
             
             database?.inDatabase({(fmdb) in
                 fmdb.setKey(key)
-                print("Open Done")
+//                print("Open Done")
             })
             database?.inTransaction({(fmdb, rollback) in
                 do {
                     try createDatabase(fmdb: fmdb)
-                    print("Create Done")
+//                    print("Create Done")
                 } catch {
                 }
             })
@@ -241,7 +241,8 @@ public class Database {
                                 "'local_timestamp' TEXT," +
                                 "'is_consult' INTEGER DEFAULT 0," +
                                 "'is_call_center' INTEGER DEFAULT 0," +
-                                "'call_center_id' TEXT" +
+                                "'call_center_id' TEXT," +
+                                "'last_edited' INTEGER DEFAULT 0" +
                                 ")", values: nil)
         
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_opposite on MESSAGE (opposite_pin, chat_id)", values: nil)

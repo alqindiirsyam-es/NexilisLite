@@ -2830,7 +2830,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             })
             let message = CoreMessage_TMessageBank.sendMessage(message_id: messageId,
                                                                l_pin: dataMessages[indexPath!.row][TypeDataMessage.l_pin] as! String,
-                                                               message_scope_id: dataMessages[indexPath!.row][TypeDataMessage.l_pin] as! String,
+                                                               message_scope_id: dataMessages[indexPath!.row][TypeDataMessage.message_scope_id] as! String,
                                                                status: "1",
                                                                message_text: dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String,
                                                                credential: dataMessages[indexPath!.row][TypeDataMessage.credential] as! String,
@@ -4461,9 +4461,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                         }
                     }
                 }
-                else if FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
+                else if FileEncryption.shared.isSecureExists(filename: fileChat) {
                     do {
-                        if let dataFile = try FileEncryption.shared.readSecure(filename: fileURL.lastPathComponent) {
+                        if let dataFile = try FileEncryption.shared.readSecure(filename: fileChat) {
                             var sizeOfFile = Int(dataFile.count / 1000000)
                             if (sizeOfFile < 1) {
                                 sizeOfFile = Int(dataFile.count / 1000)
@@ -4495,7 +4495,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
             containerViewFile.bottomAnchor.constraint(equalTo:messageText.topAnchor, constant: -5).isActive = true
             containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
+//            containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
             containerViewFile.backgroundColor = .black.withAlphaComponent(0.2)
             containerViewFile.layer.cornerRadius = 5.0
             containerViewFile.clipsToBounds = true
@@ -5224,129 +5224,129 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                         }
                     }
                 }
-            } else if (sender.file_id != "") {
-                if let dirPath = paths.first {
-                    let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.file_id)
-                    if FileManager.default.fileExists(atPath: fileURL.path) {
-                        self.previewItem = fileURL as NSURL
-                        let previewController = QLPreviewController()
-                        let rightBarButton = UIBarButtonItem()
-                        previewController.navigationItem.rightBarButtonItem = rightBarButton
-                        previewController.dataSource = self
-                        previewController.modalPresentationStyle = .custom
-                        
-                        self.present(previewController, animated: true)
-                    } else if FileEncryption.shared.isSecureExists(filename: sender.file_id) {
-                        do {
-                            if let docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
-                                
-                                let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                                let tempPath = cachesDirectory.appendingPathComponent(sender.file_id)
-                                try docData.write(to: tempPath)
-                                self.previewItem = tempPath as NSURL
-                                let previewController = QLPreviewController()
-                                let rightBarButton = UIBarButtonItem()
-                                previewController.navigationItem.rightBarButtonItem = rightBarButton
-                                previewController.dataSource = self
-                                previewController.modalPresentationStyle = .custom
-                                self.present(previewController,animated: true)
-                            }
-                        }
-                        catch {
+            }
+        } else if (sender.file_id != "") {
+            if let dirPath = paths.first {
+                let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.file_id)
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    self.previewItem = fileURL as NSURL
+                    let previewController = QLPreviewController()
+                    let rightBarButton = UIBarButtonItem()
+                    previewController.navigationItem.rightBarButtonItem = rightBarButton
+                    previewController.dataSource = self
+                    previewController.modalPresentationStyle = .custom
+                    
+                    self.present(previewController, animated: true)
+                } else if FileEncryption.shared.isSecureExists(filename: sender.file_id) {
+                    do {
+                        if let docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
                             
+                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                            let tempPath = cachesDirectory.appendingPathComponent(sender.file_id)
+                            try docData.write(to: tempPath)
+                            self.previewItem = tempPath as NSURL
+                            let previewController = QLPreviewController()
+                            let rightBarButton = UIBarButtonItem()
+                            previewController.navigationItem.rightBarButtonItem = rightBarButton
+                            previewController.dataSource = self
+                            previewController.modalPresentationStyle = .custom
+                            self.present(previewController,animated: true)
                         }
-                    } else {
-                        for view in sender.containerFile.subviews {
-                            if !(view is UIImageView) && !(view is UILabel) {
-                                view.removeFromSuperview()
-                            }
-                        }
-                        let containerLoading = UIView()
-                        sender.containerFile.addSubview(containerLoading)
-                        containerLoading.translatesAutoresizingMaskIntoConstraints = false
-                        containerLoading.centerYAnchor.constraint(equalTo: sender.containerFile.centerYAnchor).isActive = true
-                        containerLoading.leadingAnchor.constraint(equalTo: sender.labelFile.trailingAnchor, constant: 5).isActive = true
-                        containerLoading.trailingAnchor.constraint(equalTo: sender.containerFile.trailingAnchor, constant: -5).isActive = true
-                        containerLoading.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                        containerLoading.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                        let circlePath = UIBezierPath(arcCenter: CGPoint(x: 15, y: 15), radius: 10, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
-                        let trackShape = CAShapeLayer()
-                        trackShape.path = circlePath.cgPath
-                        trackShape.fillColor = UIColor.clear.cgColor
-                        trackShape.lineWidth = 5
-                        trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
-                        containerLoading.layer.addSublayer(trackShape)
-                        let shapeLoading = CAShapeLayer()
-                        shapeLoading.path = circlePath.cgPath
-                        shapeLoading.fillColor = UIColor.clear.cgColor
-                        shapeLoading.lineWidth = 3
-                        shapeLoading.strokeEnd = 0
-                        shapeLoading.strokeColor = UIColor.blueBubbleColor.cgColor
-                        containerLoading.layer.addSublayer(shapeLoading)
-                        let imageupload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
-                        imageupload.tintColor = .white
-                        containerLoading.addSubview(imageupload)
-                        imageupload.translatesAutoresizingMaskIntoConstraints = false
-                        imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
-                        imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
+                    }
+                    catch {
                         
-                        Download().startHTTP(forKey: sender.file_id) { (name, progress) in
-                            DispatchQueue.main.async {
-                                guard progress == 100 else {
-                                    shapeLoading.strokeEnd = CGFloat(progress / 100)
-                                    return
-                                }
-                                do {
-                                    try FileEncryption.shared.writeSecure(filename: name)
-                                } catch {
-                                    
-                                }
-                                let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as! String == sender.file_id})
-                                if idx != nil {
-                                    self.dataMessages[idx!]["progress"] = progress
-                                    self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
-                                }
+                    }
+                } else {
+                    for view in sender.containerFile.subviews {
+                        if !(view is UIImageView) && !(view is UILabel) {
+                            view.removeFromSuperview()
+                        }
+                    }
+                    let containerLoading = UIView()
+                    sender.containerFile.addSubview(containerLoading)
+                    containerLoading.translatesAutoresizingMaskIntoConstraints = false
+                    containerLoading.centerYAnchor.constraint(equalTo: sender.containerFile.centerYAnchor).isActive = true
+                    containerLoading.leadingAnchor.constraint(equalTo: sender.labelFile.trailingAnchor, constant: 5).isActive = true
+                    containerLoading.trailingAnchor.constraint(equalTo: sender.containerFile.trailingAnchor, constant: -5).isActive = true
+                    containerLoading.widthAnchor.constraint(equalToConstant: 30).isActive = true
+                    containerLoading.heightAnchor.constraint(equalToConstant: 30).isActive = true
+                    let circlePath = UIBezierPath(arcCenter: CGPoint(x: 15, y: 15), radius: 10, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
+                    let trackShape = CAShapeLayer()
+                    trackShape.path = circlePath.cgPath
+                    trackShape.fillColor = UIColor.clear.cgColor
+                    trackShape.lineWidth = 5
+                    trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
+                    containerLoading.layer.addSublayer(trackShape)
+                    let shapeLoading = CAShapeLayer()
+                    shapeLoading.path = circlePath.cgPath
+                    shapeLoading.fillColor = UIColor.clear.cgColor
+                    shapeLoading.lineWidth = 3
+                    shapeLoading.strokeEnd = 0
+                    shapeLoading.strokeColor = UIColor.blueBubbleColor.cgColor
+                    containerLoading.layer.addSublayer(shapeLoading)
+                    let imageupload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
+                    imageupload.tintColor = .white
+                    containerLoading.addSubview(imageupload)
+                    imageupload.translatesAutoresizingMaskIntoConstraints = false
+                    imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
+                    imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
+                    
+                    Download().startHTTP(forKey: sender.file_id) { (name, progress) in
+                        DispatchQueue.main.async {
+                            guard progress == 100 else {
+                                shapeLoading.strokeEnd = CGFloat(progress / 100)
+                                return
+                            }
+                            do {
+                                try FileEncryption.shared.writeSecure(filename: name)
+                            } catch {
+                                
+                            }
+                            let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as! String == sender.file_id})
+                            if idx != nil {
+                                self.dataMessages[idx!]["progress"] = progress
+                                self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
                             }
                         }
                     }
                 }
-            } else {
-                DispatchQueue.main.async {
-                    let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.message_id})
-                    if idx == nil {
-                        return
-                    }
-                    let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-                    if section == nil {
-                        return
-                    }
-                    let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == self.dataMessages[idx!]["message_id"] as! String})
-                    if row == nil {
-                        return
-                    }
-                    let indexPath = IndexPath(row: row!, section: section!)
-                    self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        if let cell = self.tableChatView.cellForRow(at: indexPath) {
-                            let containerMessage = cell.contentView.subviews[1]
-                            let idMe = User.getMyPin() as String?
-                            if (self.dataMessages[idx!]["f_pin"] as? String == idMe) {
-                                containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
-                                        containerMessage.backgroundColor = .clear
-                                    } else {
-                                        containerMessage.backgroundColor = .blueBubbleColor
-                                    }
+            }
+        } else {
+            DispatchQueue.main.async {
+                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.message_id})
+                if idx == nil {
+                    return
+                }
+                let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
+                if section == nil {
+                    return
+                }
+                let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == self.dataMessages[idx!]["message_id"] as! String})
+                if row == nil {
+                    return
+                }
+                let indexPath = IndexPath(row: row!, section: section!)
+                self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if let cell = self.tableChatView.cellForRow(at: indexPath) {
+                        let containerMessage = cell.contentView.subviews[1]
+                        let idMe = User.getMyPin() as String?
+                        if (self.dataMessages[idx!]["f_pin"] as? String == idMe) {
+                            containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
+                                    containerMessage.backgroundColor = .clear
+                                } else {
+                                    containerMessage.backgroundColor = .blueBubbleColor
                                 }
-                            } else {
-                                containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
-                                        containerMessage.backgroundColor = .clear
-                                    } else {
-                                        containerMessage.backgroundColor = .whiteBubbleColor
-                                    }
+                            }
+                        } else {
+                            containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
+                                    containerMessage.backgroundColor = .clear
+                                } else {
+                                    containerMessage.backgroundColor = .whiteBubbleColor
                                 }
                             }
                         }

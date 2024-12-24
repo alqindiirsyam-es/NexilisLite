@@ -367,6 +367,7 @@ public class CoreMessage_TMessageCode {
     public static let UPDATE_PENDING_SID       = "C45";
     public static let CHECKIN       = "C46";
     public static let SEND_VERSION_STATE = "VRS"; //S
+    public static let EDIT_MESSAGE = "EM01";
     
     
     public static let GET_BALANCE   = "C35";

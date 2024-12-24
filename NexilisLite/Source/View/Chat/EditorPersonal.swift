@@ -838,7 +838,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func addDataMessage() {
         multipleOffsetUp += 1
         let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0"
-        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
+        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
@@ -868,6 +868,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row[TypeDataMessage.is_call_center] = cursorData.string(forColumnIndex: 20)
                         row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 21)
                         row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 22)
+                        row[TypeDataMessage.last_edit] = cursorData.longLongInt(forColumnIndex: 23)
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as! String)'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -979,7 +980,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func getData() {
 //        let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0"
 //        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20 ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
-        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc"
+        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc"
         if isContactCenter {
             if complaintId.isEmpty {
                 query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '5' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc"
@@ -1043,6 +1044,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row[TypeDataMessage.is_call_center] = cursorData.string(forColumnIndex: 20)
                         row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 21)
                         row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 22)
+                        row[TypeDataMessage.last_edit] = cursorData.longLongInt(forColumnIndex: 23)
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as! String)'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -1478,6 +1480,18 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 }
                 else if (chatData[CoreMessage_TMessageKey.F_PIN] == self.dataPerson["f_pin"]!! && !self.isContactCenter && (chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == "3")) || (self.isContactCenter && chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == "5" && self.complaintId == chatData[CoreMessage_TMessageKey.CALL_CENTER_ID]) {
                     if chatData[CoreMessage_TMessageKey.F_PIN] == nil {
+                        return
+                    }
+                    let idx = self.dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == chatData[CoreMessage_TMessageKey.MESSAGE_ID]})
+                    if idx != nil {
+                        self.dataMessages[idx!][TypeDataMessage.message_text] = chatData[CoreMessage_TMessageKey.MESSAGE_TEXT]
+                        self.dataMessages[idx!][TypeDataMessage.last_edit] = chatData[CoreMessage_TMessageKey.LAST_EDIT]
+                        self.dataMessages[idx!][TypeDataMessage.status] = chatData[CoreMessage_TMessageKey.STATUS]
+                        let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
+                        let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                        if row != nil && section != nil  {
+                            self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                        }
                         return
                     }
                     var row: [String: Any?] = [:]
@@ -2425,6 +2439,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         row["credential"] = credential
         row["chat_id"] = chat_id
         row["file_id"] = file_id
+        row["blog_id"] = ex_blog_id
         row["attachment_flag"] = attachment_flag
         row["reff_id"] = reff_id
         row["progress"] = 0.0
@@ -3748,33 +3763,9 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 self.tableChatView.reloadData()
             }
         })
-//        let edit = UIAction(title: "Edit".localized(), image: UIImage(systemName: "pencil"), handler: {(_) in
-//            if self.removed {
-//                return
-//            }
-//            if self.isSearching {
-//                self.cancelAction()
-//            }
-//            if self.reffId != nil {
-//                self.deleteReplyView()
-//            }
-//            self.isEditAction = true
-//            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-//                let nextInteraction = UIContextMenuInteraction(delegate: self)
-//                interaction.view!.addInteraction(nextInteraction)
-//                guard let interaction = interaction.view!.interactions.first,
-//                      let data = Data(base64Encoded: "X3ByZXNlbnRNZW51QXRMb2NhdGlvbjo="),
-//                      let str = String(data: data, encoding: .utf8)
-//                else {
-//                    return
-//                }
-//                let selector = NSSelectorFromString(str)
-//                guard interaction.responds(to: selector) else {
-//                    return
-//                }
-//                nextInteraction.perform(selector, with: self.view)
-//            }
-//        })
+        let edit = UIAction(title: "Edit".localized(), image: UIImage(systemName: "pencil"), handler: {(_) in
+            self.showEditMessageAlert(at: indexPath!)
+        })
         let info = UIAction(title: "Info".localized(), image: UIImage(systemName: "info.circle.fill"), handler: {(_) in
             if self.removed {
                 return
@@ -3855,7 +3846,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             })
             let message = CoreMessage_TMessageBank.sendMessage(message_id: messageId,
                                                                l_pin: dataMessages[indexPath!.row][TypeDataMessage.l_pin] as! String,
-                                                               message_scope_id: dataMessages[indexPath!.row][TypeDataMessage.l_pin] as! String,
+                                                               message_scope_id: dataMessages[indexPath!.row][TypeDataMessage.message_scope_id] as! String,
                                                                status: "1",
                                                                message_text: dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String,
                                                                credential: dataMessages[indexPath!.row][TypeDataMessage.credential] as! String,
@@ -3880,12 +3871,11 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         var children: [UIMenuElement] = [star, reply, forward, copy, delete]
 //        let copyOption = self.copyOption(indexPath: indexPath!)
         let idMe = User.getMyPin() as String?
+        print("LOHE \(isContactCenter)")
         if dataMessages[indexPath!.row]["status"] as! String == "0" {
             children = [resend, delete]
         } else if isContactCenter {
-            if (groupImages[dataMessages[indexPath!.row]["message_id"] as! String] != nil) {
-                children = [reply, copy]
-            }
+            children = [reply, copy]
         } else if (dataMessages[indexPath!.row]["lock"] != nil && dataMessages[indexPath!.row]["lock"] as! String == "1") || dataMessages[indexPath!.row]["message_scope_id"] as! String == "18" || dataPerson["f_pin"] == "-999" || dataMessages[indexPath!.row]["credential"] as! String == "1" {
             children = [delete]
         } else if (groupImages[dataMessages[indexPath!.row]["message_id"] as! String] != nil) {
@@ -3915,6 +3905,9 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
                 children.insert(info, at: children.count - 1)
             }
+//            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String).isEmpty && (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
+//                children.insert(edit, at: children.count - 1)
+//            }
         }
         if isEditAction {
             return UIContextMenuConfiguration(identifier: nil,
@@ -3929,6 +3922,52 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                                           previewProvider: nil) { _ in
             UIMenu(title: "", children: children)
         }
+    }
+    
+    func showEditMessageAlert(at indexPath: IndexPath) {
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
+        let oldText = dataMessages[indexPath.row][TypeDataMessage.message_text] as! String
+        let alertController = UIAlertController(title: "Edit".localized(), message: nil, preferredStyle: .alert)
+        alertController.addTextField { textField in
+            textField.text = oldText
+        }
+        
+        let saveAction = UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+            if let textField = alertController.textFields?.first, let newText = textField.text {
+                if newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
+                    let lastEdited = 1 + ((dataMessages[indexPath.row][TypeDataMessage.last_edit] as? Int64) ?? 0)
+                    let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id] as! String, l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin] as! String, message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as! String, status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential] as! String, attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as! String, ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id] as! String, message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id] as! String, audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id] as! String, video_id: dataMessages[indexPath.row][TypeDataMessage.video_id] as! String, file_id: dataMessages[indexPath.row][TypeDataMessage.file_id] as! String, thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id] as! String, reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id] as! String, read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts] as! String, chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id] as! String, is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center] as! String, call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id] as! String, opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin] as! String, last_edit: lastEdited)
+                    Nexilis.addQueueMessage(message: message, isEditMessage: true)
+                    DispatchQueue.global().async {
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            do {
+                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                    "message_text" : newText,
+                                    "last_edited" : lastEdited
+                                ], _where: "message_id = '\(dataMessages[indexPath.row]["message_id"] as! String)'")
+                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                            } catch {
+                                rollback.pointee = true
+                                print("Access database error: \(error.localizedDescription)")
+                            }
+                        })
+                    }
+                    let idx = self?.dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == dataMessages[indexPath.row][TypeDataMessage.message_id] as? String})
+                    if idx != nil{
+                        self?.dataMessages[idx!][TypeDataMessage.message_text] = newText
+                        self?.dataMessages[idx!][TypeDataMessage.last_edit] = lastEdited
+                        self?.tableChatView.reloadRows(at: [indexPath], with: .none)
+                    }
+                }
+            }
+        }
+        
+        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel, handler: nil)
+        
+        alertController.addAction(saveAction)
+        alertController.addAction(cancelAction)
+        
+        present(alertController, animated: true, completion: nil)
     }
     
     @objc func cancelAction() {
@@ -5176,6 +5215,21 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             }
         }
         
+        if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
+            let editedText = UILabel()
+            editedText.text = "Edited".localized()
+            editedText.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+            editedText.textColor = .lightGray
+            cell.contentView.addSubview(editedText)
+            editedText.translatesAutoresizingMaskIntoConstraints = false
+            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                editedText.trailingAnchor.constraint(equalTo: timeMessage.leadingAnchor, constant: -2).isActive = true
+            } else {
+                editedText.leadingAnchor.constraint(equalTo: timeMessage.trailingAnchor, constant: 2).isActive = true
+            }
+            editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
+        }
+        
         let messageText = UILabel()
         messageText.numberOfLines = 0
         messageText.lineBreakMode = .byWordWrapping
@@ -5237,6 +5291,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         }
         
         let imageSticker = UIImageView()
+        var stringLS = ""
         if let attachmentFlag = dataMessages[indexPath.row]["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
             if attachmentFlag == "27" || attachmentFlag == "26" { // live streaming
                 let data = textChat
@@ -5253,10 +5308,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     }
                     if let c = User.getData(pin: by) {
                         let name = c.fullName
-                        messageText.attributedText = "\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm")) \nBroadcaster: \(name)".richText()
+                        stringLS = "\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm")) \nBroadcaster: \(name)"
                     } else {
-                        messageText.attributedText = ("\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm"))").richText()
+                        stringLS = ("\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm"))")
                     }
+                    messageText.attributedText = stringLS.richText()
                 }
             }
             else if attachmentFlag == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") && (dataMessages[indexPath.row]["lock"] as? String != "2") {
@@ -5364,7 +5420,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         }
         
         if isSearching && textSearch.count > 1 {
-            messageText.attributedText = textChat.richText(isSearching: true, textSearch: textSearch)
+            messageText.attributedText = stringLS.isEmpty ? textChat.richText(isSearching: true, textSearch: textSearch) : stringLS.richText(isSearching: true, textSearch: textSearch)
             if textChat.lowercased().contains(textSearch) {
                 countMatchesSearch += 1
             }
@@ -5694,7 +5750,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
             containerViewFile.bottomAnchor.constraint(equalTo:messageText.topAnchor, constant: -5).isActive = true
             containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
+//            containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
             containerViewFile.backgroundColor = .black.withAlphaComponent(0.2)
             containerViewFile.layer.cornerRadius = 5.0
             containerViewFile.clipsToBounds = true
@@ -7159,4 +7215,5 @@ public class TypeDataMessage {
     public static let is_call_center = "is_call_center"
     public static let call_center_id = "call_center_id"
     public static let opposite_pin = "opposite_pin"
+    public static let last_edit = "last_edit"
 }

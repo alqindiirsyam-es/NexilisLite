@@ -621,12 +621,6 @@ class QmeraAudioViewController: UIViewController {
     }
     
     @objc func didEnd(sender: Any?) {
-        if self.buttonWB.isDescendant(of: self.view){
-            self.buttonWB.removeFromSuperview()
-        }
-        if self.buttonChat.isDescendant(of: self.view){
-            self.buttonChat.removeFromSuperview()
-        }
         poweredByView.isHidden = true
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         if !onGoingCC.isEmpty {
@@ -870,6 +864,12 @@ class QmeraAudioViewController: UIViewController {
                         let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
                         if pin == requester || pin == officer {
                             DispatchQueue.main.async {
+                                if self.buttonWB.isDescendant(of: self.view){
+                                    self.buttonWB.removeFromSuperview()
+                                }
+                                if self.buttonChat.isDescendant(of: self.view){
+                                    self.buttonChat.removeFromSuperview()
+                                }
                                 if self.viewIfLoaded?.window != nil {
                                     let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                                     imageView.tintColor = .white
@@ -888,6 +888,12 @@ class QmeraAudioViewController: UIViewController {
                         }
                     } else if !onGoingCC.isEmpty && users.count == 0 {
                         DispatchQueue.main.async {
+                            if self.buttonWB.isDescendant(of: self.view){
+                                self.buttonWB.removeFromSuperview()
+                            }
+                            if self.buttonChat.isDescendant(of: self.view){
+                                self.buttonChat.removeFromSuperview()
+                            }
                             if self.viewIfLoaded?.window != nil {
                                 let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                                 imageView.tintColor = .white
