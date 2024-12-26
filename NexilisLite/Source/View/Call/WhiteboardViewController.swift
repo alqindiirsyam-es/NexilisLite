@@ -335,7 +335,7 @@ class WhiteboardViewController: UIViewController, WhiteboardDelegate {
     
     
     @IBAction func onAlphaChanged(_ sender: UISlider) {
-        let alp = sender.value / 100.0
+        let alp = ((sender.value / (100.0 / 25.0)) + (100.0 - 25.0))  / 100.0
         view.backgroundColor = UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: CGFloat(alp))
     }
     

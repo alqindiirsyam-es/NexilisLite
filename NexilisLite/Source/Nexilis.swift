@@ -459,6 +459,12 @@ public class Nexilis: NSObject {
                                         
                                     }
                                 }
+                                if jsonData["chatbot_greetings"]! != nil {
+                                    if let greeting = jsonData["chatbot_greetings"] as? String {
+                                        print("Chatbot greeting: \(greeting)")
+                                        Utils.setChatbotGreetings(value: greeting)
+                                    }
+                                }
                             }
                             if let convertJsonFA = try? JSONSerialization.data(withJSONObject: jsonFA, options: .prettyPrinted) {
                                 if let jsonFAString = String(data: convertJsonFA, encoding: .utf8) {
@@ -2691,7 +2697,7 @@ extension Nexilis: MessageDelegate {
                                         
                                     }
                                 } else {
-                                    Download().startHTTP(forKey: file) { (name, progress) in
+                                    Download().startHTTP(forKey: file, isImage: false) { (name, progress) in
                                         DispatchQueue.main.async {
                                             guard progress == 100 else {
                                                 return

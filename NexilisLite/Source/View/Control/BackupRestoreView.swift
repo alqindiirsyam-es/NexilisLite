@@ -246,7 +246,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(getFileName(option: optionBackup, fileId: fileIdBackup))
                 if !FileManager.default.fileExists(atPath: fileURL.path) {
-                    Download().startHTTP(forKey: getFileName(option: optionBackup, fileId: fileIdBackup)) { (name, progress) in
+                    Download().startHTTP(forKey: getFileName(option: optionBackup, fileId: fileIdBackup), isImage: false) { (name, progress) in
                         DispatchQueue.main.async { [self] in
                             guard progress == 100 else {
                                 labelRestoring.text = "Downloading...".localized() + "  \(progress)%"

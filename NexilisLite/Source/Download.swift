@@ -45,11 +45,11 @@ public class Download {
         _ = Nexilis.write(message: CoreMessage_TMessageBank.getImageDownload(p_image_id: forKey))
     }
     
-    public func startHTTP(forKey: String, completion: @escaping (String, Double)->()) {
-        _ = startHTTP(filename: forKey, baseURL: DOWNLOAD_URL, completion: completion)
+    public func startHTTP(forKey: String, isImage: Bool = true, completion: @escaping (String, Double)->()) {
+        _ = startHTTP(filename: forKey, isImage: isImage, baseURL: DOWNLOAD_URL, completion: completion)
     }
     
-    public func startHTTP(filename: String, baseURL: String, completion: @escaping (String, Double)->()) {
+    public func startHTTP(filename: String, isImage: Bool = true, baseURL: String, completion: @escaping (String, Double)->()) {
         let download = Nexilis.getDownload(forKey: filename)
         if download == nil {
             Nexilis.addDownload(forKey: filename, download: self)
@@ -89,12 +89,17 @@ public class Download {
                             let url = documentDir.appendingPathComponent(filename)
                             //print("write file \(url.path)")
                             let dResponse = try FileEncryption.shared.decryptToMemory(successResponse, MasterKeyUtil.shared.getServerKey())
-                            let imageOr = UIImage(data: successResponse)
-                            let imageDec = UIImage(data: dResponse)
-                            if imageDec != nil {
+                            if isImage {
+                                let imageOr = UIImage(data: successResponse)
+                                let imageDec = UIImage(data: dResponse)
+                                if imageDec != nil {
+                                    try dResponse.write(to: url)
+                                } else {
+                                    try successResponse.write(to: url)
+                                }
+                            }
+                            else {
                                 try dResponse.write(to: url)
-                            } else {
-                                try successResponse.write(to: url)
                             }
                             Nexilis.removeDownload(forKey: filename)
                             completion(filename,100)

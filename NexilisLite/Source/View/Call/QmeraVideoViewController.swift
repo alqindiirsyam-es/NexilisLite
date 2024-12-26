@@ -115,7 +115,7 @@ class QmeraVideoViewController: UIViewController {
         navigationController?.navigationBar.setBackgroundImage(nil, for: .default)
         navigationController?.navigationBar.shadowImage = nil
         navigationController?.navigationBar.isTranslucent = false
-        navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+//        navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
         let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
         navigationController?.navigationBar.titleTextAttributes = textAttributes
         navigationController?.navigationBar.topItem?.backBarButtonItem = nil
@@ -128,7 +128,7 @@ class QmeraVideoViewController: UIViewController {
             navigationController?.navigationBar.setBackgroundImage(nil, for: .default)
             navigationController?.navigationBar.shadowImage = nil
             navigationController?.navigationBar.isTranslucent = false
-            navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+//            navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
             navigationController?.navigationBar.titleTextAttributes = textAttributes
             navigationController?.navigationBar.topItem?.backBarButtonItem = nil
@@ -644,7 +644,7 @@ class QmeraVideoViewController: UIViewController {
         let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
         navigationController.modalPresentationStyle = .overCurrentContext
         navigationController.navigationBar.tintColor = .white
-        navigationController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+//        navigationController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
         navigationController.navigationBar.isTranslucent = false
         navigationController.navigationBar.overrideUserInterfaceStyle = .dark
         navigationController.navigationBar.barStyle = .black

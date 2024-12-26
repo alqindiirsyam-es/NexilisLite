@@ -1224,7 +1224,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     imageDownload.centerYAnchor.constraint(equalTo: sender.imageView.centerYAnchor).isActive = true
                     imageDownload.widthAnchor.constraint(equalToConstant: 30).isActive = true
                     imageDownload.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    Download().startHTTP(forKey: sender.video_id) { (name, progress) in
+                    Download().startHTTP(forKey: sender.video_id, isImage: false) { (name, progress) in
                         DispatchQueue.main.async {
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
@@ -1333,7 +1333,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
                     imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
                     
-                    Download().startHTTP(forKey: sender.file_id) { (name, progress) in
+                    Download().startHTTP(forKey: sender.file_id, isImage: false) { (name, progress) in
                         DispatchQueue.main.async {
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)

@@ -3015,7 +3015,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         }
                     }
                 } else if dataMessages[index]["video_id"] as? String != nil && !((dataMessages[index]["video_id"] as? String)!.isEmpty){
-                    Download().startHTTP(forKey: dataMessages[index]["video_id"] as! String) { (name, progress) in
+                    Download().startHTTP(forKey: dataMessages[index]["video_id"] as! String, isImage: false) { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
@@ -3065,7 +3065,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     }
                 }
                 else if dataMessages[index]["file_id"] as? String != nil && !((dataMessages[index]["file_id"] as? String)!.isEmpty) {
-                    Download().startHTTP(forKey: dataMessages[index]["file_id"] as! String) { (name, progress) in
+                    Download().startHTTP(forKey: dataMessages[index]["file_id"] as! String, isImage: false) { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
@@ -6494,7 +6494,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     imageDownload.centerYAnchor.constraint(equalTo: sender.imageView.centerYAnchor).isActive = true
                     imageDownload.widthAnchor.constraint(equalToConstant: 30).isActive = true
                     imageDownload.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    Download().startHTTP(forKey: sender.video_id) { (name, progress) in
+                    Download().startHTTP(forKey: sender.video_id, isImage: false) { (name, progress) in
                         DispatchQueue.main.async {
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
@@ -6603,7 +6603,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
                     imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
                     
-                    Download().startHTTP(forKey: sender.file_id) { (name, progress) in
+                    Download().startHTTP(forKey: sender.file_id, isImage: false) { (name, progress) in
                         DispatchQueue.main.async {
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
