@@ -434,13 +434,18 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             ])
             blockedView(blocked: "1")
         } else if blocking == "0" {
-            if self.dataPerson["f_pin"]!! != "-999"{
+            if self.dataPerson["f_pin"]!! != "-999" && complaintId.isEmpty {
                 menu = UIMenu(title: "", children: [
                     actionSearch,
                     actionBlock,
                     actionDelete
                 ])
-            } else {
+            } else if  !complaintId.isEmpty{
+                menu = UIMenu(title: "", children: [
+                    actionSearch
+                ])
+            }
+                else {
                 menu = UIMenu(title: "", children: [
                     actionSearch,
                     actionDelete
@@ -457,6 +462,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         
         let moreIcon = UIBarButtonItem(image: UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular, scale: .default)), menu: menu)
         let buttonAudioCall = UIBarButtonItem(image: UIImage(systemName: "phone", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular, scale: .default)), style: .plain, target: self, action: #selector(audioVideoCall(sender:)))
+//        let buttonSearch = UIBarButtonItem(image: UIImage(systemName: "magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular, scale: .default)), style: .plain, target: self, action: #selector(audioVideoCall(sender:)))
         buttonAudioCall.tag = 0
         let buttonVideoCall = UIBarButtonItem(image: UIImage(systemName: "video", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular, scale: .default)), style: .plain, target: self, action: #selector(audioVideoCall(sender:)))
         buttonVideoCall.tag = 1
@@ -466,7 +472,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         } else if !isContactCenter {
             navigationItem.rightBarButtonItem = moreIcon
         } else if !complaintId.isEmpty { //!complaintId.isEmpty
-            navigationItem.rightBarButtonItem = buttonAddRoom
+            navigationItem.rightBarButtonItems = [moreIcon,buttonAddRoom]
         }
     }
     
@@ -3875,7 +3881,12 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         if dataMessages[indexPath!.row]["status"] as! String == "0" {
             children = [resend, delete]
         } else if isContactCenter {
-            children = [reply, copy]
+            if dataMessages[indexPath!.row]["attachment_flag"] as! String == "11" {
+                children = [reply]
+            }
+            else {
+                children = [reply, copy]
+            }
         } else if (dataMessages[indexPath!.row]["lock"] != nil && dataMessages[indexPath!.row]["lock"] as! String == "1") || dataMessages[indexPath!.row]["message_scope_id"] as! String == "18" || dataPerson["f_pin"] == "-999" || dataMessages[indexPath!.row]["credential"] as! String == "1" {
             children = [delete]
         } else if (groupImages[dataMessages[indexPath!.row]["message_id"] as! String] != nil) {
