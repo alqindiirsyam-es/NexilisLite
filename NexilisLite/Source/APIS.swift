@@ -65,6 +65,8 @@ public class APIS: NSObject {
             controller.isOfficer = true
             controller.fromAPI = true
             let navigationController = CustomNavigationController(rootViewController: controller)
+            navigationController.setNavigationBarHidden(false, animated: false)
+            navigationController.navigationBar.isTranslucent = false
             navigationController.defaultStyle()
             if UIApplication.shared.visibleViewController?.navigationController != nil {
                 UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)

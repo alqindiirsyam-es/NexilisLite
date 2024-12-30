@@ -22,14 +22,21 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
         self.title = "Call Center History".localized()
         
         if fromAPI {
-            let imageButton = UIImageView(frame: CGRect(x: -16, y: 0, width: 20, height: 44))
-            imageButton.image = UIImage(systemName: "chevron.backward", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular, scale: .default))?.withTintColor(.white)
-            imageButton.contentMode = .left
-            let tapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(didTapExit))
-            imageButton.isUserInteractionEnabled = true
-            imageButton.addGestureRecognizer(tapGestureRecognizer)
-            let leftItem = UIBarButtonItem(customView: imageButton)
-            self.navigationItem.leftBarButtonItem = leftItem
+            if let navigationBar = navigationController?.navigationBar {
+                    let appearance = UINavigationBarAppearance()
+                    appearance.configureWithOpaqueBackground() // or `.configureWithTransparentBackground()`
+                    navigationBar.standardAppearance = appearance
+                    navigationBar.scrollEdgeAppearance = appearance
+                    let imageButton = UIImageView(frame: CGRect(x: -16, y: 0, width: 20, height: 44))
+                    imageButton.image = UIImage(systemName: "chevron.backward", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular, scale: .default))?.withTintColor(.white)
+                    imageButton.contentMode = .left
+                    let tapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(didTapExit))
+                    imageButton.isUserInteractionEnabled = true
+                    imageButton.addGestureRecognizer(tapGestureRecognizer)
+                    let leftItem = UIBarButtonItem(customView: imageButton)
+                    self.navigationItem.leftBarButtonItem = leftItem
+                }
+            tableView.contentInsetAdjustmentBehavior = .automatic
         }
         
     }

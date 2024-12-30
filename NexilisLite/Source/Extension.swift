@@ -764,7 +764,7 @@ extension String {
         let boldItalicFont = UIFont.systemFont(ofSize: 12, weight: .semibold)
         let textUTF8 = String(self.utf8)
         let finalText = NSMutableAttributedString(string: textUTF8, attributes: [NSAttributedString.Key.font: font])
-        finalText.addAttribute(.foregroundColor, value: UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? UIColor.white : UIColor.black, range: NSRange(location: 0, length: textUTF8.count + textUTF8.countEmojiCharacter()))
+// finalText.addAttribute(.foregroundColor, value: UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? UIColor.white : UIColor.black, range: NSRange(location: 0, length: finalText.length + textUTF8.countEmojiCharacter()))
         let boldSign: Character = "*"
         let italicSign: Character = "_"
         let underlineSign: Character = "^"
