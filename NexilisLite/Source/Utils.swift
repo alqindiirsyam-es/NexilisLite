@@ -639,97 +639,97 @@ public final class Utils {
                 let json = Array(jsonArray)[0]
                 for i in 0..<json.keys.count {
                     if Array(json.keys)[i] == "app_builder_url_first_tab" {
-                        Utils.setURLFirstTab(value: Array(json.values)[i] as! String)
+                        Utils.setURLFirstTab(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_url_third_tab" {
-                        Utils.setURLThirdTab(value: Array(json.values)[i] as! String)
+                        Utils.setURLThirdTab(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_custom_tab" {
-                        Utils.setCustomTab(cust: Array(json.values)[i] as! String)
+                        Utils.setCustomTab(cust: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_url_base" {
-                        Utils.setURLBase(value: Array(json.values)[i] as! String)
+                        Utils.setURLBase(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_url_qms" {
-                        Utils.setURLQMS(value: Array(json.values)[i] as! String)
+                        Utils.setURLQMS(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_icon_dock" {
-                        Utils.setIconDock(value: Array(json.values)[i] as! String)
+                        Utils.setIconDock(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_icon_ss" {
-                        Utils.setIconSS(value: Array(json.values)[i] as! String)
+                        Utils.setIconSS(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_background" {
-                        Utils.setBackground(value: Array(json.values)[i] as! String)
+                        Utils.setBackground(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_url_privacy_policy" {
-                        Utils.setURLPrivacyPolicy(value: Array(json.values)[i] as! String)
+                        Utils.setURLPrivacyPolicy(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_enable_privacy_policy" {
-                        Utils.setEnablePrivacyPolicy(value: Array(json.values)[i] as! String == "1" ? true : false)
+                        Utils.setEnablePrivacyPolicy(value: Array(json.values)[i] as? String == "1" ? true : false)
                     }
                     if Array(json.keys)[i] == "pb_fb_icon_center_self_mode2" {
-                        Utils.setIconCenterAnim2(value: Array(json.values)[i] as! String)
+                        Utils.setIconCenterAnim2(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "pb_fb_icon_center_self_mode4" {
-                        Utils.setIconCenterAnim4(value: Array(json.values)[i] as! String)
+                        Utils.setIconCenterAnim4(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_ac_theme" {
-                        Utils.setACTheme(value: Array(json.values)[i] as! String)
+                        Utils.setACTheme(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_button_url" {
-                        Utils.setButtonURL(value: Array(json.values)[i] as! String)
+                        Utils.setButtonURL(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_custom_buttons" {
-                        Utils.setCustomButtons(value: Array(json.values)[i] as! String)
+                        Utils.setCustomButtons(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_enable_mobile_builder" {
-                        Utils.setEnableMobileBuilder(value: Array(json.values)[i] as! String)
+                        Utils.setEnableMobileBuilder(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_enable_mobile_builder" {
-                        Utils.setEnableMobileBuilder(value: Array(json.values)[i] as! String)
+                        Utils.setEnableMobileBuilder(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "fb_config_mode" {
-                        Utils.setConfigModeFB(value: Array(json.values)[i] as! String)
+                        Utils.setConfigModeFB(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_button_icon" {
-                        Utils.setCustomFBIcon(value: Array(json.values)[i] as! String)
+                        Utils.setCustomFBIcon(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "fb_floating_anim" {
-                        Utils.setFloatingAnim(value: Array(json.values)[i] as! String)
+                        Utils.setFloatingAnim(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "fb_icon_with_bg" {
-                        Utils.setFBIconBg(value: Array(json.values)[i] as! String)
+                        Utils.setFBIconBg(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "fb_item_with_bg" {
-                        Utils.setFBItemBg(value: Array(json.values)[i] as! String)
+                        Utils.setFBItemBg(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "user_agent" {
-                        Utils.setUserAgent(value: Array(json.values)[i] as! String)
+                        Utils.setUserAgent(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_background_light" {
-                        Utils.setBackgroundLight(value: Array(json.values)[i] as! String)
+                        Utils.setBackgroundLight(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_background_dark" {
-                        Utils.setBackgroundDark(value: Array(json.values)[i] as! String)
+                        Utils.setBackgroundDark(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "sms_center" {
-                        Utils.setSMSCenter(value: Array(json.values)[i] as! String)
+                        Utils.setSMSCenter(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "whatsapp_center" {
-                        Utils.setWhatsappCenter(value: Array(json.values)[i] as! String)
+                        Utils.setWhatsappCenter(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "call_center" {
-                        Utils.setCallCenter(value: Array(json.values)[i] as! String)
+                        Utils.setCallCenter(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "enable_valid_trans" {
-                        Utils.setValidTrans(value: Array(json.values)[i] as! String)
+                        Utils.setValidTrans(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "chatbot_greetings" {
-                        Utils.setValidTrans(value: Array(json.values)[i] as! String)
+                        Utils.setValidTrans(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "fb_icon_center" {
-                        Utils.setIconCenter(value: Array(json.values)[i] as! String)
+                        Utils.setIconCenter(value: Array(json.values)[i] as? String ?? "")
                     }
                 }
                 Utils.setFinishInitPrefs(value: true)

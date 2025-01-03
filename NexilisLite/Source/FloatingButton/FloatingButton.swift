@@ -246,7 +246,14 @@ public class FloatingButton: UIView {
         if configModeFB != MODE_VERTICAL_FLOATING_BUTTON {
             return
         }
-        let task = URLSession.shared.dataTask(with: URL(string: (isDocked ? Utils.getUrlDock() : Utils.getIconCenter())!)!) { dataImage, response, error in
+        var urlFb = Utils.getIconCenter()
+        if isDocked {
+            urlFb = Utils.getUrlDock() ?? ""
+        }
+        if urlFb.isEmpty {
+            return
+        }
+        let task = URLSession.shared.dataTask(with: URL(string: (urlFb))!) { dataImage, response, error in
             if let error = error {
                 print("Failed to load data: \(error)")
                 return
