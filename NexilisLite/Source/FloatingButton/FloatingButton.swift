@@ -173,9 +173,11 @@ public class FloatingButton: UIView {
         addSubview(scrollView)
         
         if configModeFB == MODE_VERTICAL_SIDE_TAB {
-            let bgImage = resizeImage(image: UIImage(named: "pb_button_background_vtcst", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: widthVerticalSideTab, height: heightVerticalSideTab))
-            scrollView.backgroundColor = UIColor.init(patternImage: bgImage)
-            
+            scrollView.backgroundColor = UIColor.white.withAlphaComponent(0.8)
+            scrollView.layer.borderColor = UIColor.gray.cgColor
+            scrollView.layer.borderWidth = 0.2
+            scrollView.layer.cornerRadius = 5.0
+            scrollView.layer.masksToBounds = true
             scrollView.leftAnchor.constraint(equalTo: nexilis_button.rightAnchor).isActive = true
             scrollView.centerYAnchor.constraint(equalTo: nexilis_button.centerYAnchor).isActive = true
             scrollView.widthAnchor.constraint(equalToConstant: widthVerticalSideTab).isActive = true
@@ -214,11 +216,10 @@ public class FloatingButton: UIView {
         scrollView.addSubview(groupView)
 
         if configModeFB == MODE_VERTICAL_SIDE_TAB {
-            groupView.spacing = 10.0
-            groupView.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor).isActive = true
+            groupView.spacing = 20.0
+            groupView.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 10).isActive = true
+            groupView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -10).isActive = true
             groupView.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor).isActive = true
-            groupView.heightAnchor.constraint(equalToConstant: heightVerticalSideTab - 20).isActive = true
-            groupView.widthAnchor.constraint(equalToConstant: 30).isActive = true
         } else if configModeFB == MODE_HORIZONTAL_SIDE_TAB {
             groupView.leftAnchor.constraint(equalTo: scrollView.leftAnchor).isActive = true
             groupView.rightAnchor.constraint(equalTo: scrollView.rightAnchor).isActive = true
@@ -407,7 +408,8 @@ public class FloatingButton: UIView {
                                     newButton.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                     newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                 } else if mode == MODE_VERTICAL_SIDE_TAB {
-                                    newButton.imageView?.contentMode = .scaleAspectFit
+                                    newButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+                                    newButton.heightAnchor.constraint(equalToConstant: 25).isActive = true
                                 } else {
                                     newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                 }
