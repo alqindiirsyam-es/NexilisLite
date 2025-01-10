@@ -60,6 +60,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         contentController.add(self, name: "closeProfile")
         contentController.add(self, name: "successChangeTheme")
         contentController.add(self, name: "finishForm")
+        contentController.add(self, name: "shareText")
         
         let source: String = "var meta = document.createElement('meta');" +
             "meta.name = 'viewport';" +
@@ -113,17 +114,14 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     
     func loadURLWithCookie(url: URL) {
         var urlRequest = URLRequest(url: url)
-        let cookieHeader = Utils.getCookiesMobile()
-        urlRequest.addValue(cookieHeader, forHTTPHeaderField: "Cookie")
         let customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1 \(Utils.getUserAgent())"
         urlRequest.setValue(customUserAgent, forHTTPHeaderField: "User-Agent")
-        
-        if let cookies = HTTPCookieStorage.shared.cookies {
+        if let cookies = HTTPCookieStorage.shared.cookies(for: url) {
             for cookie in cookies {
                 webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
             }
+            webView.load(urlRequest)
         }
-        webView.load(urlRequest)
     }
     
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -406,12 +404,20 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                 exit(0)
             }))
             self.present(alert, animated: true, completion: nil)
-        }  else if message.name == "finishForm" {
+        } else if message.name == "finishForm" {
             if self.webView.canGoBack {
                 self.webView.goBack()
             } else {
                 self.dismiss(animated: true)
             }
+        } else if message.name == "shareText" {
+            print("HMM masuk share text")
+            guard let dict = message.body as? [String: AnyObject],
+                  let param1 = dict["param1"] as? String else {
+                return
+            }
+            let activityViewController = UIActivityViewController(activityItems: [param1], applicationActivities: nil)
+            self.present(activityViewController, animated: true, completion: nil)
         }
     }
     
@@ -580,20 +586,20 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         sender.endRefreshing()
     }
     
-    public func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        guard let serverTrust = challenge.protectionSpace.serverTrust else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-        if let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0),
-           let pinnedCertificateHash = getCertificateHash(from: serverCertificate),
-           pinnedCertificateHash == Utils.getCertificatePinningWebview() {
-            let credential = URLCredential(trust: serverTrust)
-            completionHandler(.useCredential, credential) // Certificate matches, proceed
-        } else {
-            completionHandler(.cancelAuthenticationChallenge, nil) // Certificate doesn't match, cancel
-        }
-    }
+//    public func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+//        guard let serverTrust = challenge.protectionSpace.serverTrust else {
+//            completionHandler(.cancelAuthenticationChallenge, nil)
+//            return
+//        }
+//        if let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0),
+//           let pinnedCertificateHash = getCertificateHash(from: serverCertificate),
+//           pinnedCertificateHash == Utils.getCertificatePinningWebview() {
+//            let credential = URLCredential(trust: serverTrust)
+//            completionHandler(.useCredential, credential) // Certificate matches, proceed
+//        } else {
+//            completionHandler(.cancelAuthenticationChallenge, nil) // Certificate doesn't match, cancel
+//        }
+//    }
     
     private func getCertificateHash(from certificate: SecCertificate) -> String? {
         guard let publicKey = getPublicKey(from: certificate) else { return nil }

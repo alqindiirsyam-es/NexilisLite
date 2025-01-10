@@ -252,8 +252,8 @@ public class Network {
                 //print(multipartFormData)
             }
             
-            for i in 0..<filesTempServer.count {
-                multipartFormData.append(filesTempServer[i], withName: "file\(i+1)", fileName: filesTempServer[i].lastPathComponent, mimeType: "application/octet-stream")
+            for i in 0..<filesIn.count {
+                multipartFormData.append(filesIn[i], withName: "file\(i+1)", fileName: filesIn[i].lastPathComponent, mimeType: "application/octet-stream")
                 Nexilis.putUploadFile(forKey: filesIn[i].lastPathComponent, uploader: self)
                 //print(multipartFormData)
             }

@@ -132,7 +132,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                     Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
-                                Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
+//                                Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                             ]
                         }
                         if !isChangeProfile {
@@ -186,7 +186,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
                             Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
-                            Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
+//                            Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                         ]
                         if Nexilis.showButtonFB {
                             Item.menus["Personal"]?.append(Item(icon: UIImage(systemName: "gearshape.circle"), title: "Configure Floating Button".localized()))

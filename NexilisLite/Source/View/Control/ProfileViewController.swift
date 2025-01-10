@@ -639,6 +639,7 @@ public class ProfileViewController: UITableViewController {
                                         } else if let editor = self.previousViewController as? EditorGroup {
                                             editor.afterUnfriend()
                                         }
+                                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                                         self.navigationController?.popToRootViewController(animated: true)
                                     }
                                     Nexilis.shared.stateUnfriend = ""
@@ -741,63 +742,63 @@ extension ProfileViewController: ImageVideoPickerDelegate {
             guard let me = User.getMyPin() else {
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: {
-                Nexilis.showLoader()
-                DispatchQueue.global().async {
-                    let resize = image.resize(target: CGSize(width: 800, height: 600))
-                    let documentDir = try! FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                    let fileDir = documentDir.appendingPathComponent("THUMB_\(me)\(Date().currentTimeMillis().toHex())")
-                    if !FileManager.default.fileExists(atPath: fileDir.path), let data = resize.jpegData(compressionQuality: 0.8) {
-                        try! data.write(to: fileDir)
-                        Network().uploadHTTP(name: fileDir.lastPathComponent) { result, progress , response in
-                            guard result else {
-                                DispatchQueue.main.async {
-                                    Nexilis.hideLoader(completion: { [self] in
-                                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                                        imageView.tintColor = .white
-                                        publicBanner.dismiss()
-                                        publicBanner = FloatingNotificationBanner(title: "Can't change profile picture, try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                        publicBanner.show()
-                                        self.dismissImage?(image, fileDir.lastPathComponent)
-                                    })
-                                }
-                                return
-                            }
-                            guard progress == 100 else {
-                                return
-                            }
-                            if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChangePersonImage(thumb_id: fileDir.lastPathComponent)), response.isOk() {
-                                Database.shared.database?.inTransaction({ fmdb, rollback in
-                                    do {
-                                        _ = Database.shared.updateRecord(fmdb: fmdb, table: "BUDDY", cvalues: ["image_id": fileDir.lastPathComponent], _where: "f_pin = '\(me)'")
-                                    } catch {
-                                        rollback.pointee = true
-                                        print("Access database error: \(error.localizedDescription)")
-                                    }
+            Nexilis.showLoader()
+            DispatchQueue.global().async {
+                let resize = image.resize(target: CGSize(width: 800, height: 600))
+                let documentDir = try! FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                let data = resize.jpegData(compressionQuality: 0.8)
+                guard let data = data else { return }
+                let fileDir = documentDir.appendingPathComponent("THUMB_\(me)\(Date().currentTimeMillis().toHex()).jpg")
+                if !FileManager.default.fileExists(atPath: fileDir.path) {
+                    try! data.write(to: fileDir)
+                    Network().uploadHTTP(name: fileDir.lastPathComponent) { result, progress , response in
+                        guard result else {
+                            DispatchQueue.main.async {
+                                Nexilis.hideLoader(completion: { [self] in
+                                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                    imageView.tintColor = .white
+                                    publicBanner.dismiss()
+                                    publicBanner = FloatingNotificationBanner(title: "Can't change profile picture, try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                    publicBanner.show()
+                                    self.dismissImage?(image, fileDir.lastPathComponent)
                                 })
-                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "updateFifthTab"), object: nil, userInfo: nil)
-                                
-                                DispatchQueue.main.async {
-                                    Nexilis.hideLoader(completion: { [self] in
-                                        self.profile.image = image
-                                        let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
-                                        self.user?.thumb = fileDir.lastPathComponent
-                                        imageView.tintColor = .white
-                                        publicBanner.dismiss()
-                                        publicBanner = FloatingNotificationBanner(title: "Successfully changed profile picture".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                                        publicBanner.show()
-                                        self.dismissImage?(image, fileDir.lastPathComponent)
-                                    })
-                                }
-                            } else {
-                                Nexilis.hideLoader(completion: {})
                             }
+                            return
                         }
-                    } else {
-                        Nexilis.hideLoader(completion: {})
+                        guard progress == 100 else {
+                            return
+                        }
+                        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChangePersonImage(thumb_id: fileDir.lastPathComponent)), response.isOk() {
+                            Database.shared.database?.inTransaction({ fmdb, rollback in
+                                do {
+                                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "BUDDY", cvalues: ["image_id": fileDir.lastPathComponent], _where: "f_pin = '\(me)'")
+                                } catch {
+                                    rollback.pointee = true
+                                    print("Access database error: \(error.localizedDescription)")
+                                }
+                            })
+                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "updateFifthTab"), object: nil, userInfo: nil)
+                            
+                            DispatchQueue.main.async {
+                                Nexilis.hideLoader(completion: { [self] in
+                                    self.profile.image = image
+                                    let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+                                    self.user?.thumb = fileDir.lastPathComponent
+                                    imageView.tintColor = .white
+                                    publicBanner.dismiss()
+                                    publicBanner = FloatingNotificationBanner(title: "Successfully changed profile picture".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                                    publicBanner.show()
+                                    self.dismissImage?(image, fileDir.lastPathComponent)
+                                })
+                            }
+                        } else {
+                            Nexilis.hideLoader(completion: {})
+                        }
                     }
+                } else {
+                    Nexilis.hideLoader(completion: {})
                 }
-            })
+            }
         }
     }
     

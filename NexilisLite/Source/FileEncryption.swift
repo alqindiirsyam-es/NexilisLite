@@ -107,7 +107,7 @@ public class FileEncryption {
     func encryptFile(_ inputURL: URL, _ outputURL: URL, _ key: SymmetricKey) throws {
         let keyData = key.withUnsafeBytes { Data($0) }
         
-        let iv = generateIV()
+        let iv = MasterKeyUtil.shared.getServerKeyIV()
         let data = try Data(contentsOf: inputURL)
         let encryptedData = Data(count: data.count + kCCBlockSizeAES128)
         var finalData = encryptedData

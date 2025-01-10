@@ -1025,6 +1025,7 @@ extension GroupDetailViewController: ImageVideoPickerDelegate {
                                     print("Access database error: \(error.localizedDescription)")
                                 }
                             })
+                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                         } else {
                             DispatchQueue.main.async {
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))

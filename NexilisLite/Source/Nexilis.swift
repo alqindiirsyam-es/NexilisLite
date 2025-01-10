@@ -459,6 +459,9 @@ public class Nexilis: NSObject {
                                         
                                     }
                                 }
+                                if jsonData["secure_folder_encrypt_key_iv"]! != nil {
+                                    Utils.setSecureFolderEncryptIv(value: jsonData["secure_folder_encrypt_key_iv"] as! String)
+                                }
                                 if jsonData["chatbot_greetings"]! != nil {
                                     if let greeting = jsonData["chatbot_greetings"] as? String {
                                         print("Chatbot greeting: \(greeting)")

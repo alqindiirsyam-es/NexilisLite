@@ -315,6 +315,47 @@ extension UIImage {
         UIGraphicsEndImageContext()
         return image
     }
+    
+    func mimeType() -> String? {
+        guard let imageData = self.pngData() else {
+            return nil
+        }
+
+        let byteArray = [UInt8](imageData)
+        
+        if byteArray.starts(with: [0xFF, 0xD8, 0xFF]) {
+            return "image/jpeg"
+        } else if byteArray.starts(with: [0x89, 0x50, 0x4E, 0x47]) {
+            return "image/png"
+        } else if byteArray.starts(with: [0x47, 0x49, 0x46, 0x38]) {
+            return "image/gif"
+        } else if byteArray.starts(with: [0x49, 0x49, 0x2A, 0x00]) || byteArray.starts(with: [0x4D, 0x4D, 0x00, 0x2A]) {
+            return "image/tiff"
+        }
+        return nil
+    }
+
+}
+
+extension Data {
+    func mimeType() -> String? {
+        let byteArray = [UInt8](self)
+        
+        if byteArray.starts(with: [0xFF, 0xD8, 0xFF]) {
+            return "image/jpeg"
+        } else if byteArray.starts(with: [0x89, 0x50, 0x4E, 0x47]) {
+            return "image/png"
+        } else if byteArray.starts(with: [0x47, 0x49, 0x46, 0x38]) {
+            return "image/gif"
+        } else if byteArray.starts(with: [0x49, 0x49, 0x2A, 0x00]) || byteArray.starts(with: [0x4D, 0x4D, 0x00, 0x2A]) {
+            return "image/tiff"
+        } else if byteArray.starts(with: [0x25, 0x50, 0x44, 0x46]) {
+            return "application/pdf"
+        } else if byteArray.starts(with: [0x50, 0x4B, 0x03, 0x04]) {
+            return "application/zip"
+        }
+        return nil
+    }
 }
 
 extension UIImage {

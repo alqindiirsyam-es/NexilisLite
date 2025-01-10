@@ -75,8 +75,9 @@ open class ImageVideoPicker: NSObject {
             let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
             UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
         }
-        controller.dismiss(animated: false, completion: nil)
-        self.delegate?.didSelect(imagevideo: imagevideo)
+        controller.dismiss(animated: false, completion: {
+            self.delegate?.didSelect(imagevideo: imagevideo)
+        })
     }
 }
 

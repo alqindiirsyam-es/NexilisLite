@@ -88,6 +88,11 @@ public class MasterKeyUtil {
         }
     }
     
+    func getServerKeyIV() -> Data {
+        let keyData = base64toData(Utils.getSecureFolderEncryptIv()) ?? Data()
+        return keyData
+    }
+    
     func getMasterKey() throws -> SymmetricKey {
         if (Nexilis.checkingAccess(key: "authentication") && isDeviceNotSecure()) {
             var result = false
