@@ -1268,7 +1268,7 @@ public class Nexilis: NSObject {
     }
     
     static func saveMessage(message: TMessage, withStatus: Bool = true) {
-        print("save message \(message.toLogString())")
+//        print("save message \(message.toLogString())")
         guard let me = User.getMyPin() else {
             return
         }

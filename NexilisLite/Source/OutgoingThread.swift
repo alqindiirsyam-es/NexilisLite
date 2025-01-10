@@ -125,7 +125,7 @@ class OutgoingThread {
     }
     
     private func process(message: TMessage) {
-        print("outgoing process", message.toLogString())
+//        print("outgoing process", message.toLogString())
         if self.isWait {
             queue.append(message)
             return
