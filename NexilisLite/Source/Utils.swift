@@ -589,7 +589,8 @@ public final class Utils {
         let apiKey: String = SecureUserDefaults.shared.value(forKey: "apiKey") ?? ""
         let parameters = [
             "app_id": APIS.getAppNm(),
-            "apikey": apiKey
+            "apikey": apiKey,
+            "f_pin": User.getMyPin()
         ]
         var jsonArray: [[String: Any]] = []
         jsonArray.append(parameters)
@@ -741,6 +742,21 @@ public final class Utils {
                     }
                     if Array(json.keys)[i] == "fb_icon_center" {
                         Utils.setIconCenter(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "tab1_icon" {
+                        Utils.setTab1Icon(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "tab2_icon" {
+                        Utils.setTab2Icon(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "tab3_icon" {
+                        Utils.setTab3Icon(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "tab4_icon" {
+                        Utils.setTab4Icon(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "indicator_tab_image" {
+                        Utils.setIndicatorTabImage(value: Array(json.values)[i] as? String ?? "")
                     }
                 }
                 Utils.setFinishInitPrefs(value: true)
@@ -1205,6 +1221,15 @@ public final class Utils {
             return value
         }
         return "0"
+    }
+    public static func setIndicatorTabImage(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "indicator_tab_image")
+    }
+    public static func getIndicatorTabImage() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "indicator_tab_image") {
+            return value
+        }
+        return ""
     }
     static func setDebugBC(value: [String: String]) {
         SecureUserDefaults.shared.set(value, forKey: "debugBc")

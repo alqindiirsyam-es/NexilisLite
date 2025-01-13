@@ -335,11 +335,7 @@ public class FloatingButton: UIView {
             return
         }
         if groupView.subviews.count == 0 {
-            if !Utils.getHistoryPullFB().isEmpty {
-                setFBFromPull()
-            } else {
-                getDefaultButton()
-            }
+            getDefaultButton()
         }
         DispatchQueue.global().async { [self] in
             if !Utils.getCustomButtons().isEmpty && configModeFB != MODE_HORIZONTAL_SIDE_TAB && configModeFB != MODE_HORIZONTAL_ANIMATION && configModeFB != MODE_VERTICAL_SIDE_TAB && Nexilis.fromMAB {
@@ -355,12 +351,21 @@ public class FloatingButton: UIView {
                         let newButton = UIButton()
                         newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                         newButton.translatesAutoresizingMaskIntoConstraints = false
-                        DispatchQueue.global().async {[self] in
-                            getDataImageFromUrl(from: URL(string: Utils.getURLBase() + "get_file_from_path?img=" + icon)!) { data, response, error in
+                        DispatchQueue.global().async {
+                            let urlString = Utils.getURLBase() + "get_file_from_path?img=" + icon
+                            if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                                DispatchQueue.main.async() {
+                                    newButton.setImage(cachedImage, for: .normal)
+                                }
+                                return
+                            }
+                            Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
                                 guard let data = data, error == nil else { return }
-                                DispatchQueue.main.async {
+                                // always update the UI from the main thread
+                                DispatchQueue.main.async() {
                                     if let image = UIImage(data: data) {
                                         newButton.setImage(image, for: .normal)
+                                        ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
                                     }
                                 }
                             }
@@ -371,12 +376,15 @@ public class FloatingButton: UIView {
                         newButton.addTarget(self, action: #selector(fbTap), for: .touchUpInside)
                     }
                 }
-                return
-            }
-            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullFloatingButton(), timeout: 30 * 1000){
-                if response.isOk() {
-                    Utils.setHistoryPullFB(value: response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: ""))
+            } else {
+                if !Utils.getHistoryPullFB().isEmpty {
                     setFBFromPull()
+                }
+                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullFloatingButton(), timeout: 30 * 1000){
+                    if response.isOk() {
+                        Utils.setHistoryPullFB(value: response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: ""))
+                        setFBFromPull()
+                    }
                 }
             }
         }
@@ -443,11 +451,22 @@ public class FloatingButton: UIView {
                                     newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_more" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_more" : "pb_button_others", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
                                 }
                                 if !icon.isEmpty {
-                                    DispatchQueue.global().async { [self] in
-                                        getDataImageFromUrl(from: URL(string: Utils.getURLBase() + "get_file_from_path?img=" + icon)!) { data, response, error in
+                                    DispatchQueue.global().async {
+                                        let urlString = Utils.getURLBase() + "get_file_from_path?img=" + icon
+                                        if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                                            DispatchQueue.main.async() {
+                                                newButton.setImage(cachedImage, for: .normal)
+                                            }
+                                            return
+                                        }
+                                        Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
                                             guard let data = data, error == nil else { return }
-                                            DispatchQueue.main.async {
-                                                newButton.setImage(UIImage(data: data), for: .normal)
+                                            // always update the UI from the main thread
+                                            DispatchQueue.main.async() {
+                                                if let image = UIImage(data: data) {
+                                                    newButton.setImage(image, for: .normal)
+                                                    ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
+                                                }
                                             }
                                         }
                                     }
@@ -462,13 +481,6 @@ public class FloatingButton: UIView {
                 }
             }
         }
-    }
-    
-    private func getDataImageFromUrl(from url: URL, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
-        let urlConfig = URLSessionConfiguration.default
-        let sessionDelegate = SelfSignedURLSessionDelegate()
-        let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
-        session.dataTask(with: url, completionHandler: completion).resume()
     }
     
     func getDefaultButton() {

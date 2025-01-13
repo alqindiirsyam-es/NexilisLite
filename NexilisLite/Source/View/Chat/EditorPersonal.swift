@@ -4215,10 +4215,10 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 return
             }
             for i in 0..<countSelected {
-                if let groupingImages = groupImages[dataMessages[i]["message_id"] as! String] {
+                if groupImages[dataMessages[i]["message_id"] as! String] != nil {
                     var tempData = dataMessages
                     tempData.remove(at: 0)
-                    var dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"] as! String]!).map({ $0.dataMessage })
+                    let dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"] as! String]!).map({ $0.dataMessage })
                     tempData.insert(contentsOf: dataMessageInGrouping, at: i)
                     dataMessages = tempData
                 }

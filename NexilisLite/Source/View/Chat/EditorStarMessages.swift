@@ -991,7 +991,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         row["video_id"] = cursorData.string(forColumnIndex: 8)
                         row["image_id"] = cursorData.string(forColumnIndex: 9)
                         row["thumb_id"] = cursorData.string(forColumnIndex: 10)
-                        row["read_receipts"] = cursorData.int(forColumnIndex: 11)
+                        row["read_receipts"] = cursorData.string(forColumnIndex: 11)
                         row["chat_id"] = cursorData.string(forColumnIndex: 12)
                         row["file_id"] = cursorData.string(forColumnIndex: 13)
                         row["attachment_flag"] = cursorData.string(forColumnIndex: 14)
