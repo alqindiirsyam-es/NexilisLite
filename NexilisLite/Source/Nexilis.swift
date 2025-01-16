@@ -415,6 +415,10 @@ public class Nexilis: NSObject {
     private static func getFeatureAccess() {
         DispatchQueue.global().async {
             Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "get_feature_access_new")!) { data, response, error in
+                let response = response as? HTTPURLResponse
+                if response?.statusCode != 200 || error != nil {
+                    return
+                }
                 if let data = data, let responseString = String(data: data, encoding: .utf8) {
                     if let jsonArray = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                         do {
@@ -1371,7 +1375,9 @@ public class Nexilis: NSObject {
                 if !withStatus {
                     if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select counter from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
                         counter = Int(cursor.int(forColumnIndex: 0))
-                        counter! += 1
+                        if last_edited == 0 {
+                            counter! += 1
+                        }
                         cursor.close()
                         //print("select db message summary")
                     }
@@ -3543,7 +3549,7 @@ extension Nexilis: MessageDelegate {
                         text = "Sent File 📄"
                     }
                 } else if !message.getBody(key: audioId).isEmpty {
-                    text = "Sent Audio 🎵"
+                    text = "Sent Audio ♫"
                 } else if message.getBody(key: messageText).contains("Share%20location%20") {
                     text = "Sent Location 📌"
                 } else if message.getBody(key: attachmentFlag) == "27" {

@@ -11,6 +11,8 @@ import FMDB
 import NotificationBannerSwift
 import Toast_Swift
 import nuSDKService
+import AVFoundation
+import AVKit
 
 public class APIS: NSObject {
     public static func connect(appName: String, apiKey: String, delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
@@ -810,6 +812,31 @@ public class APIS: NSObject {
     
     public static func setPreventScreenCapture(isActive: Bool) {
 //        Utils.bPreventScreenCapture = isActive
+    }
+    
+    public static func openImageNexilis(image: UIImage) {
+        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+        previewImageVC.image = image
+        previewImageVC.isHiddenTextField = true
+        previewImageVC.modalPresentationStyle = .custom
+        previewImageVC.modalTransitionStyle  = .crossDissolve
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(previewImageVC, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(previewImageVC, animated: true, completion: nil)
+        }
+    }
+    
+    public static func openVideoNexilis(videoURL: URL) {
+        let player = AVPlayer(url: videoURL)
+        let playerVC = AVPlayerViewController()
+        playerVC.modalPresentationStyle = .custom
+        playerVC.player = player
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(playerVC, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(playerVC, animated: true, completion: nil)
+        }
     }
     
     private static var appNm = "";

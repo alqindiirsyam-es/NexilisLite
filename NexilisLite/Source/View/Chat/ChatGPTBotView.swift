@@ -11,9 +11,6 @@ import NotificationBannerSwift
 import nuSDKService
 
 class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
-    
-    let CHATGPT_URL = "https://nexilis.io:8439/gpt"
-    
     public var dataPerson : [String: String?] = [
         "f_pin" : "-997",
         "firstName" : "GPT SmartBot",
@@ -351,9 +348,8 @@ class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         dataMessages.append(row)
         var gptRow : [String: String] = [:]
         gptRow["role"] = row["f_pin"] as! String == "-997" ? "assistant" : "user"
-        gptRow["content"] = row["message_text"] as! String
+        gptRow["content"] = row["message_text"] as? String
         chatGPTMessages.append(gptRow)
-        let jsonBody = Payload(use_video: "0", payload: chatGPTMessages)
         request(mesage: row["message_text"] as! String)
         tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"] as! String == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .none)
         if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintViewTextField.constant == 0 {
@@ -577,12 +573,6 @@ class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                 print("Error encoding data: \(error.localizedDescription)")
             }
         }
-//        AF.request(CHATGPT_URL, method: .post, parameters: data, encoder: JSONParameterEncoder.default)
-//            .responseJSON{ response in
-//                if let result = response.value as? [String: Any], let message = result["message"] as? [String: String] {
-//                    
-//                }
-//            }
     }
     
     func loadData(){

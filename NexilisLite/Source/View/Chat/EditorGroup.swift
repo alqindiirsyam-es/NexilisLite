@@ -98,6 +98,13 @@ public class EditorGroup: UIViewController {
     var lastY: CGFloat = 0
     var listTimerCredential: [String: Int] = [:]
     var timerCredential: [String: Timer] = [:]
+    var audioPlayer: AVAudioPlayer?
+    var editVC = UIViewController()
+    var editTextView = UITextView()
+    var isEditingMessage = false
+    var constraintBottomeditTextView: NSLayoutConstraint!
+    var constraintHeighteditTextView: NSLayoutConstraint!
+    var constraintBottomSendEditTV: NSLayoutConstraint!
     
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
@@ -532,11 +539,11 @@ public class EditorGroup: UIViewController {
     private func getData() {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"] as! String)' order by server_date asc"
+                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"] as! String)' order by server_date asc"
                 if isHistoryCC {
                     query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc"
                 } else if (dataTopic["chat_id"] as! String != "") {
-                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where chat_id='\(dataTopic["chat_id"] as! String)' order by server_date asc"
+                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited FROM MESSAGE where chat_id='\(dataTopic["chat_id"] as! String)' order by server_date asc"
                 }
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     var tempImages: [ImageGrouping] = []
@@ -562,6 +569,7 @@ public class EditorGroup: UIViewController {
                         row["is_stared"] = cursorData.string(forColumnIndex: 17)
                         row["blog_id"] = cursorData.string(forColumnIndex: 18)
                         row["credential"] = cursorData.string(forColumnIndex: 19)
+                        row[TypeDataMessage.last_edit] = cursorData.longLongInt(forColumnIndex: 20)
                         row["isSelected"] = false
                         if row["credential"] != nil && row["credential"] as! String == "1" {
                             let idMe = User.getMyPin()!
@@ -937,6 +945,18 @@ public class EditorGroup: UIViewController {
                 let group_id = self.dataGroup["group_id"] as! String
                 let chat_id = self.dataTopic["chat_id"] as! String
                 if chatData[CoreMessage_TMessageKey.L_PIN] == group_id && (chatData[CoreMessage_TMessageKey.CHAT_ID] ?? "") == chat_id {
+                    let idx = self.dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == chatData[CoreMessage_TMessageKey.MESSAGE_ID]})
+                    if idx != nil {
+                        self.dataMessages[idx!][TypeDataMessage.message_text] = chatData[CoreMessage_TMessageKey.MESSAGE_TEXT]
+                        self.dataMessages[idx!][TypeDataMessage.last_edit] = Int64(chatData[CoreMessage_TMessageKey.LAST_EDIT]!)
+                        self.dataMessages[idx!][TypeDataMessage.status] = chatData[CoreMessage_TMessageKey.STATUS]
+                        let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
+                        let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                        if row != nil && section != nil  {
+                            self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                        }
+                        return
+                    }
                     var row: [String: Any?] = [:]
                     row["message_id"] = chatData[CoreMessage_TMessageKey.MESSAGE_ID]
                     row["f_pin"] = chatData[CoreMessage_TMessageKey.F_PIN]
@@ -1500,7 +1520,7 @@ public class EditorGroup: UIViewController {
     }
     
     @objc func keyboardWillShow(notification: NSNotification) {
-        if self.viewIfLoaded?.window != nil {
+        if self.viewIfLoaded?.window != nil && !isEditingMessage {
             if (self.constraintBottomAttachment.constant != 0.0) {
                 self.constraintBottomAttachment.constant = 0.0
                 self.viewSticker.removeConstraints(self.viewSticker.constraints)
@@ -1536,11 +1556,24 @@ public class EditorGroup: UIViewController {
                     }
                 }
             }
+        }  else if isEditingMessage {
+            let info:NSDictionary = notification.userInfo! as NSDictionary
+            let keyboardSize = (info[UIResponder.keyboardFrameEndUserInfoKey] as! NSValue).cgRectValue
+            
+            let keyboardHeight: CGFloat = keyboardSize.height
+            
+            let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
+            let constant: CGFloat = 0 - keyboardHeight - 15
+            constraintBottomeditTextView.constant = constant
+            constraintBottomSendEditTV.constant = constant
+            UIView.animate(withDuration: TimeInterval(duration), animations: {
+                self.view.layoutIfNeeded()
+            })
         }
     }
     
     @objc func keyboardWillHide(notification: NSNotification) {
-        if self.viewIfLoaded?.window != nil {
+        if self.viewIfLoaded?.window != nil && !isEditingMessage {
             let info:NSDictionary = notification.userInfo! as NSDictionary
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
@@ -2175,7 +2208,7 @@ extension EditorGroup: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPrevi
             let urlFile = self.previewItem?.absoluteString
             var originaFileName = (urlFile! as NSString).lastPathComponent
             originaFileName = NSString(string: originaFileName).removingPercentEncoding!
-            let renamedNameFile = "Qmera_doc_" + "\(Date().currentTimeMillis())_" + originaFileName
+            let renamedNameFile = "Nexilis_doc_" + "\(Date().currentTimeMillis())_" + originaFileName
             let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
             let fileURL = documentsDirectory.appendingPathComponent(renamedNameFile)
             if !FileManager.default.fileExists(atPath: fileURL.path) {
@@ -2250,20 +2283,50 @@ extension EditorGroup: UITextViewDelegate {
         if !isShowMention {
             hideMention()
         }
-        let cursorPosition = textView.caretRect(for: self.textFieldSend.selectedTextRange!.start).origin
-        let currentLine = Int(cursorPosition.y / self.textFieldSend.font!.lineHeight)
-        UIView.animate(withDuration: 0.3) {
-            let numberOfLines = textView.textContainer.lineBreakMode == .byWordWrapping ? Int(textView.contentSize.height / textView.font!.lineHeight) - 1 : 1
-            if currentLine == 0 && numberOfLines == 1 {
-                self.heightTextFieldSend.constant = 40
-            } else if self.heightTextFieldSend.constant < 95.0 && currentLine >= 4 {
-                self.heightTextFieldSend.constant = 95.0
-            } else if currentLine < 4 && numberOfLines < 5 {
-                if (self.textFieldSend.text.count > 0 && self.heightTextFieldSend.constant != self.textFieldSend.contentSize.height) {
-                    self.heightTextFieldSend.constant = self.textFieldSend.contentSize.height
+        var nowTextFieldSend = self.textFieldSend
+        if isEditingMessage {
+            nowTextFieldSend = editTextView
+        }
+        let cursorPosition = textView.caretRect(for: nowTextFieldSend!.selectedTextRange!.start).origin
+        let doubleCurrentLine = cursorPosition.y / nowTextFieldSend!.font!.lineHeight
+        if doubleCurrentLine.isFinite {
+            let currentLine = Int(doubleCurrentLine)
+            UIView.animate(withDuration: 0.3) {
+                let numberOfLines = textView.textContainer.lineBreakMode == .byWordWrapping ? Int(textView.contentSize.height / textView.font!.lineHeight) - 1 : 1
+                if currentLine == 0 && numberOfLines == 1 {
+                    self.heightTextFieldSend.constant = 40
+                    if self.isEditingMessage {
+                        self.constraintHeighteditTextView.constant = 40
+                    }
+                } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintHeighteditTextView != nil && self.constraintHeighteditTextView.constant < 95.0)) && currentLine >= 4 {
+                    self.heightTextFieldSend.constant = 95.0
+                    if self.isEditingMessage {
+                        self.constraintHeighteditTextView.constant = 95.0
+                    }
+                } else if currentLine < 4 && numberOfLines < 5 {
+                    if (nowTextFieldSend!.text.count > 0 && self.heightTextFieldSend.constant != nowTextFieldSend!.contentSize.height) {
+                        self.heightTextFieldSend.constant = nowTextFieldSend!.contentSize.height
+                        if self.isEditingMessage {
+                            self.constraintHeighteditTextView.constant = nowTextFieldSend!.contentSize.height
+                        }
+                    }
                 }
             }
         }
+//        let cursorPosition = textView.caretRect(for: self.textFieldSend.selectedTextRange!.start).origin
+//        let currentLine = Int(cursorPosition.y / self.textFieldSend.font!.lineHeight)
+//        UIView.animate(withDuration: 0.3) {
+//            let numberOfLines = textView.textContainer.lineBreakMode == .byWordWrapping ? Int(textView.contentSize.height / textView.font!.lineHeight) - 1 : 1
+//            if currentLine == 0 && numberOfLines == 1 {
+//                self.heightTextFieldSend.constant = 40
+//            } else if self.heightTextFieldSend.constant < 95.0 && currentLine >= 4 {
+//                self.heightTextFieldSend.constant = 95.0
+//            } else if currentLine < 4 && numberOfLines < 5 {
+//                if (self.textFieldSend.text.count > 0 && self.heightTextFieldSend.constant != self.textFieldSend.contentSize.height) {
+//                    self.heightTextFieldSend.constant = self.textFieldSend.contentSize.height
+//                }
+//            }
+//        }
     }
     
     public func textViewDidChange(_ textView: UITextView) {
@@ -2643,7 +2706,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath!.section]})
         var star: UIAction
         if (dataMessages[indexPath!.row]["is_stared"] as! String == "0") {
-            star = UIAction(title: "Star".localized(), image: UIImage(systemName: "star.fill"), handler: {(_) in
+            star = UIAction(title: "Star".localized(), image: UIImage(systemName: "star"), handler: {(_) in
                 if self.removed {
                     return
                 }
@@ -2666,7 +2729,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.tableChatView.reloadRows(at: [indexPath!], with: .none)
             })
         } else {
-            star = UIAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash.fill"), handler: {(_) in
+            star = UIAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash"), handler: {(_) in
                 if self.removed {
                     return
                 }
@@ -2690,7 +2753,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             })
         }
         
-        let reply = UIAction(title: "Reply".localized(), image: UIImage(systemName: "arrowshape.turn.up.left.fill"), handler: {(_) in
+        let reply = UIAction(title: "Reply".localized(), image: UIImage(systemName: "arrowshape.turn.up.left"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -2701,7 +2764,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.handleReply(indexPath: indexPath!)
             })
         })
-        let forward = UIAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right.fill"), handler: {(_) in
+        let forward = UIAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -2727,7 +2790,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.tableChatView.reloadData()
             }
         })
-        let copy = UIAction(title: "Copy".localized(), image: UIImage(systemName: "doc.on.doc.fill"), handler: {(_) in
+        let copy = UIAction(title: "Copy".localized(), image: UIImage(systemName: "doc.on.doc"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -2753,7 +2816,88 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.tableChatView.reloadData()
             }
         })
-        let info = UIAction(title: "Info".localized(), image: UIImage(systemName: "info.circle.fill"), handler: {(_) in
+        let edit = UIAction(title: "Edit".localized(), image: UIImage(systemName: "pencil.tip.crop.circle"), handler: {(_) in
+            self.isEditingMessage = true
+            self.showEditMessageView(at: indexPath!)
+        })
+        let translate = UIAction(title: "Translate".localized(), image: UIImage(systemName: "t.bubble"), handler: {(_) in
+            self.showToast(message: "Translating...".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+            var translation: String = "English"
+            let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
+            if lang == "id" {
+                translation = "Indonesia"
+            }
+            let payload: [String : Any] = [
+                "role": "user",
+                "content": dataMessages[indexPath!.row][TypeDataMessage.message_text]!!
+            ]
+            let parameter: [String : Any] = [
+                "use_video": "0",
+                "translate": translation,
+                "payload": [payload]
+            ]
+            DispatchQueue.global().async {
+                Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getGPTBotUrl())!, parameter: parameter, completion: { data, response, error in
+                    let response = response as? HTTPURLResponse
+                    if response?.statusCode != 200 || error != nil {
+                        DispatchQueue.main.async {
+                            self.showToast(message: "There is an error occurred while translating your message. Please try again or check your network connection.".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                        }
+                        return
+                    }
+                    if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                        if let json = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: String] {
+                            let dataContent = json["content"]!
+                            let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String})
+                            if idx != nil{
+                                self.dataMessages[idx!][TypeDataMessage.message_text] = dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String + "\n\n" + "%\(dataContent)%"
+                            }
+                            DispatchQueue.main.async{
+                                self.tableChatView.reloadRows(at: [indexPath!], with: .none)
+                            }
+                        }
+                    }
+                })
+            }
+        })
+        let gcs = UIAction(title: "Get Chat Suggestion".localized(), image: UIImage(systemName: "exclamationmark.bubble"), handler: {(_) in
+            self.showToast(message: "Getting chat suggestion...".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+            let payload: [String : Any] = [
+                "role": "user",
+                "content": dataMessages[indexPath!.row][TypeDataMessage.message_text]!!
+            ]
+            let parameter: [String : Any] = [
+                "use_video": "0",
+                "suggest": "1",
+                "payload": [payload]
+            ]
+            DispatchQueue.global().async {
+                Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getGPTBotUrl())!, parameter: parameter, completion: { data, response, error in
+                    let response = response as? HTTPURLResponse
+                    if response?.statusCode != 200 || error != nil {
+                        DispatchQueue.main.async {
+                            self.showToast(message: "There is an error occurred while translating your message. Please try again or check your network connection.".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                        }
+                        return
+                    }
+                    if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                        if let json = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
+                            if let dataMessage = json["message"] as? [[String: Any]] {
+                                if let dataContent = dataMessage[0]["content"] as? String {
+                                    DispatchQueue.main.async{
+                                        self.textFieldSend.text = dataContent
+                                        self.textFieldSend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black
+                                    }
+                                }
+                            }
+                            
+                        }
+                    }
+                })
+            }
+        })
+        let more = UIMenu(title: "More...".localized(), children: [translate, gcs])
+        let info = UIAction(title: "Info".localized(), image: UIImage(systemName: "info.circle"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -2763,7 +2907,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             messageInfoVC.isPersonal = false
             self.navigationController?.pushViewController(messageInfoVC, animated: true)
         })
-        let delete = UIAction(title: "Delete".localized(), image: UIImage(systemName: "trash.fill"), attributes: .destructive, handler: {(_) in
+        let delete = UIAction(title: "Delete".localized(), image: UIImage(systemName: "trash"), attributes: .destructive, handler: {(_) in
             if self.removed {
                 return
             }
@@ -2853,6 +2997,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         })
         
         var children: [UIMenuElement] = [star, reply, forward, copy, delete]
+        var isMore = false
 //        let copyOption = self.copyOption(indexPath: indexPath!)
         let idMe = User.getMyPin() as String?
         
@@ -2885,12 +3030,150 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
                 children.insert(info, at: children.count - 1)
             }
+            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String).isEmpty {
+                if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
+                    children.insert(edit, at: children.count - 1)
+                }
+                if !(dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String).isEmpty {
+                    if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
+                        children.insert(edit, at: children.count - 1)
+                    }
+                    isMore = true
+                }
+            }
         }
         
+        let mainMenu = UIMenu(title: "", options: [.displayInline],
+                              children: children)
+        var menuForShow = UIMenu(title: "", children: [mainMenu])
+        if isMore {
+            menuForShow = UIMenu(title: "", children: [mainMenu, more])
+        }
         return UIContextMenuConfiguration(identifier: nil,
                                           previewProvider: nil) { _ in
-            UIMenu(title: "", children: children)
+            return menuForShow
         }
+    }
+    
+    func showEditMessageView(at indexPath: IndexPath) {
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
+        let oldText = dataMessages[indexPath.row][TypeDataMessage.message_text] as! String
+        editVC = UIViewController()
+        if let view = editVC.view {
+            view.backgroundColor = .clear
+            let blurView = UIView()
+            let blurEffect = UIBlurEffect(style: .systemUltraThinMaterialLight)
+            let blurEffectView = UIVisualEffectView(effect: blurEffect)
+            blurEffectView.frame = blurView.bounds
+            blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            blurView.addSubview(blurEffectView)
+            blurView.sendSubviewToBack(blurEffectView)
+            view.addSubview(blurView)
+            blurView.anchor(top: view.topAnchor, left: view.leftAnchor, bottom: view.bottomAnchor, right: view.rightAnchor)
+            
+            let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissEditVC))
+            tapGesture.cancelsTouchesInView = false
+            view.addGestureRecognizer(tapGesture)
+            
+            editTextView = UITextView()
+            editTextView.layer.cornerRadius = textFieldSend.maxCornerRadius()
+            editTextView.layer.borderWidth = 1.0
+            editTextView.textColor = UIColor.black
+            editTextView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+            editTextView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 11, right: 40)
+            editTextView.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.5).cgColor
+            editTextView.font = UIFont.systemFont(ofSize: 12)
+            editTextView.delegate = self
+            editTextView.allowsEditingTextAttributes = true
+            editTextView.backgroundColor = .clear
+            view.addSubview(editTextView)
+            editTextView.anchor(left: view.leftAnchor, right: view.rightAnchor, paddingLeft: 15, paddingRight: 15)
+            constraintBottomeditTextView = editTextView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -15)
+            constraintHeighteditTextView = editTextView.heightAnchor.constraint(equalToConstant: 40)
+            constraintBottomeditTextView.isActive = true
+            constraintHeighteditTextView.isActive = true
+            editTextView.text = oldText
+            editTextView.becomeFirstResponder()
+            
+            let buttonSend = UIButton(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+            buttonSend.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
+            buttonSend.circle()
+            buttonSend.actionHandle(controlEvents: .touchUpInside,
+             ForAction:{() -> Void in
+                let newText = self.editTextView.text ?? ""
+                if newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
+                    let lastEdited = 1 + ((dataMessages[indexPath.row][TypeDataMessage.last_edit] as? Int64) ?? 0)
+                    let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id] as! String, l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin] as! String, message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as! String, status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential] as! String, attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as! String, ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id] as! String, message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id] as! String, audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id] as! String, video_id: dataMessages[indexPath.row][TypeDataMessage.video_id] as! String, file_id: dataMessages[indexPath.row][TypeDataMessage.file_id] as! String, thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id] as! String, reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id] as! String, read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts] as! String, chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id] as! String, is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center] as! String, call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id] as! String, opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin] as! String, last_edit: lastEdited)
+                    Nexilis.addQueueMessage(message: message, isEditMessage: true)
+                    DispatchQueue.global().async {
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            do {
+                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                    "message_text" : newText,
+                                    "last_edited" : lastEdited
+                                ], _where: "message_id = '\(dataMessages[indexPath.row]["message_id"] as! String)'")
+                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                            } catch {
+                                rollback.pointee = true
+                                print("Access database error: \(error.localizedDescription)")
+                            }
+                        })
+                    }
+                    let idx = self.dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == dataMessages[indexPath.row][TypeDataMessage.message_id] as? String})
+                    if idx != nil{
+                        self.dataMessages[idx!][TypeDataMessage.message_text] = newText
+                        self.dataMessages[idx!][TypeDataMessage.last_edit] = lastEdited
+                        self.tableChatView.reloadRows(at: [indexPath], with: .none)
+                    }
+                }
+             })
+            buttonSend.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+            view.addSubview(buttonSend)
+            buttonSend.anchor(right: view.rightAnchor, paddingRight: 15, width: 40, height: 40)
+            constraintBottomSendEditTV = buttonSend.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -15)
+            constraintBottomSendEditTV.isActive = true
+            
+            let viewMessage = UIView()
+            view.addSubview(viewMessage)
+            viewMessage.translatesAutoresizingMaskIntoConstraints = false
+            if (dataMessages[indexPath.row][TypeDataMessage.f_pin] as? String == User.getMyPin()) {
+                viewMessage.leftAnchor.constraint(greaterThanOrEqualTo: view.leftAnchor, constant: 60).isActive = true
+                viewMessage.rightAnchor.constraint(equalTo: view.rightAnchor, constant: -15).isActive = true
+                viewMessage.backgroundColor = .blueBubbleColor
+                viewMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner, .layerMinXMinYCorner]
+            } else {
+                viewMessage.rightAnchor.constraint(lessThanOrEqualTo: view.rightAnchor, constant: 60).isActive = true
+                viewMessage.leftAnchor.constraint(equalTo: view.leftAnchor, constant: 15).isActive = true
+                viewMessage.backgroundColor = .whiteBubbleColor
+                viewMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+            }
+            viewMessage.bottomAnchor.constraint(equalTo: editTextView.topAnchor, constant: -15).isActive = true
+            viewMessage.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            viewMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
+            viewMessage.layer.cornerRadius = 10.0
+            viewMessage.clipsToBounds = true
+            
+            let messageText = UILabel()
+            messageText.numberOfLines = 0
+            messageText.lineBreakMode = .byWordWrapping
+            viewMessage.addSubview(messageText)
+            messageText.translatesAutoresizingMaskIntoConstraints = false
+            messageText.topAnchor.constraint(equalTo: viewMessage.topAnchor, constant: 15).isActive = true
+            messageText.leadingAnchor.constraint(equalTo: viewMessage.leadingAnchor, constant: 15).isActive = true
+            messageText.bottomAnchor.constraint(equalTo: viewMessage.bottomAnchor, constant: -15).isActive = true
+            messageText.trailingAnchor.constraint(equalTo: viewMessage.trailingAnchor, constant: -15).isActive = true
+            messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+            messageText.font = .systemFont(ofSize: 12)
+            messageText.text = oldText
+        }
+        editVC.modalTransitionStyle = .crossDissolve
+        editVC.modalPresentationStyle = .overFullScreen
+        self.present(editVC, animated: true)
+    }
+    
+    @objc func dismissEditVC() {
+        self.isEditingMessage = false
+        editVC.dismiss(animated: true)
     }
     
     @objc func cancelAction() {
@@ -3686,6 +3969,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         let videoChat = dataMessages[indexPath.row]["video_id"] as! String
         let fileChat = dataMessages[indexPath.row]["file_id"] as! String
         let reffChat = dataMessages[indexPath.row]["reff_id"] as! String
+        let audioChat = (dataMessages[indexPath.row]["audio_id"] as? String) ?? ""
         let dataTimer = listTimerCredential[(dataMessages[indexPath.row]["message_id"] as! String)]
         
         cellMessage.contentView.addSubview(containerMessage)
@@ -4001,6 +4285,21 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             }
         }
         
+        if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
+            let editedText = UILabel()
+            editedText.text = "Edited".localized()
+            editedText.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+            editedText.textColor = .lightGray
+            cellMessage.contentView.addSubview(editedText)
+            editedText.translatesAutoresizingMaskIntoConstraints = false
+            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                editedText.trailingAnchor.constraint(equalTo: timeMessage.leadingAnchor, constant: -2).isActive = true
+            } else {
+                editedText.leadingAnchor.constraint(equalTo: timeMessage.trailingAnchor, constant: 2).isActive = true
+            }
+            editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
+        }
+        
         messageText.numberOfLines = 0
         messageText.lineBreakMode = .byWordWrapping
         containerMessage.addSubview(messageText)
@@ -4021,6 +4320,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             } else if dataMessages[indexPath.row]["attachment_flag"] as! String == "27" {
                 imageLS.image = UIImage(named: "pb_live_tv", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             }
+        } else if !audioChat.isEmpty {
+            messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 60).isActive = true
         } else {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
         }
@@ -4041,6 +4342,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         
         if dataMessages[indexPath.row]["lock"] as? String == "2" {
             textChat = "🚫 _"+"Message has expired".localized()+"_"
+        }
+        
+        if !audioChat.isEmpty {
+            textChat = textChat!.components(separatedBy: "|")[0]
         }
         
         let imageSticker = UIImageView()
@@ -4193,6 +4498,32 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         
         let imageThumb = UIImageView()
         let containerViewFile = UIView()
+        
+        if !audioChat.isEmpty {
+            let imageAudio = UIImageView()
+            imageAudio.image = UIImage(systemName: "music.note", withConfiguration: UIImage.SymbolConfiguration(pointSize: 35))
+            containerMessage.addSubview(imageAudio)
+            imageAudio.anchor(left: containerMessage.leftAnchor, paddingLeft: 15, centerY: containerMessage.centerYAnchor)
+            imageAudio.tintColor = .black
+            
+            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+            if let dirPath = paths.first {
+                let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(audioChat)
+                if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: audioChat) {
+                    Download().startHTTP(forKey: audioChat) { (name, progress) in
+                        guard progress == 100 else {
+                            return
+                        }
+                        tableView.reloadRows(at: [indexPath], with: .none)
+                    }
+                }
+            }
+            let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
+            containerMessage.addGestureRecognizer(objectTap)
+            objectTap.audio_id = audioChat
+        }
         
         if (thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1")) {
             if let listImages = groupImages[messageIdChat] {
@@ -4355,9 +4686,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     //                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
                     imageThumb.image = image
                     
-                    let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(videoChat)
                     let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
-                    if !FileManager.default.fileExists(atPath: imageURL.path) && !FileManager.default.fileExists(atPath: videoURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) && !FileEncryption.shared.isSecureExists(filename: videoURL.lastPathComponent){
+                    if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                         let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
                         let blurEffectView = UIVisualEffectView(effect: blurEffect)
                         blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
@@ -5308,6 +5638,44 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                                 self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
                             }
                         }
+                    }
+                }
+            }
+        } else if !sender.audio_id.isEmpty {
+            if let dirPath = paths.first {
+                let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.audio_id)
+                if FileManager.default.fileExists(atPath: audioURL.path) {
+                    do {
+                        if audioPlayer == nil || audioPlayer?.url != audioURL {
+                            audioPlayer = try AVAudioPlayer(contentsOf: audioURL)
+                            audioPlayer?.prepareToPlay()
+                            audioPlayer?.play()
+                        } else if audioPlayer!.isPlaying {
+                            audioPlayer?.pause()
+                        } else {
+                            audioPlayer?.play()
+                        }
+                    } catch {
+                        
+                    }
+                } else if FileEncryption.shared.isSecureExists(filename: sender.audio_id) {
+                    do {
+                        if let audioData = try FileEncryption.shared.readSecure(filename: sender.audio_id) {
+                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                            let tempPath = cachesDirectory.appendingPathComponent(sender.audio_id)
+                            try audioData.write(to: tempPath)
+                            if audioPlayer == nil || audioPlayer?.url != tempPath {
+                                audioPlayer = try AVAudioPlayer(contentsOf: tempPath)
+                                audioPlayer?.prepareToPlay()
+                                audioPlayer?.play()
+                            } else if audioPlayer!.isPlaying {
+                                audioPlayer?.pause()
+                            } else {
+                                audioPlayer?.play()
+                            }
+                        }
+                    } catch {
+                        
                     }
                 }
             }

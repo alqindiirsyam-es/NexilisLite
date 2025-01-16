@@ -418,6 +418,8 @@ public class FloatingButton: UIView {
                                 } else if mode == MODE_VERTICAL_SIDE_TAB {
                                     newButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
                                     newButton.heightAnchor.constraint(equalToConstant: 25).isActive = true
+                                    newButton.contentMode = .scaleAspectFit
+                                    newButton.clipsToBounds = true
                                 } else {
                                     newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                 }

@@ -11,7 +11,7 @@ import WebKit
 import Speech
 import CommonCrypto
 
-public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScrollViewDelegate, UIGestureRecognizerDelegate, WKScriptMessageHandler, SFSpeechRecognizerDelegate {
+public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScrollViewDelegate, UIGestureRecognizerDelegate, WKScriptMessageHandler, SFSpeechRecognizerDelegate, ImageVideoPickerDelegate {
     var webView = WKWebView()
     let closeButton = UIButton()
     public var customUrl = ""
@@ -24,6 +24,9 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     var recognitionTask : SFSpeechRecognitionTask?
     let audioEngine = AVAudioEngine()
     var alertController = LibAlertController()
+    
+    var indexImageVideoWv = 0
+    var imageVideoPicker: ImageVideoPicker!
     
     public override var preferredStatusBarStyle: UIStatusBarStyle {
         return .default
@@ -61,6 +64,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         contentController.add(self, name: "successChangeTheme")
         contentController.add(self, name: "finishForm")
         contentController.add(self, name: "shareText")
+        contentController.add(self, name: "openGalleryiOS")
         
         let source: String = "var meta = document.createElement('meta');" +
             "meta.name = 'viewport';" +
@@ -411,13 +415,116 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                 self.dismiss(animated: true)
             }
         } else if message.name == "shareText" {
-            print("HMM masuk share text")
             guard let dict = message.body as? [String: AnyObject],
                   let param1 = dict["param1"] as? String else {
                 return
             }
             let activityViewController = UIActivityViewController(activityItems: [param1], applicationActivities: nil)
             self.present(activityViewController, animated: true, completion: nil)
+        }  else if message.name == "openGalleryiOS" {
+            guard let dict = message.body as? [String: AnyObject],
+                  let param1 = dict["param1"] as? Int else {
+                return
+            }
+            indexImageVideoWv = param1
+            let alertController = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+            
+            if let action = self.actionImageVideo(for: "image", title: "Choose Photo".localized()) {
+                alertController.addAction(action)
+            }
+            if let action = self.actionImageVideo(for: "video", title: "Choose Video".localized()) {
+                alertController.addAction(action)
+            }
+            alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
+            self.present(alertController, animated: true)
+        }
+    }
+    
+    private func actionImageVideo(for type: String, title: String) -> UIAlertAction? {
+        return UIAlertAction(title: title, style: .default) { [unowned self] _ in
+            switch type {
+            case "image":
+                imageVideoPicker.present(source: .imageAlbum)
+            case "video":
+                imageVideoPicker.present(source: .videoAlbum)
+            default:
+                imageVideoPicker.present(source: .imageAlbum)
+            }
+        }
+    }
+    
+    public func didSelect(imagevideo: Any?) {
+        if imagevideo != nil {
+            let imageData = imagevideo! as! [UIImagePickerController.InfoKey : Any]
+            if (imageData[.mediaType] as! String == "public.image") {
+                let compressedImage = (imageData[.originalImage] as! UIImage).pngData()!
+                let base64String = compressedImage.base64EncodedString()
+                let base64ToWeb = "data:image/jpeg;base64,\(base64String)"
+                webView.evaluateJavaScript("loadFromMobile('\(base64ToWeb)',\(indexImageVideoWv))") { (result, error) in
+                    if let error = error {
+                        print("Error executing JavaScript: \(error)")
+                    }
+                }
+            } else {
+                guard var dataVideo = try? Data(contentsOf: imageData[.mediaURL] as! URL) else {
+                    return
+                }
+                let sizeOfVideo = Double(dataVideo.count / 1048576)
+                if (sizeOfVideo > 10.0) {
+                    let compressedURL = NSURL.fileURL(withPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
+                    compressVideo(inputURL: imageData[.mediaURL] as! URL,
+                                  outputURL: compressedURL) { exportSession in
+                        guard let session = exportSession else {
+                            return
+                        }
+                        
+                        switch session.status {
+                        case .unknown:
+                            break
+                        case .waiting:
+                            break
+                        case .exporting:
+                            break
+                        case .completed:
+                            guard let compressedData = try? Data(contentsOf: compressedURL) else {
+                                return
+                            }
+                            dataVideo = compressedData
+                        case .failed:
+                            break
+                        case .cancelled:
+                            break
+                        @unknown default:
+                            break
+                        }
+                    }
+                }
+                let base64String = dataVideo.base64EncodedString()
+                let base64ToWeb = "data:video/mp4;base64,\(base64String)"
+                webView.evaluateJavaScript("loadFromMobile('\(base64ToWeb)',\(indexImageVideoWv))") { (result, error) in
+                    if let error = error {
+                        print("Error executing JavaScript: \(error)")
+                    }
+                }
+            }
+        }
+    }
+    
+    func compressVideo(inputURL: URL,
+                       outputURL: URL,
+                       handler:@escaping (_ exportSession: AVAssetExportSession?) -> Void) {
+        let urlAsset = AVURLAsset(url: inputURL, options: nil)
+        guard let exportSession = AVAssetExportSession(asset: urlAsset,
+                                                       presetName: AVAssetExportPresetMediumQuality) else {
+            handler(nil)
+            
+            return
+        }
+        
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .mp4
+        exportSession.exportAsynchronously {
+            handler(exportSession)
         }
     }
     

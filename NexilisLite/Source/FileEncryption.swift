@@ -11,7 +11,7 @@ import CommonCrypto
 
 public class FileEncryption {
     
-    static let shared = FileEncryption()
+    public static let shared = FileEncryption()
 
     private init() {}
     
@@ -33,7 +33,7 @@ public class FileEncryption {
         }
     }
     
-    func readSecure(filename: String) throws -> Data? {
+    public func readSecure(filename: String) throws -> Data? {
         let fileManager = FileManager.default
         let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let secureDir = documentDir.appendingPathComponent("secure")
@@ -41,7 +41,7 @@ public class FileEncryption {
         return try decryptToMemory(fileURL)
     }
     
-    func writeSecure(filename: String? = nil, fileURL : URL? = nil, data: Data? = nil) throws -> [Any]? {
+    public func writeSecure(filename: String? = nil, fileURL : URL? = nil, data: Data? = nil) throws -> [Any]? {
         let fileManager = FileManager.default
         let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let secureDir = documentDir.appendingPathComponent("secure")
@@ -60,7 +60,7 @@ public class FileEncryption {
         return [outputURL.lastPathComponent, outputURL]
     }
     
-    func isSecureExists(filename: String) -> Bool {
+    public func isSecureExists(filename: String) -> Bool {
         let fileManager = FileManager.default
         do {
             let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)

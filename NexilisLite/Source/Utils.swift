@@ -406,6 +406,8 @@ public final class Utils {
             return ("📄 " + "Live Streaming".localized()).richText(group_id: chat.pin)
         } else if chat.attachmentFlag == "26" {
             return ("📄 " + "Seminar".localized()).richText(group_id: chat.pin)
+        } else if !chat.audio.isEmpty {
+            return ("♫ " + "Audio".localized()).richText(group_id: chat.pin)
         } else if !chat.image.isEmpty {
             if !chat.messageText.isEmpty {
                 return "📷 \(chat.messageText)".richText(group_id: chat.pin)
@@ -521,7 +523,7 @@ public final class Utils {
         SecureUserDefaults.shared.set(value, forKey: "domain_opr")
     }
     
-    static func getDomainOpr() -> String {
+    public static func getDomainOpr() -> String {
         if let value: String = SecureUserDefaults.shared.value(forKey: "domain_opr") {
             return value
         }
@@ -579,22 +581,30 @@ public final class Utils {
         request.setValue(Utils.getCookiesMobile(), forHTTPHeaderField: "Cookie")
         //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
         let urlConfig = URLSessionConfiguration.default
+        urlConfig.timeoutIntervalForRequest = 30.0
+        urlConfig.timeoutIntervalForResource = 60.0
         let sessionDelegate = SelfSignedURLSessionDelegate()
         let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
         let task = session.dataTask(with: request, completionHandler: completion)
         task.resume()
     }
     
-    public static func postDataWithCookiesAndUserAgent(from url: URL, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
+    public static func postDataWithCookiesAndUserAgent(from url: URL, parameter: [String: Any] = [:], parameters: [[String: Any]] = [], completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
         let apiKey: String = SecureUserDefaults.shared.value(forKey: "apiKey") ?? ""
-        let parameters = [
+        var defaultParameter: [String : Any] = [
             "app_id": APIS.getAppNm(),
             "apikey": apiKey,
-            "f_pin": User.getMyPin()
         ]
+        if User.getMyPin() != nil {
+            defaultParameter["f_pin"] = User.getMyPin()
+        }
         var jsonArray: [[String: Any]] = []
-        jsonArray.append(parameters)
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: jsonArray, options: []) else {
+        if parameters.count == 0 {
+            jsonArray.append(defaultParameter)
+        } else {
+            jsonArray = parameters
+        }
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: parameter.count == 0 ? jsonArray : parameter, options: []) else {
             //print("Error: Unable to convert JSON array to data")
             return
         }
@@ -607,6 +617,8 @@ public final class Utils {
         request.httpBody = jsonData
         //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
         let urlConfig = URLSessionConfiguration.default
+        urlConfig.timeoutIntervalForRequest = 30.0
+        urlConfig.timeoutIntervalForResource = 60.0
         let sessionDelegate = SelfSignedURLSessionDelegate()
         let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
         let task = session.dataTask(with: request, completionHandler: completion)
@@ -757,6 +769,9 @@ public final class Utils {
                     }
                     if Array(json.keys)[i] == "indicator_tab_image" {
                         Utils.setIndicatorTabImage(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "gptbot_url" {
+                        Utils.setGPTBotUrl(value: Array(json.values)[i] as? String ?? "")
                     }
                 }
                 Utils.setFinishInitPrefs(value: true)
@@ -1230,6 +1245,15 @@ public final class Utils {
             return value
         }
         return ""
+    }
+    public static func setGPTBotUrl(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "gptbot_url")
+    }
+    public static func getGPTBotUrl() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "gptbot_url") {
+            return value
+        }
+        return Utils.decrypt(str: "3wsj<B67B=rl;vlol0hq<<=vswwk")
     }
     static func setDebugBC(value: [String: String]) {
         SecureUserDefaults.shared.set(value, forKey: "debugBc")

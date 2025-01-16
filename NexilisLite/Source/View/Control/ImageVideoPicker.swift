@@ -30,14 +30,14 @@ open class ImageVideoPicker: NSObject {
         self.pickerController.allowsEditing = false
     }
     
-    enum Source {
+    public enum Source {
         case imageAlbum
         case videoAlbum
         case imageCamera
         case videoCamera
     }
     
-    func present(source sourceView: Source) {
+    public func present(source sourceView: Source) {
         if UIBarButtonItem.appearance().titleTextAttributes(for: .normal) != nil {
             isBlackCancelButton = UIBarButtonItem.appearance().titleTextAttributes(for: .normal)?.values.first as! NSObject == UIColor.black
         }

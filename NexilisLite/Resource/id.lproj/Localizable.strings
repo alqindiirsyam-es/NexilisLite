@@ -377,4 +377,10 @@
 "Failed, blocked user" = "Gagal, pengguna telah diblokir";
 "Feature disabled.." = "Fitur dinonaktifkan..";
 "Message has expired" = "Pesan telah kadaluarsa";
+"More..." = "Lainnya...";
+"Translate" = "Terjemahkan";
+"Get Chat Suggestion" = "Dapatkan Saran Obrolan";
+"Translating..." = "Menerjemahkan...";
+"Getting chat suggestion..." = "Mendapatkan saran obrolan...";
+"There is an error occurred while translating your message. Please try again or check your network connection." = "Terjadi kesalahan saat menerjemahkan pesan Anda. Silakan coba lagi atau periksa koneksi jaringan Anda.";
 

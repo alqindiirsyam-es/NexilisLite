@@ -454,8 +454,8 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
             originalImageName = (urlImage! as NSString).lastPathComponent
         }
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let compressedImageName = "THUMB-Qmera_image_\(originalImageName)"
-        let thumbName = "THUMB_Qmera_image_\(originalImageName)"
+        let compressedImageName = "THUMB-Nexilis_image_\(originalImageName)"
+        let thumbName = "THUMB_Nexilis_image_\(originalImageName)"
         let fileURL = documentsDirectory.appendingPathComponent(compressedImageName)
         let compressedImage = (imageVideoData![.originalImage] as! UIImage).jpegData(compressionQuality:  1.0)
         if let data = compressedImage,
@@ -519,8 +519,8 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
         let urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString
         let originalVideoName = (urlVideo! as NSString).lastPathComponent
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let renamedVideoName = "Qmera_video_\(originalVideoName)"
-        let thumbName = "THUMB_Qmera_video_\(originalVideoName)"
+        let renamedVideoName = "Nexilis_video_\(originalVideoName)"
+        let thumbName = "THUMB_Nexilis_video_\(originalVideoName)"
         let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             do {
@@ -550,7 +550,7 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
             let urlFile = self.previewItem?.absoluteString
             var originaFileName = (urlFile! as NSString).lastPathComponent
             originaFileName = NSString(string: originaFileName).removingPercentEncoding!
-            let renamedNameFile = "Qmera_doc_" + "\(Date().currentTimeMillis())_" + originaFileName
+            let renamedNameFile = "Nexilis_doc_" + "\(Date().currentTimeMillis())_" + originaFileName
             let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
             let fileURL = documentsDirectory.appendingPathComponent(renamedNameFile)
             if !FileManager.default.fileExists(atPath: fileURL.path) {

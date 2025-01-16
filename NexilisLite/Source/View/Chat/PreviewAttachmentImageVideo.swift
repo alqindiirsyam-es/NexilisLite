@@ -286,8 +286,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 originalImageName = (urlImage! as NSString).lastPathComponent
             }
             let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let compressedImageName = "THUMB-Qmera_image_\(originalImageName)"
-            let thumbName = "THUMB_Qmera_image_\(originalImageName)"
+            let compressedImageName = "THUMB-Nexilis_image_\(originalImageName)"
+            let thumbName = "THUMB_Nexilis_image_\(originalImageName)"
             let fileURL = documentsDirectory.appendingPathComponent(compressedImageName)
             var compressedImage:Data?
             if (fromCopy) {
@@ -358,8 +358,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             let urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString
             let originalVideoName = (urlVideo! as NSString).lastPathComponent
             let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let renamedVideoName = "Qmera_video_\(originalVideoName)"
-            let thumbName = "THUMB_Qmera_video_\(originalVideoName)"
+            let renamedVideoName = "Nexilis_video_\(originalVideoName)"
+            let thumbName = "THUMB_Nexilis_video_\(originalVideoName)"
             let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
             if !FileManager.default.fileExists(atPath: fileURL.path) {
                 do {

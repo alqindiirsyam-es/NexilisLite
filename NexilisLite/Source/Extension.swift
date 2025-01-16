@@ -276,7 +276,7 @@ extension UIImage {
         return destinationData as Data
     }
     
-    func resize(target: CGSize) -> UIImage {
+    public func resize(target: CGSize) -> UIImage {
         // Determine the scale factor that preserves aspect ratio
         let widthRatio = target.width / size.width
         let heightRatio = target.height / size.height
@@ -810,6 +810,7 @@ extension String {
         let italicSign: Character = "_"
         let underlineSign: Character = "^"
         let strikethroughSign: Character = "~"
+        let italicGreySign: Character = "%"
         var locationBold: [NSRange] = []
         
         //Bold
@@ -989,6 +990,51 @@ extension String {
                 }
                 lastFirstRange = rangeStrikethrough[i].endIndex
                 continueCheckingStrikethrough = false
+            }
+        }
+        
+        //ItalicGrey
+        let textAfterStrikeThrough = finalText.string
+        let rangeItalicGrey = getRangeOfWordWithSign(sentence: textAfterStrikeThrough, sign: italicGreySign)
+        if rangeItalicGrey.count > 0 {
+            var lastFirstRange = -1
+            var countRemoveItalicGreySign = 0
+            var continueCheckingItalicGrey = false
+            var totalEmoji = 0
+            for i in 0..<rangeItalicGrey.count {
+                if rangeItalicGrey[i].startIndex > lastFirstRange {
+                    let charStart: Character = rangeItalicGrey[i].startIndex != 0 ? Array(textAfterStrikeThrough.substring(from: rangeItalicGrey[i].startIndex - 1, to: rangeItalicGrey[i].startIndex - 1))[0] : Array("0")[0]
+                    if (rangeItalicGrey[i].startIndex == 0 || (!charStart.isLetter && !charStart.isNumber)) {
+                        lastFirstRange = rangeItalicGrey[i].startIndex
+                        continueCheckingItalicGrey = true
+                    } else {
+                        continueCheckingItalicGrey = false
+                    }
+                }
+                if !continueCheckingItalicGrey {
+                    continue
+                }
+                if rangeItalicGrey[i].endIndex != (textAfterStrikeThrough.count-1) {
+                    let char: Character = Array(textAfterStrikeThrough.substring(from: rangeItalicGrey[i].endIndex + 1, to: rangeItalicGrey[i].endIndex + 1))[0]
+                    if char.isLetter || char.isNumber {
+                        continue
+                    }
+                }
+                let countEmojiBefore = finalText.string.substring(from: 0, to: lastFirstRange - (2*countRemoveItalicGreySign)).countEmojiCharacter()
+                let countEmoji = finalText.string.substring(from: lastFirstRange - (2*countRemoveItalicGreySign), to: rangeItalicGrey[i].endIndex - (2*countRemoveItalicGreySign)).countEmojiCharacter()
+                totalEmoji = countEmoji + countEmojiBefore
+                finalText.addAttribute(.font, value: italicFont, range: NSRange(location: lastFirstRange - (2*countRemoveItalicGreySign) + countEmojiBefore, length: (rangeItalicGrey[i].endIndex + countEmoji + 1) - lastFirstRange))
+                finalText.addAttribute(.foregroundColor, value: UIColor.darkGray, range: NSRange(location: lastFirstRange - (2*countRemoveItalicGreySign) + countEmojiBefore, length: (rangeItalicGrey[i].endIndex + countEmoji + 1) - lastFirstRange))
+                if !isEditing{
+                    finalText.mutableString.replaceOccurrences(of: "\(italicGreySign)", with: "", options: .literal, range: NSRange(location: lastFirstRange + countEmojiBefore - (2*countRemoveItalicGreySign), length: 1))
+                    finalText.mutableString.replaceOccurrences(of: "\(italicGreySign)", with: "", options: .literal, range: NSRange(location: rangeItalicGrey[i].endIndex + totalEmoji - (2*countRemoveItalicGreySign) - 1, length: 1))
+                    countRemoveItalicGreySign += 1
+                } else {
+                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: lastFirstRange + countEmojiBefore, length: 1))
+                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: rangeItalicGrey[i].endIndex + totalEmoji, length: 1))
+                }
+                lastFirstRange = rangeItalicGrey[i].endIndex
+                continueCheckingItalicGrey = false
             }
         }
         
@@ -1227,7 +1273,7 @@ extension UIImageView {
         set { objc_setAssociatedObject(self, &UIImageView.urlKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
 
-    func loadImageAsync(with urlString: String?, isGif: Bool = false) {
+    public func loadImageAsync(with urlString: String?, isGif: Bool = false) {
         // cancel prior task, if any
 
         weak var oldTask = currentTask
