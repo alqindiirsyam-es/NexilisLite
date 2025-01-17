@@ -57,6 +57,7 @@ class AddFriendTableViewController: UITableViewController {
         navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
         
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Scan QR".localized(), style: .plain, target: self, action: #selector(scanQR(sender:)))
         
         searchController = UISearchController(searchResultsController: nil)
         searchController.delegate = self
@@ -91,6 +92,49 @@ class AddFriendTableViewController: UITableViewController {
     
     @objc func cancel(sender: Any) {
         navigationController?.dismiss(animated: true, completion: nil)
+    }
+    
+    @objc func scanQR(sender: Any) {
+        let scannerVC = QRScannerController()
+        scannerVC.onQRCodeDetected = { qrCode in
+            print("Detected QR Code: \(qrCode)")
+            
+            let users = self.data.filter{ $0.pin == qrCode }
+            if users.count > 0 {
+                let user = users[0]
+                let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
+                controller.flag = .invite
+                controller.data = user.pin
+                controller.name = user.fullName
+                controller.picture = user.thumb
+                controller.isDismiss = {
+                    self.data.removeAll(where: {$0.pin == user.pin})
+                    if self.isFilltering {
+                        self.fillteredData.removeAll(where: {$0.pin == user.pin})
+                    }
+                    self.tableView.reloadData()
+        //            self.getData { d in
+        //                self.data = d
+        //                DispatchQueue.main.async {
+        //                    self.tableView.reloadData()
+        //                }
+        //            }
+                }
+                self.navigationController?.show(controller, sender: nil)
+            }
+            else {
+                let alert = UIAlertController(title: "User not found", message: "The QR code may be invalid.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                self.present(alert, animated: true, completion: nil)
+            }
+            
+            
+            // Handle the detected QR code here (e.g., navigate or show an alert)
+//            let alert = UIAlertController(title: "QR Code Detected", message: qrCode, preferredStyle: .alert)
+//            alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+//            self.present(alert, animated: true, completion: nil)
+        }
+        present(scannerVC, animated: true, completion: nil)
     }
     
     // MARK: - Data source

@@ -18,6 +18,7 @@ public class ProfileViewController: UITableViewController {
     @IBOutlet weak var message: UIButton!
     @IBOutlet weak var viewUserType: UIView!
     @IBOutlet weak var imageUserType: UIImageView!
+    @IBOutlet weak var qrImage: UIImageView!
     @IBOutlet weak var labelUserType: UILabel!
     @IBOutlet weak var buttonGroup: UIStackView!
     @IBOutlet weak var myViewGroup: UIView!
@@ -239,12 +240,20 @@ public class ProfileViewController: UITableViewController {
         labelChangePassword.text = "Change Password".localized()
         labelAcceptCall.text = "Accept Call".localized()
         buttonHistoryCC.setAttributedTitle(NSAttributedString(string: "Call Center History".localized(), attributes: [NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16), NSAttributedString.Key.foregroundColor : self.traitCollection.userInterfaceStyle == .dark ? UIColor.blackDarkMode : UIColor.white]), for: .normal)
+//        buttonQRCode.setAttributedTitle(NSAttributedString(string: "Show QR Code".localized(), attributes: [NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16), NSAttributedString.Key.foregroundColor : self.traitCollection.userInterfaceStyle == .dark ? UIColor.blackDarkMode : UIColor.white]), for: .normal)
         navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
         
         switchPrivateAccount.onTintColor = .mainColor
         switchAcceptCall.onTintColor = .mainColor
         buttonEditpass.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         buttonHistoryCC.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .secondaryColor : .black
+//        buttonQRCode.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .secondaryColor : .black
+        let qrTapGesture = UITapGestureRecognizer(target: self, action: #selector(showQR(sender:)))
+        qrImage.isUserInteractionEnabled = true
+        qrImage.contentMode = .scaleAspectFit
+        qrImage.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .secondaryColor : .black
+        qrImage.translatesAutoresizingMaskIntoConstraints = false
+        qrImage.addGestureRecognizer(qrTapGesture)
         
         if let me = User.getMyPin(), me == data || flag == Flag.me {
             buttonGroup.removeFromSuperview()
@@ -252,6 +261,8 @@ public class ProfileViewController: UITableViewController {
             imageVideoPicker = ImageVideoPicker(presentationController: self, delegate: self)
             buttonEditPass.addTarget(self, action: #selector(editPassword(sender:)), for: .touchUpInside)
             buttonHistoryCC.addTarget(self, action: #selector(historyCC(sender:)), for: .touchUpInside)
+//            buttonQRCode.addTarget(self, action: #selector(showQR(sender:)), for: .touchUpInside)
+            
             if myData?.privacy_flag == "1" {
                 switchPrivateAccount.setOn(true, animated: false)
             }
@@ -397,6 +408,13 @@ public class ProfileViewController: UITableViewController {
         } else {
             controller.isOfficer = false
         }
+        navigationController?.show(controller, sender: nil)
+    }
+    
+    @objc func showQR(sender: Any){
+        // TODO: Show Controller
+        let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "qrProfile") as! QRProfileController
+        controller.fPin = self.data
         navigationController?.show(controller, sender: nil)
     }
     
