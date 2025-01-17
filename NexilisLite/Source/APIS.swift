@@ -78,7 +78,7 @@ public class APIS: NSObject {
         } else {
             if media != nil || (media == nil && category != nil) {
                 if media == nil || media! < 0 || media! > 2 {
-                    UIApplication.shared.visibleViewController?.view.makeToast("108:Invalid Contact Center media parameter (0:Chat, 1:Audio Call, 2:Video Call)".localized(), duration: 2)
+                    UIApplication.shared.visibleViewController?.view.makeToast("108:Invalid Contact Center media parameter (0:Chat, 1:Audio Call, 2:Video Call)".localized(), duration: 3)
                     return
                 }
             }
@@ -86,12 +86,12 @@ public class APIS: NSObject {
                 if category != 0 {
                     let service = CategoryCC.getDataFromServiceId(service_id: "\(category!)")
                     if service == nil {
-                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Contact Center category parameter".localized(), duration: 2)
+                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Contact Center category parameter".localized(), duration: 3)
                         return
                     }
                     let serviceChilds = CategoryCC.getDatafromParent(parent: service!.service_id)
                     if serviceChilds.count > 0 {
-                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Contact Center category parameter".localized(), duration: 2)
+                        UIApplication.shared.visibleViewController?.view.makeToast("109:Invalid Contact Center category parameter".localized(), duration: 3)
                         return
                     }
                 }
@@ -194,7 +194,7 @@ public class APIS: NSObject {
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
@@ -284,12 +284,12 @@ public class APIS: NSObject {
     
     public static func startAudioCall(name: String) {
         if name.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
@@ -329,12 +329,12 @@ public class APIS: NSObject {
     
     public static func startVideoCall(name: String) {
         if name.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
@@ -530,12 +530,12 @@ public class APIS: NSObject {
     
     public static func startWhiteboard(name: String) {
         if name.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
@@ -575,12 +575,12 @@ public class APIS: NSObject {
     
     public static func startScreenSharing(name: String) {
         if name.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
         if user == nil {
-            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("91:Invalid name or you must add Username to your contact first".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork() {
@@ -621,7 +621,7 @@ public class APIS: NSObject {
     
     public static func signInAdmin(password: String) {
         if password.isEmpty {
-            UIApplication.shared.visibleViewController?.view.makeToast("113:Password is empty".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("113:Password is empty".localized(), duration: 3)
             return
         }
         let isChangeProfile = Utils.getSetProfile()
@@ -631,7 +631,7 @@ public class APIS: NSObject {
         }
         let isAdmin = User.isAdmin()
         if isAdmin {
-            UIApplication.shared.visibleViewController?.view.makeToast("112:You already login or registered as Admin".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("112:You already login or registered as Admin".localized(), duration: 3)
             return
         }
         if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
@@ -703,7 +703,7 @@ public class APIS: NSObject {
         }
         let isAdmin = User.isAdmin()
         if !isAdmin {
-            UIApplication.shared.visibleViewController?.view.makeToast("111:You must Sign In as Admin to use this feature".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("111:You must Sign In as Admin to use this feature".localized(), duration: 3)
             return
         }
         let controller = SetInternalCSAccount()
@@ -752,15 +752,15 @@ public class APIS: NSObject {
         }
         let finalUname = uname.replacingOccurrences(of: "[\\n\\r\\t~%()\"]", with: "", options: .regularExpression)
         if finalUname == User.getData(pin: User.getMyPin())?.fullName {
-            UIApplication.shared.visibleViewController?.view.makeToast("102:Duplicate username".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("102:Duplicate username".localized(), duration: 3)
             return
         }
         if finalUname.count == 0 {
-            UIApplication.shared.visibleViewController?.view.makeToast("103:Username is empty".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("103:Username is empty".localized(), duration: 3)
             return
         }
         if finalUname.count < 3 {
-            UIApplication.shared.visibleViewController?.view.makeToast("104:Username length is too short".localized(), duration: 2)
+            UIApplication.shared.visibleViewController?.view.makeToast("104:Username length is too short".localized(), duration: 3)
             return
         }
         let a = finalUname.split(separator: " ", maxSplits: 1)

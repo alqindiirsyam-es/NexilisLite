@@ -76,6 +76,8 @@ class QmeraAudioViewController: UIViewController {
     
     private var isSpeaker: Bool = false
     
+    private var isMuted: Bool = false
+    
     var listRemoteViewFix: [UIImageView] = [
         UIImageView(),
         UIImageView(),
@@ -173,6 +175,20 @@ class QmeraAudioViewController: UIViewController {
         let button = UIButton()
         button.setImage(UIImage(systemName: "speaker.slash")?.withTintColor(.mainColor, renderingMode: .alwaysOriginal), for: .normal)
         button.setImage(UIImage(systemName: "speaker.wave.3")?.withTintColor(.white, renderingMode: .alwaysOriginal), for: .selected)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.setBackgroundColor(.white, for: .normal)
+        button.setBackgroundColor(.mainColor, for: .highlighted)
+        button.setBackgroundColor(.mainColor, for: .selected)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+        button.imageEdgeInsets = UIEdgeInsets(top: 15, left: 15, bottom: 15, right: 15)
+        return button
+    }()
+    
+    let mic: UIButton = {
+        let button = UIButton()
+        button.setImage(UIImage(systemName: "mic")?.withTintColor(.mainColor, renderingMode: .alwaysOriginal), for: .normal)
+        button.setImage(UIImage(systemName: "mic.slash")?.withTintColor(.white, renderingMode: .alwaysOriginal), for: .selected)
         button.imageView?.contentMode = .scaleAspectFit
         button.setBackgroundColor(.white, for: .normal)
         button.setBackgroundColor(.mainColor, for: .highlighted)
@@ -334,6 +350,7 @@ class QmeraAudioViewController: UIViewController {
         accept.circle()
         invite.circle()
         speaker.circle()
+        mic.circle()
     }
     
     private func getUserData(completion: @escaping (User?) -> ()) {
@@ -396,10 +413,12 @@ class QmeraAudioViewController: UIViewController {
         stack.addArrangedSubview(invite)
         stack.addArrangedSubview(end)
         stack.addArrangedSubview(speaker)
+        stack.addArrangedSubview(mic)
         
         invite.addTarget(self, action: #selector(didInvite(sender:)), for: .touchUpInside)
         end.addTarget(self, action: #selector(didPressEnd(sender:)), for: .touchUpInside)
         speaker.addTarget(self, action: #selector(didSpeaker(sender:)), for: .touchUpInside)
+        mic.addTarget(self, action: #selector(didMute(sender:)), for: .touchUpInside)
         
         if !ticketId.isEmpty {
             self.view.addSubview(self.stackViewToolbar2)
@@ -572,6 +591,11 @@ class QmeraAudioViewController: UIViewController {
             UIDevice.current.isProximityMonitoringEnabled = true
         }
         Nexilis.setSpeaker(isSpeaker)
+    }
+    
+    @objc func didMute(sender: Any?) {
+        isMuted = !isMuted
+        mic.isSelected = isMuted
     }
     
     @objc func didInvite(sender: Any?) {

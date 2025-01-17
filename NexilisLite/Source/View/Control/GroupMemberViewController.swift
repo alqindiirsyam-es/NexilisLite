@@ -105,7 +105,7 @@ class GroupMemberViewController: UITableViewController {
                                 self.isDismiss?()
                             })
                         } else {
-                            self.showToast(message: "Server busy".localized(), seconds: 3)
+                            self.view.makeToast("Server busy, please try again later".localized(), duration: 3)
                         }
                     }
                 } catch {

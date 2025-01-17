@@ -66,7 +66,7 @@ class GroupCreateViewController: UITableViewController {
                     self.navigationController?.dismiss(animated: true, completion: nil)
                     self.isDismiss?(self.id)
                 } else {
-                    self.showToast(message: "Server busy, please try again later".localized(), seconds: 3)
+                    self.view.makeToast("Server busy, please try again later".localized(), duration: 3)
                 }
             }
         }

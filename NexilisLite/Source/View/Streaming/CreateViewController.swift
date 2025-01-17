@@ -134,10 +134,10 @@ class CreateViewController: UITableViewController {
             
             if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.createLS(title: "1~\(streamingTitle)", type: type, category: "3", tagline: streamingTag.text ?? "", notifType: notif, blogId: id, data: json)) {
                 if response.getBody(key: CoreMessage_TMessageKey.ERRCOD) != "00" {
-                    showToast(message: "Server Busy. Please try again.".localized(), font: UIFont.systemFont(ofSize: 12), controller: self)
+                    self.view.makeToast("Server Busy. Please try again.".localized(), duration: 3)
                 }
             } else {
-                showToast(message: "No Network. Please try again.".localized(), font: UIFont.systemFont(ofSize: 12), controller: self)
+                self.view.makeToast("No Network. Please try again.".localized(), duration: 3)
             }
             controller.data = User.getMyPin()!
             controller.streamingData = data

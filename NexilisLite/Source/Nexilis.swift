@@ -1525,6 +1525,9 @@ public class Nexilis: NSObject {
             return
         }
         let status = message.getBody(key : CoreMessage_TMessageKey.STATUS, default_value : "")
+        let latitude = message.getBody(key : CoreMessage_TMessageKey.LATITUDE, default_value : "")
+        let longitude = message.getBody(key : CoreMessage_TMessageKey.LONGITUDE, default_value : "")
+        let desc = message.getBody(key : CoreMessage_TMessageKey.DESCRIPTION, default_value : "")
         guard !status.isEmpty else {
             return
         }
@@ -1546,17 +1549,26 @@ public class Nexilis: NSObject {
                                 if status == "3" {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                         "status" : status,
+                                        "longitude" : longitude,
+                                        "latitude" : latitude,
+                                        "location" : desc,
                                         "time_delivered" : String(Date().currentTimeMillis()),
                                         "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
                                 } else if status == "4" {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                         "status" : status,
                                         "time_read" : String(Date().currentTimeMillis()),
+                                        "longitude" : longitude,
+                                        "latitude" : latitude,
+                                        "location" : desc,
                                         "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
                                 } else if status == "8" {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                         "status" : status,
                                         "time_ack" : String(Date().currentTimeMillis()),
+                                        "longitude" : longitude,
+                                        "latitude" : latitude,
+                                        "location" : desc,
                                         "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
                                 } else {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
@@ -1575,20 +1587,32 @@ public class Nexilis: NSObject {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "status" : status,
                                     "time_delivered" : String(Date().currentTimeMillis()),
+                                    "longitude" : longitude,
+                                    "latitude" : latitude,
+                                    "location" : desc,
                                     "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                             } else if status == "4" {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "status" : status,
                                     "time_read" : String(Date().currentTimeMillis()),
+                                    "longitude" : longitude,
+                                    "latitude" : latitude,
+                                    "location" : desc,
                                     "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                             } else if status == "8" {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "status" : status,
                                     "time_ack" : String(Date().currentTimeMillis()),
+                                    "longitude" : longitude,
+                                    "latitude" : latitude,
+                                    "location" : desc,
                                     "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                             } else {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "status" : status,
+                                    "longitude" : longitude,
+                                    "latitude" : latitude,
+                                    "location" : desc,
                                     "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                             }
                         }

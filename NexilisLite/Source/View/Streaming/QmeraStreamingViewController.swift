@@ -480,7 +480,7 @@ class QmeraStreamingViewController: UIViewController {
             let submitAction = UIAlertAction(title: "Submit".localized(), style: .default, handler: { (action) -> Void in
                 let textField = self.alert?.textFields![0]
                 if textField!.text!.isEmpty {
-                    self.showToast(message: (type == 0 ? "Title".localized() : "Tagline".localized()) + " " + "can't be empty".localized(), controller: self)
+                    self.view.makeToast((type == 0 ? "Title".localized() : "Tagline".localized()) + " " + "can't be empty".localized(), duration: 3)
                     return
                 }
                 if textField!.text! == (type == 0 ? (self.streamingData["title"] as! String) : (self.streamingData["tagline"] as! String)) {
@@ -505,7 +505,7 @@ class QmeraStreamingViewController: UIViewController {
                         } else {
                             self.tagline.text = textField!.text!
                         }
-                        self.showToast(message: "Successfully changed".localized(), controller: self)
+                        self.view.makeToast("Successfully changed".localized(), duration: 3)
                     }
                 }
             })

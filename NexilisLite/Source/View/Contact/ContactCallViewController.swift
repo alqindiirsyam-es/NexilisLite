@@ -34,7 +34,7 @@ class ContactCallViewController: UIViewController {
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
         if (segue.identifier == "videoVC") {
             if !Nexilis.checkingAccess(key: "video_call") {
-                showToast(message: "Feature disabled..".localized(), font: UIFont.systemFont(ofSize: 12), controller: self)
+                self.view.makeToast("Feature disabled..".localized(), duration: 3)
                 return
             }
             if !CheckConnection.isConnectedToNetwork() {
@@ -333,7 +333,7 @@ extension ContactCallViewController: UITableViewDataSource {
     
     @objc func call(sender: Any) {
         if !Nexilis.checkingAccess(key: "audio_call") {
-            showToast(message: "Feature disabled..".localized(), font: UIFont.systemFont(ofSize: 12), controller: self)
+            self.view.makeToast("Feature disabled..".localized(), duration: 3)
             return
         }
         let index = sender as! UIButton
@@ -355,7 +355,7 @@ extension ContactCallViewController: UITableViewDataSource {
     
     @objc func videoCall(sender: Any) {
         if !Nexilis.checkingAccess(key: "video_call") {
-            showToast(message: "Feature disabled..".localized(), font: UIFont.systemFont(ofSize: 12), controller: self)
+            self.view.makeToast("Feature disabled..".localized(), duration: 3)
             return
         }
         let index = sender as! UIButton

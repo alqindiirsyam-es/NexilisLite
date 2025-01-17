@@ -297,7 +297,7 @@ class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         if viewController is ChatGPTBotView {
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
-                viewController.showToast(message: "Write Messages".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                viewController.view.makeToast("Write Messages".localized(), duration: 3)
                 if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized()) {
                     textFieldSend.text = ""
                 }
@@ -1555,7 +1555,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
             text = text + "\n\n\nchat " + "Powered by Nexilis".localized()
             DispatchQueue.main.async {
                 UIPasteboard.general.string = text
-                self.showToast(message: "Text coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
             }
             cancelAction()
         } else if deleteSession {
@@ -1639,14 +1639,14 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                         if FileManager.default.fileExists(atPath: imageURL.path) {
                                             let image    = UIImage(contentsOfFile: imageURL.path)
                                             UIPasteboard.general.image = image
-                                            self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                            self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                         }
                                         else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                             do {
                                                 if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
                                                     let image = UIImage(data: imageData)
                                                     UIPasteboard.general.image = image
-                                                    self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                                    self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                                 }
                                             } catch {
                                                 
@@ -1660,7 +1660,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                         if (index == 0) {
                             DispatchQueue.main.async {
                                 UIPasteboard.general.string = dataMessages[indexPath.row]["message_text"] as? String
-                                self.showToast(message: "Text coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
                             }
                         } else {
                             DispatchQueue.main.async {
@@ -1673,14 +1673,14 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                         if FileManager.default.fileExists(atPath: imageURL.path) {
                                             let image    = UIImage(contentsOfFile: imageURL.path)
                                             UIPasteboard.general.image = image
-                                            self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                            self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                         }
                                         else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                             do {
                                                 if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
                                                     let image = UIImage(data: imageData)
                                                     UIPasteboard.general.image = image
-                                                    self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                                    self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                                 }
                                             } catch {
                                                 
@@ -2180,7 +2180,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
                         if row != nil && section != nil {
                             self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                         }
-                        self.showToast(message: "Confirmation Success.".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                        self.view.makeToast("Confirmation Success.".localized(), duration: 3)
                     }
                 }
             }

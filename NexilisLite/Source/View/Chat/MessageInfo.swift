@@ -6,15 +6,19 @@
 //
 
 import UIKit
+import CoreLocation
 
-class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource {
+class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource, CLLocationManagerDelegate {
     var data: [String: Any?] = [:]
     var dataStatus: [[String: Any?]] = []
+    var dataLocation: [String] = []
     private var tableStatus: UITableView!
     var dateMessage = ""
     var dataPerson: [String: String?] = [:]
     var dataGroup: [String: Any?] = [:]
     var isPersonal = true
+    var finishGetLocation = false
+    let locationManager = CLLocationManager()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -34,6 +38,13 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource 
         getData()
         dateMessage = chatDate(stringDate: data["server_date"] as! String)
         
+        locationManager.delegate = self
+        locationManager.requestWhenInUseAuthorization()
+        if CLLocationManager.locationServicesEnabled() {
+            locationManager.desiredAccuracy = kCLLocationAccuracyBest
+            locationManager.startUpdatingLocation()
+        }
+        
         tableStatus.reloadData()
         
         view.addSubview(tableStatus)
@@ -52,7 +63,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource 
     private func getData() {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, status, time_delivered, time_read, time_ack FROM MESSAGE_STATUS where message_id='\(data["message_id"]!!)'") {
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, status, time_delivered, time_read, time_ack, longitude, latitude FROM MESSAGE_STATUS where message_id='\(data["message_id"]!!)'") {
                     var listStatus: [Int] = []
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
@@ -61,6 +72,8 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource 
                         row["time_delivered"] = cursorData.string(forColumnIndex: 2) ?? ""
                         row["time_read"] = cursorData.string(forColumnIndex: 3) ?? ""
                         row["time_ack"] = cursorData.string(forColumnIndex: 4) ?? ""
+                        row["longitude"] = cursorData.string(forColumnIndex: 5) ?? ""
+                        row["latitude"] = cursorData.string(forColumnIndex: 6) ?? ""
                         dataStatus.append(row)
                         listStatus.append(Int(row["status"] as! String)!)
                     }
@@ -72,6 +85,38 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource 
                 print("Access database error: \(error.localizedDescription)")
             }
         })
+    }
+    
+    func getAllLocationDesc() {
+        for data in dataStatus {
+            let latitude = CLLocationDegrees(data["latitude"] as? String ?? "")!
+            let longitude = CLLocationDegrees(data["longitude"] as? String ?? "")!
+            let location = CLLocation(latitude: latitude, longitude: longitude)
+            let geocoder = CLGeocoder()
+            print("SEKUTT \(location.coordinate.latitude), \(location.coordinate.longitude)")
+            geocoder.reverseGeocodeLocation(location) { (placemarks, error) in
+                var result = ""
+                if let error = error {
+                    print("Error fetching address: \(error.localizedDescription)")
+                } else if let placemark = placemarks?.first {
+                    if let locality = placemark.locality {
+                        result += locality + ", "
+                    }
+                    if let administrativeArea = placemark.administrativeArea {
+                        result += administrativeArea + ", "
+                    }
+                    if let country = placemark.country {
+                        result += country
+                    }
+                    print("MANTAB \(result)")
+                }
+            }
+        }
+    }
+    
+    public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        self.getAllLocationDesc()
+        locationManager.stopUpdatingLocation()
     }
     
     func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {

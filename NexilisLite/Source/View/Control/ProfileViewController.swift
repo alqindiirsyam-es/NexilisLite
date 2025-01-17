@@ -420,7 +420,7 @@ public class ProfileViewController: UITableViewController {
     
     @objc func call(sender: Any) {
         if !Nexilis.checkingAccess(key: "audio_call") {
-            showToast(message: "Feature disabled..".localized(), font: UIFont.systemFont(ofSize: 12), controller: self)
+            self.view.makeToast("Feature disabled..".localized(), duration: 3)
             return
         }
         let myData = User.getData(pin: self.data)
@@ -453,7 +453,7 @@ public class ProfileViewController: UITableViewController {
     
     @objc func video(sender: Any) {
         if !Nexilis.checkingAccess(key: "video_call") {
-            showToast(message: "Feature disabled..".localized(), font: UIFont.systemFont(ofSize: 12), controller: self)
+            self.view.makeToast("Feature disabled..".localized(), duration: 3)
             return
         }
         let myData = User.getData(pin: self.data)

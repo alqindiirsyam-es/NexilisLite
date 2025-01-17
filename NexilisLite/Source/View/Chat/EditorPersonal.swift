@@ -14,7 +14,7 @@ import Photos
 import nuSDKService
 import SwiftLinkPreview
 
-public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestureRecognizerDelegate {
+public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestureRecognizerDelegate, CLLocationManagerDelegate {
     @IBOutlet var viewButton: UIView!
     @IBOutlet var constraintViewTextField: NSLayoutConstraint!
     @IBOutlet var buttonVoice: UIButton!
@@ -115,6 +115,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var constraintBottomeditTextView: NSLayoutConstraint!
     var constraintHeighteditTextView: NSLayoutConstraint!
     var constraintBottomSendEditTV: NSLayoutConstraint!
+    let locationManager = CLLocationManager()
+    var longitude = ""
+    var latitude = ""
     
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
@@ -234,6 +237,17 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         center.addObserver(self, selector: #selector(onTyping(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerTypingChat), object: nil)
         center.addObserver(self, selector: #selector(onFailedSendMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.failedSendMessage), object: nil)
         
+        locationManager.delegate = self
+        locationManager.requestWhenInUseAuthorization()
+        
+        // Check if location services are enabled
+        if CLLocationManager.locationServicesEnabled() {
+            locationManager.desiredAccuracy = kCLLocationAccuracyBest
+            locationManager.startUpdatingLocation()
+        } else {
+            print("Location services are not enabled.")
+        }
+        
         if dataMessageForward != nil {
             for i in 0..<dataMessageForward!.count {
                 sendChat(message_scope_id: "3", status: "2", message_text: dataMessageForward![i]["message_text"] as! String, credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"] as! String, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"] as! String, audio_id: dataMessageForward![i]["audio_id"] as! String, video_id: dataMessageForward![i]["video_id"] as! String, file_id: dataMessageForward![i]["file_id"] as! String, thumb_id: dataMessageForward![i]["thumb_id"] as! String, reff_id: "", read_receipts: dataMessageForward![i]["read_receipts"] as! String, chat_id: "", is_call_center: "0", call_center_id: "", viewController: self)
@@ -288,6 +302,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 //                ccAction(sender: buttonId)
 //            }
 //        }
+    }
+    
+    public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        latitude = "\(location.coordinate.latitude)"
+        longitude = "\(location.coordinate.longitude)"
+        locationManager.stopUpdatingLocation()
     }
     
     public func afterUnfriend() {
@@ -1610,7 +1631,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             self.timeoutCC.invalidate()
                         } else {
                             if !self.showToast30s {
-                                self.showToast(message: "Please reply within 30 seconds so the call center session doesn't end.".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                self.view.makeToast("Please reply within 30 seconds so the call center session doesn't end.".localized(), duration: 3)
                                 sendTyping(l_pin: fPinContacCenter, isTyping: true)
                                 self.showToast30s = true
                             }
@@ -2175,7 +2196,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     @objc func audioVideoCall(sender: UIBarButtonItem) {
         if sender.tag == 0 {
             if !Nexilis.checkingAccess(key: "audio_call") {
-                showToast(message: "Feature disabled..".localized(), font: UIFont.systemFont(ofSize: 12), controller: self)
+                self.view.makeToast("Feature disabled..".localized(), duration: 3)
                 return
             }
             let goAudioCall = Nexilis.checkMicPermission()
@@ -2205,7 +2226,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             }
         } else {
             if !Nexilis.checkingAccess(key: "video_call") {
-                showToast(message: "Feature disabled..".localized(), font: UIFont.systemFont(ofSize: 12), controller: self)
+                self.view.makeToast("Feature disabled..".localized(), duration: 3)
                 return
             }
             let goAudioCall = Nexilis.checkMicPermission()
@@ -2377,7 +2398,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if viewController is EditorPersonal && file_id == "" && dataMessageForward == nil && !isAutoSendCC{
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
-                viewController.showToast(message: "Write Messages".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                viewController.view.makeToast("Write Messages".localized(), duration: 3)
                 if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized()) {
                     textFieldSend.text = ""
                 }
@@ -2406,7 +2427,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     textFieldSend.text = ""
                 }
                 dismissKeyboard()
-                viewController.showToast(message: "Unable to send message. Waiting for the officer to accept your request".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                self.view.makeToast("Unable to send message. Waiting for the officer to accept your request".localized(), duration: 3)
                 return
             }
             is_call_center = "1"
@@ -2554,7 +2575,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     @objc func ccAction(sender: UIButton) {
         if self.nowSelectedCategoryCC == "CantReturn" {
             if sender.tag == 503 {
-                self.showToast(message: "You can't request Call Center more than one".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                self.view.makeToast("You can't request Call Center more than one".localized(), duration: 3)
             } else if sender.tag == 504 {
                 busyCCAction(sender: sender)
             }
@@ -2572,7 +2593,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         var row: [String: Any?] = [:]
         if nowSelectedCategoryCC.isEmpty || level > levelNow {
             if Utils.getDefaultCC() == "No" && !showToastTwiceClick {
-                self.showToast(message: "You can press your choice again to change category".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                self.view.makeToast("You can press your choice again to change category".localized(), duration: 3)
                 showToastTwiceClick = true
             }
             row["message_id"] = ""
@@ -2791,7 +2812,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     let email = response.getBody(key: CoreMessage_TMessageKey.EMAIL, default_value: "")
                     let officer = response.getBody(key: CoreMessage_TMessageKey.L_PIN, default_value: "")
                     if email.isEmpty {
-                        self.showToast(message: "Invalid Email Address".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                        self.view.makeToast("Invalid Email Address".localized(), duration: 3)
                         return
                     }
                     // TODO: check if mail available
@@ -3809,7 +3830,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             self.showEditMessageView(at: indexPath!)
         })
         let translate = UIAction(title: "Translate".localized(), image: UIImage(systemName: "t.bubble"), handler: {(_) in
-            self.showToast(message: "Translating...".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+            self.view.makeToast("Translating...".localized(), duration: 3)
             var translation: String = "English"
             let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
             if lang == "id" {
@@ -3829,7 +3850,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     let response = response as? HTTPURLResponse
                     if response?.statusCode != 200 || error != nil {
                         DispatchQueue.main.async {
-                            self.showToast(message: "There is an error occurred while translating your message. Please try again or check your network connection.".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                            self.view.makeToast("There is an error occurred while translating your message. Please try again or check your network connection.".localized(), duration: 3)
                         }
                         return
                     }
@@ -3849,7 +3870,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
         })
         let gcs = UIAction(title: "Get Chat Suggestion".localized(), image: UIImage(systemName: "exclamationmark.bubble"), handler: {(_) in
-            self.showToast(message: "Getting chat suggestion...".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+            self.view.makeToast("Getting chat suggestion...".localized(), duration: 3)
             let payload: [String : Any] = [
                 "role": "user",
                 "content": dataMessages[indexPath!.row][TypeDataMessage.message_text]!!
@@ -3864,7 +3885,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     let response = response as? HTTPURLResponse
                     if response?.statusCode != 200 || error != nil {
                         DispatchQueue.main.async {
-                            self.showToast(message: "There is an error occurred while translating your message. Please try again or check your network connection.".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                            self.view.makeToast("There is an error occurred while getting chat suggestion for you. Please try again or check your network connection.".localized(), duration: 3)
                         }
                         return
                     }
@@ -4095,7 +4116,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
              ForAction:{() -> Void in
                 let newText = self.editTextView.text ?? ""
                 if newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
-                    let lastEdited = 1 + ((dataMessages[indexPath.row][TypeDataMessage.last_edit] as? Int64) ?? 0)
+                    let lastEdited = Int64(Date().currentTimeMillis())
                     let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id] as! String, l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin] as! String, message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as! String, status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential] as! String, attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as! String, ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id] as! String, message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id] as! String, audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id] as! String, video_id: dataMessages[indexPath.row][TypeDataMessage.video_id] as! String, file_id: dataMessages[indexPath.row][TypeDataMessage.file_id] as! String, thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id] as! String, reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id] as! String, read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts] as! String, chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id] as! String, is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center] as! String, call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id] as! String, opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin] as! String, last_edit: lastEdited)
                     Nexilis.addQueueMessage(message: message, isEditMessage: true)
                     DispatchQueue.global().async {
@@ -4393,7 +4414,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             text = text + "\n\n\nchat " + "Powered by Nexilis".localized()
             DispatchQueue.main.async {
                 UIPasteboard.general.string = text
-                self.showToast(message: "Text coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
             }
             cancelAction()
         } else if forwardSession {
@@ -4538,13 +4559,13 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                                     if FileManager.default.fileExists(atPath: imageURL.path) {
                                         let image    = UIImage(contentsOfFile: imageURL.path)
                                         UIPasteboard.general.image = image
-                                        self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                        self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                     } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                         do {
                                             if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
                                                 let image = UIImage(data: imageData)
                                                 UIPasteboard.general.image = image
-                                                self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                                self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                             }
                                         } catch {
                                             
@@ -4557,7 +4578,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                         if (index == 0) {
                             DispatchQueue.main.async {
                                 UIPasteboard.general.string = dataMessages[indexPath.row]["message_text"] as? String
-                                self.showToast(message: "Text coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
                             }
                         } else {
                             DispatchQueue.main.async {
@@ -4569,13 +4590,13 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                                     if FileManager.default.fileExists(atPath: imageURL.path) {
                                         let image    = UIImage(contentsOfFile: imageURL.path)
                                         UIPasteboard.general.image = image
-                                        self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                        self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                     } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                         do {
                                             if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
                                                 let image = UIImage(data: imageData)
                                                 UIPasteboard.general.image = image
-                                                self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                                self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                             }
                                         } catch {
                                             
@@ -5632,7 +5653,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             }
         }
         
-        let stringDate = (dataMessages[indexPath.row]["server_date"] as? String) ?? ""
+        var stringDate = (dataMessages[indexPath.row]["server_date"] as? String) ?? ""
+        if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
+            stringDate = "\(dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64)"
+        }
         if !stringDate.isEmpty {
             if (dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2" {
                 if dataTimer! >= 10 {
@@ -6476,11 +6500,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
     
     @objc func tapAck(_ sender: ObjectGesture) {
         if blocking == "1" {
-            self.view.makeToast("You blocked this user".localized())
+            self.view.makeToast("You blocked this user".localized(), duration: 3)
             return
         }
         if blocking == "-1" {
-            self.view.makeToast("You have been blocked by this user".localized())
+            self.view.makeToast("You have been blocked by this user".localized(), duration: 3)
             return
         }
         let indexPath = sender.indexPath
@@ -6496,7 +6520,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             return
         }
         DispatchQueue.global().async {
-            let result = Nexilis.write(message: CoreMessage_TMessageBank.getAckLocationMessage(f_pin: dataMessages[indexPath.row]["f_pin"] as! String, message_id: dataMessages[indexPath.row]["message_id"] as! String, l_pin: dataMessages[indexPath.row]["l_pin"] as! String, server_date: "\(Date().currentTimeMillis())", message_scope_id: dataMessages[indexPath.row]["message_scope_id"] as! String, longitude: "", latitude: "", description: ""))
+            let result = Nexilis.write(message: CoreMessage_TMessageBank.getAckLocationMessage(f_pin: dataMessages[indexPath.row]["f_pin"] as! String, message_id: dataMessages[indexPath.row]["message_id"] as! String, l_pin: dataMessages[indexPath.row]["l_pin"] as! String, server_date: "\(Date().currentTimeMillis())", message_scope_id: dataMessages[indexPath.row]["message_scope_id"] as! String, longitude: self.latitude, latitude: self.longitude, description: ""))
             if result != nil {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
@@ -6516,7 +6540,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                         if row != nil && section != nil {
                             self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                         }
-                        self.showToast(message: "Confirmation Success.".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                        self.view.makeToast("Confirmation Success.".localized(), duration: 3)
                     }
                 }
             }
@@ -6990,7 +7014,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     label.attributedText = highlightedText(for: text, in: range, label: label)
                     timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
                         UIPasteboard.general.string = word
-                        self.showToast(message: "Link Copied".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                        self.view.makeToast("Link Copied".localized(), duration: 3)
                         label.attributedText = self.removeHighlightedText(for: text, in: range, label: label)
                     })
                 }

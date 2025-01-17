@@ -240,7 +240,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                   let param1 = dict["param1"] as? String else {
                 return
             }
-            showToast(message: param1, controller: self.tabBarController!)
+            self.view.makeToast(param1, duration: 3)
         } else if message.name == "blockUser" {
             guard let dict = message.body as? [String: AnyObject],
                   let param1 = dict["param1"] as? String,

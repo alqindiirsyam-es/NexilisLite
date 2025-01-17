@@ -613,9 +613,9 @@ extension ContactChatViewController {
                 exblock = exblock == nil ? "0" : exblock!.isEmpty ? "0" : exblock!
                 if exblock != "0" {
                     if exblock == "1" {
-                        self.view.makeToast("You blocked this user".localized())
+                        self.view.makeToast("You blocked this user".localized(), duration: 3)
                     } else {
-                        self.view.makeToast("You have been blocked by this user".localized())
+                        self.view.makeToast("You have been blocked by this user".localized(), duration: 3)
                     }
                     return
                 }
@@ -642,9 +642,9 @@ extension ContactChatViewController {
                     exblock = exblock == nil ? "0" : exblock!.isEmpty ? "0" : exblock!
                     if exblock != "0" {
                         if exblock == "1" {
-                            self.view.makeToast("You blocked this user".localized())
+                            self.view.makeToast("You blocked this user".localized(), duration: 3)
                         } else {
-                            self.view.makeToast("You have been blocked by this user".localized())
+                            self.view.makeToast("You have been blocked by this user".localized(), duration: 3)
                         }
                         return
                     }
@@ -796,7 +796,7 @@ extension ContactChatViewController {
                         navigationController?.show(editorGroupVC, sender: nil)
                         cursorMember.close()
                     } else {
-                        self.view.makeToast("You are not a member of this group".localized(), duration: 0.5)
+                        self.view.makeToast("You are not a member of this group".localized(), duration: 3)
                     }
                 } catch {
                     rollback.pointee = true

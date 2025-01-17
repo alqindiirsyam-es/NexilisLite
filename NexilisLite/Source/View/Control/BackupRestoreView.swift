@@ -646,7 +646,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             })
         } catch {
             //print(error)
-            self.view.makeToast("Backup files are corrupted".localized(), duration: 0.5)
+            self.view.makeToast("Backup files are corrupted".localized(), duration: 3)
             DispatchQueue.global().async { [self] in
                 _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupRestored(option: optionBackup, fileid: fileIdBackup))
             }

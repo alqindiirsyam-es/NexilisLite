@@ -908,7 +908,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     label.attributedText = highlightedText(for: text, in: range, label: label)
                     timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
                         UIPasteboard.general.string = word
-                        self.showToast(message: "Link Copied".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                        self.view.makeToast("Link Copied".localized(), duration: 3)
                         label.attributedText = self.removeHighlightedText(for: text, in: range, label: label)
                     })
                 }
@@ -1517,7 +1517,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     text = text + "\n\n\nchat " + "Powered by Nexilis".localized()
                     DispatchQueue.main.async {
                         UIPasteboard.general.string = text
-                        self.showToast(message: "Text coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                        self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
                     }
                 }
             } else {
@@ -1530,13 +1530,13 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         if FileManager.default.fileExists(atPath: imageURL.path) {
                             let image    = UIImage(contentsOfFile: imageURL.path)
                             UIPasteboard.general.image = image
-                            self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                            self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                         } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                             do {
                                 if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
                                     let image    = UIImage(data: imageData)
                                     UIPasteboard.general.image = image
-                                    self.showToast(message: "Image coppied to clipboard".localized(), seconds: 1)
+                                    self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                 }
                             } catch {
                                 
@@ -1575,7 +1575,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     handler: {(_) in if (index == 0) {
                         DispatchQueue.main.async {
                             UIPasteboard.general.string = dataMessages[indexPath.row]["message_text"] as? String
-                            self.showToast(message: "Text coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                            self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
                         }
                     } else {
                         DispatchQueue.main.async {
@@ -1587,13 +1587,13 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                 if FileManager.default.fileExists(atPath: imageURL.path) {
                                     let image    = UIImage(contentsOfFile: imageURL.path)
                                     UIPasteboard.general.image = image
-                                    self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                    self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                 } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                     do {
                                         if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
                                             let image    = UIImage(data: imageData)
                                             UIPasteboard.general.image = image
-                                            self.showToast(message: "Image coppied to clipboard".localized(), font: UIFont.systemFont(ofSize: 12, weight: .medium), controller: self)
+                                            self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                         }
                                     } catch {
                                         
