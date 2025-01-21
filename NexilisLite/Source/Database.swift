@@ -234,6 +234,7 @@ public class Database {
                                 "'unk_numbers' INTEGER DEFAULT 0," +
                                 "'conn_state' INTEGER DEFAULT 1," +
                                 "'tag_client' TEXT," +
+                                "'gif_id' TEXT," +
                                 "'tag_subactivity' TEXT," +
                                 "'messagenumber' INTEGER DEFAULT 0," +
                                 "'mail_account' TEXT," +

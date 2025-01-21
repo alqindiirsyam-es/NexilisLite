@@ -9,6 +9,7 @@ import UIKit
 
 class ProfileView: UIImageView {
     
+    let imageMuted = UIImageView()
     var user: User? {
         didSet {
             guard let user = self.user else {
@@ -49,6 +50,13 @@ class ProfileView: UIImageView {
         layer.borderWidth = 1
         layer.borderColor = UIColor.white.cgColor
         circle()
+        
+        imageMuted.image = UIImage(systemName: "mic.slash")
+        self.addSubview(imageMuted)
+        imageMuted.tintColor = .red
+        
+        imageMuted.anchor(left: self.leftAnchor, bottom: self.bottomAnchor, paddingLeft: 30, paddingBottom: 10, width: 30, height: 40)
+        imageMuted.isHidden = true
     }
     
 }

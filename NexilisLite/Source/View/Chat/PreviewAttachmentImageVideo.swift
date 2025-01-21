@@ -8,9 +8,10 @@
 import UIKit
 import AVKit
 import AVFoundation
+import SDWebImage
 
 protocol PreviewAttachmentImageVideoDelegate : NSObjectProtocol {
-    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, viewController: UIViewController)
+    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, viewController: UIViewController)
 }
 
 class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITextViewDelegate {
@@ -27,6 +28,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     @IBOutlet weak var constraintButtonAckCondential: NSLayoutConstraint!
     var imageVideoData: [UIImagePickerController.InfoKey: Any]?
     var image: UIImage?
+    var dataGIF: Data?
+    var animatedImageView: SDAnimatedImageView!
     var currentTextTextField: String?
     var delegate: PreviewAttachmentImageVideoDelegate?
     var isHiddenTextField = false
@@ -35,6 +38,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     var isAck = false
     var isGroup = false
     var isCC = false
+    var isGIF = false
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -64,7 +68,17 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 imagePreview.image = imageVideoData![.originalImage] as? UIImage
             }
         } else {
-            imagePreview.image = image
+            if isGIF {
+                animatedImageView = SDAnimatedImageView()
+                animatedImageView.contentMode = .scaleAspectFit
+                imagePreview.addSubview(animatedImageView)
+                animatedImageView.anchor(top: imagePreview.topAnchor, left: imagePreview.leftAnchor, bottom: imagePreview.bottomAnchor, right: imagePreview.rightAnchor)
+                if let animatedImage = SDAnimatedImage(data: dataGIF!) {
+                    animatedImageView.image = animatedImage
+                }
+            } else {
+                imagePreview.image = image
+            }
         }
         
         if ((imageVideoData != nil && imageVideoData![.mediaType] as! String == "public.image") || isHiddenTextField) {
@@ -275,7 +289,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     }
     
     @objc func sendTapped() {
-        if fromCopy || (imageVideoData![.mediaType] as! String == "public.image") {
+        if (fromCopy && image != nil) || (imageVideoData != nil && imageVideoData![.mediaType] as! String == "public.image") {
             var originalImageName = ""
             if (fromCopy) {
                 originalImageName = "\(Date().currentTimeMillis())_copyImage"
@@ -317,63 +331,93 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             }
             self.dismiss(animated: true, completion: nil)
             if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
-                delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, viewController: self)
+                delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self)
             } else {
-                delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, viewController: self)
+                delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self)
             }
         } else {
-            guard var dataVideo = try? Data(contentsOf: imageVideoData![.mediaURL] as! URL) else {
-                return
+            var dataVideo: Data?
+            if imageVideoData != nil {
+                dataVideo = try? Data(contentsOf: imageVideoData![.mediaURL] as! URL)
             }
-            let sizeOfVideo = Double(dataVideo.count / 1048576)
-            if (sizeOfVideo > 10.0) {
-                let compressedURL = NSURL.fileURL(withPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
-                compressVideo(inputURL: imageVideoData![.mediaURL] as! URL,
-                              outputURL: compressedURL) { exportSession in
-                    guard let session = exportSession else {
-                        return
-                    }
-                    
-                    switch session.status {
-                    case .unknown:
-                        break
-                    case .waiting:
-                        break
-                    case .exporting:
-                        break
-                    case .completed:
-                        guard let compressedData = try? Data(contentsOf: compressedURL) else {
+            if var dataVideo = dataVideo {
+                let sizeOfVideo = Double(dataVideo.count / 1048576)
+                if (sizeOfVideo > 10.0) {
+                    let compressedURL = NSURL.fileURL(withPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
+                    compressVideo(inputURL: imageVideoData![.mediaURL] as! URL,
+                                  outputURL: compressedURL) { exportSession in
+                        guard let session = exportSession else {
                             return
                         }
-                        dataVideo = compressedData
-                    case .failed:
-                        break
-                    case .cancelled:
-                        break
-                    @unknown default:
-                        break
+                        
+                        switch session.status {
+                        case .unknown:
+                            break
+                        case .waiting:
+                            break
+                        case .exporting:
+                            break
+                        case .completed:
+                            guard let compressedData = try? Data(contentsOf: compressedURL) else {
+                                return
+                            }
+                            dataVideo = compressedData
+                        case .failed:
+                            break
+                        case .cancelled:
+                            break
+                        @unknown default:
+                            break
+                        }
                     }
                 }
             }
-            let urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString
-            let originalVideoName = (urlVideo! as NSString).lastPathComponent
             let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let renamedVideoName = "Nexilis_video_\(originalVideoName)"
-            let thumbName = "THUMB_Nexilis_video_\(originalVideoName)"
+            var urlVideo = ""
+            var originalVideoName = ""
+            var renamedVideoName = ""
+            var thumbName = ""
+            if (fromCopy && dataGIF != nil) {
+                originalVideoName = "\(Date().currentTimeMillis())_copyGif"
+                renamedVideoName = "Nexilis_gif_\(originalVideoName)"
+                thumbName = "THUMB_Nexilis_gif_\(originalVideoName)"
+            } else {
+                urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString!
+                originalVideoName = (urlVideo as NSString).lastPathComponent
+                renamedVideoName = "Nexilis_video_\(originalVideoName)"
+                thumbName = "THUMB_Nexilis_video_\(originalVideoName)"
+            }
             let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
             if !FileManager.default.fileExists(atPath: fileURL.path) {
                 do {
-                    try dataVideo.write(to: fileURL)
+                    if let dataVideo = dataVideo {
+                        try dataVideo.write(to: fileURL)
+                    } else if let dataGIF = dataGIF {
+                        try dataGIF.write(to: fileURL)
+                    }
                     //print("file saved")
                 } catch {
                     //print("error saving file:", error)
                 }
             }
-            let dataThumbVideo = imagePreview.image!.jpegData(compressionQuality:  1.0)
+            var dataThumbVideo: Data?
+            if !fromCopy {
+                dataThumbVideo = imagePreview.image!.jpegData(compressionQuality:  1.0)
+            }
             let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
             if !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
                 do {
-                    try dataThumbVideo!.write(to: fileURLTHUMB)
+                    if let dataThumbVideo = dataThumbVideo {
+                        try dataThumbVideo.write(to: fileURLTHUMB)
+                    } else {
+                        if let dataGIF = dataGIF {
+                            if let dataThumbGif = UIImage(data: dataGIF) {
+                                if let compressedDataThumbGif = dataThumbGif.jpegData(compressionQuality: 1.0) {
+                                    try compressedDataThumbGif.write(to: fileURLTHUMB)
+                                }
+                            }
+                        }
+                    }
                     //print("thumb saved")
                 } catch {
                     //print("error saving file:", error)
@@ -381,9 +425,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             }
             self.dismiss(animated: true, completion: nil)
             if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
-                delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, viewController: self)
+                delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: renamedVideoName, viewController: self)
             } else {
-                delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, viewController: self)
+                delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: renamedVideoName, viewController: self)
             }
         }
     }

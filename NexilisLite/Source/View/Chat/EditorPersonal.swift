@@ -13,6 +13,7 @@ import NotificationBannerSwift
 import Photos
 import nuSDKService
 import SwiftLinkPreview
+import SDWebImage
 
 public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestureRecognizerDelegate, CLLocationManagerDelegate {
     @IBOutlet var viewButton: UIView!
@@ -95,7 +96,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var showingLink = ""
     var isAlwaysHideLinkPreview = false
     var timerCheckLink: Timer?
-    var timerLongPressLink: Timer?
     var timerFakeProgress: Timer?
     var showMenuContext = false
     var touchedSubview = UIView()
@@ -871,7 +871,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func addDataMessage() {
         multipleOffsetUp += 1
         let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0"
-        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
+        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
@@ -902,6 +902,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 21)
                         row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 22)
                         row[TypeDataMessage.last_edit] = cursorData.longLongInt(forColumnIndex: 23)
+                        row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 24)
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as! String)'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -1013,7 +1014,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func getData() {
 //        let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0"
 //        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20 ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
-        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc"
+        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc"
         if isContactCenter {
             if complaintId.isEmpty {
                 query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '5' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc"
@@ -1078,6 +1079,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 21)
                         row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 22)
                         row[TypeDataMessage.last_edit] = cursorData.longLongInt(forColumnIndex: 23)
+                        row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 24)
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as! String)'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -1539,6 +1541,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row["audio_id"] = chatData[CoreMessage_TMessageKey.AUDIO_ID]
                     } else {
                         row["audio_id"] = ""
+                    }
+                    if (chatData.keys.contains(CoreMessage_TMessageKey.GIF_ID)) {
+                        row["gif_id"] = chatData[CoreMessage_TMessageKey.GIF_ID]
+                    } else {
+                        row["gif_id"] = ""
                     }
                     if (chatData.keys.contains(CoreMessage_TMessageKey.VIDEO_ID)) {
                         row["video_id"] = chatData[CoreMessage_TMessageKey.VIDEO_ID]
@@ -2394,7 +2401,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
     }
     
-    private func sendChat(message_scope_id:String =  "3", status:String =  "1", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "4", chat_id: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, isAutoSendCC : Bool = false) {
+    private func sendChat(message_scope_id:String =  "3", status:String =  "1", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "4", chat_id: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, isAutoSendCC : Bool = false, gif_id: String = "") {
         if viewController is EditorPersonal && file_id == "" && dataMessageForward == nil && !isAutoSendCC{
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
@@ -2463,7 +2470,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             read_receipts = "8"
         }
         sendTyping(l_pin: l_pin, isTyping: true)
-        let message = CoreMessage_TMessageBank.sendMessage(l_pin: l_pin, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: chat_id, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin)
+        let message = CoreMessage_TMessageBank.sendMessage(l_pin: l_pin, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: chat_id, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin, gif_id: gif_id)
         Nexilis.addQueueMessage(message: message)
         let messageId = String(message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID]!)
         if credential == "1" {
@@ -2491,6 +2498,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         row["progress"] = 0.0
         row["lock"] = "0"
         row["is_stared"] = "0"
+        row["gif_id"] = gif_id
         row["isSelected"] = false
         row[TypeDataMessage.is_call_center] = is_call_center
         row[TypeDataMessage.call_center_id] = call_center_id
@@ -3326,8 +3334,8 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate {
         }
     }
     
-    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, viewController: UIViewController) {
-        sendChat(message_text: message_text, attachment_flag: attachment_flag, image_id: image_id, video_id: video_id, thumb_id: thumb_id, viewController: viewController)
+    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, viewController: UIViewController) {
+        sendChat(message_text: message_text, attachment_flag: attachment_flag, image_id: image_id, video_id: video_id, thumb_id: thumb_id, viewController: viewController, gif_id : gif_id)
     }
 }
 
@@ -3419,7 +3427,7 @@ extension EditorPersonal: UITextViewDelegate {
                     if self.isEditingMessage {
                         self.constraintHeighteditTextView.constant = 40
                     }
-                } else if ((self.constraintHeighteditTextView != nil && self.heightTextFieldSend.constant < 95.0) || self.constraintHeighteditTextView.constant < 95.0) && currentLine >= 4 {
+                } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintHeighteditTextView != nil && self.constraintHeighteditTextView.constant < 95.0)) && currentLine >= 4 {
                     self.heightTextFieldSend.constant = 95.0
                     if self.isEditingMessage {
                         self.constraintHeighteditTextView.constant = 95.0
@@ -3660,34 +3668,54 @@ extension EditorPersonal: UITextViewDelegate {
         }
     }
     
-    public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(UIResponderStandardEditActions.paste(_:)) && (UIPasteboard.general.image != nil) {
-            return true
-        }
-        return super.canPerformAction(action, withSender: sender)
-    }
-    
-    public override func paste(_ sender: Any?) {
-        if UIPasteboard.general.image != nil {
-            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-            previewImageVC.image = UIPasteboard.general.image
-            previewImageVC.fromCopy = true
-            previewImageVC.currentTextTextField = textFieldSend.text
-            previewImageVC.modalPresentationStyle = .custom
-            previewImageVC.delegate = self
-            previewImageVC.isAck = self.isAck
-            previewImageVC.isConfidential = self.isConfidential
-            previewImageVC.isCC = self.isContactCenter
-            self.present(previewImageVC, animated: true, completion: nil)
-        }
-    }
-    
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        if let pasteboardItems = UIPasteboard.general.items.first {
+            if pasteboardItems["public.jpeg"] != nil || pasteboardItems["public.png"] != nil || pasteboardItems["public.gif"] != nil || (pasteboardItems.keys.first != nil && pasteboardItems.keys.first!.contains(".gif")) {
+                let dataGif = UIPasteboard.general.data(forPasteboardType: "com.compuserve.gif")
+                let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                previewImageVC.image = pasteboardItems["public.png"] as? UIImage ?? pasteboardItems["public.jpeg"] as? UIImage
+                previewImageVC.isGIF = (pasteboardItems["public.png"] == nil && pasteboardItems["public.jpeg"] == nil)
+                previewImageVC.fromCopy = true
+                previewImageVC.dataGIF = dataGif
+                previewImageVC.currentTextTextField = textFieldSend.text
+                previewImageVC.modalPresentationStyle = .custom
+                previewImageVC.delegate = self
+                previewImageVC.isAck = self.isAck
+                previewImageVC.isConfidential = self.isConfidential
+                previewImageVC.isCC = self.isContactCenter
+                self.present(previewImageVC, animated: true, completion: nil)
+                return false
+            }
+        }
         if (self.textFieldSend.text.count == 0) {
             return text != "\n"
         }
         return true
     }
+    
+    func isGIFData(_ data: Data) -> Bool {
+        let gifSignature: [UInt8] = [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]
+        let rawData = [UInt8](data.prefix(6))
+        return rawData == gifSignature
+    }
+    
+    public func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+            switch interaction {
+            case .invokeDefaultAction:
+                let gesture = ObjectGesture()
+                gesture.message_id = URL.absoluteString
+                tapMessageText(gesture)
+                return false
+            case .presentActions:
+                UIPasteboard.general.string = URL.absoluteString
+                self.view.makeToast("Link Copied".localized(), duration: 3)
+                return false
+            case .preview:
+                return true
+            @unknown default:
+                return true
+            }
+        }
 }
 
 //EUC
@@ -5143,6 +5171,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         let fileChat = (dataMessages[indexPath.row]["file_id"] as? String) ?? ""
         let reffChat = (dataMessages[indexPath.row]["reff_id"] as? String) ?? ""
         let audioChat = (dataMessages[indexPath.row]["audio_id"] as? String) ?? ""
+        let gifChat = (dataMessages[indexPath.row]["gif_id"] as? String) ?? ""
         let dataTimer = listTimerCredential[(dataMessages[indexPath.row]["message_id"] as! String)]
         
         cell.backgroundColor = .clear
@@ -5451,9 +5480,15 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
         }
         
-        let messageText = UILabel()
-        messageText.numberOfLines = 0
-        messageText.lineBreakMode = .byWordWrapping
+        let messageText = UITextView()
+        messageText.isEditable = false
+        messageText.isSelectable = true
+        messageText.dataDetectorTypes = []
+        messageText.backgroundColor = .clear
+        messageText.isScrollEnabled = false
+        messageText.textContainerInset = UIEdgeInsets.zero
+        messageText.contentInset = UIEdgeInsets.zero
+        messageText.textDragInteraction?.isEnabled = false
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
         let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
@@ -5540,6 +5575,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                         stringLS = ("\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm"))")
                     }
                     messageText.attributedText = stringLS.richText()
+                    messageText.isUserInteractionEnabled = false
                 }
             }
             else if attachmentFlag == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") && (dataMessages[indexPath.row]["lock"] as? String != "2") {
@@ -5567,6 +5603,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     let province = jsonForm["province"] as! String
                     let club = jsonForm["club"] as! String
                     messageText.attributedText = "*\(form_title.replacingOccurrences(of: "+", with: " "))* \nClub Type: \(club_type) \nProvince: \(province) \nClub Name: \(club) ".richText()
+                    messageText.isUserInteractionEnabled = false
                 }
             }
             else {
@@ -5579,68 +5616,33 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         }
         
         func modifyText() {
-            
-            func ranges(of word: String, in string: String) -> [NSRange] {
-                var result: [NSRange] = []
-                var startIndex = string.startIndex
-                
-                while let range = string[startIndex...].range(of: word) {
-                    let nsRange = NSRange(range, in: string)
-                    result.append(nsRange)
-                    startIndex = range.upperBound
-                }
-                
-                return result
-            }
-            
-            messageText.isUserInteractionEnabled = false
             if !textChat.isEmpty {
                 if textChat.contains("■"){
                     textChat = textChat.components(separatedBy: "■")[0]
                     textChat = textChat.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                let listTextEnter = textChat.split(separator: "\n")
                 let finalAtribute = textChat.richText()
-                var containsLink = false
-                var listRange: [NSRange] = []
-                for j in 0...listTextEnter.count - 1 {
-                    let listText = listTextEnter[j].split(separator: " ")
-                    if listText.count > 0 {
-                        for i in 0...listText.count - 1 {
-                            if listText[i].lowercased().checkStartWithLink() {
-                                var rangeTapLink = (finalAtribute.string as NSString).range(of: String(listText[i]))
-                                func checkContainsRange() {
-                                    if listRange.contains(rangeTapLink) {
-                                        let allRanges = ranges(of: String(listText[i]), in: finalAtribute.string)
-                                        for allRange in allRanges {
-                                            if !listRange.contains(allRange) {
-                                                rangeTapLink = allRange
-                                                break
-                                            }
-                                        }
-                                    }
-                                    listRange.append(rangeTapLink)
-                                }
-                                checkContainsRange()
-                                finalAtribute.addAttributes([.foregroundColor: UIColor.blue, .underlineStyle: NSUnderlineStyle.single.rawValue], range: rangeTapLink)
-                                if !containsLink {
-                                    containsLink = true
-                                }
-                            }
+                textChat = finalAtribute.string
+                let urlPattern = "(https?://|www\\.)\\S+"
+                if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
+                    let matches = regex.matches(in: textChat, options: [], range: NSRange(textChat.startIndex..., in: textChat))
+                    
+                    for match in matches {
+                        if let range = Range(match.range, in: textChat) {
+                            let linkText = String(textChat[range])
+                            let nsRange = NSRange(range, in: textChat)
+                            finalAtribute.addAttribute(.link, value: linkText, range: nsRange)
+                            finalAtribute.addAttribute(.foregroundColor, value: UIColor.blue, range: nsRange)
+                            finalAtribute.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: nsRange)
                         }
                     }
                 }
                 messageText.attributedText = finalAtribute
-                if containsLink && !copySession && !forwardSession && !deleteSession && !self.removed {
-                    messageText.isUserInteractionEnabled = true
-                    let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPressLink(_:)))
-                    longPress.minimumPressDuration = 0.1
-                    containerMessage.addGestureRecognizer(longPress)
-                }
+                messageText.delegate = self
             }
         }
         
-        if !copySession && !forwardSession && !deleteSession && !self.removed && messageText.isUserInteractionEnabled == false {
+        if !copySession && !forwardSession && !deleteSession && !self.removed {
             let interaction = UIContextMenuInteraction(delegate: self)
             containerMessage.addInteraction(interaction)
             containerMessage.isUserInteractionEnabled = true
@@ -5678,6 +5680,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         
         let imageThumb = UIImageView()
         let containerViewFile = UIView()
+        let imageGif = SDAnimatedImageView()
         
         if !audioChat.isEmpty {
             let imageAudio = UIImageView()
@@ -5692,7 +5695,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             if let dirPath = paths.first {
                 let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(audioChat)
                 if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: audioChat) {
-                    Download().startHTTP(forKey: audioChat) { (name, progress) in
+                    Download().startHTTP(forKey: audioChat, isImage: false) { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
@@ -5886,7 +5889,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     
                 }
                 
-                if (videoChat != "") {
+                if (videoChat != "" && gifChat.isEmpty) {
                     let imagePlay = UIImageView(image: UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold, scale: .default))?.imageWithInsets(insets: UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10))?.withTintColor(.white))
                     imagePlay.circle()
                     imageThumb.addSubview(imagePlay)
@@ -5894,6 +5897,42 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     imagePlay.translatesAutoresizingMaskIntoConstraints = false
                     imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
                     imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+                } else if !gifChat.isEmpty {
+                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                    if let dirPath = paths.first {
+                        let gifURL = URL(fileURLWithPath: dirPath).appendingPathComponent(gifChat)
+                        if !FileManager.default.fileExists(atPath: gifURL.path) && !FileEncryption.shared.isSecureExists(filename: gifChat) {
+                            Download().startHTTP(forKey: gifChat, isImage: false) { (name, progress) in
+                                guard progress == 100 else {
+                                    return
+                                }
+                                tableView.reloadRows(at: [indexPath], with: .none)
+                            }
+                        } else {
+                            imageThumb.addSubview(imageGif)
+                            imageGif.translatesAutoresizingMaskIntoConstraints = false
+                            imageGif.anchor(top: imageThumb.topAnchor, left: imageThumb.leftAnchor, bottom: imageThumb.bottomAnchor, right: imageThumb.rightAnchor)
+                            if FileManager.default.fileExists(atPath: gifURL.path) {
+                                imageGif.image = SDAnimatedImage(contentsOfFile: gifURL.path)
+//                                imageGif.shouldCustomLoopCount = true
+//                                imageGif.animationRepeatCount = 4
+                            } else if FileEncryption.shared.isSecureExists(filename: gifChat){
+                                do {
+                                    let data = try FileEncryption.shared.readSecure(filename: gifChat)
+                                    if let imageData = SDAnimatedImage(data: data!) {
+                                        imageGif.image = imageData
+//                                        imageGif.shouldCustomLoopCount = true
+//                                        imageGif.animationRepeatCount = 4
+                                    }
+                                }
+                                catch {
+                                    print("Error reading secure file")
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 if (dataMessages[indexPath.row]["progress"] as! Double != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
@@ -5936,6 +5975,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     imageThumb.addGestureRecognizer(objectTap)
                     objectTap.image_id = imageChat
                     objectTap.video_id = videoChat
+                    objectTap.gif_id = gifChat
                     objectTap.imageView = imageThumb
                     objectTap.indexPath = indexPath
                 }
@@ -6689,6 +6729,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     }
                 }
             }
+        } else if (sender.gif_id != "") {
+            
         } else if (sender.video_id != "") {
             if let dirPath = paths.first {
                 let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.video_id)
@@ -6960,116 +7002,22 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             }
         }
     }
-    
-    @objc func handleLongPressLink(_ gestureRecognizer: UILongPressGestureRecognizer) {
-        func showMenuContext() {
-            if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended{
-                timerCheckLink?.invalidate()
-            } else if gestureRecognizer.state == .began {
-                timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false, block: {_ in
-                    let interaction = UIContextMenuInteraction(delegate: self)
-                    gestureRecognizer.view!.addInteraction(interaction)
-                    guard let interaction = gestureRecognizer.view!.interactions.first,
-                          let data = Data(base64Encoded: "X3ByZXNlbnRNZW51QXRMb2NhdGlvbjo="),
-                          let str = String(data: data, encoding: .utf8)
-                    else {
-                        return
-                    }
-                    let selector = NSSelectorFromString(str)
-                    guard interaction.responds(to: selector) else {
-                        return
-                    }
-                    let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
-                    impactHeavy.impactOccurred()
-                    interaction.perform(selector, with: self.view)
-                    self.showMenuContext = true
-                })
-            }
-        }
-        if gestureRecognizer.state == .began {
-            let touchPoint = gestureRecognizer.location(in: self.view)
-            touchedSubview = self.view.hitTest(touchPoint, with: nil) ?? UIView()
-            if !(touchedSubview is UILabel) {
-                showMenuContext()
-            }
-        }
-        guard let label = touchedSubview as? UILabel else { return }
-        let touchPointLabel = gestureRecognizer.location(in: label)
 
-        if let text = label.text, let range = getWordRange(at: touchPointLabel, in: label) {
-            let word = String(text[range])
-            if word.starts(with: "www.") || word.starts(with: "https://") || word.starts(with: "http://") {
-                if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended {
-                    timerCheckLink?.invalidate()
-                    if label.isHighlighted {
-                        var stringURl = word
-                        if stringURl.starts(with: "www.") {
-                            stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-                        }
-                        guard let url = URL(string: stringURl) else { return }
-                        UIApplication.shared.open(url)
-                        label.attributedText = removeHighlightedText(for: text, in: range, label: label)
-                    }
-                } else if gestureRecognizer.state == .began {
-                    label.attributedText = highlightedText(for: text, in: range, label: label)
-                    timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
-                        UIPasteboard.general.string = word
-                        self.view.makeToast("Link Copied".localized(), duration: 3)
-                        label.attributedText = self.removeHighlightedText(for: text, in: range, label: label)
-                    })
-                }
-            } else {
-                showMenuContext()
-            }
-        } else {
-            showMenuContext()
+    func highlightedText(for text: String, textView: UITextView) -> NSAttributedString {
+        let mutableAttributedString = textView.attributedText!.mutableCopy() as! NSMutableAttributedString
+        if let range = textView.attributedText.string.range(of: text) {
+            let nsRange = NSRange(range, in: textView.attributedText.string)
+            mutableAttributedString.addAttribute(.backgroundColor, value: UIColor.lightGray.withAlphaComponent(0.5), range: NSRange(range, in: text))
         }
-    }
-    
-    func getWordRange(at point: CGPoint, in label: UILabel) -> Range<String.Index>? {
-        guard let text = label.text else { return nil }
-        
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(size: .zero)
-        let textStorage = NSTextStorage(attributedString: label.attributedText ?? NSAttributedString())
-        
-        layoutManager.addTextContainer(textContainer)
-        textStorage.addLayoutManager(layoutManager)
-        
-        textContainer.lineFragmentPadding = 0.0
-        textContainer.lineBreakMode = label.lineBreakMode
-        textContainer.maximumNumberOfLines = label.numberOfLines
-        textContainer.size = label.bounds.size
-        
-        let characterIndex = layoutManager.characterIndex(for: point, in: textContainer, fractionOfDistanceBetweenInsertionPoints: nil)
-        
-        if characterIndex == text.count - 1 {
-            return nil
-        }
-        var wordStartIndex = characterIndex
-        while wordStartIndex > 0 && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != " " && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != "\n" {
-            wordStartIndex -= 1
-        }
-        
-        var wordEndIndex = characterIndex
-        while wordEndIndex < text.count && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != " " && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != "\n" {
-            wordEndIndex += 1
-        }
-        
-        return text.index(text.startIndex, offsetBy: wordStartIndex)..<text.index(text.startIndex, offsetBy: wordEndIndex)
-    }
-
-    func highlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
-        let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
-        mutableAttributedString.addAttribute(.backgroundColor, value: UIColor.lightGray.withAlphaComponent(0.5), range: NSRange(range, in: text))
-        label.isHighlighted = true
         return mutableAttributedString
     }
     
-    func removeHighlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
-        let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
-        mutableAttributedString.removeAttribute(.backgroundColor, range: NSRange(range, in: text))
-        label.isHighlighted = false
+    func removeHighlightedText(for text: String, textView: UITextView) -> NSAttributedString {
+        let mutableAttributedString = textView.attributedText!.mutableCopy() as! NSMutableAttributedString
+        if let range = textView.attributedText.string.range(of: text) {
+            let nsRange = NSRange(range, in: textView.attributedText.string)
+            mutableAttributedString.removeAttribute(.backgroundColor, range: NSRange(range, in: text))
+        }
         return mutableAttributedString
     }
     
@@ -7438,6 +7386,7 @@ public class ObjectGesture: UITapGestureRecognizer {
     public var video_id = ""
     public var file_id = ""
     public var audio_id = ""
+    public var gif_id = ""
     public var imageView = UIImageView()
     public var containerFile = UIView()
     public var labelFile = UILabel()
@@ -7510,4 +7459,5 @@ public class TypeDataMessage {
     public static let call_center_id = "call_center_id"
     public static let opposite_pin = "opposite_pin"
     public static let last_edit = "last_edit"
+    public static let gif_id = "gif_id"
 }

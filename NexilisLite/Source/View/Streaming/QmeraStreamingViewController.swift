@@ -397,7 +397,7 @@ class QmeraStreamingViewController: UIViewController {
                     let tagline = message.getBody(key: CoreMessage_TMessageKey.TAGLINE, default_value: self.tagline.text!)
                     if !titleRaw.isEmpty || !tagline.isEmpty{
                         let titleWithChar = titleRaw.components(separatedBy: "~")[1]
-                        let title = titleWithChar.components(separatedBy: "9632")[0]
+                        let title = titleWithChar.components(separatedBy: "■")[0]
                         
                         self.status.text = title
                         let size = self.status.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: self.status.frame.height))
@@ -494,7 +494,7 @@ class QmeraStreamingViewController: UIViewController {
                     return
                 }
                 
-                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getUpdateLiveVideo(pTitle: type == 0 ? "\(self.frontCamera ? 1 : 0)~\(textField!.text!)9632" : "\(self.frontCamera ? 1 : 0)~\(self.status.text!)9632", pTagline: type == 1 ? textField!.text! : self.tagline.text!)) {
+                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getUpdateLiveVideo(pTitle: type == 0 ? "\(self.frontCamera ? 1 : 0)~\(textField!.text!.toStupidString())" : "\(self.frontCamera ? 1 : 0)~\(self.status.text!.toStupidString())", pTagline: type == 1 ? textField!.text! : self.tagline.text!.toStupidString())) {
                     if response.isOk() {
                         if type == 0 {
                             self.status.text = textField!.text!

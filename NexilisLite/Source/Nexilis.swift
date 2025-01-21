@@ -86,6 +86,7 @@ public class Nexilis: NSObject {
     public static let AUDIO_CALL_RINGING = 23
     public static let AUDIO_CALL_OFFHOOK = 22
     public static let AUDIO_CALL_INCOMING = 21
+    public static let AUDIO_VIDEO_CALL_MUTED = 26
     public static let VIDEO_RINGING = 11
     public static let ENDED = 8
     public static let INITIATING = 4
@@ -1317,6 +1318,7 @@ public class Nexilis: NSObject {
                         "video_id" : message.getBody(key : CoreMessage_TMessageKey.VIDEO_ID, default_value : ""),
                         "image_id" : message.getBody(key : CoreMessage_TMessageKey.IMAGE_ID, default_value : ""),
                         "file_id" : message.getBody(key : CoreMessage_TMessageKey.FILE_ID, default_value : ""),
+                        "gif_id" : message.getBody(key : CoreMessage_TMessageKey.GIF_ID, default_value : ""),
                         "thumb_id" : message.getBody(key : CoreMessage_TMessageKey.THUMB_ID, default_value : ""),
                         "opposite_pin" : message.getBody(key : CoreMessage_TMessageKey.OPPOSITE_PIN, default_value : ""),
                         "format" : message.getBody(key : CoreMessage_TMessageKey.FORMAT, default_value : ""),

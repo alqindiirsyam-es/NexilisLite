@@ -23,6 +23,7 @@ public class User: Model {
     public var device_id: String
     
     public var isSelected: Bool = false
+    public var isMuted: Bool = false
     
     public init(pin: String) {
         self.pin = pin

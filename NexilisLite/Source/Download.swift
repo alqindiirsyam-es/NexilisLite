@@ -45,7 +45,7 @@ public class Download {
         _ = Nexilis.write(message: CoreMessage_TMessageBank.getImageDownload(p_image_id: forKey))
     }
     
-    public func startHTTP(forKey: String, isImage: Bool = true, completion: @escaping (String, Double)->()) {
+    public func startHTTP(forKey: String, isImage: Bool = false, completion: @escaping (String, Double)->()) {
         _ = startHTTP(filename: forKey, isImage: isImage, baseURL: DOWNLOAD_URL, completion: completion)
     }
     
@@ -87,10 +87,10 @@ public class Download {
                         do {
                             let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                             let url = documentDir.appendingPathComponent(filename)
-                            //print("write file \(url.path)")
+//                            print("write file \(url.path)")
+//                            try successResponse.write(to: url)
                             let dResponse = try FileEncryption.shared.decryptToMemory(successResponse, MasterKeyUtil.shared.getServerKey())
                             if isImage {
-                                let imageOr = UIImage(data: successResponse)
                                 let imageDec = UIImage(data: dResponse)
                                 if imageDec != nil {
                                     try dResponse.write(to: url)
@@ -99,7 +99,7 @@ public class Download {
                                 }
                             }
                             else {
-                                try dResponse.write(to: url)
+                                try successResponse.write(to: url)
                             }
                             Nexilis.removeDownload(forKey: filename)
                             completion(filename,100)
@@ -109,7 +109,7 @@ public class Download {
                     else {
                         let statusCode = result.response?.statusCode
                         print("Response fail: \(result.debugDescription)")
-                        completion(filename,0)
+                        completion(filename,-100)
                     }
                 }
             }

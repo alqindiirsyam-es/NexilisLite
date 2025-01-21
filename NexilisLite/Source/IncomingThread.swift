@@ -1303,7 +1303,7 @@ class IncomingThread {
         if (!thumb_id.isEmpty) {
             Download().startHTTP(forKey: thumb_id) { (file, progress) in
                 //print ("masuk download \(progress)")
-                if(progress == 100) {
+                if(progress == 100 || progress == -100) {
                     Nexilis.saveMessage(message: message, withStatus: false)
                     //print("save message incoming")
                 }

@@ -415,6 +415,13 @@ public final class Utils {
                 return ("📷 " + "Photo".localized()).richText(group_id: chat.pin)
             }
         }
+        else if !chat.gif.isEmpty {
+            if !chat.messageText.isEmpty {
+                return "🎬 \(chat.messageText)".richText(group_id: chat.pin)
+            } else {
+                return ("🎬 " + "GIF".localized()).richText(group_id: chat.pin)
+            }
+        }
         else if !chat.video.isEmpty {
             if !chat.messageText.isEmpty {
                 return "📹 \(chat.messageText)".richText(group_id: chat.pin)

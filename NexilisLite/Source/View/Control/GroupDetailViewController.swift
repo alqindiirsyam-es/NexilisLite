@@ -539,14 +539,18 @@ class GroupDetailViewController: UITableViewController {
                 let member = g.members[indexPath.row - 1]
                 if member.pin != User.getMyPin()! {
                     if member.pin == g.by {
-                        let data = User.getDataCanNil(pin: member.pin)
-                        let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
-                        controller.flag = data == nil ? .invite : .friend
-                        controller.user = member
-                        controller.name = member.fullName
-                        controller.data = member.pin
-                        controller.picture = member.thumb
-                        self.navigationController?.show(controller, sender: nil)
+                        let dataUser = User.getDataCanNil(pin: member.pin)
+                        if dataUser != nil {
+                            let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
+                            controller.flag = .friend
+                            controller.user = member
+                            controller.name = member.fullName
+                            controller.data = member.pin
+                            controller.picture = member.thumb
+                            self.navigationController?.show(controller, sender: nil)
+                        } else {
+                            print("Add friend")
+                        }
                         return
                     }
                     let alert = LibAlertController(title: nil, message: "\(member.firstName) \(member.lastName)", preferredStyle: .actionSheet)
@@ -614,17 +618,26 @@ class GroupDetailViewController: UITableViewController {
                     // skip self profile
                     return
                 }
-                let data = User.getDataCanNil(pin: member.pin)
-                let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
-                controller.flag = data == nil ? .invite : .friend
-                controller.user = member
-                controller.name = member.fullName
-                controller.data = member.pin
-                controller.picture = member.thumb
-                controller.isDismiss = {
-                    self.reload()
+                let dataUser = User.getDataCanNil(pin: member.pin)
+                if dataUser != nil {
+                    let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
+                    controller.flag = .friend
+                    controller.user = member
+                    controller.name = member.fullName
+                    controller.data = member.pin
+                    controller.picture = member.thumb
+                    controller.isDismiss = {
+                        self.reload()
+                    }
+                    self.navigationController?.show(controller, sender: nil)
+                } else {
+                    let alert = LibAlertController(title: nil, message: "do you want to add".localized() + " \(member.fullName) " + "as friend?".localized(), preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "Yes".localized(), style: .default, handler: { action in
+                        self.didTapAdd(member.pin)
+                    }))
+                    alert.addAction(UIAlertAction(title: "No".localized(), style: .cancel, handler: nil))
+                    navigationController?.present(alert, animated: true)
                 }
-                self.navigationController?.show(controller, sender: nil)
             }
         case .exit:
             if let g = group {
@@ -664,6 +677,42 @@ class GroupDetailViewController: UITableViewController {
         default:
             //print("No handler..")
             break
+        }
+    }
+    
+    private func didTapAdd(_ pin: String) {
+        Nexilis.showLoader()
+        addFriend(pin) { result in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                Nexilis.hideLoader { [self] in
+                    if result {
+                        let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+                        imageView.tintColor = .white
+                        let banner = FloatingNotificationBanner(title: "Successfully add friend".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                        banner.show()
+                        self.reload()
+                    } else {
+                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                        imageView.tintColor = .white
+                        let banner = FloatingNotificationBanner(title: "Server busy, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                        banner.show()
+                    }
+                }
+            })
+        }
+    }
+    
+    private func addFriend(_ pin: String, completion: @escaping (Bool) -> ()) {
+        DispatchQueue.global().async {
+            guard !self.data.isEmpty else {
+                completion(false)
+                return
+            }
+            if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendQRCode(fpin: pin)), response.isOk() {
+                completion(true)
+            } else {
+                completion(false)
+            }
         }
     }
     
@@ -952,6 +1001,10 @@ class GroupDetailViewController: UITableViewController {
             }
             return cell
         }
+    }
+    
+    @objc func imageAddContactTapped() {
+        print("Image View Tapped")
     }
     
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {

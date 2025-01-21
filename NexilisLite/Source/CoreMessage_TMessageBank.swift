@@ -147,7 +147,7 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
-    public static func sendMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String) -> TMessage {
+    public static func sendMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String, gif_id: String = "") -> TMessage {
         let me = User.getMyPin()!
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.SEND_CHAT
@@ -197,6 +197,9 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.READ_RECEIPTS] = read_receipts
         if !chat_id.isEmpty {
             tmessage.mBodies[CoreMessage_TMessageKey.CHAT_ID] = chat_id
+        }
+        if !gif_id.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.GIF_ID] = gif_id
         }
         return tmessage
     }
@@ -1204,9 +1207,11 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.F_PIN] = me
         tmessage.mBodies[CoreMessage_TMessageKey.L_PIN] = l_pin
         tmessage.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = messageId
-        tmessage.mBodies["message_id"] = messageId // message_id separated with coma
+        tmessage.mBodies["message_id"] = "'\(messageId)'" // message_id separated with coma
         tmessage.mBodies[CoreMessage_TMessageKey.CHAT_ID] = chat
         tmessage.mBodies[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] = scope
+        tmessage.mBodies["delete_all"] = "1"
+//        tmessage.mBodies["delete_local"] = "1"
         if type == "2" { // delete for everyone
             tmessage.mBodies[CoreMessage_TMessageKey.DELETE_MESSAGE_FLAG] = "1"
         }

@@ -227,7 +227,7 @@ extension UINavigationController {
             navigationBar.shadowImage = UIImage()
             navigationBar.isTranslucent = true
             let navBarAppearance = UINavigationBarAppearance()
-            navBarAppearance.configureWithOpaqueBackground()
+            navBarAppearance.configureWithTransparentBackground()
             navBarAppearance.backgroundColor = .clear
             navigationBar.standardAppearance = navBarAppearance
             navigationBar.scrollEdgeAppearance = navBarAppearance

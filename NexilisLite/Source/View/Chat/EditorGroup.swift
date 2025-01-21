@@ -13,6 +13,7 @@ import Photos
 import NotificationBannerSwift
 import nuSDKService
 import SwiftLinkPreview
+import SDWebImage
 
 public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     @IBOutlet var viewButton: UIView!
@@ -86,7 +87,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var isAlwaysHideLinkPreview = false
     var timerCheckLink: Timer?
     var lastPositionCursorMention = 0
-    var timerLongPressLink: Timer?
     var timerFakeProgress: Timer?
     var showMenuContext = false
     var touchedSubview = UIView()
@@ -560,11 +560,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     private func getData() {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"] as! String)' order by server_date asc"
+                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"] as! String)' order by server_date asc"
                 if isHistoryCC {
                     query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc"
                 } else if (dataTopic["chat_id"] as! String != "") {
-                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited FROM MESSAGE where chat_id='\(dataTopic["chat_id"] as! String)' order by server_date asc"
+                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id FROM MESSAGE where chat_id='\(dataTopic["chat_id"] as! String)' order by server_date asc"
                 }
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     var tempImages: [ImageGrouping] = []
@@ -591,6 +591,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         row["blog_id"] = cursorData.string(forColumnIndex: 18)
                         row["credential"] = cursorData.string(forColumnIndex: 19)
                         row[TypeDataMessage.last_edit] = cursorData.longLongInt(forColumnIndex: 20)
+                        row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 21)
                         row["isSelected"] = false
                         if row["credential"] != nil && row["credential"] as! String == "1" {
                             let idMe = User.getMyPin()!
@@ -990,6 +991,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         row["audio_id"] = chatData[CoreMessage_TMessageKey.AUDIO_ID]
                     } else {
                         row["audio_id"] = ""
+                    }
+                    if (chatData.keys.contains(CoreMessage_TMessageKey.GIF_ID)) {
+                        row["gif_id"] = chatData[CoreMessage_TMessageKey.GIF_ID]
+                    } else {
+                        row["gif_id"] = ""
                     }
                     if (chatData.keys.contains(CoreMessage_TMessageKey.VIDEO_ID)) {
                         row["video_id"] = chatData[CoreMessage_TMessageKey.VIDEO_ID]
@@ -2181,7 +2187,7 @@ extension EditorGroup: ImageVideoPickerDelegate, PreviewAttachmentImageVideoDele
         }
     }
     
-    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, viewController: UIViewController) {
+    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, viewController: UIViewController) {
         sendChat(message_text: message_text, attachment_flag: attachment_flag, image_id: image_id, video_id: video_id, thumb_id: thumb_id, viewController: viewController)
     }
 }
@@ -2650,28 +2656,22 @@ extension EditorGroup: UITextViewDelegate {
         }
     }
     
-    public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(UIResponderStandardEditActions.paste(_:)) && (UIPasteboard.general.image != nil) {
-            return true
-        }
-        return super.canPerformAction(action, withSender: sender)
-    }
-    
-    public override func paste(_ sender: Any?) {
-        if UIPasteboard.general.image != nil {
-            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-            previewImageVC.image = UIPasteboard.general.image
-            previewImageVC.fromCopy = true
-            previewImageVC.currentTextTextField = textFieldSend.text
-            previewImageVC.isAck = self.isAck
-            previewImageVC.isConfidential = self.isConfidential
-            previewImageVC.modalPresentationStyle = .custom
-            previewImageVC.delegate = self
-            self.present(previewImageVC, animated: true, completion: nil)
-        }
-    }
-    
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        if let pasteboardItems = UIPasteboard.general.items.first {
+            if pasteboardItems["public.jpeg"] != nil || pasteboardItems["public.png"] != nil || pasteboardItems["public.gif"] != nil || (pasteboardItems.keys.first != nil && pasteboardItems.keys.first!.contains(".gif")) {
+                let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                previewImageVC.image = pasteboardItems["public.png"] as? UIImage ?? pasteboardItems["public.jpeg"] as? UIImage ?? pasteboardItems.values.first as! UIImage
+                previewImageVC.isGIF = (pasteboardItems["public.png"] == nil && pasteboardItems["public.jpeg"] == nil)
+                previewImageVC.fromCopy = true
+                previewImageVC.currentTextTextField = textFieldSend.text
+                previewImageVC.modalPresentationStyle = .custom
+                previewImageVC.delegate = self
+                previewImageVC.isAck = self.isAck
+                previewImageVC.isConfidential = self.isConfidential
+                self.present(previewImageVC, animated: true, completion: nil)
+                return false
+            }
+        }
         if text.isEmpty {
             if listMentionInTextField.count > 0 {
                 for i in 0..<listMentionInTextField.count {
@@ -2710,6 +2710,24 @@ extension EditorGroup: UITextViewDelegate {
         }
         return true
     }
+    
+    public func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+            switch interaction {
+            case .invokeDefaultAction:
+                let gesture = ObjectGesture()
+                gesture.message_id = URL.absoluteString
+                tapMessageText(gesture)
+                return false
+            case .presentActions:
+                UIPasteboard.general.string = URL.absoluteString
+                self.view.makeToast("Link Copied".localized(), duration: 3)
+                return false
+            case .preview:
+                return true
+            @unknown default:
+                return true
+            }
+        }
 }
 
 extension EditorGroup: UIContextMenuInteractionDelegate {
@@ -3991,6 +4009,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         let fileChat = dataMessages[indexPath.row]["file_id"] as! String
         let reffChat = dataMessages[indexPath.row]["reff_id"] as! String
         let audioChat = (dataMessages[indexPath.row]["audio_id"] as? String) ?? ""
+        let gifChat = (dataMessages[indexPath.row]["gif_id"] as? String) ?? ""
         let dataTimer = listTimerCredential[(dataMessages[indexPath.row]["message_id"] as! String)]
         
         cellMessage.contentView.addSubview(containerMessage)
@@ -4005,7 +4024,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
         }
         
-        let messageText = UILabel()
+        let messageText = UITextView()
+        messageText.isEditable = false
+        messageText.isSelectable = true
+        messageText.dataDetectorTypes = []
+        messageText.backgroundColor = .clear
+        messageText.isScrollEnabled = false
+        messageText.textContainerInset = UIEdgeInsets.zero
+        messageText.contentInset = UIEdgeInsets.zero
+        messageText.textDragInteraction?.isEnabled = false
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
         let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32)
@@ -4320,10 +4347,6 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             }
             editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
         }
-        
-        messageText.numberOfLines = 0
-        messageText.lineBreakMode = .byWordWrapping
-        containerMessage.addSubview(messageText)
         topMarginText.isActive = true
         if dataMessages[indexPath.row]["attachment_flag"] as! String == "27" || dataMessages[indexPath.row]["attachment_flag"] as! String == "26" {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
@@ -4423,68 +4446,33 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         }
         
         func modifyText() {
-            
-            func ranges(of word: String, in string: String) -> [NSRange] {
-                var result: [NSRange] = []
-                var startIndex = string.startIndex
-                
-                while let range = string[startIndex...].range(of: word) {
-                    let nsRange = NSRange(range, in: string)
-                    result.append(nsRange)
-                    startIndex = range.upperBound
-                }
-                
-                return result
-            }
-            
-            messageText.isUserInteractionEnabled = false
             if !textChat!.isEmpty {
                 if textChat!.contains("■"){
                     textChat = textChat!.components(separatedBy: "■")[0]
                     textChat = textChat!.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                let listTextEnter = textChat!.split(separator: "\n")
-                let finalAtribute = textChat!.richText(group_id: self.dataGroup["group_id"] as! String)
-                var containsLink = false
-                var listRange: [NSRange] = []
-                for j in 0...listTextEnter.count - 1 {
-                    let listText = listTextEnter[j].split(separator: " ")
-                    if listText.count > 0 {
-                        for i in 0...listText.count - 1 {
-                            if listText[i].lowercased().checkStartWithLink() {
-                                var rangeTapLink = (finalAtribute.string as NSString).range(of: String(listText[i]))
-                                func checkContainsRange() {
-                                    if listRange.contains(rangeTapLink) {
-                                        let allRanges = ranges(of: String(listText[i]), in: finalAtribute.string)
-                                        for allRange in allRanges {
-                                            if !listRange.contains(allRange) {
-                                                rangeTapLink = allRange
-                                                break
-                                            }
-                                        }
-                                    }
-                                    listRange.append(rangeTapLink)
-                                }
-                                checkContainsRange()
-                                finalAtribute.addAttributes([.foregroundColor: UIColor.blue, .underlineStyle: NSUnderlineStyle.single.rawValue], range: rangeTapLink)
-                                if !containsLink {
-                                    containsLink = true
-                                }
-                            }
+                let finalAtribute = textChat!.richText()
+                textChat = finalAtribute.string
+                let urlPattern = "(https?://|www\\.)\\S+"
+                if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
+                    let matches = regex.matches(in: textChat!, options: [], range: NSRange(textChat!.startIndex..., in: textChat!))
+                    
+                    for match in matches {
+                        if let range = Range(match.range, in: textChat!) {
+                            let linkText = String(textChat![range])
+                            let nsRange = NSRange(range, in: textChat!)
+                            finalAtribute.addAttribute(.link, value: linkText, range: nsRange)
+                            finalAtribute.addAttribute(.foregroundColor, value: UIColor.blue, range: nsRange)
+                            finalAtribute.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: nsRange)
                         }
                     }
                 }
                 messageText.attributedText = finalAtribute
-                if containsLink && !copySession && !forwardSession && !deleteSession && !self.removed {
-                    messageText.isUserInteractionEnabled = true
-                    let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPressLink(_:)))
-                    longPress.minimumPressDuration = 0.1
-                    containerMessage.addGestureRecognizer(longPress)
-                }
+                messageText.delegate = self
             }
         }
         
-        if !copySession && !forwardSession && !deleteSession && !isHistoryCC && !removed && messageText.isUserInteractionEnabled == false {
+        if !copySession && !forwardSession && !deleteSession && !isHistoryCC && !removed {
             let interaction = UIContextMenuInteraction(delegate: self)
             containerMessage.addInteraction(interaction)
             containerMessage.isUserInteractionEnabled = true
@@ -4519,6 +4507,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         
         let imageThumb = UIImageView()
         let containerViewFile = UIView()
+        let imageGif = SDAnimatedImageView()
         
         if !audioChat.isEmpty {
             let imageAudio = UIImageView()
@@ -4533,7 +4522,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             if let dirPath = paths.first {
                 let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(audioChat)
                 if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: audioChat) {
-                    Download().startHTTP(forKey: audioChat) { (name, progress) in
+                    Download().startHTTP(forKey: audioChat, isImage: false) { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
@@ -4727,7 +4716,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     
                 }
                 
-                if (videoChat != "") {
+                if (videoChat != "" && gifChat.isEmpty) {
                     let imagePlay = UIImageView(image: UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold, scale: .default))?.imageWithInsets(insets: UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10))?.withTintColor(.white))
                     imagePlay.circle()
                     imageThumb.addSubview(imagePlay)
@@ -4735,6 +4724,42 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     imagePlay.translatesAutoresizingMaskIntoConstraints = false
                     imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
                     imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+                } else if !gifChat.isEmpty {
+                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                    if let dirPath = paths.first {
+                        let gifURL = URL(fileURLWithPath: dirPath).appendingPathComponent(gifChat)
+                        if !FileManager.default.fileExists(atPath: gifURL.path) && !FileEncryption.shared.isSecureExists(filename: gifChat) {
+                            Download().startHTTP(forKey: gifChat, isImage: false) { (name, progress) in
+                                guard progress == 100 else {
+                                    return
+                                }
+                                tableView.reloadRows(at: [indexPath], with: .none)
+                            }
+                        } else {
+                            imageThumb.addSubview(imageGif)
+                            imageGif.translatesAutoresizingMaskIntoConstraints = false
+                            imageGif.anchor(top: imageThumb.topAnchor, left: imageThumb.leftAnchor, bottom: imageThumb.bottomAnchor, right: imageThumb.rightAnchor)
+                            if FileManager.default.fileExists(atPath: gifURL.path) {
+                                imageGif.image = SDAnimatedImage(contentsOfFile: gifURL.path)
+//                                imageGif.shouldCustomLoopCount = true
+//                                imageGif.animationRepeatCount = 4
+                            } else if FileEncryption.shared.isSecureExists(filename: gifChat){
+                                do {
+                                    let data = try FileEncryption.shared.readSecure(filename: gifChat)
+                                    if let imageData = SDAnimatedImage(data: data!) {
+                                        imageGif.image = imageData
+//                                        imageGif.shouldCustomLoopCount = true
+//                                        imageGif.animationRepeatCount = 4
+                                    }
+                                }
+                                catch {
+                                    print("Error reading secure file")
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 if (dataMessages[indexPath.row]["progress"] as! Double != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
@@ -4777,6 +4802,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     imageThumb.addGestureRecognizer(objectTap)
                     objectTap.image_id = imageChat
                     objectTap.video_id = videoChat
+                    objectTap.gif_id = gifChat
                     objectTap.imageView = imageThumb
                     objectTap.indexPath = indexPath
                 }
@@ -5469,6 +5495,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     }
                 }
             }
+        } else if (sender.gif_id != "") {
+            
         } else if (sender.video_id != "") {
             if let dirPath = paths.first {
                 let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.video_id)
@@ -5745,428 +5773,328 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         }
     }
         
-        @objc func handleLongPressLink(_ gestureRecognizer: UILongPressGestureRecognizer) {
-            func showMenuContext() {
-                if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended{
-                    timerCheckLink?.invalidate()
-                } else if gestureRecognizer.state == .began {
-                    timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false, block: {_ in
-                        let interaction = UIContextMenuInteraction(delegate: self)
-                        gestureRecognizer.view!.addInteraction(interaction)
-                        guard let interaction = gestureRecognizer.view!.interactions.first,
-                              let data = Data(base64Encoded: "X3ByZXNlbnRNZW51QXRMb2NhdGlvbjo="),
-                              let str = String(data: data, encoding: .utf8)
-                        else {
-                            return
-                        }
-                        let selector = NSSelectorFromString(str)
-                        guard interaction.responds(to: selector) else {
-                            return
-                        }
-                        let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
-                        impactHeavy.impactOccurred()
-                        interaction.perform(selector, with: self.view)
-                        self.showMenuContext = true
-                    })
-                }
-            }
-            if gestureRecognizer.state == .began {
-                let touchPoint = gestureRecognizer.location(in: self.view)
-                touchedSubview = self.view.hitTest(touchPoint, with: nil) ?? UIView()
-                if !(touchedSubview is UILabel) {
-                    showMenuContext()
-                }
-            }
-            guard let label = touchedSubview as? UILabel else { return }
-            let touchPointLabel = gestureRecognizer.location(in: label)
-            
-            if let text = label.text, let range = getWordRange(at: touchPointLabel, in: label) {
-                let word = String(text[range])
-                if word.starts(with: "www.") || word.starts(with: "https://") || word.starts(with: "http://") {
-                    if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended {
-                        timerCheckLink?.invalidate()
-                        if label.isHighlighted {
-                            var stringURl = word
-                            if stringURl.starts(with: "www.") {
-                                stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-                            }
-                            guard let url = URL(string: stringURl) else { return }
-                            UIApplication.shared.open(url)
-                            label.attributedText = removeHighlightedText(for: text, in: range, label: label)
-                        }
-                    } else if gestureRecognizer.state == .began {
-                        label.attributedText = highlightedText(for: text, in: range, label: label)
-                        timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
-                            UIPasteboard.general.string = word
-                            self.view.makeToast("Link Copied".localized(), duration: 3)
-                            label.attributedText = self.removeHighlightedText(for: text, in: range, label: label)
-                        })
-                    }
-                } else {
-                    showMenuContext()
-                }
+    func highlightedText(for text: String, in range: Range<String.Index>, textView: UITextView) -> NSAttributedString {
+        let mutableAttributedString = textView.attributedText!.mutableCopy() as! NSMutableAttributedString
+        mutableAttributedString.addAttribute(.backgroundColor, value: UIColor.lightGray.withAlphaComponent(0.5), range: NSRange(range, in: text))
+        return mutableAttributedString
+    }
+    
+    func removeHighlightedText(for text: String, in range: Range<String.Index>, textView: UITextView) -> NSAttributedString {
+        let mutableAttributedString = textView.attributedText!.mutableCopy() as! NSMutableAttributedString
+        mutableAttributedString.removeAttribute(.backgroundColor, range: NSRange(range, in: text))
+        return mutableAttributedString
+    }
+        
+    @objc func tapMessageText(_ sender: ObjectGesture) {
+        var stringURl = sender.message_id
+        if stringURl.lowercased().starts(with: "www.") {
+            stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
+        }
+        guard let url = URL(string: stringURl) else { return }
+        UIApplication.shared.open(url)
+    }
+    
+    //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+    //        if copySession || forwardSession || deleteSession {
+    //            return nil
+    //        }
+    //        let idMe = User.getMyPin() as String?
+    //        if (dataMessages[indexPath.row]["f_pin"] as? String != idMe) {
+    //            return nil
+    //        }
+    //        let messageInfoVC = MessageInfo()
+    //        self.navigationController?.show(messageInfoVC, sender: nil)
+    //        return UISwipeActionsConfiguration()
+    //    }
+    //
+    //    public func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+    //        if copySession || forwardSession || deleteSession {
+    //            return nil
+    //        }
+    //        let action = UIContextualAction(style: .normal,
+    //                                        title: "") { [weak self] (action, view, completionHandler) in
+    //                                            self?.handleReply(indexPath: indexPath)
+    //                                            completionHandler(true)
+    //        }
+    //        action.backgroundColor = .white
+    //        action.image = UIImage(systemName: "arrowshape.turn.up.left.fill")?.withTintColor(.black, renderingMode: .alwaysOriginal)
+    //        return UISwipeActionsConfiguration(actions: [action])
+    //    }
+    
+    private func handleReply(indexPath: IndexPath, dataMessagesImage: [String: Any?] = [:], reffId: String = "") {
+        var dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
+        if reffId.isEmpty {
+            self.deleteReplyView()
+            if dataMessagesImage.count != 0 {
+                dataMessages = [dataMessagesImage]
             } else {
-                showMenuContext()
+                self.textFieldSend.becomeFirstResponder()
             }
+            self.reffId = dataMessages[indexPath.row]["message_id"] as? String
+        } else {
+            dataMessages = self.dataMessages.filter({ $0["message_id"] as! String == reffId })
+            self.reffId = reffId
+        }
+        UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
+            self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50
+            if self.contraintBottomMention.constant > 0 {
+                self.contraintBottomMention.constant = self.contraintBottomMention.constant + 50
+            }
+        }, completion: nil)
+        if (self.currentIndexpath != nil) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
+            }
+        } else {
+            self.tableChatView.scrollToBottom()
         }
         
-        func getWordRange(at point: CGPoint, in label: UILabel) -> Range<String.Index>? {
-            guard let text = label.text else { return nil }
-            
-            let layoutManager = NSLayoutManager()
-            let textContainer = NSTextContainer(size: .zero)
-            let textStorage = NSTextStorage(attributedString: label.attributedText ?? NSAttributedString())
-            
-            layoutManager.addTextContainer(textContainer)
-            textStorage.addLayoutManager(layoutManager)
-            
-            textContainer.lineFragmentPadding = 0.0
-            textContainer.lineBreakMode = label.lineBreakMode
-            textContainer.maximumNumberOfLines = label.numberOfLines
-            textContainer.size = label.bounds.size
-            
-            let characterIndex = layoutManager.characterIndex(for: point, in: textContainer, fractionOfDistanceBetweenInsertionPoints: nil)
-            
-            if characterIndex == text.count - 1 {
-                return nil
-            }
-            var wordStartIndex = characterIndex
-            while wordStartIndex > 0 && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != " " && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != "\n" {
-                wordStartIndex -= 1
-            }
-            
-            var wordEndIndex = characterIndex
-            while wordEndIndex < text.count && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != " " && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != "\n" {
-                wordEndIndex += 1
-            }
-            
-            return text.index(text.startIndex, offsetBy: wordStartIndex)..<text.index(text.startIndex, offsetBy: wordEndIndex)
+        self.viewTextfield.addSubview(self.containerPreviewReply)
+        self.containerPreviewReply.translatesAutoresizingMaskIntoConstraints = false
+        self.containerPreviewReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
+        self.containerPreviewReply.topAnchor.constraint(equalTo: self.viewTextfield.topAnchor).isActive = true
+        if !self.containerLink.isDescendant(of: self.viewTextfield) {
+            self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.textFieldSend.topAnchor)
+        } else {
+            self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.containerLink.topAnchor)
         }
+        self.bottomAnchorPreviewReply.isActive = true
+        self.containerPreviewReply.trailingAnchor.constraint(equalTo: self.viewTextfield.trailingAnchor).isActive = true
+        self.containerPreviewReply.backgroundColor = .secondaryColor
         
-        func highlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
-            let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
-            mutableAttributedString.addAttribute(.backgroundColor, value: UIColor.lightGray.withAlphaComponent(0.5), range: NSRange(range, in: text))
-            label.isHighlighted = true
-            return mutableAttributedString
+        let leftReply = UIView()
+        self.containerPreviewReply.addSubview(leftReply)
+        leftReply.translatesAutoresizingMaskIntoConstraints = false
+        leftReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
+        leftReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor).isActive = true
+        leftReply.bottomAnchor.constraint(equalTo: self.containerPreviewReply.bottomAnchor).isActive = true
+        leftReply.widthAnchor.constraint(equalToConstant: 3).isActive = true
+        leftReply.backgroundColor = .orangeColor
+        
+        let titleReply = UILabel()
+        self.containerPreviewReply.addSubview(titleReply)
+        titleReply.translatesAutoresizingMaskIntoConstraints = false
+        titleReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
+        titleReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor, constant: 10).isActive = true
+        titleReply.font = UIFont.systemFont(ofSize: 12).bold
+        let idMe = User.getMyPin() as String?
+        if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+            titleReply.text = "You".localized()
+        } else {
+            if dataMessages[indexPath.row]["f_pin"] as? String != "-999" {
+                let dataPerson = self.getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"] as! String, message_id: dataMessages[indexPath.row]["message_id"] as! String)
+                titleReply.text = dataPerson["name"]
+            } else {
+                titleReply.text = "Bot"
+            }
         }
+        titleReply.textColor = .orangeColor
         
-        func removeHighlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
-            let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
-            mutableAttributedString.removeAttribute(.backgroundColor, range: NSRange(range, in: text))
-            label.isHighlighted = false
-            return mutableAttributedString
-        }
-        
-        @objc func tapMessageText(_ sender: ObjectGesture) {
-            var stringURl = sender.message_id
-            if stringURl.lowercased().starts(with: "www.") {
-                stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-            }
-            guard let url = URL(string: stringURl) else { return }
-            UIApplication.shared.open(url)
-        }
-        
-        //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        //        if copySession || forwardSession || deleteSession {
-        //            return nil
-        //        }
-        //        let idMe = User.getMyPin() as String?
-        //        if (dataMessages[indexPath.row]["f_pin"] as? String != idMe) {
-        //            return nil
-        //        }
-        //        let messageInfoVC = MessageInfo()
-        //        self.navigationController?.show(messageInfoVC, sender: nil)
-        //        return UISwipeActionsConfiguration()
-        //    }
-        //
-        //    public func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        //        if copySession || forwardSession || deleteSession {
-        //            return nil
-        //        }
-        //        let action = UIContextualAction(style: .normal,
-        //                                        title: "") { [weak self] (action, view, completionHandler) in
-        //                                            self?.handleReply(indexPath: indexPath)
-        //                                            completionHandler(true)
-        //        }
-        //        action.backgroundColor = .white
-        //        action.image = UIImage(systemName: "arrowshape.turn.up.left.fill")?.withTintColor(.black, renderingMode: .alwaysOriginal)
-        //        return UISwipeActionsConfiguration(actions: [action])
-        //    }
-        
-        private func handleReply(indexPath: IndexPath, dataMessagesImage: [String: Any?] = [:], reffId: String = "") {
-            var dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
-            if reffId.isEmpty {
-                self.deleteReplyView()
-                if dataMessagesImage.count != 0 {
-                    dataMessages = [dataMessagesImage]
-                } else {
-                    self.textFieldSend.becomeFirstResponder()
-                }
-                self.reffId = dataMessages[indexPath.row]["message_id"] as? String
+        let contentReply = UILabel()
+        self.containerPreviewReply.addSubview(contentReply)
+        contentReply.translatesAutoresizingMaskIntoConstraints = false
+        contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
+        contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
+        contentReply.font = UIFont.systemFont(ofSize: 10)
+        let message_text = dataMessages[indexPath.row]["message_text"] as! String
+        let attachment_flag = dataMessages[indexPath.row]["attachment_flag"] as! String
+        let thumb_chat = dataMessages[indexPath.row]["thumb_id"] as! String
+        let image_chat = dataMessages[indexPath.row]["image_id"] as! String
+        let video_chat = dataMessages[indexPath.row]["video_id"] as! String
+        let file_chat = dataMessages[indexPath.row]["file_id"] as! String
+        if (attachment_flag == "0" && thumb_chat == "") {
+            contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+        } else if (attachment_flag == "1" || image_chat != "") {
+            if (message_text == "") {
+                contentReply.text = "📷 Photo".localized()
             } else {
-                dataMessages = self.dataMessages.filter({ $0["message_id"] as! String == reffId })
-                self.reffId = reffId
-            }
-            UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
-                self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50
-                if self.contraintBottomMention.constant > 0 {
-                    self.contraintBottomMention.constant = self.contraintBottomMention.constant + 50
-                }
-            }, completion: nil)
-            if (self.currentIndexpath != nil) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
-                }
-            } else {
-                self.tableChatView.scrollToBottom()
-            }
-            
-            self.viewTextfield.addSubview(self.containerPreviewReply)
-            self.containerPreviewReply.translatesAutoresizingMaskIntoConstraints = false
-            self.containerPreviewReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
-            self.containerPreviewReply.topAnchor.constraint(equalTo: self.viewTextfield.topAnchor).isActive = true
-            if !self.containerLink.isDescendant(of: self.viewTextfield) {
-                self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.textFieldSend.topAnchor)
-            } else {
-                self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.containerLink.topAnchor)
-            }
-            self.bottomAnchorPreviewReply.isActive = true
-            self.containerPreviewReply.trailingAnchor.constraint(equalTo: self.viewTextfield.trailingAnchor).isActive = true
-            self.containerPreviewReply.backgroundColor = .secondaryColor
-            
-            let leftReply = UIView()
-            self.containerPreviewReply.addSubview(leftReply)
-            leftReply.translatesAutoresizingMaskIntoConstraints = false
-            leftReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
-            leftReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor).isActive = true
-            leftReply.bottomAnchor.constraint(equalTo: self.containerPreviewReply.bottomAnchor).isActive = true
-            leftReply.widthAnchor.constraint(equalToConstant: 3).isActive = true
-            leftReply.backgroundColor = .orangeColor
-            
-            let titleReply = UILabel()
-            self.containerPreviewReply.addSubview(titleReply)
-            titleReply.translatesAutoresizingMaskIntoConstraints = false
-            titleReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
-            titleReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor, constant: 10).isActive = true
-            titleReply.font = UIFont.systemFont(ofSize: 12).bold
-            let idMe = User.getMyPin() as String?
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                titleReply.text = "You".localized()
-            } else {
-                if dataMessages[indexPath.row]["f_pin"] as? String != "-999" {
-                    let dataPerson = self.getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"] as! String, message_id: dataMessages[indexPath.row]["message_id"] as! String)
-                    titleReply.text = dataPerson["name"]
-                } else {
-                    titleReply.text = "Bot"
-                }
-            }
-            titleReply.textColor = .orangeColor
-            
-            let contentReply = UILabel()
-            self.containerPreviewReply.addSubview(contentReply)
-            contentReply.translatesAutoresizingMaskIntoConstraints = false
-            contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
-            contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
-            contentReply.font = UIFont.systemFont(ofSize: 10)
-            let message_text = dataMessages[indexPath.row]["message_text"] as! String
-            let attachment_flag = dataMessages[indexPath.row]["attachment_flag"] as! String
-            let thumb_chat = dataMessages[indexPath.row]["thumb_id"] as! String
-            let image_chat = dataMessages[indexPath.row]["image_id"] as! String
-            let video_chat = dataMessages[indexPath.row]["video_id"] as! String
-            let file_chat = dataMessages[indexPath.row]["file_id"] as! String
-            if (attachment_flag == "0" && thumb_chat == "") {
                 contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
-            } else if (attachment_flag == "1" || image_chat != "") {
-                if (message_text == "") {
-                    contentReply.text = "📷 Photo".localized()
-                } else {
-                    contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
-                }
-            } else if (attachment_flag == "2" || video_chat != "") {
-                if (message_text == "") {
-                    contentReply.text = "📹 Video".localized()
-                } else {
-                    contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
-                }
-            } else if (attachment_flag == "6" || file_chat != ""){
-                contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
-            } else if (attachment_flag == "11") {
-                contentReply.text = "❤️ Sticker"
-            } else if attachment_flag == "27" {
-                contentReply.text = "📄 " + "Live Streaming".localized()
-            } else if attachment_flag == "26" {
-                contentReply.text = "📄 " + "Seminar".localized()
             }
-            contentReply.textColor = .gray
-            
-            let buttonCancelReply = UIButton(type: .custom)
-            self.containerPreviewReply.addSubview(buttonCancelReply)
-            buttonCancelReply.translatesAutoresizingMaskIntoConstraints = false
-            buttonCancelReply.trailingAnchor.constraint(equalTo: self.containerPreviewReply.trailingAnchor, constant: -10).isActive = true
-            buttonCancelReply.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
-            buttonCancelReply.setImage(UIImage(systemName: "xmark.circle" , withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular, scale: .default)), for: .normal)
-            buttonCancelReply.addTarget(nil, action: #selector(self.deleteReplyView), for: .touchUpInside)
-            buttonCancelReply.backgroundColor = .clear
-            buttonCancelReply.tintColor = .mainColor
-            
-            if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
-                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                if let dirPath = paths.first {
-                    let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumb_chat)
-                    let image : UIImage? =  {
-                        if let img = Nexilis.imageCache.object(forKey: thumb_chat as NSString) {
-                            return img
-                        }
-                        else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                            Nexilis.imageCache.setObject(img, forKey: thumb_chat as NSString)
-                            return img
-                        }
-                        return nil
-                    }()
-                    //                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
-                    let imageThumb = UIImageView(image: image)
-                    self.containerPreviewReply.addSubview(imageThumb)
-                    imageThumb.layer.cornerRadius = 2.0
-                    imageThumb.clipsToBounds = true
-                    imageThumb.translatesAutoresizingMaskIntoConstraints = false
-                    imageThumb.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
-                    imageThumb.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
-                    imageThumb.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                    imageThumb.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    
-                    if (attachment_flag == "2") {
-                        let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
-                        imageThumb.addSubview(imagePlay)
-                        imagePlay.clipsToBounds = true
-                        imagePlay.translatesAutoresizingMaskIntoConstraints = false
-                        imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
-                        imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
-                        imagePlay.widthAnchor.constraint(equalToConstant: 10).isActive = true
-                        imagePlay.heightAnchor.constraint(equalToConstant: 10).isActive = true
-                        imagePlay.tintColor = .white
+        } else if (attachment_flag == "2" || video_chat != "") {
+            if (message_text == "") {
+                contentReply.text = "📹 Video".localized()
+            } else {
+                contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+            }
+        } else if (attachment_flag == "6" || file_chat != ""){
+            contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
+        } else if (attachment_flag == "11") {
+            contentReply.text = "❤️ Sticker"
+        } else if attachment_flag == "27" {
+            contentReply.text = "📄 " + "Live Streaming".localized()
+        } else if attachment_flag == "26" {
+            contentReply.text = "📄 " + "Seminar".localized()
+        }
+        contentReply.textColor = .gray
+        
+        let buttonCancelReply = UIButton(type: .custom)
+        self.containerPreviewReply.addSubview(buttonCancelReply)
+        buttonCancelReply.translatesAutoresizingMaskIntoConstraints = false
+        buttonCancelReply.trailingAnchor.constraint(equalTo: self.containerPreviewReply.trailingAnchor, constant: -10).isActive = true
+        buttonCancelReply.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
+        buttonCancelReply.setImage(UIImage(systemName: "xmark.circle" , withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular, scale: .default)), for: .normal)
+        buttonCancelReply.addTarget(nil, action: #selector(self.deleteReplyView), for: .touchUpInside)
+        buttonCancelReply.backgroundColor = .clear
+        buttonCancelReply.tintColor = .mainColor
+        
+        if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
+            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+            if let dirPath = paths.first {
+                let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumb_chat)
+                let image : UIImage? =  {
+                    if let img = Nexilis.imageCache.object(forKey: thumb_chat as NSString) {
+                        return img
                     }
+                    else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
+                        Nexilis.imageCache.setObject(img, forKey: thumb_chat as NSString)
+                        return img
+                    }
+                    return nil
+                }()
+                //                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
+                let imageThumb = UIImageView(image: image)
+                self.containerPreviewReply.addSubview(imageThumb)
+                imageThumb.layer.cornerRadius = 2.0
+                imageThumb.clipsToBounds = true
+                imageThumb.translatesAutoresizingMaskIntoConstraints = false
+                imageThumb.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
+                imageThumb.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
+                imageThumb.widthAnchor.constraint(equalToConstant: 30).isActive = true
+                imageThumb.heightAnchor.constraint(equalToConstant: 30).isActive = true
+                
+                if (attachment_flag == "2") {
+                    let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
+                    imageThumb.addSubview(imagePlay)
+                    imagePlay.clipsToBounds = true
+                    imagePlay.translatesAutoresizingMaskIntoConstraints = false
+                    imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+                    imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
+                    imagePlay.widthAnchor.constraint(equalToConstant: 10).isActive = true
+                    imagePlay.heightAnchor.constraint(equalToConstant: 10).isActive = true
+                    imagePlay.tintColor = .white
                 }
-            }
-            if (attachment_flag == "11") {
-                let imageSticker = UIImageView(image: UIImage(named: (message_text.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
-                self.containerPreviewReply.addSubview(imageSticker)
-                imageSticker.layer.cornerRadius = 2.0
-                imageSticker.clipsToBounds = true
-                imageSticker.translatesAutoresizingMaskIntoConstraints = false
-                imageSticker.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
-                imageSticker.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
-                imageSticker.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                imageSticker.heightAnchor.constraint(equalToConstant: 30).isActive = true
             }
         }
-        
-        func scrollToFirstSearchMessage(indexScroll: Int = 1) {
-            if textSearch.count < 2 {
-                return
-            }
-            var lastIndex = 0
-            let messageTextForSearch: [[String: Any?]] = self.dataMessages.reversed()
-            for idx in 0..<messageTextForSearch.count {
-                if (messageTextForSearch[idx]["message_text"] as! String).lowercased().contains(textSearch) {
-                    lastIndex += 1
-                    if lastIndex < indexScroll {
-                        continue
-                    }
-                    lastScrollIdxSearch = lastIndex
-                    let section = self.dataDates.firstIndex(of: messageTextForSearch[idx]["chat_date"] as! String)
-                    if section == nil {
-                        return
-                    }
-                    let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == messageTextForSearch[idx]["message_id"] as! String})
-                    if row == nil {
-                        return
-                    }
-                    let indexPath = IndexPath(row: row!, section: section!)
-                    self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        if let cell = self.tableChatView.cellForRow(at: indexPath) {
-                            let containerMessage = cell.contentView.subviews[1]
-                            let idMe = User.getMyPin() as String?
-                            if (messageTextForSearch[idx]["f_pin"] as? String == idMe) {
-                                containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
-                                        containerMessage.backgroundColor = .clear
-                                    } else {
-                                        containerMessage.backgroundColor = .blueBubbleColor
-                                    }
+        if (attachment_flag == "11") {
+            let imageSticker = UIImageView(image: UIImage(named: (message_text.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
+            self.containerPreviewReply.addSubview(imageSticker)
+            imageSticker.layer.cornerRadius = 2.0
+            imageSticker.clipsToBounds = true
+            imageSticker.translatesAutoresizingMaskIntoConstraints = false
+            imageSticker.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
+            imageSticker.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
+            imageSticker.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            imageSticker.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        }
+    }
+    
+    func scrollToFirstSearchMessage(indexScroll: Int = 1) {
+        if textSearch.count < 2 {
+            return
+        }
+        var lastIndex = 0
+        let messageTextForSearch: [[String: Any?]] = self.dataMessages.reversed()
+        for idx in 0..<messageTextForSearch.count {
+            if (messageTextForSearch[idx]["message_text"] as! String).lowercased().contains(textSearch) {
+                lastIndex += 1
+                if lastIndex < indexScroll {
+                    continue
+                }
+                lastScrollIdxSearch = lastIndex
+                let section = self.dataDates.firstIndex(of: messageTextForSearch[idx]["chat_date"] as! String)
+                if section == nil {
+                    return
+                }
+                let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == messageTextForSearch[idx]["message_id"] as! String})
+                if row == nil {
+                    return
+                }
+                let indexPath = IndexPath(row: row!, section: section!)
+                self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if let cell = self.tableChatView.cellForRow(at: indexPath) {
+                        let containerMessage = cell.contentView.subviews[1]
+                        let idMe = User.getMyPin() as String?
+                        if (messageTextForSearch[idx]["f_pin"] as? String == idMe) {
+                            containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
+                                    containerMessage.backgroundColor = .clear
+                                } else {
+                                    containerMessage.backgroundColor = .blueBubbleColor
                                 }
-                            } else {
-                                containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
-                                        containerMessage.backgroundColor = .clear
-                                    } else {
-                                        containerMessage.backgroundColor = .whiteBubbleColor
-                                    }
+                            }
+                        } else {
+                            containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
+                                    containerMessage.backgroundColor = .clear
+                                } else {
+                                    containerMessage.backgroundColor = .whiteBubbleColor
                                 }
                             }
                         }
                     }
-                    titleSearchMatches.isHidden = false
-                    if countMatchesSearch != 0 {
-                        if countMatchesSearch > 1 {
-                            titleSearchMatches.text = "\(lastScrollIdxSearch) " + "of".localized() + " \(countMatchesSearch) " + "matches".localized()
-                        } else {
-                            titleSearchMatches.text = "\(countMatchesSearch) " + "matches".localized()
-                        }
-                    } else {
-                        titleSearchMatches.text = "Not found".localized()
-                    }
-                    if lastScrollIdxSearch == countMatchesSearch || countMatchesSearch == 0 {
-                        buttonUp.isEnabled = false
-                        buttonUp.tintColor = .gray
-                    } else {
-                        buttonUp.isEnabled = true
-                        buttonUp.tintColor = .mainColor
-                    }
-                    if countMatchesSearch == 0 || lastScrollIdxSearch == 1 || countMatchesSearch == 1 {
-                        buttonDown.isEnabled = false
-                        buttonDown.tintColor = .gray
-                    } else {
-                        buttonDown.isEnabled = true
-                        buttonDown.tintColor = .mainColor
-                    }
-                    break
                 }
+                titleSearchMatches.isHidden = false
+                if countMatchesSearch != 0 {
+                    if countMatchesSearch > 1 {
+                        titleSearchMatches.text = "\(lastScrollIdxSearch) " + "of".localized() + " \(countMatchesSearch) " + "matches".localized()
+                    } else {
+                        titleSearchMatches.text = "\(countMatchesSearch) " + "matches".localized()
+                    }
+                } else {
+                    titleSearchMatches.text = "Not found".localized()
+                }
+                if lastScrollIdxSearch == countMatchesSearch || countMatchesSearch == 0 {
+                    buttonUp.isEnabled = false
+                    buttonUp.tintColor = .gray
+                } else {
+                    buttonUp.isEnabled = true
+                    buttonUp.tintColor = .mainColor
+                }
+                if countMatchesSearch == 0 || lastScrollIdxSearch == 1 || countMatchesSearch == 1 {
+                    buttonDown.isEnabled = false
+                    buttonDown.tintColor = .gray
+                } else {
+                    buttonDown.isEnabled = true
+                    buttonDown.tintColor = .mainColor
+                }
+                break
             }
         }
-        
-        public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+    }
+    
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        let indexPath = tableChatView.indexPathsForVisibleRows?.first
+        if indexPath != nil {
+            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+            let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
+            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
+                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+                let headerView = listViewOnSection[sect]
+                headerView.isHidden = true
+            }
+        }
+    }
+    
+    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate {
             let indexPath = tableChatView.indexPathsForVisibleRows?.first
             if indexPath != nil {
                 let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
                 let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
+                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
                     let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
                     let headerView = listViewOnSection[sect]
                     headerView.isHidden = true
                 }
             }
         }
-        
-        public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-            if !decelerate {
-                let indexPath = tableChatView.indexPathsForVisibleRows?.first
-                if indexPath != nil {
-                    let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-                    let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-                    if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
-                        let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                        let headerView = listViewOnSection[sect]
-                        headerView.isHidden = true
-                    }
-                }
-            }
-        }
     }
+}
     
 extension EditorGroup: UISearchBarDelegate {
     

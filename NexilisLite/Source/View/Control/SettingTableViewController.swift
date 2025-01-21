@@ -115,9 +115,9 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
-                                Item(icon: UIImage(systemName: "person.crop.rectangle"), title: "Change Admin / Internal Password".localized()),
+//                                Item(icon: UIImage(systemName: "person.crop.rectangle"), title: "Change Admin / Internal Password".localized()),
                                 Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
-                                Item(icon: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, title: "Set Internal Account".localized()),
+//                                Item(icon: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, title: "Set Internal Account".localized()),
                                 Item(icon: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, title: "Set CS Account".localized()),
                             ]
                         } else if User.isInternal(userType: cursorUser.string(forColumnIndex: 0) ?? "") || User.isCallCenter(userType: cursorUser.string(forColumnIndex: 0) ?? "") || User.isVerified(official_account: cursorUser.string(forColumnIndex: 2) ?? "") {
@@ -290,7 +290,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         tabBarController?.navigationItem.searchController = nil
         tabBarController?.navigationItem.rightBarButtonItem = nil
         makeMenu()
-        tableView.reloadData()
     }
     
     // MARK: - Table view data source

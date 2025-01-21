@@ -205,6 +205,12 @@ class QmeraAudioViewController: UIViewController {
         stackView.distribution = .fillEqually
         return stackView
     }()
+    let stack2: UIStackView = {
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.distribution = .fillEqually
+        return stackView
+    }()
     
     let poweredByView: UIStackView = {
         let stackView = UIStackView()
@@ -405,15 +411,18 @@ class QmeraAudioViewController: UIViewController {
         status.text = "Connecting..."
         
         stack.spacing = buttonSize / 2
+        stack2.spacing = buttonSize / 2
         
         view.addSubview(stack)
+        view.addSubview(stack2)
         
         stack.anchor(bottom: view.bottomAnchor, paddingBottom: 60, centerX: view.centerXAnchor, width: buttonSize * 4, height: buttonSize)
+        stack2.anchor(bottom: stack.topAnchor, paddingBottom: 10, centerX: view.centerXAnchor, width: buttonSize, height: buttonSize)
         
         stack.addArrangedSubview(invite)
         stack.addArrangedSubview(end)
         stack.addArrangedSubview(speaker)
-        stack.addArrangedSubview(mic)
+        stack2.addArrangedSubview(mic)
         
         invite.addTarget(self, action: #selector(didInvite(sender:)), for: .touchUpInside)
         end.addTarget(self, action: #selector(didPressEnd(sender:)), for: .touchUpInside)
@@ -596,6 +605,7 @@ class QmeraAudioViewController: UIViewController {
     @objc func didMute(sender: Any?) {
         isMuted = !isMuted
         mic.isSelected = isMuted
+        API.mmc(int: 0, boolean: isMuted)
     }
     
     @objc func didInvite(sender: Any?) {
@@ -637,6 +647,7 @@ class QmeraAudioViewController: UIViewController {
                 self.end.isEnabled = false
                 self.invite.isEnabled = false
                 self.speaker.isEnabled = false
+                self.mic.isEnabled = false
             }
             self.isEndByMe = true
             self.didEnd(sender: nil)
@@ -823,7 +834,23 @@ class QmeraAudioViewController: UIViewController {
            let message = data["message"] as? String
         {
             let arrayMessage = message.split(separator: ",")
-            if state == Nexilis.AUDIO_CALL_RINGING || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_RINGING) {
+            if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
+                DispatchQueue.main.async { [self] in
+                    if let pin = arrayMessage.first, let index = users.firstIndex(of: User(pin: String(pin))) {
+                        if arrayMessage[1] == "1" {
+                            users[index].isMuted = true
+                            if let profile = profiles.subviews[index] as? ProfileView {
+                                profile.imageMuted.isHidden = false
+                            }
+                        } else {
+                            users[index].isMuted = false
+                            if let profile = profiles.subviews[index] as? ProfileView {
+                                profile.imageMuted.isHidden = true
+                            }
+                        }
+                    }
+                }
+            } else if state == Nexilis.AUDIO_CALL_RINGING || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_RINGING) {
                 if users.count == 1 {
                     DispatchQueue.main.async {
                         self.status.text = "Ringing..."
@@ -852,9 +879,6 @@ class QmeraAudioViewController: UIViewController {
                         }
                         self.timer?.fire()
                         self.firstCall = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-//                            API.adjustVolume(fValue: 10.0)
-                        })
                     }
                 }
                 if (!isOutgoing || !firstCall), users.count >= 1, let user = User.getData(pin: String(arrayMessage[1])), !users.contains(user) {
@@ -941,6 +965,7 @@ class QmeraAudioViewController: UIViewController {
                             self.end.isEnabled = false
                             self.invite.isEnabled = false
                             self.speaker.isEnabled = false
+                            self.mic.isEnabled = false
                             let controller = self.presentedViewController
                             if controller != nil {
                                 controller!.dismiss(animated: true)

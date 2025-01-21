@@ -318,14 +318,18 @@ class ContactChatViewController: UITableViewController {
                         if indexChat != nil {
                             chats.remove(at: indexChat!)
                             chats.insert(newChat[0], at: 0)
-                            let indexPathToMove = IndexPath(row: indexChat!, section: 0)
-                            let indexPathNewPosition = IndexPath(row: 0, section: 0)
-                            tableView.performBatchUpdates({
-                                tableView.moveRow(at: indexPathToMove, to: indexPathNewPosition)
-                            }, completion: nil)
-                            tableView.beginUpdates()
-                            tableView.reloadRows(at: [IndexPath(row: 0, section: 0)], with: .none)
-                            tableView.endUpdates()
+                            if segment.selectedSegmentIndex == 0 {
+                                let indexPathToMove = IndexPath(row: indexChat!, section: 0)
+                                let indexPathNewPosition = IndexPath(row: 0, section: 0)
+                                tableView.performBatchUpdates({
+                                    tableView.moveRow(at: indexPathToMove, to: indexPathNewPosition)
+                                }, completion: nil)
+                                tableView.beginUpdates()
+                                tableView.reloadRows(at: [IndexPath(row: 0, section: 0)], with: .none)
+                                tableView.endUpdates()
+                            } else {
+                                tableView.reloadData()
+                            }
                         } else {
                             chats.insert(newChat[0], at: 0)
                             tableView.reloadData()
@@ -341,6 +345,12 @@ class ContactChatViewController: UITableViewController {
             let data:[AnyHashable : Any] = notification.userInfo!
             if let dataMessage = data["message"] as? TMessage {
                 var idMessage = dataMessage.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
+                if dataMessage.mBodies["message_id"] != nil {
+                    idMessage = dataMessage.getBody(key: "message_id")
+                    if idMessage.contains("'") {
+                        idMessage = idMessage.replacingOccurrences(of: "'", with: "")
+                    }
+                }
                 if idMessage.contains(",") {
                     let listString = dataMessage.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID).components(separatedBy: ",")
                     idMessage = listString[listString.count - 1]
@@ -350,9 +360,13 @@ class ContactChatViewController: UITableViewController {
                     if dataMessage.getBody(key: CoreMessage_TMessageKey.DELETE_MESSAGE_FLAG) == "1" {
                         chats[indexChat!].lock = "1"
                     }
-                    tableView.beginUpdates()
-                    tableView.reloadRows(at: [IndexPath(row: indexChat!, section: 0)], with: .none)
-                    tableView.endUpdates()
+                    if segment.selectedSegmentIndex == 0 {
+                        tableView.beginUpdates()
+                        tableView.reloadRows(at: [IndexPath(row: indexChat!, section: 0)], with: .none)
+                        tableView.endUpdates()
+                    } else {
+                        tableView.reloadData()
+                    }
                 }
             }
         }

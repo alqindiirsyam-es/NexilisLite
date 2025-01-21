@@ -21,8 +21,10 @@ class QmeraVideoViewController: UIViewController {
     var wbRoomId = ""
     var isInisiator = true
     var isSpeaker = true
+    var isMuted = false
     var isPresent = false
     var callFCM = false
+    var isNavigationHidden = false
     var listRemoteViewFix: [UIImageView] = [
         UIImageView(),
         UIImageView(),
@@ -37,6 +39,21 @@ class QmeraVideoViewController: UIViewController {
         UIView(),
         UIView()
     ]
+    var imageMuted: [UIImageView] = [
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView()
+    ]
+    var mutedZoom: UIImageView = {
+        let image = UIImageView(frame: CGRect(x: 0, y: 0, width: 30, height: 40))
+        image.contentMode = .scaleAspectFit
+        image.image = UIImage(systemName: "mic.slash")
+        image.tintColor = .red
+        image.isHidden = true
+        return image
+    }()
     let myImage = UIImageView()
     let name = UILabel()
     let profileImage = UIImageView()
@@ -51,6 +68,7 @@ class QmeraVideoViewController: UIViewController {
     var constraintLeftStackViewToolbar2 = NSLayoutConstraint()
     let stackViewToolbar = UIStackView()
     let stackViewToolbar2 = UIStackView()
+    let stackViewToolbar3 = UIStackView()
     var onScreenConstraintWB = [NSLayoutConstraint]()
     let buttonWB = UIButton()
     let buttonChat = UIButton()
@@ -58,6 +76,7 @@ class QmeraVideoViewController: UIViewController {
     let buttonAddParticipant = UIButton()
     let buttonSpeaker = UIButton()
     let buttonRotate = UIButton()
+    let buttonMuted = UIButton()
     var showStackViewToolbar = true
     let scrollRemoteView = UIScrollView()
     var isAutoAccept = false
@@ -112,10 +131,7 @@ class QmeraVideoViewController: UIViewController {
     }()
     
     deinit {
-        navigationController?.navigationBar.setBackgroundImage(nil, for: .default)
-        navigationController?.navigationBar.shadowImage = nil
-        navigationController?.navigationBar.isTranslucent = false
-//        navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        navigationController?.changeAppearance(clear: false)
         let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
         navigationController?.navigationBar.titleTextAttributes = textAttributes
         navigationController?.navigationBar.topItem?.backBarButtonItem = nil
@@ -125,10 +141,7 @@ class QmeraVideoViewController: UIViewController {
     
     override func viewWillDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
-            navigationController?.navigationBar.setBackgroundImage(nil, for: .default)
-            navigationController?.navigationBar.shadowImage = nil
-            navigationController?.navigationBar.isTranslucent = false
-//            navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+            navigationController?.changeAppearance(clear: false)
             let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
             navigationController?.navigationBar.titleTextAttributes = textAttributes
             navigationController?.navigationBar.topItem?.backBarButtonItem = nil
@@ -141,10 +154,6 @@ class QmeraVideoViewController: UIViewController {
         super.viewDidLoad()
         Nexilis.setWhiteboardReceiver(receiver: self)
         self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
-        let navBarAppearance = UINavigationBarAppearance()
-        navBarAppearance.configureWithTransparentBackground()
-        navigationController?.navigationBar.standardAppearance = navBarAppearance
-        navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
         navigationController?.changeAppearance(clear: true)
         
         NotificationCenter.default.addObserver(self, selector: #selector(self.onStatusCall(_:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusCall), object: nil)
@@ -167,6 +176,7 @@ class QmeraVideoViewController: UIViewController {
         Calling()
         addToolbar()
         addTimerVC()
+        addImageMutedOnZoom()
         if isAutoAccept {
             didTapAcceptCallButton()
         }
@@ -242,13 +252,18 @@ class QmeraVideoViewController: UIViewController {
     
     func addTimerVC() {
         view.addSubview(containerTimerVC)
-        containerTimerVC.anchor(top: view.topAnchor, paddingTop: 20, centerX: view.centerXAnchor, minWidth: 40)
+        containerTimerVC.anchor(top: view.safeAreaLayoutGuide.topAnchor, centerX: view.centerXAnchor, minWidth: 40)
         containerTimerVC.makeRoundedView(radius: 8)
         containerTimerVC.backgroundColor = .black.withAlphaComponent(0.3)
         containerTimerVC.addSubview(labelTimerVC)
         labelTimerVC.anchor(left: containerTimerVC.leftAnchor, right: containerTimerVC.rightAnchor, paddingLeft: 8, paddingRight: 8, centerX: containerTimerVC.centerXAnchor, centerY: containerTimerVC.centerYAnchor)
         labelTimerVC.textColor = .white
         containerTimerVC.isHidden = true
+    }
+    
+    func addImageMutedOnZoom() {
+        view.addSubview(mutedZoom)
+        mutedZoom.anchor(top: containerTimerVC.bottomAnchor, paddingTop: 10, centerX: view.centerXAnchor, width: 30, height: 40)
     }
     
     func addZoomView() {
@@ -270,7 +285,7 @@ class QmeraVideoViewController: UIViewController {
 //        cameraView.frame = CGRect(x: view.frame.width - 130, y: 20, width: 120, height: 160)
         cameraView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            cameraView.topAnchor.constraint(equalTo: view.topAnchor, constant: 20.0),
+            cameraView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             cameraView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10.0),
             cameraView.widthAnchor.constraint(equalToConstant: 120.0),
             cameraView.heightAnchor.constraint(equalToConstant: 160.0)
@@ -335,7 +350,7 @@ class QmeraVideoViewController: UIViewController {
         profileImage.translatesAutoresizingMaskIntoConstraints = false
         profileImage.frame.size = CGSize(width: 60.0, height: 60.0)
         NSLayoutConstraint.activate([
-            profileImage.topAnchor.constraint(equalTo: view.topAnchor, constant: 40.0),
+            profileImage.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             profileImage.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             profileImage.widthAnchor.constraint(equalToConstant: 60.0),
             profileImage.heightAnchor.constraint(equalToConstant: 63.0)
@@ -549,6 +564,9 @@ class QmeraVideoViewController: UIViewController {
                 if self.buttonRotate.isDescendant(of: self.view) {
                     self.buttonRotate.removeFromSuperview()
                 }
+                if self.buttonMuted.isDescendant(of: self.view) {
+                    self.buttonMuted.removeFromSuperview()
+                }
                 if self.wbVC != nil{
                     self.wbVC!.close?()
                 }
@@ -615,6 +633,7 @@ class QmeraVideoViewController: UIViewController {
                 self.buttonWB.isHidden = false
                 self.buttonChat.isHidden = false
                 self.poweredByView.isHidden = false
+                self.buttonMuted.isHidden = false
                 let connectDate = Date()
                 self.vcTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                     let format = Utils.callDurationFormatter.string(from: Date().timeIntervalSince(connectDate))
@@ -697,6 +716,7 @@ class QmeraVideoViewController: UIViewController {
                 self.buttonSpeaker.isHidden = false
                 self.buttonAddParticipant.isHidden = false
                 self.buttonRotate.isHidden = false
+                self.buttonMuted.isHidden = false
 //                if(!self.wbRoomId.isEmpty){
 //                    DispatchQueue.main.async {
 //                        self.wbTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(self.runTimer), userInfo: nil, repeats: true)
@@ -706,6 +726,7 @@ class QmeraVideoViewController: UIViewController {
         }
         self.buttonDecline.isHidden = true
         self.buttonSpeaker.isHidden = true
+        self.buttonMuted.isHidden = true
         self.buttonAddParticipant.isHidden = true
         self.buttonRotate.isHidden = true
         addChild(wbVC!)
@@ -727,7 +748,7 @@ class QmeraVideoViewController: UIViewController {
     }
     
     func addToolbarAfterAccept() {
-        self.view.addSubview(self.stackViewToolbar)
+        view.addSubview(self.stackViewToolbar)
         self.stackViewToolbar.translatesAutoresizingMaskIntoConstraints = false
         constraintBottomStackViewToolbar = self.stackViewToolbar.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: -60.0)
         NSLayoutConstraint.activate([
@@ -739,14 +760,19 @@ class QmeraVideoViewController: UIViewController {
         self.stackViewToolbar.alignment = .center
         self.stackViewToolbar.spacing = 30
         
-        self.view.addSubview(buttonRotate)
+        view.addSubview(self.stackViewToolbar3)
+        self.stackViewToolbar3.anchor(bottom: self.stackViewToolbar.topAnchor, paddingBottom: 10, centerX: self.view.centerXAnchor)
+        self.stackViewToolbar3.axis = .horizontal
+        self.stackViewToolbar3.distribution = .equalSpacing
+        self.stackViewToolbar3.alignment = .center
+        self.stackViewToolbar3.spacing = 30
+        
+        view.addSubview(buttonRotate)
         buttonRotate.translatesAutoresizingMaskIntoConstraints = false
         buttonRotate.frame.size = CGSize(width: 70.0, height: 70.0)
         NSLayoutConstraint.activate([
             buttonRotate.widthAnchor.constraint(equalToConstant: 70.0),
             buttonRotate.heightAnchor.constraint(equalToConstant: 70.0),
-            buttonRotate.centerXAnchor.constraint(equalTo: self.view.centerXAnchor),
-            buttonRotate.bottomAnchor.constraint(equalTo: self.stackViewToolbar.topAnchor, constant: -10.0)
         ])
         buttonRotate.backgroundColor = .secondaryColor
         buttonRotate.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
@@ -754,6 +780,20 @@ class QmeraVideoViewController: UIViewController {
         buttonRotate.circle()
         buttonRotate.isHidden = true
         buttonRotate.addTarget(self, action: #selector(camera(sender:)), for: .touchUpInside)
+        
+        view.addSubview(buttonMuted)
+        buttonMuted.translatesAutoresizingMaskIntoConstraints = false
+        buttonMuted.frame.size = CGSize(width: 70.0, height: 70.0)
+        NSLayoutConstraint.activate([
+            buttonMuted.widthAnchor.constraint(equalToConstant: 70.0),
+            buttonMuted.heightAnchor.constraint(equalToConstant: 70.0),
+        ])
+        buttonMuted.backgroundColor = .secondaryColor
+        buttonMuted.setImage(UIImage(systemName: "mic", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+        buttonMuted.tintColor = .mainColor
+        buttonMuted.circle()
+        buttonMuted.isHidden = true
+        buttonMuted.addTarget(self, action: #selector(muted(sender:)), for: .touchUpInside)
         
         view.addSubview(buttonAddParticipant)
         buttonAddParticipant.translatesAutoresizingMaskIntoConstraints = false
@@ -783,7 +823,7 @@ class QmeraVideoViewController: UIViewController {
         buttonSpeaker.isHidden = true
         buttonSpeaker.addTarget(self, action: #selector(didTapSpeakerButton(sender:)), for: .touchUpInside)
         
-        self.view.addSubview(self.stackViewToolbar2)
+        view.addSubview(self.stackViewToolbar2)
         self.stackViewToolbar2.translatesAutoresizingMaskIntoConstraints = false
         constraintLeftStackViewToolbar2 = self.stackViewToolbar2.leftAnchor.constraint(equalTo: self.view.leftAnchor, constant: 10.0)
         NSLayoutConstraint.activate([
@@ -825,7 +865,7 @@ class QmeraVideoViewController: UIViewController {
             buttonChat.addTarget(self, action: #selector(didTapChatButton), for: .touchUpInside)
         }
         
-        self.view.addSubview(poweredByView)
+        view.addSubview(poweredByView)
         self.poweredByView.translatesAutoresizingMaskIntoConstraints = false
         let constraintRightPowered =  self.poweredByView.rightAnchor.constraint(equalTo: self.view.rightAnchor, constant: -10.0)
         let constraintBottomPowered = self.poweredByView.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: -10.0)
@@ -845,6 +885,8 @@ class QmeraVideoViewController: UIViewController {
         stackViewToolbar.addArrangedSubview(buttonSpeaker)
         stackViewToolbar2.addArrangedSubview(buttonWB)
         stackViewToolbar2.addArrangedSubview(buttonChat)
+        stackViewToolbar3.addArrangedSubview(buttonRotate)
+        stackViewToolbar3.addArrangedSubview(buttonMuted)
 //        startFaceTimer()
     }
     
@@ -904,6 +946,7 @@ class QmeraVideoViewController: UIViewController {
     }
     
     func setSpeaker(isSpeaker: Bool) {
+        Nexilis.setSpeaker(isSpeaker, isVideo: true)
         DispatchQueue.main.async {
             if (isSpeaker) {
                 self.buttonSpeaker.backgroundColor = .lightGray
@@ -916,7 +959,6 @@ class QmeraVideoViewController: UIViewController {
             }
             self.isSpeaker = isSpeaker
         }
-        Nexilis.setSpeaker(isSpeaker, isVideo: true)
     }
     
     @objc func didTapSpeakerButton(sender: AnyObject){
@@ -957,6 +999,22 @@ class QmeraVideoViewController: UIViewController {
         }
     }
     
+    @objc func muted(sender: Any?) {
+        isMuted = !isMuted
+        API.mmc(int: 0, boolean: isMuted)
+        DispatchQueue.main.async {
+            if (self.isMuted) {
+                self.buttonMuted.backgroundColor = .lightGray
+                self.buttonMuted.tintColor = .mainColor
+                self.buttonMuted.setImage(UIImage(systemName: "mic.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            } else {
+                self.buttonMuted.backgroundColor = .secondaryColor
+                self.buttonMuted.tintColor = .mainColor
+                self.buttonMuted.setImage(UIImage(systemName: "mic", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            }
+        }
+    }
+    
     @objc func hideToolbar() {
         DispatchQueue.main.async {
             if self.showStackViewToolbar {
@@ -983,11 +1041,22 @@ class QmeraVideoViewController: UIViewController {
         let message = (data?["message"] ?? "") as! String
         var remoteChannel = [String:String]()
         let arrayMessage = message.split(separator: ",")
-        if(state == Nexilis.VIDEO_CALL_ZOOM){
+        if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
+            DispatchQueue.main.async { [self] in
+                if self.dataPerson.count == 1 {
+                    if arrayMessage[1] == "1" {
+                        mutedZoom.isHidden = false
+                    } else {
+                        mutedZoom.isHidden = true
+                    }
+                }
+            }
+        }
+        else if(state == Nexilis.VIDEO_CALL_ZOOM){
             DispatchQueue.main.async {
                 if self.dataPerson.count > 1 {
                     if !self.transformZoomAfterNewUserMore2 {
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi * 3)/2)
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi * 3)/2)
                         self.transformZoomAfterNewUserMore2 = true
                     }
                 }
@@ -997,9 +1066,9 @@ class QmeraVideoViewController: UIViewController {
             if(arrayMessage[3] == "0"){
                 DispatchQueue.main.async {
                     if self.dataPerson.count == 1 && arrayMessage[2] == "1" && arrayMessage[4] == "1" {
-                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi * 3)/2)
+                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi * 3)/2)
                     } else {
-                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi)/2)
+                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
                     }
                 }
             }
@@ -1093,13 +1162,13 @@ class QmeraVideoViewController: UIViewController {
             }
             if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
                 DispatchQueue.main.async {
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 1.9).rotated(by: (CGFloat.pi)/2)
+                    self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
                     self.zoomView.contentMode = .scaleAspectFit
                 }
             }
             else if self.dataPerson.count == 1 {
                 DispatchQueue.main.async {
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi * 3)/2)
+                    self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi * 3)/2)
                     self.zoomView.contentMode = .scaleAspectFit
                 }
             } else if self.dataPerson.count > 1 {
@@ -1168,6 +1237,9 @@ class QmeraVideoViewController: UIViewController {
                         if self.buttonRotate.isDescendant(of: self.view) {
                             self.buttonRotate.removeFromSuperview()
                         }
+                        if self.buttonMuted.isDescendant(of: self.view) {
+                            self.buttonMuted.removeFromSuperview()
+                        }
                         if self.wbVC != nil{
                             self.wbVC!.close?()
                         }
@@ -1206,6 +1278,9 @@ class QmeraVideoViewController: UIViewController {
                     }
                     if self.buttonRotate.isDescendant(of: self.view) {
                         self.buttonRotate.removeFromSuperview()
+                    }
+                    if self.buttonMuted.isDescendant(of: self.view) {
+                        self.buttonMuted.removeFromSuperview()
                     }
                     if self.wbVC != nil{
                         self.wbVC!.close?()
@@ -1262,7 +1337,7 @@ class QmeraVideoViewController: UIViewController {
                     
                     if self.dataPerson.count == 1 {
                         self.transformZoomAfterNewUserMore2 = false
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi)/2)
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
                     }
                 }
             }
