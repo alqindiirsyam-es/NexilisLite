@@ -5496,7 +5496,25 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 }
             }
         } else if (sender.gif_id != "") {
-            
+            if let dirPath = paths.first {
+                let gifURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.gif_id)
+                if FileManager.default.fileExists(atPath: gifURL.path) {
+                    do {
+                        let data = try Data(contentsOf: gifURL)
+                        APIS.openImageNexilis(image: UIImage(), data: data, isGIF: true)
+                    } catch {
+                        
+                    }
+                } else if FileEncryption.shared.isSecureExists(filename: sender.gif_id) {
+                    do {
+                        if let secureData = try FileEncryption.shared.readSecure(filename: sender.gif_id) {
+                            APIS.openImageNexilis(image: UIImage(), data: secureData, isGIF: true)
+                        }
+                    } catch {
+                        
+                    }
+                }
+            }
         } else if (sender.video_id != "") {
             if let dirPath = paths.first {
                 let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.video_id)

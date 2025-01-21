@@ -814,10 +814,12 @@ public class APIS: NSObject {
 //        Utils.bPreventScreenCapture = isActive
     }
     
-    public static func openImageNexilis(image: UIImage) {
+    public static func openImageNexilis(image: UIImage, data: Data? = nil, isGIF: Bool = false) {
         let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
         previewImageVC.image = image
         previewImageVC.isHiddenTextField = true
+        previewImageVC.isGIF = isGIF
+        previewImageVC.dataGIF = data
         previewImageVC.modalPresentationStyle = .custom
         previewImageVC.modalTransitionStyle  = .crossDissolve
         if UIApplication.shared.visibleViewController?.navigationController != nil {
