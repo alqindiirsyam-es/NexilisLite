@@ -98,41 +98,27 @@ class AddFriendTableViewController: UITableViewController {
         let scannerVC = QRScannerController()
         scannerVC.onQRCodeDetected = { qrCode in
             print("Detected QR Code: \(qrCode)")
+            self.dismiss(animated: true)
+            var isQR = false
             
-            let users = self.data.filter{ $0.pin == qrCode }
-            if users.count > 0 {
-                let user = users[0]
-                let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
-                controller.flag = .invite
-                controller.data = user.pin
-                controller.name = user.fullName
-                controller.picture = user.thumb
-                controller.isDismiss = {
-                    self.data.removeAll(where: {$0.pin == user.pin})
-                    if self.isFilltering {
-                        self.fillteredData.removeAll(where: {$0.pin == user.pin})
-                    }
-                    self.tableView.reloadData()
-        //            self.getData { d in
-        //                self.data = d
-        //                DispatchQueue.main.async {
-        //                    self.tableView.reloadData()
-        //                }
-        //            }
+            
+            DispatchQueue.main.async {
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendQRCode(fpin: qrCode), timeout: 1000 * 30) {
+                    print(response.toLogString())
+                    isQR = true
                 }
-                self.navigationController?.show(controller, sender: nil)
+                
+                if isQR {
+                    let alert = UIAlertController(title: "Action Successful".localized(), message: "Successfully added a new friend".localized(), preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                    self.present(alert, animated: true, completion: nil)
+                }
+                else {
+                    let alert = UIAlertController(title: "Unable to complete action".localized(), message: "Friend is invalid or not found".localized(), preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                    self.present(alert, animated: true, completion: nil)
+                }
             }
-            else {
-                let alert = UIAlertController(title: "User not found", message: "The QR code may be invalid.", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
-                self.present(alert, animated: true, completion: nil)
-            }
-            
-            
-            // Handle the detected QR code here (e.g., navigate or show an alert)
-//            let alert = UIAlertController(title: "QR Code Detected", message: qrCode, preferredStyle: .alert)
-//            alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
-//            self.present(alert, animated: true, completion: nil)
         }
         present(scannerVC, animated: true, completion: nil)
     }

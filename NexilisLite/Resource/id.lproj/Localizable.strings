@@ -385,3 +385,7 @@
 "There is an error occurred while translating your message. Please try again or check your network connection." = "Terjadi kesalahan saat menerjemahkan pesan Anda. Silakan coba lagi atau periksa koneksi jaringan Anda.";
 "Sub Group" = "Sub Grup";
 "Optional" = "Opsional";
+"Action Successful" = "Berhasil";
+"Unable to complete action" = "Gagal";
+"Successfully added a new friend" = "Teman baru berhasil ditambahkan";
+"Friend is invalid or not found" = "Teman tidak valid atau tidak ditemukan";
