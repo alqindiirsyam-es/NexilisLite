@@ -1344,10 +1344,10 @@ class QmeraVideoViewController: UIViewController {
                         }
                     }
                     
-//                    if self.dataPerson.count == 1 {
-//                        self.transformZoomAfterNewUserMore2 = false
-//                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
-//                    }
+                    if self.dataPerson.count == 1 {
+                        self.transformZoomAfterNewUserMore2 = false
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
+                    }
                 }
             }
         } else if (state == Nexilis.OFFLINE) {

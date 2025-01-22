@@ -243,7 +243,10 @@ public class Database {
                                 "'is_consult' INTEGER DEFAULT 0," +
                                 "'is_call_center' INTEGER DEFAULT 0," +
                                 "'call_center_id' TEXT," +
-                                "'last_edited' INTEGER DEFAULT 0" +
+                                "'last_edited' INTEGER DEFAULT 0," +
+                                "'is_secret' INTEGER DEFAULT 0," +
+                                "'is_deleted_retention' INTEGER DEFAULT 0," +
+                                "'is_forwarded_message' INTEGER DEFAULT 0" +
                                 ")", values: nil)
         
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_opposite on MESSAGE (opposite_pin, chat_id)", values: nil)

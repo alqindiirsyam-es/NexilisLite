@@ -1302,6 +1302,9 @@ public class Nexilis: NSObject {
                 let is_call_center = message.getBody(key: CoreMessage_TMessageKey.IS_CALL_CENTER, default_value: "0")
                 let call_center_id = message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID, default_value: "")
                 let last_edited = message.getBodyAsLong(key: CoreMessage_TMessageKey.LAST_EDIT, default_value: 0)
+                let is_secret = message.getBodyAsLong(key: CoreMessage_TMessageKey.IS_SECRET, default_value: 0)
+                let is_delete_retention = message.getBodyAsLong(key: CoreMessage_TMessageKey.IS_DELETED_RETENTION, default_value: 0)
+                let is_forwarded_message = message.getBodyAsLong(key: CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE, default_value: 0)
                 //print("prepare save db")
                 do {
                     _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
@@ -1334,7 +1337,10 @@ public class Nexilis: NSObject {
                         "broadcast_flag" : broadcast_flag,
                         "is_call_center" : is_call_center,
                         "call_center_id" : call_center_id,
-                        "last_edited" : last_edited
+                        "last_edited" : last_edited,
+                        "is_secret" : is_secret,
+                        "is_deleted_retention" : is_delete_retention,
+                        "is_forwarded_message" : is_forwarded_message
                     ], replace: true)
                 } catch {
                     rollback.pointee = true

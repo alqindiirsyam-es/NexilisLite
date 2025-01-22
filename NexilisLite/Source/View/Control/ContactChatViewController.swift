@@ -1131,7 +1131,7 @@ extension ContactChatViewController {
                         }
                     }
                 } else {
-                    if !Utils.getIconDock().isEmpty {
+                    if !Utils.getIconDock().isEmpty && data.profile.isEmpty {
                         let urlString = Utils.getUrlDock()!
                         if let cachedImage = ImageCache.shared.image(forKey: urlString) {
                             let imageData = cachedImage

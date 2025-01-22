@@ -222,17 +222,19 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         locationManager.delegate = self
         locationManager.requestWhenInUseAuthorization()
         
-        // Check if location services are enabled
-        if CLLocationManager.locationServicesEnabled() {
-            locationManager.desiredAccuracy = kCLLocationAccuracyBest
-            locationManager.startUpdatingLocation()
-        } else {
-            print("Location services are not enabled.")
+        DispatchQueue.global().async { [self] in
+            if CLLocationManager.locationServicesEnabled() {
+                locationManager.desiredAccuracy = kCLLocationAccuracyBest
+                locationManager.startUpdatingLocation()
+            } else {
+                print("Location services are not enabled.")
+            }
         }
         
         if dataMessageForward != nil {
             for i in 0..<dataMessageForward!.count {
-                sendChat(message_scope_id: "4", status: "2", message_text: dataMessageForward![i]["message_text"] as! String, credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"] as! String, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"] as! String, audio_id: dataMessageForward![i]["audio_id"] as! String, video_id: dataMessageForward![i]["video_id"] as! String, file_id: dataMessageForward![i]["file_id"] as! String, thumb_id: dataMessageForward![i]["thumb_id"] as! String, reff_id: "", read_receipts: "", is_call_center: "0", call_center_id: "", viewController: self)
+                let isForwarded = (dataMessageForward![i][TypeDataMessage.is_forwarded] as? Int) ?? 0
+                sendChat(message_scope_id: "4", status: "2", message_text: dataMessageForward![i]["message_text"] as! String, credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"] as! String, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"] as! String, audio_id: dataMessageForward![i]["audio_id"] as! String, video_id: dataMessageForward![i]["video_id"] as! String, file_id: dataMessageForward![i]["file_id"] as! String, thumb_id: dataMessageForward![i]["thumb_id"] as! String, reff_id: "", read_receipts: "", is_call_center: "0", call_center_id: "", viewController: self, is_forwarded: isForwarded + 1)
             }
             dataMessageForward = nil
         }
@@ -560,11 +562,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     private func getData() {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"] as! String)' order by server_date asc"
+                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"] as! String)' order by server_date asc"
                 if isHistoryCC {
                     query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc"
                 } else if (dataTopic["chat_id"] as! String != "") {
-                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id FROM MESSAGE where chat_id='\(dataTopic["chat_id"] as! String)' order by server_date asc"
+                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message FROM MESSAGE where chat_id='\(dataTopic["chat_id"] as! String)' order by server_date asc"
                 }
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     var tempImages: [ImageGrouping] = []
@@ -592,6 +594,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         row["credential"] = cursorData.string(forColumnIndex: 19)
                         row[TypeDataMessage.last_edit] = cursorData.longLongInt(forColumnIndex: 20)
                         row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 21)
+                        row[TypeDataMessage.is_forwarded] = Int(cursorData.int(forColumnIndex: 22))
                         row["isSelected"] = false
                         if row["credential"] != nil && row["credential"] as! String == "1" {
                             let idMe = User.getMyPin()!
@@ -1042,6 +1045,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     row["reff_id"] = chatData[CoreMessage_TMessageKey.REF_ID] ?? ""
                     row["lock"] = ""
                     row["is_stared"] = "0"
+                    row[TypeDataMessage.is_forwarded] = chatData[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE]
                     row["isSelected"] = false
                     if !self.dataDates.contains("Today".localized()){
                         self.dataDates.append("Today".localized())
@@ -1677,7 +1681,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         sendChat(message_text: textFieldSend.text!, viewController: self)
     }
     
-    private func sendChat(message_scope_id:String =  "4", status:String =  "2", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController) {
+    private func sendChat(message_scope_id:String =  "4", status:String =  "2", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, gif_id: String = "", is_forwarded: Int = 0) {
         if viewController is EditorGroup && file_id == "" && dataMessageForward == nil {
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
@@ -1726,7 +1730,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 diff += "@\(listMentionInTextField[i].pin)".count - nameWithMention.count
             }
         }
-        let message = CoreMessage_TMessageBank.sendMessage(l_pin: dataGroup["group_id"] as! String, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: dataTopic["chat_id"] as! String, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin)
+        let message = CoreMessage_TMessageBank.sendMessage(l_pin: dataGroup["group_id"] as! String, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: dataTopic["chat_id"] as! String, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin, gif_id: gif_id, isForwarded: "\(is_forwarded)")
         Nexilis.addQueueMessage(message: message)
         let messageId = String(message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID]!)
         if credential == "1" {
@@ -1754,6 +1758,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         row["lock"] = "0"
         row["is_stared"] = "0"
         row["isSelected"] = false
+        row["gif_id"] = gif_id
+        row[TypeDataMessage.is_forwarded] = is_forwarded
         row[TypeDataMessage.is_call_center] = is_call_center
         row[TypeDataMessage.call_center_id] = call_center_id
         row[TypeDataMessage.opposite_pin] = opposite_pin
@@ -2197,7 +2203,7 @@ extension EditorGroup: ImageVideoPickerDelegate, PreviewAttachmentImageVideoDele
     }
     
     func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, viewController: UIViewController) {
-        sendChat(message_text: message_text, attachment_flag: attachment_flag, image_id: image_id, video_id: video_id, thumb_id: thumb_id, viewController: viewController)
+        sendChat(message_text: message_text, attachment_flag: attachment_flag, image_id: image_id, video_id: video_id, thumb_id: thumb_id, viewController: viewController, gif_id: gif_id)
     }
 }
 
@@ -2668,10 +2674,12 @@ extension EditorGroup: UITextViewDelegate {
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
         if let pasteboardItems = UIPasteboard.general.items.first {
             if pasteboardItems["public.jpeg"] != nil || pasteboardItems["public.png"] != nil || pasteboardItems["public.gif"] != nil || (pasteboardItems.keys.first != nil && pasteboardItems.keys.first!.contains(".gif")) {
+                let dataGif = UIPasteboard.general.data(forPasteboardType: "com.compuserve.gif")
                 let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                previewImageVC.image = pasteboardItems["public.png"] as? UIImage ?? pasteboardItems["public.jpeg"] as? UIImage ?? pasteboardItems.values.first as! UIImage
+                previewImageVC.image = pasteboardItems["public.png"] as? UIImage ?? pasteboardItems["public.jpeg"] as? UIImage
                 previewImageVC.isGIF = (pasteboardItems["public.png"] == nil && pasteboardItems["public.jpeg"] == nil)
                 previewImageVC.fromCopy = true
+                previewImageVC.dataGIF = dataGif
                 previewImageVC.currentTextTextField = textFieldSend.text
                 previewImageVC.modalPresentationStyle = .custom
                 previewImageVC.delegate = self
@@ -4676,7 +4684,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 imageThumb.translatesAutoresizingMaskIntoConstraints = false
                 imageThumb.frame = CGRect(x: 0, y: 0, width: getWidthImage, height: getHeightImage)
                 let data = queryMessageReply(message_id: reffChat)
-                if reffChat.isEmpty || data.count == 0 {
+                if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
                     imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 37).isActive = true
                 }
                 imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
@@ -4875,7 +4883,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             containerMessage.addSubview(containerViewFile)
             containerViewFile.translatesAutoresizingMaskIntoConstraints = false
             let data = queryMessageReply(message_id: reffChat)
-            if reffChat.isEmpty || data.count == 0 {
+            if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
                 containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 37).isActive = true
             }
             containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
@@ -4954,6 +4962,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         }
         
         let containerLinkMessage = UIView()
+        var isLoadingShowLink = false
         if thumbChat.isEmpty && fileChat.isEmpty && !textChat!.isEmpty {
             var text = ""
             let listTextSplitBreak = textChat!.components(separatedBy: "\n")
@@ -4966,6 +4975,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 }
             }
             if !text.isEmpty {
+                isLoadingShowLink = true
                 func showLink() {
                     if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
                         let title = data["title"] as? String
@@ -5042,6 +5052,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                         linkPreview.font = UIFont.systemFont(ofSize: 10.0)
                         linkPreview.textColor = .gray
                         linkPreview.numberOfLines = 1
+                        
+                        if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int != 0 {
+                            showForwardedSign()
+                        }
                         
                         if !copySession && !forwardSession && !deleteSession {
                             let objectTap = ObjectGesture(target: self, action: #selector(tapMessageText(_:)))
@@ -5286,6 +5300,44 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     objectTap.message_id = data["message_id"] as! String
                 }
             }
+        }
+        
+        if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int != 0 && !isLoadingShowLink {
+            showForwardedSign()
+        }
+        
+        func showForwardedSign() {
+            topMarginText.constant = topMarginText.constant + 20
+            
+            let containerForwarded = UIView()
+            containerMessage.addSubview(containerForwarded)
+            containerForwarded.translatesAutoresizingMaskIntoConstraints = false
+            containerForwarded.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+            containerForwarded.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32).isActive = true
+            containerForwarded.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+            containerForwarded.heightAnchor.constraint(equalToConstant: 20).isActive = true
+            if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+                containerForwarded.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
+            } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+                containerForwarded.bottomAnchor.constraint(equalTo: containerViewFile.topAnchor, constant: -5).isActive = true
+            } else if containerMessage.subviews.contains(containerLinkMessage) {
+                containerForwarded.bottomAnchor.constraint(equalTo: containerLinkMessage.topAnchor, constant: -5).isActive = true
+            } else if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+                containerForwarded.bottomAnchor.constraint(equalTo: imageSticker.topAnchor, constant: -5).isActive = true
+            }
+            
+            let imageForwarded = UIImageView()
+            containerForwarded.addSubview(imageForwarded)
+            imageForwarded.anchor(top: containerForwarded.topAnchor, left: containerForwarded.leftAnchor, width: 15, height: 15)
+            imageForwarded.image = UIImage(systemName: "arrowshape.turn.up.right.fill")
+            imageForwarded.tintColor = .gray
+            
+            let titleForwarded = UILabel()
+            containerForwarded.addSubview(titleForwarded)
+            titleForwarded.anchor(top: containerForwarded.topAnchor, left: imageForwarded.rightAnchor, right: containerForwarded.rightAnchor, height: 15)
+            titleForwarded.font = .systemFont(ofSize: 15)
+            let textForwarded = "Forwarded".localized()
+            titleForwarded.attributedText = " %\(textForwarded)%".richText()
         }
         
         return cellMessage

@@ -497,4 +497,8 @@ public class CoreMessage_TMessageKey {
     public static let STYLE = "STL";
     public static let GIF_ID = "GF";
     
+    public static let IS_SECRET = "sct";
+    public static let IS_DELETED_RETENTION = "idl";
+    public static let IS_FORWARDED_MESSAGE = "ifm";
+    
 }
