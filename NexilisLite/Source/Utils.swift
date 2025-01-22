@@ -449,14 +449,14 @@ public final class Utils {
         return "https://nexilis.io/"
     }
     
-    static func getIconDock() -> String {
+    public static func getIconDock() -> String {
         if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_icon_dock") {
             return value
         }
         return ""
     }
     
-    static func getUrlDock() -> String? {
+    public static func getUrlDock() -> String? {
         return Utils.getURLBase() + "get_file_from_path?img=" + Utils.getIconDock()
     }
     

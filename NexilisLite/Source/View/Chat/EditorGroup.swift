@@ -887,7 +887,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 }
                 if let cell = self.tableChatView.cellForRow(at: indexPath) {
                     for view in cell.contentView.subviews {
-                        if !(view is UILabel) && !(view is UIImageView) {
+                        if !(view is UITextView) && !(view is UIImageView) {
                             for viewInContainer in view.subviews {
                                 if viewInContainer is UIImageView {
                                     if viewInContainer.subviews.count == 0 {
@@ -928,19 +928,24 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     }
                     if let cell = self.tableChatView.cellForRow(at: indexPath) {
                         for view in cell.contentView.subviews {
-                            if !(view is UILabel) && !(view is UIImageView) {
+                            if !(view is UITextView) && !(view is UIImageView) {
                                 for viewSubviews in view.subviews {
-                                    if !(viewSubviews is UILabel) {
+                                    if !(viewSubviews is UITextView) {
                                         for viewInContainer in viewSubviews.subviews {
-                                            if !(viewInContainer is UILabel) && !(viewInContainer is UIImageView) {
-                                                if viewInContainer.layer.sublayers!.count < 2 {
-                                                    return
+                                            if !(viewInContainer is UITextView) && !(viewInContainer is UIImageView) {
+                                                if let cont = viewInContainer.layer.sublayers {
+                                                    if cont.count < 2 {
+                                                        return
+                                                    }
                                                 }
-                                                let loading = viewInContainer.layer.sublayers![1] as! CAShapeLayer
-                                                loading.strokeEnd = CGFloat(progress / 100)
-                                                if (progress == 100.0) {
-                                                    self.dataMessages[idx!]["progress"] = progress
-                                                    self.tableChatView.reloadRows(at: [indexPath], with: .none)
+                                                if let layers = viewInContainer.layer.sublayers {
+                                                    if let loading = layers [1] as? CAShapeLayer {
+                                                        loading.strokeEnd = CGFloat(progress / 100)
+                                                        if (progress == 100.0) {
+                                                            self.dataMessages[idx!]["progress"] = progress
+                                                            self.tableChatView.reloadRows(at: [indexPath], with: .none)
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -1165,9 +1170,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         }
                     }
                     else if (chatData.keys.contains("message_id")) {
-                        var idx = self.dataMessages.firstIndex(where: { "'\(String(describing: $0["message_id"] as? String))'" == chatData["message_id"]! })
-                        if let idxMessageIdParent = self.groupImages.firstIndex(where: { $0.value.contains(where: { $0.messageId == chatData["message_id"]! }) }) {
-                            if let idxInImages = self.groupImages[idxMessageIdParent].value.firstIndex(where: { $0.messageId == chatData["message_id"]! }) {
+                        var idMessage = dataMessage.getBody(key: "message_id")
+                        if idMessage.contains("'") {
+                            idMessage = idMessage.replacingOccurrences(of: "'", with: "")
+                        }
+                        var idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == idMessage })
+                        if let idxMessageIdParent = self.groupImages.firstIndex(where: { $0.value.contains(where: { $0.messageId == idMessage }) }) {
+                            if let idxInImages = self.groupImages[idxMessageIdParent].value.firstIndex(where: { $0.messageId == idMessage }) {
                                 self.groupImages[idxMessageIdParent].value[idxInImages].status = chatData[CoreMessage_TMessageKey.STATUS]!
                                 self.groupImages[idxMessageIdParent].value[idxInImages].dataMessage["status"] = chatData[CoreMessage_TMessageKey.STATUS]!
                             }

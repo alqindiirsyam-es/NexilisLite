@@ -149,14 +149,23 @@ class HistoryBroadcastViewController: UIViewController, UITableViewDelegate, UIT
                 }
             } else {
                 if !Utils.getIconDock().isEmpty {
-                    let dataImage = try? Data(contentsOf: URL(string: Utils.getUrlDock()!)!) //make sure your image in this url does exist, otherwise unwrap in a if let check / try-catch
-                    if dataImage != nil {
-                        getImage(name: data.profile, placeholderImage: UIImage(data: dataImage!), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
-                            imageView.image = image
-                            if !result {
-                                imageView.tintColor = .mainColor
+                    let urlString = Utils.getUrlDock()!
+                    if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                        let imageData = cachedImage
+                        imageView.image = imageData
+                    } else {
+                        DispatchQueue.global().async{
+                            Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
+                                guard let data = data, error == nil else { return }
+                                DispatchQueue.main.async() {
+                                    if UIImage(data: data) != nil {
+                                        let imageData = UIImage(data: data)!
+                                        imageView.image = imageData
+                                        ImageCache.shared.save(image: imageData, forKey: urlString)
+                                    }
+                                }
                             }
-                        })
+                        }
                     }
                 } else {
                     getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in

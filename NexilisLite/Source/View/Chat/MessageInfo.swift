@@ -17,8 +17,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     var dataPerson: [String: String?] = [:]
     var dataGroup: [String: Any?] = [:]
     var isPersonal = true
-    var finishGetLocation = false
-    let locationManager = CLLocationManager()
+    let geocoder = CLGeocoder()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -38,14 +37,10 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         getData()
         dateMessage = chatDate(stringDate: data["server_date"] as! String)
         
-        locationManager.delegate = self
-        locationManager.requestWhenInUseAuthorization()
-        if CLLocationManager.locationServicesEnabled() {
-            locationManager.desiredAccuracy = kCLLocationAccuracyBest
-            locationManager.startUpdatingLocation()
-        }
-        
         tableStatus.reloadData()
+        DispatchQueue.global().async{
+            self.getAllLocationDesc()
+        }
         
         view.addSubview(tableStatus)
         tableStatus.anchor(top: view.topAnchor, left: view.leftAnchor, bottom: view.bottomAnchor, right: view.rightAnchor)
@@ -91,13 +86,35 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         for data in dataStatus {
             let latitude = CLLocationDegrees(data["latitude"] as? String ?? "")!
             let longitude = CLLocationDegrees(data["longitude"] as? String ?? "")!
+            guard (-90...90).contains(latitude), (-180...180).contains(longitude) else {
+                print("Invalid coordinates!")
+                continue
+            }
             let location = CLLocation(latitude: latitude, longitude: longitude)
-            let geocoder = CLGeocoder()
-            print("SEKUTT \(location.coordinate.latitude), \(location.coordinate.longitude)")
+            if geocoder.isGeocoding {
+                geocoder.cancelGeocode()
+            }
+            Nexilis.dispatch = DispatchGroup()
+            Nexilis.dispatch?.enter()
             geocoder.reverseGeocodeLocation(location) { (placemarks, error) in
                 var result = ""
                 if let error = error {
-                    print("Error fetching address: \(error.localizedDescription)")
+                    if let clError = error as? CLError {
+                        switch clError.code {
+                        case .network:
+                            print("Network error: Check your internet connection.")
+                        case .geocodeFoundNoResult:
+                            print("No results found for the given coordinates.")
+                        case .geocodeCanceled:
+                            print("Geocoding request was canceled.")
+                        case .geocodeFoundPartialResult:
+                            print("Partial result found.")
+                        default:
+                            print("Error: \(clError.localizedDescription)")
+                        }
+                    } else {
+                        print("Unknown error: \(error.localizedDescription)")
+                    }
                 } else if let placemark = placemarks?.first {
                     if let locality = placemark.locality {
                         result += locality + ", "
@@ -108,15 +125,18 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     if let country = placemark.country {
                         result += country
                     }
-                    print("MANTAB \(result)")
+                }
+                self.dataLocation.append(result)
+                if let dispatch = Nexilis.dispatch {
+                    dispatch.leave()
                 }
             }
+            Nexilis.dispatch?.wait()
+            Nexilis.dispatch = nil
         }
-    }
-    
-    public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        self.getAllLocationDesc()
-        locationManager.stopUpdatingLocation()
+        DispatchQueue.main.async {
+            self.tableStatus.reloadData()
+        }
     }
     
     func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
@@ -270,6 +290,9 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             })
                             
                             content.text = dataProfile["name"]!
+                            if dataLocation.count > 0 {
+                                content.text = dataProfile["name"]! + " at (\(dataLocation[indexPath.row]))"
+                            }
                             
                             let date = Date(milliseconds: Int64(dataStatusAck[indexPath.row]["time_ack"] as! String) ?? 100)
                             let formatter = DateFormatter()
@@ -403,6 +426,9 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 if !data.isEmpty && data["read_receipts"] as? String == "8"{
                     content.image = UIImage(named: "message_status_ack", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
                     content.text = "Confirmed".localized()
+                    if dataLocation.count > 0 {
+                        content.text = "Confirmed".localized() + " at (\(dataLocation[0]))"
+                    }
                     if dataStatus.count != 0 {
                         if (dataStatus[0]["time_ack"] as! String).isEmpty {
                             cell.accessoryView = noStatus
@@ -1092,6 +1118,33 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             }
         }
         return cell
+    }
+    
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        if !data.isEmpty && data["read_receipts"] as? String == "8" {
+            if !isPersonal {
+                let latitude = CLLocationDegrees(dataStatus[indexPath.row]["latitude"] as? String ?? "")!
+                let longitude = CLLocationDegrees(dataStatus[indexPath.row]["longitude"] as? String ?? "")!
+                openMapApp(latitude: latitude, longitude: longitude)
+            } else {
+                let latitude = CLLocationDegrees(dataStatus[0]["latitude"] as? String ?? "")!
+                let longitude = CLLocationDegrees(dataStatus[0]["longitude"] as? String ?? "")!
+                openMapApp(latitude: latitude, longitude: longitude)
+            }
+        }
+    }
+    
+    func openMapApp(latitude: CLLocationDegrees, longitude: CLLocationDegrees) {
+        let appleMapsURL = "http://maps.apple.com/?q=\(latitude),\(longitude)"
+        let googleMapsURL = "comgooglemaps://?q=\(latitude),\(longitude)&zoom=14"
+        
+        if let googleMaps = URL(string: googleMapsURL), UIApplication.shared.canOpenURL(googleMaps) {
+            UIApplication.shared.open(googleMaps, options: [:], completionHandler: nil)
+        } else if let appleMaps = URL(string: appleMapsURL) {
+            UIApplication.shared.open(appleMaps, options: [:], completionHandler: nil)
+        } else {
+            print("No map application available.")
+        }
     }
     
     private func chatDate(stringDate: String) -> String {

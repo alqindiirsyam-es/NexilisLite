@@ -10,7 +10,7 @@ import nuSDKService
 import NotificationBannerSwift
 
 
-public class FloatingButton: UIView {
+public class FloatingButton: UIView, UIGestureRecognizerDelegate {
     
     var groupView: UIStackView!
     var scrollView: UIScrollView!
@@ -146,9 +146,10 @@ public class FloatingButton: UIView {
         let qmeraTap = UITapGestureRecognizer(target: self, action: #selector(qmeraTap))
         qmeraTap.numberOfTouchesRequired = 1
         nexilis_button.addGestureRecognizer(qmeraTap)
+        qmeraTap.delegate = self
         
         let qmeraLongPress = UILongPressGestureRecognizer(target: self, action: #selector(qmeraLongPress(gestureRecognizer:)))
-        nexilis_button.addGestureRecognizer(qmeraLongPress)
+        self.addGestureRecognizer(qmeraLongPress)
         
         addSubview(nexilis_button)
         
@@ -241,6 +242,11 @@ public class FloatingButton: UIView {
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(hideButton))
         tapGesture.cancelsTouchesInView = false
         UIApplication.shared.windows.first?.rootViewController?.view.addGestureRecognizer(tapGesture)
+    }
+    
+    @objc func handleTap(_ sender: UITapGestureRecognizer) {
+        let location = sender.location(in: self)
+        print("Tap location: \(location)")
     }
     
     public func setImageWithURL(_ isDocked: Bool) {
@@ -374,6 +380,8 @@ public class FloatingButton: UIView {
                         newButton.restorationIdentifier = package_id
                         newButton.accessibilityIdentifier = app_id
                         newButton.addTarget(self, action: #selector(fbTap), for: .touchUpInside)
+                        let qmeraLongPress = UILongPressGestureRecognizer(target: self, action: #selector(qmeraLongPress(gestureRecognizer:)))
+                        newButton.addGestureRecognizer(qmeraLongPress)
                     }
                 }
             } else {
@@ -477,6 +485,8 @@ public class FloatingButton: UIView {
                                 newButton.restorationIdentifier = package_id
                                 newButton.accessibilityIdentifier = app_id
                                 newButton.addTarget(self, action: #selector(fbTap), for: .touchUpInside)
+                                let qmeraLongPress = UILongPressGestureRecognizer(target: self, action: #selector(qmeraLongPress(gestureRecognizer:)))
+                                newButton.addGestureRecognizer(qmeraLongPress)
                             }
                         }
                     }
@@ -540,6 +550,8 @@ public class FloatingButton: UIView {
             newButton.restorationIdentifier = "default_fb\(data[i])"
             newButton.accessibilityIdentifier = ""
             newButton.addTarget(self, action: #selector(fbTap), for: .touchUpInside)
+            let qmeraLongPress = UILongPressGestureRecognizer(target: self, action: #selector(qmeraLongPress(gestureRecognizer:)))
+            newButton.addGestureRecognizer(qmeraLongPress)
         }
     }
     

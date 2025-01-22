@@ -260,7 +260,7 @@ class QmeraStreamingViewController: UIViewController {
             buttonRotate.addTarget(self, action: #selector(camera(sender:)), for: .touchUpInside)
             navigationItem.rightBarButtonItem = UIBarButtonItem(customView: buttonRotate)
             
-            API.initiateBC(sTitle: data, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivLocalView: imageView)
+            API.initiateBC(sTitle: data, nCamIdx: 0, nResIdx: 2, nVQuality: 4, ivLocalView: imageView)
         } else {
             API.joinBC(sBroadcasterID: data, ivRemoteView: imageView)
         }
@@ -399,7 +399,7 @@ class QmeraStreamingViewController: UIViewController {
                         let titleWithChar = titleRaw.components(separatedBy: "~")[1]
                         let title = titleWithChar.components(separatedBy: "■")[0]
                         
-                        self.status.text = title
+                        self.status.text = title.toNormalString()
                         let size = self.status.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: self.status.frame.height))
                         let width = size.width
                         self.status.frame = CGRect(x: 0, y: 0, width: width + 10, height: 30)
@@ -494,7 +494,7 @@ class QmeraStreamingViewController: UIViewController {
                     return
                 }
                 
-                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getUpdateLiveVideo(pTitle: type == 0 ? "\(self.frontCamera ? 1 : 0)~\(textField!.text!.toStupidString())" : "\(self.frontCamera ? 1 : 0)~\(self.status.text!.toStupidString())", pTagline: type == 1 ? textField!.text! : self.tagline.text!.toStupidString())) {
+                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getUpdateLiveVideo(pTitle: type == 0 ? "\(self.frontCamera ? 1 : 0)~\(textField!.text!.toStupidString())" : "\(self.frontCamera ? 1 : 0)~\(self.status.text!.toStupidString())■", pTagline: type == 1 ? textField!.text! : self.tagline.text!.toStupidString())) {
                     if response.isOk() {
                         if type == 0 {
                             self.status.text = textField!.text!
@@ -637,11 +637,11 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
             let platform = Int(m[3])
             if platform == 1 { // Android
                 DispatchQueue.main.async {
-                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: camera == 1 ? (CGFloat.pi * 3)/2 : (CGFloat.pi)/2)
+                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 3)/2 : (CGFloat.pi)/2)
                 }
             } else {
                 DispatchQueue.main.async {
-                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
+                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
                 }
             }
             sendJoin()
@@ -653,11 +653,11 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
             let platform = Int(m[3])
             if platform == 1 { // Android
                 DispatchQueue.main.async {
-                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: camera == 1 ? (CGFloat.pi * 3)/2 : (CGFloat.pi)/2)
+                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 3)/2 : (CGFloat.pi)/2)
                 }
             } else {
                 DispatchQueue.main.async {
-                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
+                    self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
                 }
             }
         } else if state == Nexilis.STREAMING_SEMINAR_ENDED {

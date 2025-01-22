@@ -10,7 +10,7 @@ import Alamofire
 import NotificationBannerSwift
 import nuSDKService
 
-class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
+public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     public var dataPerson : [String: String?] = [
         "f_pin" : "-997",
         "firstName" : "GPT SmartBot",
@@ -207,36 +207,19 @@ class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             }
         })
         let pin = "-997"
-        var counter : Int? = nil
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select counter from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
-                    counter = Int(cursor.int(forColumnIndex: 0))
-                    counter! += 0
-                    cursor.close()
-                    //print("select db message summary")
-                }
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
-            }
-        })
-        if counter == nil {
-            counter = 0
-            //print("set counter message summary")
-        }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                     "l_pin" : pin,
                     "message_id" : message_id,
-                    "counter" : counter!
+                    "counter" : 0
                 ], replace: true)
             } catch {
                 rollback.pointee = true
                 print("Access database error: \(error.localizedDescription)")
             }
         })
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
         var row: [String: Any?] = [:]
         row["message_id"] = message_id
         row["f_pin"] = "-997"
@@ -626,11 +609,19 @@ class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             imageProfile.clipsToBounds = true
             var count = 0
             viewAppBar.addSubview(imageProfile)
-            imageProfile.image = UIImage(named: "pb_gpt_bot", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-            imageProfile.contentMode = .scaleAspectFit
+            if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                imageProfile.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                    if error == nil {
+                        imageProfile.animationImages = image?.images
+                        imageProfile.animationDuration = image?.duration ?? 0.0
+                        imageProfile.animationRepeatCount = 0
+                        imageProfile.startAnimating()
+                    }
+                }
+            }
             let titleNavigation = UILabel(frame: CGRect(x: 35, y: 0, width: viewAppBar.frame.size.width - 250, height: 44))
             viewAppBar.addSubview(titleNavigation)
-            titleNavigation.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  GPT SmartBot", size: 15, y: -4)
+            titleNavigation.text = "GPT SmartBot"
             titleNavigation.textColor = .white
             titleNavigation.font = UIFont.systemFont(ofSize: 12).bold
             

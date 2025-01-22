@@ -254,11 +254,13 @@ class QmeraAudioViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         UIDevice.current.isProximityMonitoringEnabled = false
         NotificationCenter.default.removeObserver(self)
+        Nexilis.floatingButton.isHidden = false
     }
     
     deinit {
         UIDevice.current.isProximityMonitoringEnabled = false
         NotificationCenter.default.removeObserver(self)
+        Nexilis.floatingButton.isHidden = false
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -267,6 +269,8 @@ class QmeraAudioViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        Nexilis.floatingButton.isHidden = true
         
         let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
         effectView.frame = view.frame
@@ -605,7 +609,7 @@ class QmeraAudioViewController: UIViewController {
     @objc func didMute(sender: Any?) {
         isMuted = !isMuted
         mic.isSelected = isMuted
-        API.mmc(int: 0, boolean: isMuted)
+        API.mmc(int: 1, boolean: isMuted)
     }
     
     @objc func didInvite(sender: Any?) {
@@ -897,6 +901,9 @@ class QmeraAudioViewController: UIViewController {
                             SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                         }
                     }
+                    if buttonWB.isEnabled {
+                        buttonWB.isEnabled = false
+                    }
                 }
             } else if state == Nexilis.AUDIO_CALL_END || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_END) {
                 if isOutgoing {
@@ -975,6 +982,8 @@ class QmeraAudioViewController: UIViewController {
                             self.didEnd(sender: true)
                         }
                         return
+                    } else if users.count == 1 && !buttonWB.isEnabled {
+                        buttonWB.isEnabled = true
                     }
                 }
 //                if users.count == 0 {
@@ -1003,6 +1012,9 @@ class QmeraAudioViewController: UIViewController {
                             }
                             SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                         }
+                    }
+                    if users.count == 1 && !buttonWB.isEnabled {
+                        buttonWB.isEnabled = true
                     }
                 }
                 if users.count == 0 {
@@ -1035,6 +1047,9 @@ class QmeraAudioViewController: UIViewController {
                             }
                             SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                         }
+                    }
+                    if users.count == 1 && !buttonWB.isEnabled {
+                        buttonWB.isEnabled = true
                     }
                 }
                 if users.count == 0 {

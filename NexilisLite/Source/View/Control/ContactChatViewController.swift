@@ -231,6 +231,7 @@ class ContactChatViewController: UITableViewController {
             self.navigationController?.navigationBar.topItem?.title = "Start Conversation".localized()
             self.navigationController?.navigationBar.setNeedsLayout()
         }
+        getData()
         DispatchQueue.global().async {
             self.getOpenGroups(listGroups: self.groups, completion: { g in
                 DispatchQueue.main.async {
@@ -669,7 +670,12 @@ extension ContactChatViewController {
                     dismiss(animated: true, completion: nil)
                     return
                 }
-                if data.messageScope == "3" {
+                if data.pin == "-997" {
+                    let smartChatVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "chatGptVC") as! ChatGPTBotView
+                    smartChatVC.hidesBottomBarWhenPushed = true
+                    smartChatVC.fromNotification = false
+                    navigationController?.show(smartChatVC, sender: nil)
+                } else if data.messageScope == "3" {
                     let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
                     editorPersonalVC.hidesBottomBarWhenPushed = true
                     editorPersonalVC.unique_l_pin = data.pin
@@ -1000,7 +1006,10 @@ extension ContactChatViewController {
         case 0:
             if segment.numberOfSegments < 3 {
                 cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierContact", for: indexPath)
-                var content = cell.defaultContentConfiguration()
+                let content = cell.contentView
+                if content.subviews.count > 0 {
+                    content.subviews.forEach { $0.removeFromSuperview() }
+                }
                 let data: User
                 if isFilltering {
                     data = fillteredData[indexPath.row] as! User
@@ -1010,35 +1019,54 @@ extension ContactChatViewController {
                     }
                     data = contacts[indexPath.row]
                 }
-                content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
+                let imageView = UIImageView(frame: CGRect(x: 0, y: 0, width: 40.0, height: 40.0))
+                content.addSubview(imageView)
+                imageView.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10.0),
+                    imageView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                    imageView.widthAnchor.constraint(equalToConstant: 40.0),
+                    imageView.heightAnchor.constraint(equalToConstant: 40.0)
+                ])
                 if data.pin == "-997" {
-                    content.image = UIImage(named: "pb_gpt_bot", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                    imageView.circle()
+                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                        imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                            if error == nil {
+                                imageView.animationImages = image?.images
+                                imageView.animationDuration = image?.duration ?? 0.0
+                                imageView.animationRepeatCount = 0
+                                imageView.startAnimating()
+                            }
+                        }
+                    }
                 }
                 else {
                     getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
-                        content.image = image
+                        imageView.image = image
                     })
                 }
-                if User.isOfficial(official_account: data.official ?? "") || User.isOfficialRegular(official_account: data.official ?? "") {
-                    content.attributedText = self.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.officialColor)
-                    
+                let titleView = UILabel()
+                content.addSubview(titleView)
+                titleView.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
+                    titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor)
+                ])
+                titleView.font = UIFont.systemFont(ofSize: 14)
+                if (User.isOfficial(official_account: data.official ?? "") || User.isOfficialRegular(official_account: data.official ?? "")) && data.pin != "-997" {
+                    titleView.attributedText = self.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.officialColor)
+
                 } else if User.isVerified(official_account: data.official ?? "") {
-                    content.attributedText = self.set(image: UIImage(named: "ic_verified", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.verifiedColor)
+                    titleView.attributedText = self.set(image: UIImage(named: "ic_verified", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.verifiedColor)
                 }
                 else if User.isInternal(userType: data.userType ?? "") {
-                    content.attributedText = self.set(image: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.internalColor)
+                    titleView.attributedText = self.set(image: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.internalColor)
                 } else if User.isCallCenter(userType: data.userType ?? "") {
-//                    let dataCategory = CategoryCC.getDataFromServiceId(service_id: data.ex_offmp!)
-//                    if dataCategory != nil {
-//                        content.attributedText = self.set(image: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName) (\(dataCategory!.service_name))", size: 15, y: -4, colorText: UIColor.ccColor)
-//                    } else {
-                        content.attributedText = self.set(image: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.ccColor)
-//                    }
+                    titleView.attributedText = self.set(image: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.ccColor)
                 } else {
-                    content.text = data.fullName
+                    titleView.text = data.fullName
                 }
-                content.textProperties.font = UIFont.systemFont(ofSize: 14)
-                cell.contentConfiguration = content
             } else {
                 cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierChat", for: indexPath)
                 let content = cell.contentView
@@ -1083,16 +1111,50 @@ extension ContactChatViewController {
                     imageView.widthAnchor.constraint(equalToConstant: 55.0),
                     imageView.heightAnchor.constraint(equalToConstant: 55.0)
                 ])
-                if data.profile.isEmpty && data.pin != "-999" {
+                if data.profile.isEmpty && data.pin != "-999" && data.pin != "-997" {
                     if data.messageScope == "3" {
                         imageView.image = UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                     } else {
                         imageView.image = UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                     }
+                } else if data.pin == "-997" {
+                    imageView.frame = CGRect(x: 0, y: 0, width: 55.0, height: 55.0)
+                    imageView.circle()
+                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                        imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                            if error == nil {
+                                imageView.animationImages = image?.images
+                                imageView.animationDuration = image?.duration ?? 0.0
+                                imageView.animationRepeatCount = 0
+                                imageView.startAnimating()
+                            }
+                        }
+                    }
                 } else {
-                    getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : data.messageScope == "3" ? "Profile---Purple" : "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
-                        imageView.image = image
-                    })
+                    if !Utils.getIconDock().isEmpty {
+                        let urlString = Utils.getUrlDock()!
+                        if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                            let imageData = cachedImage
+                            imageView.image = imageData
+                        } else {
+                            DispatchQueue.global().async{
+                                Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
+                                    guard let data = data, error == nil else { return }
+                                    DispatchQueue.main.async() {
+                                        if UIImage(data: data) != nil {
+                                            let imageData = UIImage(data: data)!
+                                            imageView.image = imageData
+                                            ImageCache.shared.save(image: imageData, forKey: urlString)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : data.messageScope == "3" ? "Profile---Purple" : "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                            imageView.image = image
+                        })
+                    }
                 }
                 let titleView = UILabel()
                 content.addSubview(titleView)
@@ -1315,7 +1377,10 @@ extension ContactChatViewController {
                 }
             } else {
                 cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierContact", for: indexPath)
-                var content = cell.defaultContentConfiguration()
+                let content = cell.contentView
+                if content.subviews.count > 0 {
+                    content.subviews.forEach { $0.removeFromSuperview() }
+                }
                 let data: User
                 if isFilltering {
                     data = fillteredData[indexPath.row] as! User
@@ -1325,34 +1390,54 @@ extension ContactChatViewController {
                     }
                     data = contacts[indexPath.row]
                 }
-                content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
+                let imageView = UIImageView(frame: CGRect(x: 0, y: 0, width: 40.0, height: 40.0))
+                content.addSubview(imageView)
+                imageView.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10.0),
+                    imageView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                    imageView.widthAnchor.constraint(equalToConstant: 40.0),
+                    imageView.heightAnchor.constraint(equalToConstant: 40.0)
+                ])
                 if data.pin == "-997" {
-                    content.image = UIImage(named: "pb_gpt_bot", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                } else {
+                    imageView.circle()
+                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                        imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                            if error == nil {
+                                imageView.animationImages = image?.images
+                                imageView.animationDuration = image?.duration ?? 0.0
+                                imageView.animationRepeatCount = 0
+                                imageView.startAnimating()
+                            }
+                        }
+                    }
+                }
+                else {
                     getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
-                        content.image = image
+                        imageView.image = image
                     })
                 }
-                if User.isOfficial(official_account: data.official ?? "") || User.isOfficialRegular(official_account: data.official ?? "") {
-                    content.attributedText = self.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.officialColor)
-                    
+                let titleView = UILabel()
+                content.addSubview(titleView)
+                titleView.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
+                    titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor)
+                ])
+                titleView.font = UIFont.systemFont(ofSize: 14)
+                if (User.isOfficial(official_account: data.official ?? "") || User.isOfficialRegular(official_account: data.official ?? "")) && data.pin != "-997" {
+                    titleView.attributedText = self.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.officialColor)
+
                 } else if User.isVerified(official_account: data.official ?? "") {
-                    content.attributedText = self.set(image: UIImage(named: "ic_verified", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.verifiedColor)
+                    titleView.attributedText = self.set(image: UIImage(named: "ic_verified", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.verifiedColor)
                 }
                 else if User.isInternal(userType: data.userType ?? "") {
-                    content.attributedText = self.set(image: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.internalColor)
+                    titleView.attributedText = self.set(image: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.internalColor)
                 } else if User.isCallCenter(userType: data.userType ?? "") {
-//                    let dataCategory = CategoryCC.getDataFromServiceId(service_id: data.ex_offmp!)
-//                    if dataCategory != nil {
-//                        content.attributedText = self.set(image: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName) (\(dataCategory!.service_name))", size: 15, y: -4, colorText: UIColor.ccColor)
-//                    } else {
-                        content.attributedText = self.set(image: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.ccColor)
-//                    }
+                    titleView.attributedText = self.set(image: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.ccColor)
                 } else {
-                    content.text = data.fullName
+                    titleView.text = data.fullName
                 }
-                content.textProperties.font = UIFont.systemFont(ofSize: 14)
-                cell.contentConfiguration = content
             }
         case 2:
             cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierGroup", for: indexPath)

@@ -137,6 +137,7 @@ class QmeraVideoViewController: UIViewController {
         navigationController?.navigationBar.topItem?.backBarButtonItem = nil
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
+        Nexilis.floatingButton.isHidden = false
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -148,11 +149,13 @@ class QmeraVideoViewController: UIViewController {
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             NotificationCenter.default.removeObserver(self)
         }
+        Nexilis.floatingButton.isHidden = false
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         Nexilis.setWhiteboardReceiver(receiver: self)
+        Nexilis.floatingButton.isHidden = true
         self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
         navigationController?.changeAppearance(clear: true)
         
@@ -1001,7 +1004,7 @@ class QmeraVideoViewController: UIViewController {
     
     @objc func muted(sender: Any?) {
         isMuted = !isMuted
-        API.mmc(int: 0, boolean: isMuted)
+        API.mmc(int: 1, boolean: isMuted)
         DispatchQueue.main.async {
             if (self.isMuted) {
                 self.buttonMuted.backgroundColor = .lightGray
@@ -1307,6 +1310,12 @@ class QmeraVideoViewController: UIViewController {
                         if (self.dataPerson.count == 2) {
                             self.containerLabelName.forEach({ $0.subviews.forEach({ $0.removeFromSuperview() }) })
                             self.scrollRemoteView.subviews.forEach({ $0.removeFromSuperview() })
+                            if !self.buttonWB.isEnabled {
+                                self.buttonWB.isEnabled = true
+                            }
+                            if !self.buttonRotate.isEnabled {
+                                self.buttonRotate.isEnabled = true
+                            }
                         } else {
                             self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
                             self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
@@ -1335,10 +1344,10 @@ class QmeraVideoViewController: UIViewController {
                         }
                     }
                     
-                    if self.dataPerson.count == 1 {
-                        self.transformZoomAfterNewUserMore2 = false
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
-                    }
+//                    if self.dataPerson.count == 1 {
+//                        self.transformZoomAfterNewUserMore2 = false
+//                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
+//                    }
                 }
             }
         } else if (state == Nexilis.OFFLINE) {
@@ -1365,6 +1374,12 @@ class QmeraVideoViewController: UIViewController {
                         if (self.dataPerson.count == 2) {
                             self.containerLabelName.forEach({ $0.subviews.forEach({ $0.removeFromSuperview() }) })
                             self.scrollRemoteView.subviews.forEach({ $0.removeFromSuperview() })
+                            if !self.buttonWB.isEnabled {
+                                self.buttonWB.isEnabled = true
+                            }
+                            if !self.buttonRotate.isEnabled {
+                                self.buttonRotate.isEnabled = true
+                            }
                         } else {
                             self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
                             self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
@@ -1436,6 +1451,12 @@ class QmeraVideoViewController: UIViewController {
                         if (self.dataPerson.count == 2) {
                             self.containerLabelName.forEach({ $0.subviews.forEach({ $0.removeFromSuperview() }) })
                             self.scrollRemoteView.subviews.forEach({ $0.removeFromSuperview() })
+                            if !self.buttonWB.isEnabled {
+                                self.buttonWB.isEnabled = true
+                            }
+                            if !self.buttonRotate.isEnabled {
+                                self.buttonRotate.isEnabled = true
+                            }
                         } else {
                             self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
                             self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
@@ -1541,6 +1562,12 @@ class QmeraVideoViewController: UIViewController {
                         labelName.text = namePerson
                         labelName.textAlignment = .center
                         labelName.textColor = .white
+                    }
+                    if self.buttonWB.isEnabled {
+                        self.buttonWB.isEnabled = false
+                    }
+                    if self.buttonRotate.isEnabled {
+                        self.buttonRotate.isEnabled = false
                     }
                 }
             }
