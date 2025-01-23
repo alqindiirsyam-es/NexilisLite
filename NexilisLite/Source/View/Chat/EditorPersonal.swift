@@ -69,6 +69,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var removed = false
     var isConfidential = false
     var isAck = false
+    var isSecret = false
     let viewSticker = UIView()
     let containerLink = UIView()
     let containerPreviewReply = UIView()
@@ -255,7 +256,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if dataMessageForward != nil {
             for i in 0..<dataMessageForward!.count {
                 let isForwarded = (dataMessageForward![i][TypeDataMessage.is_forwarded] as? Int) ?? 0
-                sendChat(message_scope_id: "3", status: "2", message_text: dataMessageForward![i]["message_text"] as! String, credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"] as! String, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"] as! String, audio_id: dataMessageForward![i]["audio_id"] as! String, video_id: dataMessageForward![i]["video_id"] as! String, file_id: dataMessageForward![i]["file_id"] as! String, thumb_id: dataMessageForward![i]["thumb_id"] as! String, reff_id: "", read_receipts: dataMessageForward![i]["read_receipts"] as! String, chat_id: "", is_call_center: "0", call_center_id: "", viewController: self, is_forwarded: isForwarded + 1)
+                sendChat(message_scope_id: "3", status: "2", message_text: dataMessageForward![i]["message_text"] as! String, credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"] as! String, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"] as! String, audio_id: dataMessageForward![i]["audio_id"] as! String, video_id: dataMessageForward![i]["video_id"] as! String, file_id: dataMessageForward![i]["file_id"] as! String, thumb_id: dataMessageForward![i]["thumb_id"] as! String, reff_id: "", read_receipts: dataMessageForward![i]["read_receipts"] as! String, chat_id: "", is_call_center: "0", call_center_id: "", viewController: self, gif_id: dataMessageForward![i][TypeDataMessage.gif_id] as! String, is_forwarded: isForwarded + 1, is_secret: (dataMessageForward![i][TypeDataMessage.is_secret] as? Int) ?? 0)
             }
             dataMessageForward = nil
         }
@@ -1609,7 +1610,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     row["reff_id"] = chatData[CoreMessage_TMessageKey.REF_ID] ?? ""
                     row["lock"] = ""
                     row["is_stared"] = "0"
-                    row[TypeDataMessage.is_forwarded] = chatData[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE]
+                    row[TypeDataMessage.is_forwarded] = Int(chatData[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE] ?? "0")
                     row["isSelected"] = false
                     if !self.dataDates.contains("Today".localized()) {
                         self.dataDates.append("Today".localized())
@@ -2195,33 +2196,61 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     @objc func showChooserACKConfidential() {
         let alertController = LibAlertController(title: "Message Mode".localized(), message: "Select".localized() + " " + "Message Mode".localized(), preferredStyle: .actionSheet)
-        let imageConfidential = resizeImage(image: UIImage(named: "confidential_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
-        let imageAck = resizeImage(image: UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
+        let imageConfidential = resizeImage(image: UIImage(named: "pb_icon_conf_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
+        let imageAck = resizeImage(image: UIImage(named: "pb_icon_ack_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
+        let imageSecret = resizeImage(image: UIImage(named: "pb_icon_secret_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
         let confidentialAction = UIAlertAction(title: "Confidential Message".localized(), style: .default, handler: { (UIAlertAction) in
-            if !self.isConfidential {
-                self.isConfidential = true
+            self.isConfidential = !self.isConfidential
+            if self.isConfidential {
                 self.buttonAckConfidential.setImage(imageConfidential, for: .normal)
+            } else {
+                self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+            }
+            if self.isAck {
+                self.isAck = false
+            }
+            if self.isSecret {
+                self.isSecret = false
+            }
+        })
+        let ackAction = UIAlertAction(title: "Confirmation Message".localized(), style: .default, handler: { (UIAlertAction) in
+            self.isAck = !self.isAck
+            if self.isAck {
+                self.buttonAckConfidential.setImage(imageAck, for: .normal)
+            } else {
+                self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+            }
+            if self.isConfidential {
+                self.isConfidential = false
+            }
+            if self.isSecret {
+                self.isSecret = false
+            }
+        })
+        let secretAction = UIAlertAction(title: "Secret Message".localized(), style: .default, handler: { (UIAlertAction) in
+            self.isSecret = !self.isSecret
+            if self.isSecret {
+                self.buttonAckConfidential.setImage(imageSecret, for: .normal)
+            } else {
+                self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+            }
+            if self.isConfidential {
+                self.isConfidential = false
             }
             if self.isAck {
                 self.isAck = false
             }
         })
-        let ackAction = UIAlertAction(title: "Confirmation Message".localized(), style: .default, handler: { (UIAlertAction) in
-            if !self.isAck {
-                self.isAck = true
-                self.buttonAckConfidential.setImage(imageAck, for: .normal)
-            }
-            if self.isConfidential {
-                self.isConfidential = false
-            }
-        })
         confidentialAction.setValue(imageConfidential, forKey: "image")
         ackAction.setValue(imageAck, forKey: "image")
+        secretAction.setValue(imageSecret, forKey: "image")
         alertController.addAction(confidentialAction)
         alertController.addAction(ackAction)
+        alertController.addAction(secretAction)
         alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { (UIAlertAction) in
             self.isConfidential = false
             self.isAck = false
+            self.isSecret = false
             self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
         }))
         self.present(alertController, animated: true, completion: nil)
@@ -2454,7 +2483,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
     }
     
-    private func sendChat(message_scope_id:String =  "3", status:String =  "1", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "4", chat_id: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, isAutoSendCC : Bool = false, gif_id: String = "", is_forwarded: Int = 0) {
+    private func sendChat(message_scope_id:String =  "3", status:String =  "1", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "4", chat_id: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, isAutoSendCC : Bool = false, gif_id: String = "", is_forwarded: Int = 0, is_secret: Int = 0) {
         if viewController is EditorPersonal && file_id == "" && dataMessageForward == nil && !isAutoSendCC{
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
@@ -2522,8 +2551,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if isAck {
             read_receipts = "8"
         }
+        var is_secret = is_secret
+        if isSecret {
+            is_secret = 1
+        }
         sendTyping(l_pin: l_pin, isTyping: true)
-        let message = CoreMessage_TMessageBank.sendMessage(l_pin: l_pin, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: chat_id, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin, gif_id: gif_id, isForwarded: "\(is_forwarded)")
+        let message = CoreMessage_TMessageBank.sendMessage(l_pin: l_pin, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: chat_id, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin, gif_id: gif_id, isForwarded: "\(is_forwarded)", isSecret: "\(is_secret)")
         Nexilis.addQueueMessage(message: message)
         let messageId = String(message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID]!)
         if credential == "1" {
@@ -7656,4 +7689,5 @@ public class TypeDataMessage {
     public static let last_edit = "last_edit"
     public static let gif_id = "gif_id"
     public static let is_forwarded = "is_forwarded"
+    public static let is_secret = "is_secret"
 }

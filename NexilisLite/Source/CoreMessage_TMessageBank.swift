@@ -147,7 +147,7 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
-    public static func sendMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String, gif_id: String = "", isForwarded: String = "") -> TMessage {
+    public static func sendMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String, gif_id: String = "", isForwarded: String = "", isSecret: String = "") -> TMessage {
         let me = User.getMyPin()!
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.SEND_CHAT
@@ -202,6 +202,7 @@ public class CoreMessage_TMessageBank {
             tmessage.mBodies[CoreMessage_TMessageKey.GIF_ID] = gif_id
         }
         tmessage.mBodies[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE] = isForwarded
+        tmessage.mBodies[CoreMessage_TMessageKey.IS_SECRET] = isSecret
         return tmessage
     }
     
@@ -1127,6 +1128,17 @@ public class CoreMessage_TMessageBank {
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
         tmessage.mBodies[CoreMessage_TMessageKey.FIRST_NAME] = firstname
         tmessage.mBodies[CoreMessage_TMessageKey.LAST_NAME] = lastname
+        return tmessage
+    }
+    public static func getChangePersonInfoAutoQuote(f_pin: String, autoQuoteType: String, autoQuote: String) -> TMessage {
+        let me = User.getMyPin()!
+        let tmessage = TMessage()
+        tmessage.mCode = CoreMessage_TMessageCode.SET_AUTO_QUOTE
+        tmessage.mPIN = f_pin
+        tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tmessage.mBodies[CoreMessage_TMessageKey.AUTO_QUOTE] = autoQuote
+        tmessage.mBodies[CoreMessage_TMessageKey.AUTO_QUOTE_TYPE] = autoQuoteType
+        tmessage.mBodies[CoreMessage_TMessageKey.CREATED_DATE] = "\(Date().currentTimeMillis())"
         return tmessage
     }
     public static func getChangePersonInfoEmail(email:String) -> TMessage {

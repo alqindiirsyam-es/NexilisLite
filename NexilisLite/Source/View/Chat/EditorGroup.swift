@@ -236,7 +236,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         if dataMessageForward != nil {
             for i in 0..<dataMessageForward!.count {
                 let isForwarded = (dataMessageForward![i][TypeDataMessage.is_forwarded] as? Int) ?? 0
-                sendChat(message_scope_id: "4", status: "2", message_text: dataMessageForward![i]["message_text"] as! String, credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"] as! String, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"] as! String, audio_id: dataMessageForward![i]["audio_id"] as! String, video_id: dataMessageForward![i]["video_id"] as! String, file_id: dataMessageForward![i]["file_id"] as! String, thumb_id: dataMessageForward![i]["thumb_id"] as! String, reff_id: "", read_receipts: "", is_call_center: "0", call_center_id: "", viewController: self, is_forwarded: isForwarded + 1)
+                sendChat(message_scope_id: "4", status: "2", message_text: dataMessageForward![i]["message_text"] as! String, credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"] as! String, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"] as! String, audio_id: dataMessageForward![i]["audio_id"] as! String, video_id: dataMessageForward![i]["video_id"] as! String, file_id: dataMessageForward![i]["file_id"] as! String, thumb_id: dataMessageForward![i]["thumb_id"] as! String, reff_id: "", read_receipts: "", is_call_center: "0", call_center_id: "", viewController: self, gif_id: dataMessageForward![i][TypeDataMessage.gif_id] as! String, is_forwarded: isForwarded + 1)
             }
             dataMessageForward = nil
         }
@@ -1047,7 +1047,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     row["reff_id"] = chatData[CoreMessage_TMessageKey.REF_ID] ?? ""
                     row["lock"] = ""
                     row["is_stared"] = "0"
-                    row[TypeDataMessage.is_forwarded] = chatData[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE]
+                    row[TypeDataMessage.is_forwarded] = Int(chatData[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE] ?? "0")
                     row["isSelected"] = false
                     if !self.dataDates.contains("Today".localized()){
                         self.dataDates.append("Today".localized())
@@ -1655,21 +1655,25 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     @objc func showChooserACKConfidential() {
         let alertController = LibAlertController(title: "Message Mode".localized(), message: "Select".localized() + " " + "Message Mode".localized(), preferredStyle: .actionSheet)
-        let imageConfidential = resizeImage(image: UIImage(named: "confidential_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
-        let imageAck = resizeImage(image: UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
+        let imageConfidential = resizeImage(image: UIImage(named: "pb_icon_conf_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
+        let imageAck = resizeImage(image: UIImage(named: "pb_icon_ack_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
         let confidentialAction = UIAlertAction(title: "Confidential Message".localized(), style: .default, handler: { (UIAlertAction) in
-            if !self.isConfidential {
-                self.isConfidential = true
+            self.isConfidential = !self.isConfidential
+            if self.isConfidential {
                 self.buttonAckConfidential.setImage(imageConfidential, for: .normal)
+            } else {
+                self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
             }
             if self.isAck {
                 self.isAck = false
             }
         })
         let ackAction = UIAlertAction(title: "Confirmation Message".localized(), style: .default, handler: { (UIAlertAction) in
-            if !self.isAck {
-                self.isAck = true
+            self.isAck = !self.isAck
+            if self.isAck {
                 self.buttonAckConfidential.setImage(imageAck, for: .normal)
+            } else {
+                self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
             }
             if self.isConfidential {
                 self.isConfidential = false
@@ -3351,6 +3355,12 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             if self.viewAttachment.isHidden {
                 self.viewAttachment.isHidden = false
             }
+            if self.containerAction.isHidden {
+                self.containerAction.isHidden = false
+            }
+            if self.viewButton.isHidden {
+                self.viewButton.isHidden = false
+            }
             if self.constraintBottomTableViewWithTextfield.constant == -60.0 {
                 self.constraintBottomTableViewWithTextfield.constant = self.constraintBottomTableViewWithTextfield.constant + 70
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: {
@@ -3379,6 +3389,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     private func addMultipleSelectSession() {
         viewTextfield.isHidden = true
         viewAttachment.isHidden = true
+        containerAction.isHidden = true
+        viewButton.isHidden = true
         constraintBottomTableViewWithTextfield.constant = constraintBottomTableViewWithTextfield.constant - 70
         view.addSubview(containerMultpileSelectSession)
         containerMultpileSelectSession.translatesAutoresizingMaskIntoConstraints = false

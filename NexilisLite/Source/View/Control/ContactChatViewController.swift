@@ -1023,7 +1023,7 @@ extension ContactChatViewController {
                 content.addSubview(imageView)
                 imageView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
-                    imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10.0),
+                    imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20.0),
                     imageView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
                     imageView.widthAnchor.constraint(equalToConstant: 40.0),
                     imageView.heightAnchor.constraint(equalToConstant: 40.0)
@@ -1050,7 +1050,7 @@ extension ContactChatViewController {
                 content.addSubview(titleView)
                 titleView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
-                    titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
+                    titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 15.0),
                     titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor)
                 ])
                 titleView.font = UIFont.systemFont(ofSize: 14)
@@ -1394,7 +1394,7 @@ extension ContactChatViewController {
                 content.addSubview(imageView)
                 imageView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
-                    imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10.0),
+                    imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20.0),
                     imageView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
                     imageView.widthAnchor.constraint(equalToConstant: 40.0),
                     imageView.heightAnchor.constraint(equalToConstant: 40.0)
@@ -1421,7 +1421,7 @@ extension ContactChatViewController {
                 content.addSubview(titleView)
                 titleView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
-                    titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
+                    titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 15.0),
                     titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor)
                 ])
                 titleView.font = UIFont.systemFont(ofSize: 14)

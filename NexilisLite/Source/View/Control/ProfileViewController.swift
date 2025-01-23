@@ -9,7 +9,7 @@ import UIKit
 import NotificationBannerSwift
 import nuSDKService
 
-public class ProfileViewController: UITableViewController {
+public class ProfileViewController: UITableViewController, UITextFieldDelegate {
     
     @IBOutlet weak var profile: UIImageView!
     
@@ -32,6 +32,10 @@ public class ProfileViewController: UITableViewController {
     @IBOutlet weak var labelChangePassword: UILabel!
     @IBOutlet weak var buttonEditpass: UIButton!
     @IBOutlet weak var labelAcceptCall: UILabel!
+    @IBOutlet weak var buttonSaveStatus: UIButton!
+    @IBOutlet weak var editTextStatus: UITextField!
+    @IBOutlet weak var contStatusFriend: UIView!
+    @IBOutlet weak var statusFriend: UILabel!
     
     private var imageVideoPicker : ImageVideoPicker!
     
@@ -256,6 +260,7 @@ public class ProfileViewController: UITableViewController {
         qrImage.addGestureRecognizer(qrTapGesture)
         
         if let me = User.getMyPin(), me == data || flag == Flag.me {
+            contStatusFriend.isHidden = true
             buttonGroup.removeFromSuperview()
             navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Edit".localized(), style: .plain, target: self, action: #selector(didTapEdit(sender:)))
             imageVideoPicker = ImageVideoPicker(presentationController: self, delegate: self)
@@ -271,6 +276,16 @@ public class ProfileViewController: UITableViewController {
             }
             switchPrivateAccount.addTarget(self, action: #selector(privateAccountSwitch), for: .valueChanged)
             switchAcceptCall.addTarget(self, action: #selector(acceptCallSwitch), for: .valueChanged)
+            editTextStatus.placeholder = "Write a status".localized()
+            editTextStatus.text = myData?.status
+            editTextStatus.delegate = self
+            buttonSaveStatus.isHidden = true
+            
+            buttonSaveStatus.addTarget(self, action: #selector(saveStatus(sender:)), for: .touchUpInside)
+            
+            let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+            tapGesture.cancelsTouchesInView = false
+            myViewGroup.addGestureRecognizer(tapGesture)
         } else if flag == Flag.invite {
             navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(didTapAdd(sender:)))
             call.isEnabled = false
@@ -281,6 +296,7 @@ public class ProfileViewController: UITableViewController {
             title = name
             profile.setImage(name: picture)
         } else if flag == Flag.friend {
+            statusFriend.text = myData?.status
             navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "person.crop.circle.badge.xmark"), style: .plain, target: self, action: #selector(didTapUnfriend(sender:)))
             if !isBNI {
                 call.addTarget(self, action: #selector(call(sender:)), for: .touchUpInside)
@@ -293,6 +309,62 @@ public class ProfileViewController: UITableViewController {
                 buttonGroup.removeFromSuperview()
             }
             myViewGroup.removeFromSuperview()
+        }
+    }
+    
+    @objc func dismissKeyboard() {
+        if editTextStatus.isFirstResponder {
+            editTextStatus.resignFirstResponder()
+        }
+    }
+    
+    public func textFieldDidChangeSelection(_ textField: UITextField) {
+        if let text = textField.text {
+            if text == user?.status {
+                buttonSaveStatus.isHidden = true
+            } else {
+                buttonSaveStatus.isHidden = false
+            }
+        }
+    }
+    
+    @objc func saveStatus(sender: Any) {
+        dismissKeyboard()
+        Nexilis.showLoader()
+        let text = editTextStatus.text ?? ""
+        let pin = self.data
+        DispatchQueue.global().async {
+            if let resp = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChangePersonInfoQuote(quote: text)), resp.isOk() {
+                Database.shared.database?.inTransaction({ fmdb, rollback in
+                    do {
+                        _ = Database.shared.updateRecord(fmdb: fmdb, table: "BUDDY", cvalues: ["quote": text], _where: "f_pin = '\(pin)'")
+                    } catch {
+                        rollback.pointee = true
+                        print("Access database error: \(error.localizedDescription)")
+                    }
+                })
+                DispatchQueue.main.async {
+                    Nexilis.hideLoader {
+                        self.buttonSaveStatus.isHidden = true
+                        self.user?.status = self.editTextStatus.text!
+                        self.editTextStatus.text = self.editTextStatus.text!
+                        let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+                        imageView.tintColor = .white
+                        self.publicBanner.dismiss()
+                        self.publicBanner = FloatingNotificationBanner(title: "Successfully changed status".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                        self.publicBanner.show()
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    Nexilis.hideLoader {
+                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                        imageView.tintColor = .white
+                        let banner = FloatingNotificationBanner(title: "Unable to access servers".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                        banner.show()
+                    }
+                }
+            }
         }
     }
     
@@ -736,7 +808,7 @@ public class ProfileViewController: UITableViewController {
     public override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         if indexPath.section == 1 {
             if let me = User.getMyPin(), me == data || flag == Flag.me {
-                return 170
+                return 220
             }
             return 56
         }

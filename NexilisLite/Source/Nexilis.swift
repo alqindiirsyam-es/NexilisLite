@@ -3568,7 +3568,13 @@ extension Nexilis: MessageDelegate {
                 let messageScopeId = CoreMessage_TMessageKey.MESSAGE_SCOPE_ID
                 let messageText = CoreMessage_TMessageKey.MESSAGE_TEXT
                 let credential = CoreMessage_TMessageKey.CREDENTIAL
-                if !message.getBody(key: imageId).isEmpty {
+                let gif_id = CoreMessage_TMessageKey.GIF_ID
+                let is_secret = CoreMessage_TMessageKey.IS_SECRET
+                if message.getBody(key: is_secret) == "1" {
+                  text = "You got messages..."
+                } else if message.getBody(key: gif_id) != "" {
+                  text = "Sent GIF 🎬"
+                } else if !message.getBody(key: imageId).isEmpty {
                     text = "Sent Image 📷"
                 } else if message.getBody(key: attachmentFlag) == "11" {
                     text = "Sent Sticker ❤️"
