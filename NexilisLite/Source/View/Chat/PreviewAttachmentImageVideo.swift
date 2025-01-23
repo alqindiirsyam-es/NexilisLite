@@ -28,6 +28,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     @IBOutlet weak var constraintButtonAckCondential: NSLayoutConstraint!
     var imageVideoData: [UIImagePickerController.InfoKey: Any]?
     var image: UIImage?
+    var urlVideoPhpPicker: URL?
     var dataGIF: Data?
     var animatedImageView: SDAnimatedImageView!
     var currentTextTextField: String?
@@ -68,7 +69,27 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 imagePreview.image = imageVideoData![.originalImage] as? UIImage
             }
         } else {
-            if isGIF {
+            if urlVideoPhpPicker != nil {
+                do {
+                    let asset = AVURLAsset(url: urlVideoPhpPicker!, options: nil)
+                    let imgGenerator = AVAssetImageGenerator(asset: asset)
+                    imgGenerator.appliesPreferredTrackTransform = true
+                    let cgImage = try imgGenerator.copyCGImage(at: CMTimeMake(value: 0, timescale: 1), actualTime: nil)
+                    let thumbnail = UIImage(cgImage: cgImage)
+                    imagePreview.image = thumbnail
+                    let symbolPlay = UIImageView(image: UIImage(systemName: "play.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .bold, scale: .default)))
+                    imagePreview.addSubview(symbolPlay)
+                    symbolPlay.tintColor = .black.withAlphaComponent(0.5)
+                    symbolPlay.translatesAutoresizingMaskIntoConstraints = false
+                    symbolPlay.centerXAnchor.constraint(equalTo: imagePreview.centerXAnchor).isActive = true
+                    symbolPlay.centerYAnchor.constraint(equalTo: imagePreview.centerYAnchor).isActive = true
+                    let objectTap = ObjectGesture(target: self, action: #selector(previewImageVideoTapped(_:)))
+                    scrollViewImage.addGestureRecognizer(objectTap)
+                    objectTap.videoURL = urlVideoPhpPicker as? NSURL
+                } catch let error {
+                    print("*** Error generating thumbnail: \(error.localizedDescription)")
+                }
+            } else if isGIF {
                 animatedImageView = SDAnimatedImageView()
                 animatedImageView.contentMode = .scaleAspectFit
                 imagePreview.addSubview(animatedImageView)
@@ -289,22 +310,22 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     }
     
     @objc func sendTapped() {
-        if (fromCopy && image != nil) || (imageVideoData != nil && imageVideoData![.mediaType] as! String == "public.image") {
+        if (image != nil) || (imageVideoData != nil && imageVideoData![.mediaType] as! String == "public.image") {
             var originalImageName = ""
             if (fromCopy) {
-                originalImageName = "\(Date().currentTimeMillis())_copyImage"
+                originalImageName = "\(Date().currentTimeMillis())"
             } else if (imageVideoData![.imageURL] == nil) {
-                originalImageName = "\(Date().currentTimeMillis())_takeImage"
+                originalImageName = "takeImage_\(Date().currentTimeMillis())"
             } else {
                 let urlImage = (imageVideoData![.imageURL] as! NSURL).absoluteString
                 originalImageName = (urlImage! as NSString).lastPathComponent
             }
             let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let compressedImageName = "THUMB-Nexilis_image_\(originalImageName)"
+            let compressedImageName = "Nexilis_image_\(originalImageName)"
             let thumbName = "THUMB_Nexilis_image_\(originalImageName)"
             let fileURL = documentsDirectory.appendingPathComponent(compressedImageName)
             var compressedImage:Data?
-            if (fromCopy) {
+            if (image != nil) {
                 compressedImage = image!.jpegData(compressionQuality:  1.0)
             } else {
                 compressedImage = (imageVideoData![.originalImage] as! UIImage).jpegData(compressionQuality:  1.0)
@@ -337,8 +358,12 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             }
         } else {
             var dataVideo: Data?
-            if imageVideoData != nil {
-                dataVideo = try? Data(contentsOf: imageVideoData![.mediaURL] as! URL)
+            if imageVideoData != nil || urlVideoPhpPicker != nil {
+                if imageVideoData != nil {
+                    dataVideo = try? Data(contentsOf: imageVideoData![.mediaURL] as! URL)
+                } else {
+                    dataVideo = try? Data(contentsOf: urlVideoPhpPicker!)
+                }
             }
             if var dataVideo = dataVideo {
                 let sizeOfVideo = Double(dataVideo.count / 1048576)
@@ -382,7 +407,11 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 renamedVideoName = "Nexilis_gif_\(originalVideoName)"
                 thumbName = "THUMB_Nexilis_gif_\(originalVideoName)"
             } else {
-                urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString!
+                if imageVideoData != nil {
+                    urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString!
+                } else {
+                    urlVideo = (urlVideoPhpPicker! as NSURL).absoluteString!
+                }
                 originalVideoName = (urlVideo as NSString).lastPathComponent
                 renamedVideoName = "Nexilis_video_\(originalVideoName)"
                 thumbName = "THUMB_Nexilis_video_\(originalVideoName)"

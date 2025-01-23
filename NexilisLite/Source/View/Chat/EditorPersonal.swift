@@ -14,6 +14,7 @@ import Photos
 import nuSDKService
 import SwiftLinkPreview
 import SDWebImage
+import PhotosUI
 
 public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestureRecognizerDelegate, CLLocationManagerDelegate {
     @IBOutlet var viewButton: UIView!
@@ -118,6 +119,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     let locationManager = CLLocationManager()
     var longitude = ""
     var latitude = ""
+    var isBlackCancelButton = false
     
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
@@ -2073,15 +2075,37 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         return UIAlertAction(title: title, style: .default) { [unowned self] _ in
             switch type {
             case "image":
-                imageVideoPicker.present(source: .imageAlbum)
+                var config = PHPickerConfiguration()
+                config.filter = .images
+                let picker = PHPickerViewController(configuration: config)
+                picker.delegate = self
+                if UIBarButtonItem.appearance().titleTextAttributes(for: .normal) != nil {
+                    isBlackCancelButton = UIBarButtonItem.appearance().titleTextAttributes(for: .normal)?.values.first as! NSObject == UIColor.black
+                }
+                if !isBlackCancelButton {
+                    let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                    UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+                }
+                present(picker, animated: true, completion: nil)
             case "video":
-                imageVideoPicker.present(source: .videoAlbum)
+                var config = PHPickerConfiguration()
+                config.filter = .videos
+                let picker = PHPickerViewController(configuration: config)
+                picker.delegate = self
+                if UIBarButtonItem.appearance().titleTextAttributes(for: .normal) != nil {
+                    isBlackCancelButton = UIBarButtonItem.appearance().titleTextAttributes(for: .normal)?.values.first as! NSObject == UIColor.black
+                }
+                if !isBlackCancelButton {
+                    let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                    UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+                }
+                present(picker, animated: true, completion: nil)
             case "imageCamera":
                 imageVideoPicker.present(source: .imageCamera)
             case "videoCamera":
                 imageVideoPicker.present(source: .videoCamera)
             default:
-                imageVideoPicker.present(source: .imageAlbum)
+                break
             }
         }
     }
@@ -3346,7 +3370,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 }
 
 //EPV
-extension EditorPersonal: PreviewAttachmentImageVideoDelegate {
+extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewControllerDelegate {
     public func didSelect(imagevideo: Any?) {
         if (imagevideo != nil) {
             let imageVideoData = imagevideo as! [UIImagePickerController.InfoKey: Any]
@@ -3361,6 +3385,86 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate {
             previewImageVC.isConfidential = self.isConfidential
             previewImageVC.isCC = self.isContactCenter
             self.present(previewImageVC, animated: true, completion: nil)
+        }
+    }
+    
+    public func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        if !isBlackCancelButton {
+            let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+        }
+        picker.dismiss(animated: true, completion: nil)
+        guard let result = results.first else { return }
+        if result.itemProvider.hasItemConformingToTypeIdentifier("com.compuserve.gif") {
+            result.itemProvider.loadDataRepresentation(forTypeIdentifier: "com.compuserve.gif") { data, error in
+                if let error = error {
+                    print("Error loading GIF: \(error.localizedDescription)")
+                } else if let data = data {
+                    DispatchQueue.main.async {
+                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                        if (self.textFieldSend.textColor != .lightGray) {
+                            previewImageVC.currentTextTextField = self.textFieldSend.text
+                        }
+                        previewImageVC.fromCopy = true
+                        previewImageVC.isGIF = true
+                        previewImageVC.dataGIF = data
+                        previewImageVC.modalPresentationStyle = .custom
+                        previewImageVC.delegate = self
+                        previewImageVC.isAck = self.isAck
+                        previewImageVC.isConfidential = self.isConfidential
+                        previewImageVC.isCC = self.isContactCenter
+                        self.present(previewImageVC, animated: true, completion: nil)
+                    }
+                }
+            }
+        } else if result.itemProvider.hasItemConformingToTypeIdentifier("public.image") {
+            result.itemProvider.loadObject(ofClass: UIImage.self) { object, error in
+                if let image = object as? UIImage {
+                    DispatchQueue.main.async {
+                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                        if (self.textFieldSend.textColor != .lightGray) {
+                            previewImageVC.currentTextTextField = self.textFieldSend.text
+                        }
+                        previewImageVC.fromCopy = true
+                        previewImageVC.image = image
+                        previewImageVC.modalPresentationStyle = .custom
+                        previewImageVC.delegate = self
+                        previewImageVC.isAck = self.isAck
+                        previewImageVC.isConfidential = self.isConfidential
+                        previewImageVC.isCC = self.isContactCenter
+                        self.present(previewImageVC, animated: true, completion: nil)
+                    }
+                }
+            }
+        } else if result.itemProvider.hasItemConformingToTypeIdentifier("public.movie") {
+            result.itemProvider.loadFileRepresentation(forTypeIdentifier: "public.movie") { tempURL, error in
+                if let tempURL = tempURL {
+                    let fileManager = FileManager.default
+                    let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+                    let destinationURL = documentsDirectory.appendingPathComponent(tempURL.lastPathComponent)
+                    do {
+                        if fileManager.fileExists(atPath: destinationURL.path) {
+                            try fileManager.removeItem(at: destinationURL)
+                        }
+                        try fileManager.copyItem(at: tempURL, to: destinationURL)
+                        DispatchQueue.main.async {
+                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                            if (self.textFieldSend.textColor != .lightGray) {
+                                previewImageVC.currentTextTextField = self.textFieldSend.text
+                            }
+                            previewImageVC.modalPresentationStyle = .custom
+                            previewImageVC.urlVideoPhpPicker = destinationURL
+                            previewImageVC.delegate = self
+                            previewImageVC.isAck = self.isAck
+                            previewImageVC.isConfidential = self.isConfidential
+                            previewImageVC.isCC = self.isContactCenter
+                            self.present(previewImageVC, animated: true, completion: nil)
+                        }
+                    } catch {
+                        print("Error copying video file: \(error.localizedDescription)")
+                    }
+                }
+            }
         }
     }
     
