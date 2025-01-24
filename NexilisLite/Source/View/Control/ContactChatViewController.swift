@@ -1030,7 +1030,7 @@ extension ContactChatViewController {
                 ])
                 if data.pin == "-997" {
                     imageView.circle()
-                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {//resourceMediaBundle
                         imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
                             if error == nil {
                                 imageView.animationImages = image?.images
@@ -1120,7 +1120,7 @@ extension ContactChatViewController {
                 } else if data.pin == "-997" {
                     imageView.frame = CGRect(x: 0, y: 0, width: 55.0, height: 55.0)
                     imageView.circle()
-                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {//resourceMediaBundle
                         imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
                             if error == nil {
                                 imageView.animationImages = image?.images
@@ -1401,7 +1401,7 @@ extension ContactChatViewController {
                 ])
                 if data.pin == "-997" {
                     imageView.circle()
-                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {//resourceMediaBundle
                         imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
                             if error == nil {
                                 imageView.animationImages = image?.images

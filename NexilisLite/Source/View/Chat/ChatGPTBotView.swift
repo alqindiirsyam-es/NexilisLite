@@ -608,7 +608,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             imageProfile.clipsToBounds = true
             var count = 0
             viewAppBar.addSubview(imageProfile)
-            if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+            if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {//resourceMediaBundle
                 imageProfile.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
                     if error == nil {
                         imageProfile.animationImages = image?.images
