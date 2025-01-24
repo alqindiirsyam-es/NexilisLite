@@ -207,8 +207,8 @@ class QmeraStreamingViewController: UIViewController {
         view.addSubview(stack)
         view.addLayoutGuide(keyboardLayoutGuide)
         
+        addLikeView()
         if isLive {
-            addLikeView()
             addCountViewerView()
         }
         
@@ -674,10 +674,8 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
         } else if state == 94 { // like
             let m = message.split(separator: ",", omittingEmptySubsequences: false)
             let countLike = m[2].trimmingCharacters(in: .whitespaces)
-            if isLive {
-                DispatchQueue.main.async {
-                    self.count.text = countLike
-                }
+            DispatchQueue.main.async {
+                self.count.text = countLike
             }
             
         } else if state == 95 { // chat
