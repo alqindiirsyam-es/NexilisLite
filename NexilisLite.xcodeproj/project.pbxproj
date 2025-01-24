@@ -107,6 +107,8 @@
 		CD1E72622A0BA86100BF871F /* IncomingThread.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71B42A0BA86100BF871F /* IncomingThread.swift */; };
 		CD1E72632A0BA86100BF871F /* CoreMessage_TMessageUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71B52A0BA86100BF871F /* CoreMessage_TMessageUtil.swift */; };
 		CD2B01212D43945500C11B20 /* pb_gpt_bot.gif in Resources */ = {isa = PBXBuildFile; fileRef = CD2B01202D43945500C11B20 /* pb_gpt_bot.gif */; };
+		CD2B01242D43961E00C11B20 /* QRProfileController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2B01222D43961E00C11B20 /* QRProfileController.swift */; };
+		CD2B01252D43961E00C11B20 /* QRScannerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2B01232D43961E00C11B20 /* QRScannerController.swift */; };
 		CD46A06B2A0CE307009E4C87 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = CD469FC82A0CE2DE009E4C87 /* Localizable.strings */; };
 		CD46A06C2A0CE307009E4C87 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CD46A0172A0CE2DE009E4C87 /* Assets.xcassets */; };
 		CD46A06D2A0CE307009E4C87 /* PreviewAttachmentImageVideo.xib in Resources */ = {isa = PBXBuildFile; fileRef = CD46A0182A0CE2DE009E4C87 /* PreviewAttachmentImageVideo.xib */; };
@@ -369,6 +371,8 @@
 		CD1E79152A0CA43600BF871F /* SnapKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = SnapKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD1E79162A0CA43600BF871F /* Toast_Swift.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = Toast_Swift.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD2B01202D43945500C11B20 /* pb_gpt_bot.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = pb_gpt_bot.gif; sourceTree = "<group>"; };
+		CD2B01222D43961E00C11B20 /* QRProfileController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRProfileController.swift; sourceTree = "<group>"; };
+		CD2B01232D43961E00C11B20 /* QRScannerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerController.swift; sourceTree = "<group>"; };
 		CD469F502A0CC862009E4C87 /* NexilisLiteResources.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NexilisLiteResources.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD469FC92A0CE2DE009E4C87 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		CD469FCB2A0CE2DE009E4C87 /* sticker_10000000_5.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = sticker_10000000_5.png; sourceTree = "<group>"; };
@@ -755,6 +759,8 @@
 				CD1E71A42A0BA86100BF871F /* ImageVideoPicker.swift */,
 				CD1E719E2A0BA86100BF871F /* NotificationSound.swift */,
 				CD1E71A62A0BA86100BF871F /* ProfileViewController.swift */,
+				CD2B01222D43961E00C11B20 /* QRProfileController.swift */,
+				CD2B01232D43961E00C11B20 /* QRScannerController.swift */,
 				CD1E718C2A0BA86100BF871F /* QRScannerView.swift */,
 				CD1E71AC2A0BA86100BF871F /* ScannerViewController.swift */,
 				CD1E71A12A0BA86100BF871F /* SetInternalCSAccount.swift */,
@@ -1300,6 +1306,8 @@
 				CD1E72152A0BA86100BF871F /* Chat.swift in Sources */,
 				CD1E72502A0BA86100BF871F /* BroadcastVariantViewController.swift in Sources */,
 				CD1E72562A0BA86100BF871F /* BroadcastViewController.swift in Sources */,
+				CD2B01242D43961E00C11B20 /* QRProfileController.swift in Sources */,
+				CD2B01252D43961E00C11B20 /* QRScannerController.swift in Sources */,
 				CD1E72252A0BA86100BF871F /* CustomTextView.swift in Sources */,
 				CD1E72602A0BA86100BF871F /* Callback.swift in Sources */,
 				CD1E724A2A0BA86100BF871F /* HistoryCCViewController.swift in Sources */,
@@ -1539,7 +1547,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
-				DEVELOPMENT_TEAM = 4R36B4D29V;
+				DEVELOPMENT_TEAM = FR2C2CZUYZ;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
@@ -1579,7 +1587,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
-				DEVELOPMENT_TEAM = 4R36B4D29V;
+				DEVELOPMENT_TEAM = FR2C2CZUYZ;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
@@ -1618,7 +1626,7 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = "$(inherited)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4R36B4D29V;
+				DEVELOPMENT_TEAM = FR2C2CZUYZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.nexilis.NexilisLiteTests;
@@ -1636,7 +1644,7 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = "$(inherited)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4R36B4D29V;
+				DEVELOPMENT_TEAM = FR2C2CZUYZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.nexilis.NexilisLiteTests;
@@ -1653,7 +1661,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4R36B4D29V;
+				DEVELOPMENT_TEAM = FR2C2CZUYZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = "";
@@ -1675,7 +1683,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4R36B4D29V;
+				DEVELOPMENT_TEAM = FR2C2CZUYZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = "";
