@@ -20,10 +20,6 @@ public class ChangeNamePassswordViewController: UIViewController {
     public var fromSetting = false
     public var isSuccess: (() -> ())?
     
-    public override func viewWillDisappear(_ animated: Bool) {
-        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "refreshView"), object: nil, userInfo: nil)
-    }
-    
     public override func viewDidLoad() {
         super.viewDidLoad()
         

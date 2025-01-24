@@ -515,9 +515,11 @@ class QmeraVideoViewController: UIViewController {
                                     }
                                 }
                             }
+                            SecureUserDefaults.shared.set(members, forKey: "inEditorPersonal")
                             SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                         }
                     }
+                    self.users.append(User.getData(pin: dataMessage.getPIN())!)
                 }
             }
         }
@@ -666,7 +668,7 @@ class QmeraVideoViewController: UIViewController {
         let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
         navigationController.modalPresentationStyle = .overCurrentContext
         navigationController.navigationBar.tintColor = .white
-//        navigationController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        navigationController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
         navigationController.navigationBar.isTranslucent = false
         navigationController.navigationBar.overrideUserInterfaceStyle = .dark
         navigationController.navigationBar.barStyle = .black
@@ -1125,6 +1127,20 @@ class QmeraVideoViewController: UIViewController {
                         labelName.textColor = .white
                     }
                     self.scrollRemoteView.contentSize.height = CGFloat(170 * 2)
+                    if self.buttonWB.isEnabled {
+                        self.buttonWB.isEnabled = false
+                    }
+                    if self.buttonRotate.isEnabled {
+                        self.buttonRotate.isEnabled = false
+                        if self.wbVC != nil && self.wbVC!.view.isDescendant(of: self.view){
+                            self.wbVC!.view.removeFromSuperview()
+                            self.buttonDecline.isHidden = false
+                            self.buttonSpeaker.isHidden = false
+                            self.buttonAddParticipant.isHidden = false
+                            self.buttonRotate.isHidden = false
+                            self.buttonMuted.isHidden = false
+                        }
+                    }
                 } else if self.dataPerson.count > 1 {
                     if self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[1]}) != nil {
                         return
@@ -1162,6 +1178,9 @@ class QmeraVideoViewController: UIViewController {
                     labelName.textAlignment = .center
                     labelName.textColor = .white
                 }
+            }
+            if users.count >= 1, let user = User.getData(pin: String(arrayMessage[1])), !users.contains(user) {
+                self.users.append(user)
             }
             if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
                 DispatchQueue.main.async {
@@ -1618,9 +1637,11 @@ extension QmeraVideoViewController : WhiteboardReceiver {
     
     @objc func runTimer(){
         DispatchQueue.main.async {
+            if !self.buttonWB.isEnabled {
+                return
+            }
             self.wbBlink = !self.wbBlink
             if(self.wbBlink){
-                //print("set wb blink on")
                 self.buttonWB.backgroundColor = .green
             }
             else {

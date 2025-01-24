@@ -824,6 +824,7 @@ class QmeraAudioViewController: UIViewController {
                                 }
                             }
                             SecureUserDefaults.shared.set(members, forKey: "inEditorPersonal")
+                            SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                         }
                     }
                     self.users.append(User.getData(pin: dataMessage.getPIN())!)
@@ -887,23 +888,6 @@ class QmeraAudioViewController: UIViewController {
                 }
                 if (!isOutgoing || !firstCall), users.count >= 1, let user = User.getData(pin: String(arrayMessage[1])), !users.contains(user) {
                     self.users.append(user)
-                    let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-                    if !onGoingCC.isEmpty {
-                        DispatchQueue.main.async {
-                            var members = ""
-                            for user in self.users {
-                                if members.isEmpty {
-                                    members = "\(user.pin)"
-                                } else {
-                                    members = ",\(user.pin)"
-                                }
-                            }
-                            SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
-                        }
-                    }
-                    if buttonWB.isEnabled {
-                        buttonWB.isEnabled = false
-                    }
                 }
             } else if state == Nexilis.AUDIO_CALL_END || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_END) {
                 if isOutgoing {
@@ -919,6 +903,9 @@ class QmeraAudioViewController: UIViewController {
                         let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
                         if pin == requester || pin == officer {
                             DispatchQueue.main.async {
+                                if !self.end.isEnabled {
+                                    return
+                                }
                                 if self.buttonWB.isDescendant(of: self.view){
                                     self.buttonWB.removeFromSuperview()
                                 }
@@ -943,6 +930,9 @@ class QmeraAudioViewController: UIViewController {
                         }
                     } else if !onGoingCC.isEmpty && users.count == 0 {
                         DispatchQueue.main.async {
+                            if !self.end.isEnabled {
+                                return
+                            }
                             if self.buttonWB.isDescendant(of: self.view){
                                 self.buttonWB.removeFromSuperview()
                             }
@@ -982,8 +972,11 @@ class QmeraAudioViewController: UIViewController {
                             self.didEnd(sender: true)
                         }
                         return
-                    } else if users.count == 1 && !buttonWB.isEnabled {
-                        buttonWB.isEnabled = true
+                    }
+                    DispatchQueue.main.async{ [self] in
+                        if users.count == 1 && !buttonWB.isEnabled {
+                            buttonWB.isEnabled = true
+                        }
                     }
                 }
 //                if users.count == 0 {
@@ -1013,8 +1006,10 @@ class QmeraAudioViewController: UIViewController {
                             SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                         }
                     }
-                    if users.count == 1 && !buttonWB.isEnabled {
-                        buttonWB.isEnabled = true
+                    DispatchQueue.main.async { [self] in
+                        if users.count == 1 && !buttonWB.isEnabled {
+                            buttonWB.isEnabled = true
+                        }
                     }
                 }
                 if users.count == 0 {
@@ -1048,8 +1043,10 @@ class QmeraAudioViewController: UIViewController {
                             SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                         }
                     }
-                    if users.count == 1 && !buttonWB.isEnabled {
-                        buttonWB.isEnabled = true
+                    DispatchQueue.main.async { [self] in
+                        if users.count == 1 && !buttonWB.isEnabled {
+                            buttonWB.isEnabled = true
+                        }
                     }
                 }
                 if users.count == 0 {

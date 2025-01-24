@@ -368,7 +368,6 @@ public class Nexilis: NSObject {
     private static func getPullGroupNoMember() {
         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullGroupNoMember(), timeout: 30 * 1000), response.isOk() {
             let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
-            //print("KUACAU \(data)")
             if !data.isEmpty {
                 if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                     Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -3154,7 +3153,8 @@ extension Nexilis: MessageDelegate {
             let fPinContacCenter = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
             let requester = message.getBody(key: CoreMessage_TMessageKey.UPLINE_PIN)
             let complaintId = message.getBody(key: CoreMessage_TMessageKey.DATA)
-            if !requester.isEmpty {
+            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+            if !requester.isEmpty && onGoingCC.isEmpty {
                 SecureUserDefaults.shared.set("\(requester),\(fPinContacCenter),\(complaintId)", forKey: "onGoingCC")
                 SecureUserDefaults.shared.set("\(fPinContacCenter)", forKey: "membersCC")
             }
@@ -3333,13 +3333,9 @@ extension Nexilis: MessageDelegate {
                                         var members = ""
                                         var user : [User] = []
                                         let idMe = User.getMyPin()!
+                                        
                                         for json in jsonArray {
                                             if "\(json)" != idMe {
-                                                if members.isEmpty {
-                                                    members = "\(json)"
-                                                } else {
-                                                    members += ",\(json)"
-                                                }
                                                 if let userData = User.getData(pin: "\(json)") {
                                                     user.append(userData)
                                                 } else {
@@ -3350,8 +3346,14 @@ extension Nexilis: MessageDelegate {
                                                         }
                                                     })
                                                 }
+                                                if members.isEmpty {
+                                                    members = "\(json)"
+                                                } else {
+                                                    members += ",\(json)"
+                                                }
                                             }
                                         }
+                                        print("HEHE0 \(members)")
                                         SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                                         if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "0" {
                                             let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal

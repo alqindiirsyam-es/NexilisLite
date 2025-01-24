@@ -12,7 +12,7 @@ import QuickLook
 import Photos
 import SwiftLinkPreview
 
-public class EditorStarMessages: UIViewController, UITableViewDataSource, UITableViewDelegate, UIContextMenuInteractionDelegate, QLPreviewControllerDataSource {
+public class EditorStarMessages: UIViewController, UITableViewDataSource, UITableViewDelegate, UIContextMenuInteractionDelegate, QLPreviewControllerDataSource, UITextViewDelegate {
     @IBOutlet var tableChatView: UITableView!
     var dataMessages: [[String: Any?]] = []
     var dataDates: [String] = []
@@ -74,7 +74,13 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         
         let center: NotificationCenter = NotificationCenter.default
         center.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
+        center.addObserver(self, selector: #selector(onRefreshData(notification:)), name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil)
 
+    }
+    
+    @objc func onRefreshData(notification: NSNotification) {
+        getData()
+        tableChatView.reloadData()
     }
     
     @objc func didTapExit() {
@@ -200,7 +206,15 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
         timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
         
-        let messageText = UILabel()
+        let messageText = UITextView()
+        messageText.isEditable = false
+        messageText.isSelectable = true
+        messageText.dataDetectorTypes = []
+        messageText.backgroundColor = .clear
+        messageText.isScrollEnabled = false
+        messageText.textContainerInset = UIEdgeInsets.zero
+        messageText.contentInset = UIEdgeInsets.zero
+        messageText.textDragInteraction?.isEnabled = false
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
         let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32)
@@ -348,10 +362,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             imageStared.backgroundColor = .clear
             imageStared.tintColor = .systemYellow
         }
-        
-        messageText.numberOfLines = 0
-        messageText.lineBreakMode = .byWordWrapping
-        containerMessage.addSubview(messageText)
         topMarginText.isActive = true
         if dataMessages[indexPath.row]["attachment_flag"] as! String == "27" || dataMessages[indexPath.row]["attachment_flag"] as! String == "26" {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
@@ -419,36 +429,37 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageSticker.contentMode = .scaleAspectFit
             }
             else {
-                messageText.attributedText = textChat!.richText()
+                modifyText()
             }
         } else {
-            messageText.attributedText = textChat!.richText()
+            modifyText()
         }
         messageText.font = UIFont.systemFont(ofSize: 12)
         
-        messageText.isUserInteractionEnabled = false
-        if !textChat!.isEmpty {
-            if textChat!.contains("■"){
-                textChat = textChat?.components(separatedBy: "■")[0]
-                textChat = textChat?.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            let listTextEnter = textChat!.split(separator: "\n")
-            for j in 0...listTextEnter.count - 1 {
-                let listText = listTextEnter[j].split(separator: " ")
-                if listText.count > 0 {
-                    for i in 0...listText.count - 1 {
-                        if listText[i].lowercased().checkStartWithLink() {
-                            let attributedString = textChat!.richText()
-                            let rangeTapLink = (attributedString.string as NSString).range(of: String(listText[i]))
-                            attributedString.addAttributes([.foregroundColor: UIColor.blue, .underlineStyle: NSUnderlineStyle.single.rawValue], range: rangeTapLink)
-                            messageText.attributedText = attributedString
-                            messageText.isUserInteractionEnabled = true
-                            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPressLink(_:)))
-                            longPress.minimumPressDuration = 0.1
-                            containerMessage.addGestureRecognizer(longPress)
+        func modifyText() {
+            if !textChat!.isEmpty {
+                if textChat!.contains("■"){
+                    textChat = textChat!.components(separatedBy: "■")[0]
+                    textChat = textChat!.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                let finalAtribute = textChat!.richText()
+                textChat = finalAtribute.string
+                let urlPattern = "(https?://|www\\.)\\S+"
+                if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
+                    let matches = regex.matches(in: textChat!, options: [], range: NSRange(textChat!.startIndex..., in: textChat!))
+                    
+                    for match in matches {
+                        if let range = Range(match.range, in: textChat!) {
+                            let linkText = String(textChat![range])
+                            let nsRange = NSRange(range, in: textChat!)
+                            finalAtribute.addAttribute(.link, value: linkText, range: nsRange)
+                            finalAtribute.addAttribute(.foregroundColor, value: UIColor.blue, range: nsRange)
+                            finalAtribute.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: nsRange)
                         }
                     }
                 }
+                messageText.attributedText = finalAtribute
+                messageText.delegate = self
             }
         }
         
@@ -854,120 +865,22 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         
         return cellMessage
     }
-    
-    @objc func handleLongPressLink(_ gestureRecognizer: UILongPressGestureRecognizer) {
-        func showMenuContext() {
-            if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended{
-                timerCheckLink?.invalidate()
-            } else if gestureRecognizer.state == .began {
-                timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false, block: {_ in
-                    let interaction = UIContextMenuInteraction(delegate: self)
-                    gestureRecognizer.view!.addInteraction(interaction)
-                    guard let interaction = gestureRecognizer.view!.interactions.first,
-                          let data = Data(base64Encoded: "X3ByZXNlbnRNZW51QXRMb2NhdGlvbjo="),
-                          let str = String(data: data, encoding: .utf8)
-                    else {
-                        return
-                    }
-                    let selector = NSSelectorFromString(str)
-                    guard interaction.responds(to: selector) else {
-                        return
-                    }
-                    let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
-                    impactHeavy.impactOccurred()
-                    interaction.perform(selector, with: self.view)
-                    self.showMenuContext = true
-                })
-            }
-        }
-        if gestureRecognizer.state == .began {
-            let touchPoint = gestureRecognizer.location(in: self.view)
-            touchedSubview = self.view.hitTest(touchPoint, with: nil) ?? UIView()
-            if !(touchedSubview is UILabel) {
-                showMenuContext()
-            }
-        }
-        guard let label = touchedSubview as? UILabel else { return }
-        let touchPointLabel = gestureRecognizer.location(in: label)
 
-        if let text = label.text, let range = getWordRange(at: touchPointLabel, in: label) {
-            let word = String(text[range])
-            if word.starts(with: "www.") || word.starts(with: "https://") || word.starts(with: "http://") {
-                if gestureRecognizer.state == .cancelled || gestureRecognizer.state == .ended {
-                    timerCheckLink?.invalidate()
-                    if label.isHighlighted {
-                        var stringURl = word
-                        if stringURl.starts(with: "www.") {
-                            stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-                        }
-                        guard let url = URL(string: stringURl) else { return }
-                        UIApplication.shared.open(url)
-                        label.attributedText = removeHighlightedText(for: text, in: range, label: label)
-                    }
-                } else if gestureRecognizer.state == .began {
-                    label.attributedText = highlightedText(for: text, in: range, label: label)
-                    timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
-                        UIPasteboard.general.string = word
-                        self.view.makeToast("Link Copied".localized(), duration: 3)
-                        label.attributedText = self.removeHighlightedText(for: text, in: range, label: label)
-                    })
-                }
-            } else {
-                showMenuContext()
-            }
-        } else {
-            showMenuContext()
-        }
-    }
-    
-    func getWordRange(at point: CGPoint, in label: UILabel) -> Range<String.Index>? {
-        guard let text = label.text else { return nil }
-        
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(size: label.frame.size)
-        let textStorage = NSTextStorage(attributedString: NSAttributedString(string: text))
-        
-        layoutManager.addTextContainer(textContainer)
-        textStorage.addLayoutManager(layoutManager)
-        textContainer.lineFragmentPadding = 0
-        textContainer.maximumNumberOfLines = label.numberOfLines
-        
-        lastTouchPoint = point
-        let characterIndex = layoutManager.characterIndex(for: point, in: textContainer, fractionOfDistanceBetweenInsertionPoints: nil)
-        
-        if characterIndex == text.count - 1 {
-            return nil
-        }
-        var wordStartIndex = characterIndex
-        while wordStartIndex > 0 && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != " " && text[text.index(text.startIndex, offsetBy: wordStartIndex - 1)] != "\n" {
-            wordStartIndex -= 1
-        }
-        
-        var wordEndIndex = characterIndex
-        while wordEndIndex < text.count && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != " " && text[text.index(text.startIndex, offsetBy: wordEndIndex)] != "\n" {
-            wordEndIndex += 1
-        }
-        
-        return text.index(text.startIndex, offsetBy: wordStartIndex)..<text.index(text.startIndex, offsetBy: wordEndIndex)
-    }
-
-    func highlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
-        let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
+    func highlightedText(for text: String, in range: Range<String.Index>, textView: UITextView) -> NSAttributedString {
+        let mutableAttributedString = textView.attributedText!.mutableCopy() as! NSMutableAttributedString
         mutableAttributedString.addAttribute(.backgroundColor, value: UIColor.lightGray.withAlphaComponent(0.5), range: NSRange(range, in: text))
-        label.isHighlighted = true
         return mutableAttributedString
     }
     
-    func removeHighlightedText(for text: String, in range: Range<String.Index>, label: UILabel) -> NSAttributedString {
-        let mutableAttributedString = label.attributedText!.mutableCopy() as! NSMutableAttributedString
+    func removeHighlightedText(for text: String, in range: Range<String.Index>, textView: UITextView) -> NSAttributedString {
+        let mutableAttributedString = textView.attributedText!.mutableCopy() as! NSMutableAttributedString
         mutableAttributedString.removeAttribute(.backgroundColor, range: NSRange(range, in: text))
-        label.isHighlighted = false
         return mutableAttributedString
     }
-    
+        
     @objc func tapMessageText(_ sender: ObjectGesture) {
-        var stringURl = sender.message_id.lowercased()
-        if stringURl.starts(with: "www.") {
+        var stringURl = sender.message_id
+        if stringURl.lowercased().starts(with: "www.") {
             stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
         }
         guard let url = URL(string: stringURl) else { return }
@@ -975,6 +888,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     }
     
     func getData() {
+        if !dataMessages.isEmpty {
+            dataMessages.removeAll()
+        }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id FROM MESSAGE where is_stared=1 order by server_date asc") {
@@ -1659,5 +1575,46 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 navigationController?.present(streamingNav, animated: true, completion: nil)
             }
         }
+        if message[TypeDataMessage.message_scope_id] as? String == "3" {
+            var pin = message[TypeDataMessage.l_pin] as? String ?? ""
+            if pin == (User.getMyPin() ?? "") {
+                pin = message[TypeDataMessage.f_pin] as? String ?? ""
+            }
+            let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+            editorPersonalVC.hidesBottomBarWhenPushed = true
+            editorPersonalVC.unique_l_pin = pin
+            editorPersonalVC.referenceMessageId = message[TypeDataMessage.message_id] as? String ?? ""
+            editorPersonalVC.referenceChatDate = message[TypeDataMessage.chat_date] as? String ?? ""
+            navigationController?.show(editorPersonalVC, sender: nil)
+        } else {
+            var pin = message[TypeDataMessage.chat_id] as? String ?? ""
+            if pin.isEmpty {
+                pin = message[TypeDataMessage.l_pin] as? String ?? ""
+            }
+            let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorGroupVC") as! EditorGroup
+            editorGroupVC.hidesBottomBarWhenPushed = true
+            editorGroupVC.unique_l_pin = pin
+            editorGroupVC.referenceMessageId = message[TypeDataMessage.message_id] as? String ?? ""
+            editorGroupVC.referenceChatDate = message[TypeDataMessage.chat_date] as? String ?? ""
+            navigationController?.show(editorGroupVC, sender: nil)
+        }
     }
+    
+    public func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+            switch interaction {
+            case .invokeDefaultAction:
+                let gesture = ObjectGesture()
+                gesture.message_id = URL.absoluteString
+                tapMessageText(gesture)
+                return false
+            case .presentActions:
+                UIPasteboard.general.string = URL.absoluteString
+                self.view.makeToast("Link Copied".localized(), duration: 3)
+                return false
+            case .preview:
+                return true
+            @unknown default:
+                return true
+            }
+        }
 }

@@ -1799,7 +1799,6 @@ public class DialogUnableAccess: UIViewController {
     }
     
     @objc func kycTapped() {
-        //print("kycTapped")
         APIS.openContactCenter()
         self.dismiss(animated: true)
     }

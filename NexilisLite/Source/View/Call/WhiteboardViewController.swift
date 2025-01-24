@@ -300,7 +300,6 @@ class WhiteboardViewController: UIViewController, WhiteboardDelegate {
     
     func sendInit(){
         let d = destinations.joined(separator: ",")
-        //print("KOCAK \(d)")
 //            roomId = "\(me)\(tid)"
         wb?.setRoomId(roomId: roomId)
         wb!.sendInit(destinations: d)

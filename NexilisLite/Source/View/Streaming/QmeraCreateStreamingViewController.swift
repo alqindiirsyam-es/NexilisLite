@@ -84,7 +84,6 @@ public class QmeraCreateStreamingViewController: UITableViewController {
     deinit {
         //print(#function, ">>>> TADAA1")
         NotificationCenter.default.removeObserver(self)
-        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "refreshView"), object: nil, userInfo: nil)
     }
     
     public override func viewDidLoad() {

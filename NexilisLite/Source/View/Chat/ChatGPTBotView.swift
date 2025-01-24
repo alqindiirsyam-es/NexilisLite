@@ -264,7 +264,6 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
 //            }
 //            self.timeoutCC.invalidate()
 //            NotificationCenter.default.removeObserver(self)
-//            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "refreshView"), object: nil, userInfo: nil)
 //            self.dismiss(animated: true, completion: nil)
 //        } else if !complaintId.isEmpty {
 //            let alert = LibAlertController(title: "Interaction with Call Center is in progress".localized(), message: "Are you sure you want to end the Call Center?".localized(), preferredStyle: .alert)

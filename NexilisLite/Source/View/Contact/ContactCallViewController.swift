@@ -52,7 +52,6 @@ class ContactCallViewController: UIViewController {
     
     override func viewDidDisappear(_ animated: Bool) {
         NotificationCenter.default.removeObserver(self)
-        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "refreshView"), object: nil, userInfo: nil)
     }
     
     override func viewDidLoad() {

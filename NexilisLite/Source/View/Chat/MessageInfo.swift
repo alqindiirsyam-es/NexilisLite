@@ -84,8 +84,13 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     
     func getAllLocationDesc() {
         for data in dataStatus {
-            let latitude = CLLocationDegrees(data["latitude"] as? String ?? "")!
-            let longitude = CLLocationDegrees(data["longitude"] as? String ?? "")!
+            let latitudeString = data["latitude"] as? String ?? ""
+            let longitudeString = data["longitude"] as? String ?? ""
+            if latitudeString == "" || longitudeString == "" {
+                continue
+            }
+            let latitude = CLLocationDegrees(latitudeString)!
+            let longitude = CLLocationDegrees(longitudeString)!
             guard (-90...90).contains(latitude), (-180...180).contains(longitude) else {
                 print("Invalid coordinates!")
                 continue

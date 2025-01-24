@@ -53,6 +53,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     public var onGoingCC = false
     public var fPinContacCenter = ""
     public var complaintId = ""
+    public var referenceMessageId = ""
+    public var referenceChatDate = ""
     var channelContactCenter = ""
     var counter = 0
     var dateStartCC = ""
@@ -124,19 +126,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
-            for timer in self.timerCredential.values {
-                timer.invalidate()
-            }
-            self.timeoutCC.invalidate()
-            SecureUserDefaults.shared.removeValue(forKey: "inEditorPersonal")
-            NotificationCenter.default.removeObserver(self)
-            super.viewDidDisappear(true)
-            self.removeFromParent()
-            self.dismiss(animated: true, completion: nil)
-            if !isContactCenter {
-                let l_pin = self.dataPerson["f_pin"]!!
-                SecureUserDefaults.shared.set("\(textFieldSend.textColor != UIColor.lightGray ? textFieldSend.text! : ""),\(reffId ?? "")", forKey: "saved_\(l_pin)")
-            }
+            removeAllObjectBeforeDismissVC()
         }
     }
     
@@ -562,7 +552,20 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             }
             
             tableChatView.alpha = 0
-            if counter != 0 && dataMessages.count >= counter {
+            if !referenceMessageId.isEmpty {
+                if dataMessages.firstIndex(where: {$0["message_id"] as? String == referenceMessageId} ) != 0 {
+                    DispatchQueue.main.async {
+                        let section = self.dataDates.firstIndex(of: self.referenceChatDate)
+                        let row = self.dataMessages.filter({$0["chat_date"] as! String == self.referenceChatDate}).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
+                        let indexPath = IndexPath(row: row!, section: section!)
+                        self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: false)
+                        self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                            self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
+                        })
+                    }
+                }
+            } else if counter != 0 && dataMessages.count >= counter {
                 if dataMessages.firstIndex(where: {$0["message_id"] as? String == markerCounter} ) != 0 {
                     DispatchQueue.main.async {
                         let data = self.dataMessages.filter({ $0["message_id"] as? String == self.markerCounter })
@@ -1469,7 +1472,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
                         SecureUserDefaults.shared.set(dataMessage.getBody(key: CoreMessage_TMessageKey.CHANNEL), forKey: "channelCC")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                            self.dismiss(animated: true, completion: nil)
+                            self.dismiss(animated: true, completion: {
+                                self.removeAllObjectBeforeDismissVC()
+                            })
                         })
                     } else {
                         viewButton.isHidden = false
@@ -1519,10 +1524,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         timeoutCC.invalidate()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: {
                             if !(self.presentedViewController is EditorPersonal) {
-                                self.dismiss(animated: true, completion: nil)
+                                self.dismiss(animated: true, completion: {
+                                    self.removeAllObjectBeforeDismissVC()
+                                })
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                self.dismiss(animated: true, completion: nil)
+                                self.dismiss(animated: true, completion: {
+                                    self.removeAllObjectBeforeDismissVC()
+                                })
                             }
                         })
                     } else {
@@ -1655,7 +1664,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                     })
                                 }
                             }
-                            self.tableChatView.reloadRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                            let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
+                            let row = self.dataMessages.filter({$0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == row["message_id"] as? String})
+                            if row != nil && section != nil{
+                                self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                            }
                         })
                     }
                     if self.isContactCenter {
@@ -2360,14 +2373,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     @objc func didTapExit() {
         if complaintId.isEmpty || fromVCAC {
-            for timer in self.timerCredential.values {
-                timer.invalidate()
-            }
-            self.timeoutCC.invalidate()
-            SecureUserDefaults.shared.removeValue(forKey: "inEditorPersonal")
-            NotificationCenter.default.removeObserver(self)
-            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "refreshView"), object: nil, userInfo: nil)
-            self.dismiss(animated: true, completion: nil)
+            self.dismiss(animated: true, completion: {
+                self.removeAllObjectBeforeDismissVC()
+            })
         } else if !complaintId.isEmpty {
             let alert = LibAlertController(title: "Interaction with Call Center is in progress".localized(), message: "Are you sure you want to end the Call Center?".localized(), preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
@@ -2375,6 +2383,20 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 self.endCallCenter()
             }))
             self.present(alert, animated: true, completion: nil)
+        }
+    }
+    
+    private func removeAllObjectBeforeDismissVC() {
+        for timer in self.timerCredential.values {
+            timer.invalidate()
+        }
+        self.timeoutCC.invalidate()
+        SecureUserDefaults.shared.removeValue(forKey: "inEditorPersonal")
+        NotificationCenter.default.removeObserver(self)
+        self.removeFromParent()
+        if !self.isContactCenter {
+            let l_pin = self.dataPerson["f_pin"]!!
+            SecureUserDefaults.shared.set("\(self.textFieldSend.textColor != UIColor.lightGray ? self.textFieldSend.text! : ""),\(self.reffId ?? "")", forKey: "saved_\(l_pin)")
         }
     }
     
@@ -2418,7 +2440,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             SecureUserDefaults.shared.removeValue(forKey: "membersCC")
             SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
         }
-        self.dismiss(animated: true, completion: nil)
+        self.dismiss(animated: true, completion: {
+            self.removeAllObjectBeforeDismissVC()
+        })
     }
     
     @objc func keyboardWillHide(notification: NSNotification) {
@@ -2600,7 +2624,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if credential == "1" {
             var timer = Timer()
             var minute = 60
-            self.timerCredential[messageId] = timer
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true, block: {_ in
                 minute -= 1
                 self.listTimerCredential[messageId] = minute
@@ -2626,8 +2649,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         })
                     }
                 }
-                self.tableChatView.reloadRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
+                let row = self.dataMessages.filter({$0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == messageId})
+                if row != nil && section != nil{
+                    self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                }
             })
+            self.timerCredential[messageId] = timer
         }
         if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintViewTextField.constant == 0 {
             textFieldSend.text = "Send message".localized()
@@ -3923,6 +3951,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     self.dataMessages[idx!]["is_stared"] = "1"
                 }
                 self.tableChatView.reloadRows(at: [indexPath!], with: .none)
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil, userInfo: nil)
             })
         } else {
             star = UIAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash"), handler: {(_) in
@@ -3946,6 +3975,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     self.dataMessages[idx!]["is_stared"] = "0"
                 }
                 self.tableChatView.reloadRows(at: [indexPath!], with: .none)
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil, userInfo: nil)
             })
         }
         

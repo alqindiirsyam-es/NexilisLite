@@ -50,6 +50,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var stickers = [String]()
     public var unique_l_pin = ""
     public var fromNotification = false
+    public var referenceMessageId = ""
+    public var referenceChatDate = ""
     var isHistoryCC = false
     var complaintId = ""
     var counter = 0
@@ -407,7 +409,20 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         tableChatView.delegate = self
         tableChatView.dataSource = self
         tableChatView.reloadData()
-        if counter != 0 {
+        if !referenceMessageId.isEmpty {
+            if dataMessages.firstIndex(where: {$0["message_id"] as? String == referenceMessageId} ) != 0 {
+                DispatchQueue.main.async {
+                    let section = self.dataDates.firstIndex(of: self.referenceChatDate)
+                    let row = self.dataMessages.filter({$0["chat_date"] as! String == self.referenceChatDate}).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
+                    let indexPath = IndexPath(row: row!, section: section!)
+                    self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: false)
+                    self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                        self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
+                    })
+                }
+            }
+        } else if counter != 0 {
             if dataMessages.firstIndex(where: {$0["message_id"] as? String == markerCounter} ) != 0 {
                 DispatchQueue.main.async {
                     let data = self.dataMessages.filter({ $0["message_id"] as? String == self.markerCounter })
@@ -1092,7 +1107,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                     })
                                 }
                             }
-                            self.tableChatView.reloadRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                            let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
+                            let row = self.dataMessages.filter({$0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == row["message_id"] as? String})
+                            let indexPath = IndexPath(row: row!, section: section!)
+                            if row != nil && section != nil{
+                                self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                            }
                         })
                     }
                     if  self.currentIndexpath?.row == (self.dataMessages.count - 2) {
@@ -1497,7 +1517,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     @objc func didTapExit() {
         SecureUserDefaults.shared.removeValue(forKey: "inEditorGroup")
         NotificationCenter.default.removeObserver(self)
-        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "refreshView"), object: nil, userInfo: nil)
         self.dismiss(animated: true, completion: nil)
     }
     
@@ -1801,7 +1820,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         if credential == "1" {
             var timer = Timer()
             var minute = 60
-            self.timerCredential[messageId] = timer
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true, block: {_ in
                 minute -= 1
                 self.listTimerCredential[messageId] = minute
@@ -1827,8 +1845,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         })
                     }
                 }
-                self.tableChatView.reloadRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
+                let row = self.dataMessages.filter({$0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == messageId})
+                if row != nil && section != nil{
+                    self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                }
             })
+            self.timerCredential[messageId] = timer
         }
         if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintViewTextField.constant == 0 {
             textFieldSend.text = "Send message".localized()
@@ -2888,6 +2911,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     self.dataMessages[idx!]["is_stared"] = "1"
                 }
                 self.tableChatView.reloadRows(at: [indexPath!], with: .none)
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil, userInfo: nil)
             })
         } else {
             star = UIAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash"), handler: {(_) in
@@ -2911,6 +2935,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     self.dataMessages[idx!]["is_stared"] = "0"
                 }
                 self.tableChatView.reloadRows(at: [indexPath!], with: .none)
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil, userInfo: nil)
             })
         }
         
