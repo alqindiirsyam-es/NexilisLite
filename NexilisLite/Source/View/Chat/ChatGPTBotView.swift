@@ -606,9 +606,18 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             let imageProfile = UIImageView(frame: CGRect(x: 0, y: 7, width: 30, height: 30))
             imageProfile.circle()
             imageProfile.clipsToBounds = true
-            var count = 0
+//            var count = 0
             viewAppBar.addSubview(imageProfile)
             if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {//resourcesMediaBundle
+                imageProfile.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                    if error == nil {
+                        imageProfile.animationImages = image?.images
+                        imageProfile.animationDuration = image?.duration ?? 0.0
+                        imageProfile.animationRepeatCount = 0
+                        imageProfile.startAnimating()
+                    }
+                }
+            } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
                 imageProfile.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
                     if error == nil {
                         imageProfile.animationImages = image?.images
@@ -2087,7 +2096,11 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
                 imageSticker.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 imageSticker.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 imageSticker.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                imageSticker.image = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil) //resourcesMediaBundle
+                var imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                if imageStickerBundle == nil {
+                    imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+                }
+                imageSticker.image = imageStickerBundle //resourcesMediaBundle
                 imageSticker.contentMode = .scaleAspectFit
             }
             else {

@@ -1039,6 +1039,15 @@ extension ContactChatViewController {
                                 imageView.startAnimating()
                             }
                         }
+                    } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                        imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                            if error == nil {
+                                imageView.animationImages = image?.images
+                                imageView.animationDuration = image?.duration ?? 0.0
+                                imageView.animationRepeatCount = 0
+                                imageView.startAnimating()
+                            }
+                        }
                     }
                 }
                 else {
@@ -1121,6 +1130,15 @@ extension ContactChatViewController {
                     imageView.frame = CGRect(x: 0, y: 0, width: 55.0, height: 55.0)
                     imageView.circle()
                     if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {//resourcesMediaBundle
+                        imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                            if error == nil {
+                                imageView.animationImages = image?.images
+                                imageView.animationDuration = image?.duration ?? 0.0
+                                imageView.animationRepeatCount = 0
+                                imageView.startAnimating()
+                            }
+                        }
+                    } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
                         imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
                             if error == nil {
                                 imageView.animationImages = image?.images
@@ -1402,6 +1420,15 @@ extension ContactChatViewController {
                 if data.pin == "-997" {
                     imageView.circle()
                     if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {//resourcesMediaBundle
+                        imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                            if error == nil {
+                                imageView.animationImages = image?.images
+                                imageView.animationDuration = image?.duration ?? 0.0
+                                imageView.animationRepeatCount = 0
+                                imageView.startAnimating()
+                            }
+                        }
+                    } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
                         imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
                             if error == nil {
                                 imageView.animationImages = image?.images

@@ -100,6 +100,9 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
             var urlGif = URL(string: configModeFB == MODE_VERTICAL_ANIMATION ? Utils.getIconCenterAnim2() : Utils.getIconCenterAnim4())
             if (urlGif == nil) {
                 urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: configModeFB == MODE_VERTICAL_ANIMATION ? "pb_def_icon_mode2" : "pb_def_icon_mode4", withExtension: "gif")! //resourcesMediaBundle
+                if urlGif == nil {
+                    urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: configModeFB == MODE_VERTICAL_ANIMATION ? "pb_def_icon_mode2" : "pb_def_icon_mode4", withExtension: "gif")!
+                }
             }
             nexilis_button.sd_setImage(with: urlGif) { [self] (image, error, cacheType, imageURL) in
                 if error == nil {

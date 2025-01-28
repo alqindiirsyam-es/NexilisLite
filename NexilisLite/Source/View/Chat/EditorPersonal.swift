@@ -206,12 +206,23 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         documentPicker = DocumentPicker(presentationController: self, delegate: self)
         
         let fm = FileManager.default
-        let path = Bundle.resourceBundle(for: Nexilis.self).resourcePath! //resourcesMediaBundle
-        let items = try! fm.contentsOfDirectory(atPath: path)
-        
-        for item in items {
-            if item.hasPrefix("sticker") {
-                stickers.append(item)
+        if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+            let path = Bundle.resourceBundle(for: Nexilis.self).resourcePath! //resourcesMediaBundle
+            var items = try! fm.contentsOfDirectory(atPath: path)
+            
+            for item in items {
+                if item.hasPrefix("sticker") {
+                    stickers.append(item)
+                }
+            }
+        } else {
+            let path = Bundle.resourcesMediaBundle(for: Nexilis.self).resourcePath! //resourcesMediaBundle
+            var items = try! fm.contentsOfDirectory(atPath: path)
+            
+            for item in items {
+                if item.hasPrefix("sticker") {
+                    stickers.append(item)
+                }
             }
         }
         
@@ -5000,7 +5011,11 @@ extension EditorPersonal: UICollectionViewDelegate, UICollectionViewDataSource {
             imageSticker.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
             imageSticker.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor)
         ])
-        imageSticker.image = UIImage(named: stickers[indexPath.row], in: Bundle.resourceBundle(for: Nexilis.self), with: nil) //resourcesMediaBundle
+        var imageStickerBundle = UIImage(named: stickers[indexPath.row], in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        if imageStickerBundle == nil {
+            imageStickerBundle = UIImage(named: stickers[indexPath.row], in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+        }
+        imageSticker.image = imageStickerBundle //resourcesMediaBundle
         return cell
     }
     
@@ -5790,7 +5805,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                 imageSticker.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 imageSticker.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 imageSticker.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                imageSticker.image = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil) //resourcesMediaBundle
+                var imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                if imageStickerBundle == nil {
+                    imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+                }
+                imageSticker.image = imageStickerBundle //resourcesMediaBundle
                 imageSticker.contentMode = .scaleAspectFit
             } else if dataMessages[indexPath.row]["message_scope_id"] as! String == "18" {
                 let data = textChat

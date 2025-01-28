@@ -2073,13 +2073,18 @@ extension UIFont {
 //            return
 //        }
         
-        guard let pathForResourceURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: filenameString, withExtension: "otf") else { //resourcesMediaBundle
-            //print("UIFont+:  Failed to register font - path for resource not found.")
-            return
+        var pathForResourceURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: filenameString, withExtension: "otf")
+        if pathForResourceURL == nil {
+            pathForResourceURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: filenameString, withExtension: "otf")
         }
         
+//        guard let pathForResourceURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: filenameString, withExtension: "otf") else { //resourcesMediaBundle
+//            //print("UIFont+:  Failed to register font - path for resource not found.")
+//            return
+//        }
+        
         var errorRef: Unmanaged<CFError>? = nil
-        CTFontManagerRegisterFontsForURL(pathForResourceURL as CFURL, .process, &errorRef)
+        CTFontManagerRegisterFontsForURL(pathForResourceURL! as CFURL, .process, &errorRef)
 
 //        guard let fontData = NSData(contentsOfFile: pathForResourceString) else {
 //            //print("UIFont+:  Failed to register font - font data could not be loaded.")
