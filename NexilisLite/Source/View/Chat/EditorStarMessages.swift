@@ -425,9 +425,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageSticker.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 imageSticker.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor).isActive = true
                 imageSticker.widthAnchor.constraint(equalToConstant: 80).isActive = true
-                var imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                var imageStickerBundle = UIImage(named: (textChat!.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 if imageStickerBundle == nil {
-                    imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+                    imageStickerBundle = UIImage(named: (textChat!.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
                 }
                 imageSticker.image = imageStickerBundle //resourcesMediaBundle
                 imageSticker.contentMode = .scaleAspectFit
