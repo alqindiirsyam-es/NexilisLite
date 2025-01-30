@@ -209,7 +209,9 @@ class OutgoingThread {
                             }
                         }
                     } else {
-                        self.retryUpload(message: message, fileName: fileName)
+                        if !result {
+                            self.retryUpload(message: message, fileName: fileName)
+                        }
                     }
                 }
             } else {
@@ -282,7 +284,7 @@ class OutgoingThread {
         
         var countRetry = 0
         do {
-            countRetry = maxRetryUpload[message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)]!
+            countRetry = maxRetryUpload[message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)] ?? 0
             countRetry += 1
             //print("masuk Retry1 = \(countRetry)")
             maxRetryUpload.updateValue(countRetry, forKey: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))
