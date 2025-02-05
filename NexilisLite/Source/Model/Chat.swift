@@ -137,18 +137,18 @@ public class Chat: Model {
                 let query = """
                             select m.f_pin, \(!lastQuery.isEmpty ? "m.l_pin, m.message_id" : "ms.l_pin, ms.message_id"), \(!lastQuery.isEmpty ? "m.thumb_id," : "ms.counter,") m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and \(!lastQuery.isEmpty ? lastQuery : "ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")") and m.is_call_center = 0
                             union
-                            select m.f_pin, \(!lastQuery.isEmpty ? "m.l_pin, m.message_id" : "ms.l_pin, ms.message_id"), \(!lastQuery.isEmpty ? "m.thumb_id," : "ms.counter,") m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and \(!lastQuery.isEmpty ? lastQuery : "ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")") and m.is_call_center = 0
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and "ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")" and m.is_call_center = 0
                             union
-                            select m.f_pin, \(!lastQuery.isEmpty ? "m.l_pin, m.message_id" : "ms.l_pin, ms.message_id"), \(!lastQuery.isEmpty ? "m.thumb_id," : "ms.counter,") m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and \(!lastQuery.isEmpty ? lastQuery : "ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")") and m.is_call_center = 0
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and "ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")" and m.is_call_center = 0
                             union
-                            select m.f_pin, \(!lastQuery.isEmpty ? "m.l_pin, m.message_id" : "ms.l_pin, ms.message_id"), \(!lastQuery.isEmpty ? "m.thumb_id," : "ms.counter,") m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.f_name || ' (\("Lounge".localized()))', b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and \(!lastQuery.isEmpty ? lastQuery : "ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")") and m.is_call_center = 0
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.f_name || ' (\("Lounge".localized()))', b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'") and m.is_call_center = 0
                             union
-                            select m.f_pin, \(!lastQuery.isEmpty ? "m.l_pin, m.message_id" : "ms.l_pin, ms.message_id"), \(!lastQuery.isEmpty ? "m.thumb_id," : "ms.counter,") m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, c.f_name || ' (' || b.title || ')', c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and \(!lastQuery.isEmpty ? lastQuery : "ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")") and m.is_call_center = 0
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, c.f_name || ' (' || b.title || ')', c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'") and m.is_call_center = 0
                             order by 6 desc
                             """
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {
-//                        if !lastQuery.isEmpty {
+                        if !lastQuery.isEmpty {
 //                            for columnIndex in 0..<cursorData.columnCount {
 //                                if let columnName = cursorData.columnName(for: columnIndex) {
 //                                    if let value = cursorData.object(forColumn: columnName) {
@@ -159,7 +159,10 @@ public class Chat: Model {
 //                                }
 //                            }
 //                            print("---------------------")
-//                        }
+                            if (isImage || isVideo) && cursorData.string(forColumnIndex: 3) == "0" {
+                                continue
+                            }
+                        }
                         let chat = Chat(fpin: cursorData.string(forColumnIndex: 0) ?? "",
                                         pin: cursorData.string(forColumnIndex: 1) ?? "",
                                         messageId: cursorData.string(forColumnIndex: 2) ?? "",

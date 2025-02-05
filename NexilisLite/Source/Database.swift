@@ -30,7 +30,7 @@ public class Database {
         }
         
         do {
-            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: databasePath)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.none], ofItemAtPath: databasePath)
 //            print("File protection attribute set to 'complete'.")
         } catch {
 //            print("Error setting file protection attribute: \(error)")

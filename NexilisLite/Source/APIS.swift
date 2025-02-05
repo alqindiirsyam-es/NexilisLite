@@ -13,6 +13,7 @@ import Toast_Swift
 import nuSDKService
 import AVFoundation
 import AVKit
+import Intents
 
 public class APIS: NSObject {
     public static func connect(appName: String, apiKey: String, delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
@@ -800,6 +801,378 @@ public class APIS: NSObject {
     
     public static func openMail() {
         Nexilis.openmailAction()
+    }
+    
+    public static func sendPushToken(_ token: String, isResend: Bool = false) {
+        DispatchQueue.global().async{
+            var isResend = isResend
+            if Utils.getTokenAPN().isEmpty || token != Utils.getTokenAPN() || isResend {
+                Utils.setTokenAPN(value: token)
+                isResend = true
+            }
+            if isResend {
+                _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token))
+            }
+        }
+    }
+    
+    public static var uuidCall: UUID?
+    public static var fpinCall: String?
+    public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
+//        let center = UNUserNotificationCenter.current()
+//        let content = UNMutableNotificationContent()
+//        content.title = "showNotificationNexilis"
+//        content.body = ""
+//        content.sound = .default
+//        content.userInfo = userInfo
+//        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+//        let request = UNNotificationRequest(identifier: "HJK", content: content, trigger: trigger)
+//        center.add(request) { error in
+//            if let error = error {
+//                print("Error scheduling notification: \(error.localizedDescription)")
+//            }
+//        }
+        if checkAppStateisBackground() {
+            print("showNotificationNexilis1: \(userInfo)")
+            if let payload = userInfo["payload"] as? [String: Any] {
+                if let messagePayload = payload["message"] as? [String: Any] {
+                    if let data = messagePayload["data"] as? [String: Any] {
+                        let code = data["nx_code"] as? String ?? ""
+                        if code == "CL01" {
+                            if let message = data["bodies"] as? [String: Any] {
+                                var text = message[CoreMessage_TMessageKey.MESSAGE_TEXT] as? String ?? ""
+                                let nameUser = message[CoreMessage_TMessageKey.F_DISPLAY_NAME] as? String ?? ""
+                                let threadIdentifier = message[CoreMessage_TMessageKey.OPPOSITE_PIN] as? String ?? ""
+                                var nameSubtitle = ""
+                                let imageId = CoreMessage_TMessageKey.IMAGE_ID
+                                let videoId = CoreMessage_TMessageKey.VIDEO_ID
+                                let fileId = CoreMessage_TMessageKey.FILE_ID
+                                let audioId = CoreMessage_TMessageKey.AUDIO_ID
+                                let attachmentFlag = CoreMessage_TMessageKey.ATTACHMENT_FLAG
+                                let messageScopeId = CoreMessage_TMessageKey.MESSAGE_SCOPE_ID
+                                let credential = CoreMessage_TMessageKey.CREDENTIAL
+                                let gif_id = CoreMessage_TMessageKey.GIF_ID
+                                let is_secret = CoreMessage_TMessageKey.IS_SECRET
+                                if (message[is_secret] as? String ?? "") == "1" {
+                                  text = "You got messages..."
+                                } else if (message[gif_id] as? String ?? "") != "" {
+                                  text = "Sent GIF 🎬"
+                                } else if !(message[imageId] as? String ?? "").isEmpty {
+                                    text = "Sent Image 📷"
+                                } else if (message[attachmentFlag] as? String ?? "") == "11" {
+                                    text = "Sent Sticker ❤️"
+                                } else if !(message[videoId] as? String ?? "").isEmpty {
+                                    text = "Sent Video 📹"
+                                } else if !(message[fileId] as? String ?? "").isEmpty {
+                                    if (message[messageScopeId] as? String ?? "") == "18" {
+                                        text = "Sent Form 📄"
+                                    } else {
+                                        text = "Sent File 📄"
+                                    }
+                                } else if !(message[audioId] as? String ?? "").isEmpty {
+                                    text = "Sent Audio ♫"
+                                } else if text.contains("Share%20location%20") {
+                                    text = "Sent Location 📌"
+                                } else if (message[attachmentFlag] as? String ?? "") == "27" {
+                                    text = "Sent Live Streaming"
+                                } else if (message[attachmentFlag] as? String ?? "") == "26" {
+                                    text = "Sent Seminar"
+                                } else if (message[attachmentFlag] as? String ?? "") == "25" {
+                                    text = "Sent Video Conference Room"
+                                } else if (message[attachmentFlag] as? String ?? "") == "24" {
+                                    text = "Sent Quiz"
+                                } else if (message[credential] as? String ?? "") == "1" {
+                                    text = "Sent Confidential Message"
+                                }
+                                copySoundToLocalPath()
+                                let center = UNUserNotificationCenter.current()
+                                let content = UNMutableNotificationContent()
+                                content.title = nameUser
+                                content.body = text
+                                var type = "1"
+                                if (message[messageScopeId] as? String ?? "") == "3" || (message[messageScopeId] as? String ?? "") == "18" || (message[messageScopeId] as? String ?? "") == "5"{
+                                    type = "0"
+                                }
+                                var nameTopic = "Lounge".localized()
+                                var idGroup = ""
+                                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                    do {
+                                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT title, group_id FROM DISCUSSION_FORUM WHERE chat_id='\(threadIdentifier)'"), cursor.next() {
+                                            nameTopic = cursor.string(forColumnIndex: 0) ?? ""
+                                            idGroup = cursor.string(forColumnIndex: 1) ?? ""
+                                            cursor.close()
+                                        }
+                                        if idGroup.isEmpty {
+                                            idGroup = threadIdentifier
+                                        }
+                                        if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id FROM GROUPZ WHERE group_id='\(idGroup)'"), cursorGroup.next() {
+                                            let nameGroup = cursorGroup.string(forColumnIndex: 0) ?? ""
+                                            nameSubtitle = "\(nameGroup)(\(nameTopic))"
+                                            cursorGroup.close()
+                                        }
+                                    } catch {
+                                        rollback.pointee = true
+                                        print("Access database error: \(error.localizedDescription)")
+                                    }
+                                })
+                                if type == "1" {
+                                    content.subtitle = nameSubtitle
+                                }
+                                content.userInfo = ["id" : threadIdentifier, "type" : type]
+                                content.sound = UNNotificationSound(named: UNNotificationSoundName("pb_call_in.mp3"))
+                                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+                                let request = UNNotificationRequest(identifier: threadIdentifier, content: content, trigger: trigger)
+                                center.add(request) { error in
+                                    if let error = error {
+                                        print("Error scheduling notification: \(error.localizedDescription)")
+                                    }
+                                }
+                            }
+                        } else if code == "CL03" {
+                            let callFromName = data["call-from-name"] as? String ?? ""
+                            let callFrom = data["call-from"] as? String ?? ""
+                            let callType = data["call-type"] as? String ?? ""
+                            uuidCall = UUID()
+                            fpinCall = callFrom
+                            Nexilis.callAPNActivated = true
+//                                    CallManager.shared.reportIncomingCall(uuid: uuidCall!, callerName: callFromName, callerId: callFrom, isVideo: callType != "1") { error in
+//                                        if let error = error {
+//                                            print("Error reporting incoming call: \(error.localizedDescription)")
+//                                        } else {
+//                                            print("Incoming call reported successfully")
+//                                        }
+//                                    }
+                            copySoundToLocalPath()
+                            let center = UNUserNotificationCenter.current()
+                            let content = UNMutableNotificationContent()
+                            content.title = callFromName
+                            if callType == "1" {
+                                content.body = "Incoming Audio Call".localized()
+                            } else {
+                                content.body = "Incoming Video Call".localized()
+                            }
+                            content.userInfo = ["id" : callFrom, "type" : code, "callType": callType]
+                            content.sound = UNNotificationSound(named: UNNotificationSoundName("pb_call_in.mp3"))
+                            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+                            let request = UNNotificationRequest(identifier: "\(uuidCall!)", content: content, trigger: trigger)
+                            center.add(request) { error in
+                                if let error = error {
+                                    print("Error scheduling notification: \(error.localizedDescription)")
+                                }
+                            }
+                        } else if code == "CL02" {
+                            if let uuidCall = uuidCall {
+                                Nexilis.callAPNActivated = false
+                                let center = UNUserNotificationCenter.current()
+                                center.removePendingNotificationRequests(withIdentifiers: ["\(uuidCall)"])
+                                center.removeDeliveredNotifications(withIdentifiers: ["\(uuidCall)"])
+//                                    CallManager.shared.endCall(with: uuidCall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private static func copySoundToLocalPath() {
+        guard let sourceURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_in", withExtension: "mp3") else {
+            return
+        }
+
+        // Define the destination path in the Library/Sounds directory
+        let fileManager = FileManager.default
+        let soundDirectory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!.appendingPathComponent("Sounds", isDirectory: true)
+
+        // Ensure the Sounds directory exists
+        if !fileManager.fileExists(atPath: soundDirectory.path) {
+            do {
+                try fileManager.createDirectory(at: soundDirectory, withIntermediateDirectories: true, attributes: nil)
+            } catch {
+                print("Error creating Sounds directory: \(error)")
+                return
+            }
+        }
+
+        let destinationURL = soundDirectory.appendingPathComponent("pb_call_in.mp3")
+        if !fileManager.fileExists(atPath: destinationURL.path) {
+            do {
+                try fileManager.copyItem(at: sourceURL, to: destinationURL)
+            } catch {
+                
+            }
+        }
+    }
+    
+    public static func openNotificationNexilis(_ response: UNNotificationResponse) {
+        DispatchQueue.main.async{
+            if let userInfo = response.notification.request.content.userInfo as? [String: String] {
+                let id = userInfo["id"] ?? ""
+                let type = userInfo["type"] ?? ""
+                if type == "0" {
+                    if let user = User.getData(pin: id), user.firstName == "User".localized() {
+                        return
+                    }
+                    let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+                    editorPersonalVC.hidesBottomBarWhenPushed = true
+                    editorPersonalVC.unique_l_pin = id
+                    editorPersonalVC.fromNotification = true
+                    let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
+                    navigationController.modalPresentationStyle = .fullScreen
+                    navigationController.navigationBar.tintColor = .white
+                    navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                    navigationController.navigationBar.isTranslucent = false
+                    navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+                    navigationController.navigationBar.barStyle = .black
+                    let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                    UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+                    let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+                    navigationController.navigationBar.titleTextAttributes = textAttributes
+                    if UIApplication.shared.visibleViewController?.navigationController != nil {
+                        if UIApplication.shared.visibleViewController?.navigationController?.presentedViewController == editorPersonalVC {
+                            return
+                        }
+                        UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                    } else {
+                        if UIApplication.shared.visibleViewController == editorPersonalVC {
+                            return
+                        }
+                        UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                    }
+                } else if type == "1" {
+                    var groupExist = false
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        var idGroup = ""
+                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT title, group_id FROM DISCUSSION_FORUM WHERE chat_id='\(id)'"), cursor.next() {
+                            groupExist = true
+                            cursor.close()
+                        } else {
+                            if idGroup.isEmpty {
+                                idGroup = id
+                            }
+                            if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id FROM GROUPZ WHERE group_id='\(idGroup)'"), cursorGroup.next() {
+                                let nameGroup = cursorGroup.string(forColumnIndex: 0) ?? ""
+                                groupExist = true
+                                cursorGroup.close()
+                            }
+                        }
+                    })
+                    if !groupExist {
+                        return
+                    }
+                    let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "editorGroupVC") as! EditorGroup
+                    editorGroupVC.hidesBottomBarWhenPushed = true
+                    editorGroupVC.unique_l_pin = id
+                    editorGroupVC.fromNotification = true
+                    let navigationController = CustomNavigationController(rootViewController: editorGroupVC)
+                    navigationController.modalPresentationStyle = .fullScreen
+                    navigationController.navigationBar.tintColor = .white
+                    navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                    navigationController.navigationBar.isTranslucent = false
+                    navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+                    navigationController.navigationBar.barStyle = .black
+                    let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                    UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+                    let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+                    navigationController.navigationBar.titleTextAttributes = textAttributes
+                    if UIApplication.shared.visibleViewController?.navigationController != nil {
+                        if UIApplication.shared.visibleViewController?.navigationController?.presentedViewController == editorGroupVC {
+                            return
+                        }
+                        UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                    } else {
+                        if UIApplication.shared.visibleViewController == editorGroupVC {
+                            return
+                        }
+                        UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                    }
+                } else if type == "CL03" {
+                    let callType = userInfo["callType"] ?? ""
+                    if callType == "1" {
+                        if let user = User.getData(pin: id), user.firstName == "User".localized() {
+                            return
+                        }
+                        let controller = QmeraAudioViewController()
+                        controller.isOutgoing = false
+                        controller.user = User.getData(pin: id)
+                        controller.autoAcceptAPN = true
+                        controller.modalPresentationStyle = .overCurrentContext
+                        if UIApplication.shared.visibleViewController is UIAlertController {
+                            let vc = UIApplication.shared.visibleViewController as! UIAlertController
+                            vc.dismiss(animated: true, completion: {
+                                if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                    UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
+                                } else {
+                                    UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
+                                }
+                            })
+                            return
+                        }
+                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                            UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
+                        } else {
+                            UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
+                        }
+                    } else {
+                        if let user = User.getData(pin: id), user.firstName == "User".localized() {
+                            return
+                        }
+                        let videoController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
+                        videoController.fPin = id
+                        videoController.isInisiator = false
+                        videoController.autoAcceptAPN = true
+                        let navigationController = CustomNavigationController(rootViewController: videoController)
+                        navigationController.modalPresentationStyle = .fullScreen
+                        if UIApplication.shared.visibleViewController is UIAlertController {
+                            let vc = UIApplication.shared.visibleViewController as! UIAlertController
+                            vc.dismiss(animated: true, completion: {
+                                if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                                } else {
+                                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                                }
+                            })
+                            return
+                        }
+                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                        } else {
+                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                        }
+                    }
+                }
+            }
+        }
+//        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
+    
+    public static func checkAppStateisBackground() -> Bool {
+        let state = UIApplication.shared.applicationState
+        
+        switch state {
+        case .active:
+            return false
+        case .inactive:
+            return true
+        case .background:
+            return true
+        @unknown default:
+            return false
+        }
+    }
+    
+    public static func enterBackground() {
+        do {
+            try API.switchCBI(cbiI: Callback(), bLight: true)
+        } catch {
+        }
+    }
+    
+    public static func enterForeground() {
+        do {
+            try API.switchCBI(cbiI: Callback(), bLight: false)
+        } catch {
+        }
     }
     
     public static func setCheckEmulator(isActive: Bool) {

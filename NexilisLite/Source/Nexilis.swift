@@ -120,6 +120,8 @@ public class Nexilis: NSObject {
     public static let IDX_SOCIAL_COMMERCE = 101
     public static let IDX_NEWS = 102
     
+    public static var callAPNActivated = false
+    
     static var ringtonePlayer: AVAudioPlayer?
     static var ringbacktonePlayer: AVAudioPlayer?
     
@@ -366,6 +368,9 @@ public class Nexilis: NSObject {
     }
     
     private static func getPullGroupNoMember() {
+        while Nexilis.isProcessWriteSync {
+            Thread.sleep(forTimeInterval: 0.5)
+        }
         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullGroupNoMember(), timeout: 30 * 1000), response.isOk() {
             let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
             if !data.isEmpty {
@@ -509,6 +514,9 @@ public class Nexilis: NSObject {
     }
     
     private static func getPullWorkingArea() {
+        while Nexilis.isProcessWriteSync {
+            Thread.sleep(forTimeInterval: 0.5)
+        }
         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getWorkingAreaContactCenter(), timeout: 30 * 1000), response.isOk() {
             let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
             if !data.isEmpty {
@@ -865,12 +873,16 @@ public class Nexilis: NSObject {
         return me
     }
     
+    public static var isProcessWriteSync = false
     public static func writeSync(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
+        isProcessWriteSync = true
         do {
-            //print(">> SENDING MESSAGE >> ", message.toLogString())
+            print(">> SENDING MESSAGE >> ", message.toLogString())
             if let data = try API.sGetResponse(sRequest: message.pack(), lTimeout: timeout, bKeepTOResp: true) {
                 let response = TMessage(data: data)
-                //print("<< RESPONSE MESSAGE << ", response.toLogString())
+                print(">> RESPONSE WRITESYNC >> ")
+//                print("<< RESPONSE MESSAGE << ", response.toLogString())
+                isProcessWriteSync = false
                 return response
             }
         } catch {
@@ -2238,6 +2250,9 @@ extension Nexilis: CallDelegate {
                 }
             }
             if (state == Nexilis.AUDIO_CALL_INCOMING && message.split(separator: ",")[1] != "joining Ac.room on channel 0") {
+                if Nexilis.callAPNActivated || APIS.checkAppStateisBackground() {
+                    return
+                }
                 let data = User.getDataCanNil(pin: String(deviceId))
                 if data == nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
@@ -2250,7 +2265,6 @@ extension Nexilis: CallDelegate {
 //                    self.displayIncomingCall(uuid: uuidOngoing, handle: String(deviceId), hasVideo: false) { error in
 //                        UIApplication.shared.endBackgroundTask(backgroundTaskIdentifier)
 //                    }
-                Nexilis.ringtonePlayer?.play()
                 let controller = QmeraAudioViewController()
                 controller.user = User.getData(pin: String(deviceId))
                 controller.isOutgoing = false
@@ -2273,6 +2287,9 @@ extension Nexilis: CallDelegate {
                 }
 //                    API.receiveCCall(sParty: String(deviceId))
             } else if state == Nexilis.VIDEO_CALL_INCOMING {
+                if Nexilis.callAPNActivated || APIS.checkAppStateisBackground() {
+                    return
+                }
                 let dataUser = User.getDataCanNil(pin: String(deviceId))
                 if dataUser == nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
@@ -2280,7 +2297,6 @@ extension Nexilis: CallDelegate {
                     })
                     return
                 }
-                Nexilis.ringtonePlayer?.play()
                 let videoController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
                 videoController.fPin = String(deviceId)
                 videoController.isInisiator = false
@@ -3558,7 +3574,7 @@ extension Nexilis: MessageDelegate {
                 }
                 return
             }
-            if !Nexilis.showLibraryNotification {
+            if !Nexilis.showLibraryNotification || APIS.checkAppStateisBackground() {
                 return
             }
             let sender = message.getBody(key: CoreMessage_TMessageKey.F_PIN)

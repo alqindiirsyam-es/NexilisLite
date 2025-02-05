@@ -3085,7 +3085,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     message.mStatus = CoreMessage_TMessageUtil.getTID()
                     message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
                     message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(valueListGroupImages[i].messageId)"
-                    _ = Nexilis.write(message: message)
+                    DispatchQueue.global().async {
+                        _ = Nexilis.write(message: message)
+                    }
                 }
             } else {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -3101,7 +3103,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 message.mStatus = CoreMessage_TMessageUtil.getTID()
                 message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
                 message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
-                _ = Nexilis.write(message: message)
+                DispatchQueue.global().async {
+                    _ = Nexilis.write(message: message)
+                }
             }
         }
         if let index = dataMessages.firstIndex(where: {$0["message_id"] as? String == message_id}) {
@@ -5189,6 +5193,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         let dataMessages = dataMessages.filter({$0["chat_date"] as! String == dataDates[indexPath.section]})
         let profileMessage = UIImageView()
         let cell = tableView.dequeueReusableCell(withIdentifier: "cellEditorPersonal", for: indexPath as IndexPath)
+        cell.contentView.subviews.forEach({ $0.removeConstraints($0.constraints) })
         cell.contentView.subviews.forEach({ $0.removeFromSuperview() })
         
         if isContactCenter && isRequestContactCenter && dataMessages[indexPath.row]["category_cc"] != nil {
@@ -5704,7 +5709,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
         let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
-        topMarginText.isActive = true
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         messageText.font = .systemFont(ofSize: 12)
         if dataMessages[indexPath.row]["attachment_flag"] as? String == "27" || dataMessages[indexPath.row]["attachment_flag"] as? String == "26" || dataMessages[indexPath.row]["message_scope_id"] as? String == "18" {
@@ -6048,13 +6052,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                     countRestImages.textColor = .white
                 }
             } else {
-                let getHeightImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)!.height
-                let getWidthImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)!.width
-                topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 40 : getHeightImage)
+                let getHeightImage: CGFloat = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)!.height
+                let getWidthImage: CGFloat = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)!.width
+                topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 45 : getHeightImage + 5)
                 
                 containerMessage.addSubview(imageThumb)
-                imageThumb.translatesAutoresizingMaskIntoConstraints = false
                 imageThumb.frame = CGRect(x: 0, y: 0, width: getWidthImage, height: getHeightImage)
+                imageThumb.translatesAutoresizingMaskIntoConstraints = false
                 let data = queryMessageReply(message_id: reffChat)
                 if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
                     imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
@@ -6359,11 +6363,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                         containerMessage.addSubview(containerLinkMessage)
                         containerLinkMessage.translatesAutoresizingMaskIntoConstraints = false
                         containerLinkMessage.leadingAnchor.constraint(equalTo:containerMessage.leadingAnchor, constant: 15).isActive = true
-                        if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" {
-                            containerLinkMessage.bottomAnchor.constraint(equalTo: imageSticker.topAnchor, constant: -5).isActive = true
-                        } else {
-                            containerLinkMessage.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
-                        }
+                        containerLinkMessage.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                         containerLinkMessage.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
                         containerLinkMessage.heightAnchor.constraint(equalToConstant: 80.0).isActive = true
                         containerLinkMessage.backgroundColor = .gray.withAlphaComponent(0.2)
@@ -6704,6 +6704,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             let textForwarded = "Forwarded".localized()
             titleForwarded.attributedText = " %\(textForwarded)%".richText()
         }
+        topMarginText.isActive = true
 //        let panGestureRecognizer = UIPanGestureRecognizer(target: self, action: #selector(panGestureCellAction))
 //        panGestureRecognizer.delegate = self
 //        cellMessage.addGestureRecognizer(panGestureRecognizer)

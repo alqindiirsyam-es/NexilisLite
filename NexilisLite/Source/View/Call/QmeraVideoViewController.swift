@@ -23,7 +23,7 @@ class QmeraVideoViewController: UIViewController {
     var isSpeaker = true
     var isMuted = false
     var isPresent = false
-    var callFCM = false
+    var callFCM = true
     var isNavigationHidden = false
     var listRemoteViewFix: [UIImageView] = [
         UIImageView(),
@@ -86,6 +86,7 @@ class QmeraVideoViewController: UIViewController {
     var transformZoomAfterNewUserMore2 = false
     var isAddCall = ""
     var ticketId = ""
+    var autoAcceptAPN = false
     private var frontCamera = true
     var users: [User] = []
     let poweredByView: UIStackView = {
@@ -138,6 +139,7 @@ class QmeraVideoViewController: UIViewController {
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
+        Nexilis.callAPNActivated = false
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -150,6 +152,7 @@ class QmeraVideoViewController: UIViewController {
             NotificationCenter.default.removeObserver(self)
         }
         Nexilis.floatingButton.isHidden = false
+        Nexilis.callAPNActivated = false
     }
 
     override func viewDidLoad() {
@@ -182,6 +185,15 @@ class QmeraVideoViewController: UIViewController {
         addImageMutedOnZoom()
         if isAutoAccept {
             didTapAcceptCallButton()
+        }
+        if autoAcceptAPN {
+//            API.receiveCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView,ivRemoteZ: zoomView)
+            DispatchQueue.global().async {
+                if let response1 = Nexilis.writeSync(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: self.fPin, lPin: User.getMyPin()!, type: "1")) {
+                    if response1.isOk() {
+                    }
+                }
+            }
         }
         
     }
@@ -394,14 +406,15 @@ class QmeraVideoViewController: UIViewController {
             labelIncomingOutgoing.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         ])
         if isInisiator {
-            labelIncomingOutgoing.text = "Outgoing video call".localized() + "..."
-//            Nexilis.startAudio()
+            labelIncomingOutgoing.text = "Connecting".localized()
             if ticketId.isEmpty {
                 if callFCM {
                     DispatchQueue.global().async {
                         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
                             if response.isOk() {
                                 
+                            } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
+                                API.initiateCCall(sParty: self.dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
                             } else {
                                 DispatchQueue.main.async {
                                     if self.labelIncomingOutgoing.isDescendant(of: self.view) {
@@ -423,7 +436,6 @@ class QmeraVideoViewController: UIViewController {
                         }
                     }
                 } else {
-                    Nexilis.ringbacktonePlayer?.play()
                     API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
                 }
             } else {
@@ -490,8 +502,12 @@ class QmeraVideoViewController: UIViewController {
         DispatchQueue.main.async { [self] in
             let data:[AnyHashable : Any] = notification.userInfo!
             if let l_pin = data["l_pin"] as? String {
-                Nexilis.ringtonePlayer?.play()
-                API.initiateCCall(sParty: l_pin, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+                if let f_pin = data["f_pin"] as? String {
+                    if f_pin == User.getMyPin()!  {
+                        labelIncomingOutgoing.text = "Waiting for answer".localized()
+                        API.initiateCCall(sParty: l_pin, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+                    }
+                }
             }
         }
     }
@@ -613,7 +629,6 @@ class QmeraVideoViewController: UIViewController {
             } else {
                 API.csa(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: true)
             }
-            Nexilis.ringtonePlayer?.stop()
         }
         DispatchQueue.main.async {
             self.myImage.removeFromSuperview()
@@ -896,11 +911,6 @@ class QmeraVideoViewController: UIViewController {
     }
     
     func endAllCall() {
-        if isInisiator {
-            Nexilis.ringbacktonePlayer?.stop()
-        } else {
-            Nexilis.ringtonePlayer?.stop()
-        }
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         if !onGoingCC.isEmpty {
             let requester = onGoingCC.components(separatedBy: ",")[0]
@@ -1079,9 +1089,6 @@ class QmeraVideoViewController: UIViewController {
             }
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
-            if isInisiator {
-                Nexilis.ringbacktonePlayer?.stop()
-            }
             let channel = arrayMessage[3]
             remoteChannel[String(channel)] = String(arrayMessage[5])
             DispatchQueue.main.async {
@@ -1216,11 +1223,6 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else if (state == Nexilis.VIDEO_CALL_END || state == Nexilis.AUDIO_CALL_END) {
-            if isInisiator {
-                Nexilis.ringbacktonePlayer?.stop()
-            } else {
-                Nexilis.ringtonePlayer?.stop()
-            }
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             if !onGoingCC.isEmpty {
                 let requester = onGoingCC.components(separatedBy: ",")[0]
@@ -1370,11 +1372,6 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else if (state == Nexilis.OFFLINE) {
-            if isInisiator {
-                Nexilis.ringbacktonePlayer?.stop()
-            } else {
-                Nexilis.ringtonePlayer?.stop()
-            }
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             DispatchQueue.main.async {
                 if (self.dataPerson.count == 1) {
@@ -1447,11 +1444,6 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else if (state == Nexilis.BUSY) {
-            if isInisiator {
-                Nexilis.ringbacktonePlayer?.stop()
-            } else {
-                Nexilis.ringtonePlayer?.stop()
-            }
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             DispatchQueue.main.async { [self] in
                 if (self.dataPerson.count == 1) {

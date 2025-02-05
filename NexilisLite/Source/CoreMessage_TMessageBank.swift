@@ -35,6 +35,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.API] = api
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
         tmessage.mPIN = p_pin
         return tmessage
     }
@@ -48,6 +49,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_ID] = Utils.M_USER_ANDROID_ID
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
 //        tmessage.mBodies[CoreMessage_TMessageKey.BUSINESS_ENTITY] = "74"
         return tmessage
     }
@@ -1416,6 +1418,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.EMAIL] = p_email
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
         return tmessage
     }
 
@@ -2299,6 +2302,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_ID] = Utils.M_USER_ANDROID_ID
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
         return tmessage
     }
     
@@ -2596,6 +2600,48 @@ public class CoreMessage_TMessageBank {
         if !key.isEmpty {
             tMessage.mBodies[CoreMessage_TMessageKey.KEY] = key
         }
+        return tMessage
+    }
+    
+    public static func getToken(token: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.APN_TOKEN
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.TOKEN] = token
+        tMessage.mBodies[CoreMessage_TMessageKey.DEVICE_BRAND] = "iOS"
+        tMessage.mBodies[CoreMessage_TMessageKey.ANDROID_ID] = Utils.M_USER_ANDROID_ID
+        return tMessage
+    }
+    
+    public static func getMessageById(messageId: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.GET_MESSAGE_BY_ID
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = messageId
+        return tMessage
+    }
+    
+    public static func getAckMessage(messageId: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.ACK_MESSAGE_BY_ID
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = messageId
+        return tMessage
+    }
+    
+    public static func getCallStatus(lPin: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.IS_CALLING
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.L_PIN] = lPin
         return tMessage
     }
     

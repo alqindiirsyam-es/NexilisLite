@@ -360,21 +360,23 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                         let newButton = UIButton()
                         newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                         newButton.translatesAutoresizingMaskIntoConstraints = false
-                        DispatchQueue.global().async {
-                            let urlString = Utils.getURLBase() + "get_file_from_path?img=" + icon
-                            if let cachedImage = ImageCache.shared.image(forKey: urlString) {
-                                DispatchQueue.main.async() {
-                                    newButton.setImage(cachedImage, for: .normal)
+                        if !APIS.checkAppStateisBackground() {
+                            DispatchQueue.global().async {
+                                let urlString = Utils.getURLBase() + "get_file_from_path?img=" + icon
+                                if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                                    DispatchQueue.main.async() {
+                                        newButton.setImage(cachedImage, for: .normal)
+                                    }
+                                    return
                                 }
-                                return
-                            }
-                            Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
-                                guard let data = data, error == nil else { return }
-                                // always update the UI from the main thread
-                                DispatchQueue.main.async() {
-                                    if let image = UIImage(data: data) {
-                                        newButton.setImage(image, for: .normal)
-                                        ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
+                                Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
+                                    guard let data = data, error == nil else { return }
+                                    // always update the UI from the main thread
+                                    DispatchQueue.main.async() {
+                                        if let image = UIImage(data: data) {
+                                            newButton.setImage(image, for: .normal)
+                                            ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
+                                        }
                                     }
                                 }
                             }
@@ -390,6 +392,9 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
             } else {
                 if !Utils.getHistoryPullFB().isEmpty {
                     setFBFromPull()
+                }
+                while Nexilis.isProcessWriteSync {
+                    Thread.sleep(forTimeInterval: 0.5)
                 }
                 if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullFloatingButton(), timeout: 30 * 1000){
                     if response.isOk() {
@@ -464,21 +469,23 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                                     newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_more" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_more" : "pb_button_others", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
                                 }
                                 if !icon.isEmpty {
-                                    DispatchQueue.global().async {
-                                        let urlString = Utils.getURLBase() + "get_file_from_path?img=" + icon
-                                        if let cachedImage = ImageCache.shared.image(forKey: urlString) {
-                                            DispatchQueue.main.async() {
-                                                newButton.setImage(cachedImage, for: .normal)
+                                    if !APIS.checkAppStateisBackground() {
+                                        DispatchQueue.global().async {
+                                            let urlString = Utils.getURLBase() + "get_file_from_path?img=" + icon
+                                            if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                                                DispatchQueue.main.async() {
+                                                    newButton.setImage(cachedImage, for: .normal)
+                                                }
+                                                return
                                             }
-                                            return
-                                        }
-                                        Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
-                                            guard let data = data, error == nil else { return }
-                                            // always update the UI from the main thread
-                                            DispatchQueue.main.async() {
-                                                if let image = UIImage(data: data) {
-                                                    newButton.setImage(image, for: .normal)
-                                                    ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
+                                            Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
+                                                guard let data = data, error == nil else { return }
+                                                // always update the UI from the main thread
+                                                DispatchQueue.main.async() {
+                                                    if let image = UIImage(data: data) {
+                                                        newButton.setImage(image, for: .normal)
+                                                        ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
+                                                    }
                                                 }
                                             }
                                         }
@@ -661,6 +668,9 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 print("Access database error: \(error.localizedDescription)")
             }
         })
+        if !Nexilis.fromMAB {
+            UIApplication.shared.applicationIconBadgeNumber = Int(counter ?? 0)
+        }
         return counter ?? 0
     }
     

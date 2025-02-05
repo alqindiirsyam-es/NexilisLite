@@ -783,4 +783,19 @@ public class CoreMessage_TMessageCode {
     
     public static let RESET_SUPER_APP = "RSA";
     public static let GPT = "GPT";
+    
+    public static let MUTE_AC_VC = "MAV";
+    public static let LS_TARGET = "LST";
+    public static let GET_MESSAGE_BY_ID = "GMID";
+    public static let SECURITY_SHIELD_LOGGING = "SSG";
+
+    public static let IS_CALLING = "ICA";
+    public static let ACK_PUSH_CC = "ACC";
+    public static let ACK_MESSAGE_BY_ID = "AMID";
+    public static let MOBILE_ACTIVITY_REPORT = "MAR";
+    public static let CHECK_OFFLINE = "COF";
+    public static let GET_SS_CONTENT = "SS02";
+    public static let ACCEPT_REJECT_MEETING = "MTG";
+    public static let GET_CHATBOT_SCHEDULE = "CHS";
+    public static let GPT_SERVICE = "GPTS";
 }

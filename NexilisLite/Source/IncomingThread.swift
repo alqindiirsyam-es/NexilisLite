@@ -240,6 +240,7 @@ class IncomingThread {
                 if(!id.isEmpty){
 //                            Nexilis.changeUser(f_pin: id)
                     SecureUserDefaults.shared.set(id, forKey: "me")
+                    APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
                     Utils.setProfile(value: false)
                     if Utils.getForceAnonymous() {
                         viewController?.deleteAllRecordDatabase()
@@ -1263,25 +1264,34 @@ class IncomingThread {
         }
     }
     
-    private func receiveMessage(message: TMessage) -> Void {
+    public func receiveMessage(message: TMessage, withoutACK: Bool = false) -> Void {
         let message_id = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
         guard let _: String = SecureUserDefaults.shared.value(forKey: "status") else {
             //print("App not ready!!! skip receive message \(message_id)")
-            ack(message: message)
+            if !withoutACK {
+                ack(message: message)
+            }
             return
         }
+        var messageExist = false
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
-                    ack(message: message)
+                    if !withoutACK {
+                        ack(message: message)
+                    }
                     cursor.close()
-                    return
+                    messageExist = true
+                    print("MASUK RETURN MESSAGE EXIST")
                 }
             } catch {
                 rollback.pointee = true
                 print("Access database error: \(error.localizedDescription)")
             }
         })
+        if messageExist {
+            return
+        }
         let media = message.getMedia()
         //print("MEDIA \(media)");
         let thumb_id = message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)
@@ -1308,12 +1318,16 @@ class IncomingThread {
                     //print("save message incoming")
                 }
             }
-            ack(message: message)
+            if !withoutACK {
+                ack(message: message)
+            }
             return
         }
         Nexilis.saveMessage(message: message, withStatus: false)
         //print("save message incoming")
-        ack(message: message)
+        if !withoutACK {
+            ack(message: message)
+        }
     }
     
     private func receiveMessageStatus(message: TMessage) -> Void {
@@ -1422,7 +1436,10 @@ class IncomingThread {
                     }
                     let device_id: String = SecureUserDefaults.shared.value(forKey: "device_id") ?? ""
                     if !device_id.isEmpty, let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin FROM BUDDY where device_id='\(device_id)'"), cursorUser.next() {
-                        SecureUserDefaults.shared.set(cursorUser.string(forColumnIndex: 0), forKey: "me")
+                        if User.getMyPin() != cursorUser.string(forColumnIndex: 0) {
+                            SecureUserDefaults.shared.set(cursorUser.string(forColumnIndex: 0), forKey: "me")
+                            APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
+                        }
                         cursorUser.close()
                     }
                     if let delegate = Nexilis.shared.personInfoDelegate {
@@ -1529,7 +1546,10 @@ class IncomingThread {
                 ], replace: true)
                 let device_id: String = SecureUserDefaults.shared.value(forKey: "device_id") ?? ""
                 if !device_id.isEmpty, let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin FROM BUDDY where device_id='\(device_id)'"), cursorUser.next() {
-                    SecureUserDefaults.shared.set(cursorUser.string(forColumnIndex: 0), forKey: "me")
+                    if User.getMyPin() != cursorUser.string(forColumnIndex: 0) {
+                        SecureUserDefaults.shared.set(cursorUser.string(forColumnIndex: 0), forKey: "me")
+                        APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
+                    }
                     cursorUser.close()
                 }
                 ack(message: message)
@@ -2031,6 +2051,7 @@ class IncomingThread {
         if (message.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "00") == "00") {
             let f_pin = message.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "00")
             SecureUserDefaults.shared.set(f_pin, forKey: "me")
+            APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
             if let delegate = Nexilis.shared.loginDelegate {
                 delegate.onProcess(message: f_pin, status: message.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "00"))
             }

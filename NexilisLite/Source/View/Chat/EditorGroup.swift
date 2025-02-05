@@ -2047,7 +2047,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             message.mStatus = CoreMessage_TMessageUtil.getTID()
             message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
             message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
-            _ = Nexilis.write(message: message)
+            DispatchQueue.global().async {
+                _ = Nexilis.write(message: message)
+            }
         }
         if let index = dataMessages.firstIndex(where: {$0["message_id"] as? String == message_id}) {
             dataMessages[index]["status"] = "4"

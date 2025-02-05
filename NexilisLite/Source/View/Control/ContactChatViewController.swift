@@ -60,13 +60,10 @@ class ContactChatViewController: UITableViewController {
             if segment.numberOfSegments == 3 {
                 switch segment.selectedSegmentIndex {
                 case 1:
-                    Utils.inTabChats = false
                     fillteredData = self.contacts.filter { $0.fullName.lowercased().contains(searchText.lowercased()) }
                 case 2:
-                    Utils.inTabChats = false
                     fillteredData = self.groups.filter { $0.name.lowercased().contains(searchText.lowercased()) }
                 default:
-                    Utils.inTabChats = true
                     fillteredData = self.chats.filter { $0.name.lowercased().contains(searchText.lowercased()) || $0.messageText.lowercased().contains(searchText.lowercased()) }
                 }
             } else {
@@ -382,6 +379,37 @@ class ContactChatViewController: UITableViewController {
     }
     
     @objc func segmentChanged(sender: Any) {
+        switch segment.selectedSegmentIndex {
+        case 0:
+            Utils.inTabChats = true
+        case 2:
+            Utils.inTabChats = false
+            DispatchQueue.global().async {
+                self.getOpenGroups(listGroups: self.groups, completion: { g in
+                    DispatchQueue.main.async {
+                        for og in g {
+                            if self.groups.first(where: { $0.id == og.id }) == nil {
+                                self.groups.append(og)
+                            }
+                        }
+                        self.groups.sort { (a, b) -> Bool in
+                            if Int(a.official) == 1 {
+                                return true
+                            } else if Int(b.official) == 1 {
+                                return false
+                            } else {
+                                return Int(a.official) ?? 0 > Int(b.official) ?? 0
+                            }
+                        }
+                        DispatchQueue.main.async {
+                            self.tableView.reloadData()
+                        }
+                    }
+                })
+            }
+        default:
+            Utils.inTabChats = false
+        }
         filterContentForSearchText(searchController.searchBar.text!)
     }
     
@@ -533,6 +561,9 @@ class ContactChatViewController: UITableViewController {
     }
     
     private func getOpenGroups(listGroups: [Group], completion: @escaping ([Group]) -> ()) {
+        while Nexilis.isProcessWriteSync {
+            Thread.sleep(forTimeInterval: 0.5)
+        }
         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getOpenGroups(p_account: "1,2,3,5,6,7", offset: "0", search: "")) {
             var dataGroups: [Group] = []
             if (response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "00") {

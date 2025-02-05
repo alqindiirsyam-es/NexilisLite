@@ -20,7 +20,8 @@ class QmeraAudioViewController: UIViewController {
     var wbTimer = Timer()
     var wbBlink = false
     var wbRoomId = ""
-    var callFCM = false
+    var callFCM = true
+    var autoAcceptAPN = false
     
     let buttonSize: CGFloat = 70
     
@@ -255,12 +256,14 @@ class QmeraAudioViewController: UIViewController {
         UIDevice.current.isProximityMonitoringEnabled = false
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
+        Nexilis.callAPNActivated = false
     }
     
     deinit {
         UIDevice.current.isProximityMonitoringEnabled = false
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
+        Nexilis.callAPNActivated = false
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -311,6 +314,8 @@ class QmeraAudioViewController: UIViewController {
                     DispatchQueue.global().async {
                         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: u.pin, type: "1"), timeout: 30 * 1000) {
                             if response.isOk() {
+                            } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
+                                API.initiateCCall(sParty: u.pin)
                             } else {
                                 DispatchQueue.main.async {
                                     self.status.text = "Busy"
@@ -325,7 +330,6 @@ class QmeraAudioViewController: UIViewController {
                         }
                     }
                 } else {
-                    Nexilis.ringbacktonePlayer?.play()
                     API.initiateCCall(sParty: u.pin)
                 }
             } else if !ticketId.isEmpty {
@@ -339,6 +343,18 @@ class QmeraAudioViewController: UIViewController {
                 } else {
                     API.csa(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: false)
                 }
+            } else if autoAcceptAPN {
+//                API.receiveCCall(sParty: u.pin)
+//                DispatchQueue.global().asyncAfter(deadline: .now() + 1, execute: {
+//                    CallManager.shared.endCall(with: APIS.uuidCall!)
+                DispatchQueue.global().async {
+                    if let response1 = Nexilis.writeSync(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: u.pin, lPin: User.getMyPin()!, type: "1")) {
+                        if response1.isOk() {
+                //                            API.receiveCCall(sParty: u.pin)
+                        }
+                    }
+                }
+//                })
             }
         }
     }
@@ -347,8 +363,11 @@ class QmeraAudioViewController: UIViewController {
         DispatchQueue.main.async {
             let data:[AnyHashable : Any] = notification.userInfo!
             if let l_pin = data["l_pin"] as? String {
-                Nexilis.ringbacktonePlayer?.play()
-                API.initiateCCall(sParty: l_pin)
+                if let f_pin = data["f_pin"] as? String {
+                    if f_pin == User.getMyPin()!  {
+                        API.initiateCCall(sParty: l_pin)
+                    }
+                }
             }
         }
     }
@@ -389,6 +408,7 @@ class QmeraAudioViewController: UIViewController {
     }
     
     private func outgoingView() {
+        status.text = "Connecting..."
         view.addSubview(end)
         end.anchor(bottom: view.bottomAnchor, paddingBottom: 60, centerX: view.centerXAnchor, width: buttonSize, height: buttonSize)
         
@@ -761,6 +781,17 @@ class QmeraAudioViewController: UIViewController {
 //                for i in 0..<Nexilis.shared.callManager.calls.count {
 //                    Nexilis.shared.callManager.end(call: Nexilis.shared.callManager.calls[i])
 //                }
+                if callFCM {
+                    DispatchQueue.global().async {
+                        if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
+                        } else {
+                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                            banner.show()
+                        }
+                    }
+                }
                 API.terminateCall(sParty: nil)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     self.dismiss(animated: false, completion: nil)
@@ -777,20 +808,10 @@ class QmeraAudioViewController: UIViewController {
     }
     
     @objc func didReject(sender: Any?) {
-        if isOutgoing {
-            Nexilis.ringbacktonePlayer?.stop()
-        } else {
-            Nexilis.ringtonePlayer?.stop()
-        }
         didEnd(sender: sender)
     }
     
     @objc func didAccept(sender: Any?) {
-        if isOutgoing {
-            Nexilis.ringbacktonePlayer?.stop()
-        } else {
-            Nexilis.ringtonePlayer?.stop()
-        }
         NSLayoutConstraint.deactivate(stack.constraints)
         stack.subviews.forEach { subview in
             subview.removeFromSuperview()
@@ -858,13 +879,10 @@ class QmeraAudioViewController: UIViewController {
             } else if state == Nexilis.AUDIO_CALL_RINGING || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_RINGING) {
                 if users.count == 1 {
                     DispatchQueue.main.async {
-                        self.status.text = "Ringing..."
+                        self.status.text = "Waiting for answer".localized()
                     }
                 }
             } else if state == Nexilis.AUDIO_CALL_OFFHOOK || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_OFFHOOK) {
-                if isOutgoing {
-                    Nexilis.ringbacktonePlayer?.stop()
-                }
                 if users.count == 1 && firstCall {
                     DispatchQueue.main.async {
                         if !self.ticketId.isEmpty {
@@ -890,11 +908,6 @@ class QmeraAudioViewController: UIViewController {
                     self.users.append(user)
                 }
             } else if state == Nexilis.AUDIO_CALL_END || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_END) {
-                if isOutgoing {
-                    Nexilis.ringbacktonePlayer?.stop()
-                } else {
-                    Nexilis.ringtonePlayer?.stop()
-                }
                 let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
                 if let pin = arrayMessage.first, let index = users.firstIndex(of: User(pin: String(pin))) {
                     users.remove(at: index)
@@ -985,11 +998,6 @@ class QmeraAudioViewController: UIViewController {
 //                    }
 //                }
             } else if state == Nexilis.OFFLINE { // Offline
-                if isOutgoing {
-                    Nexilis.ringbacktonePlayer?.stop()
-                } else {
-                    Nexilis.ringtonePlayer?.stop()
-                }
                 let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
                 if let pin = arrayMessage.first, let index = users.firstIndex(of: User(pin: String(pin))) {
                     users.remove(at: index)
@@ -1022,11 +1030,6 @@ class QmeraAudioViewController: UIViewController {
                     }
                 }
             } else if state == Nexilis.BUSY { // Busy
-                if isOutgoing {
-                    Nexilis.ringbacktonePlayer?.stop()
-                } else {
-                    Nexilis.ringtonePlayer?.stop()
-                }
                 let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
                 if let pin = arrayMessage.first, let index = users.firstIndex(of: User(pin: String(pin))) {
                     users.remove(at: index)

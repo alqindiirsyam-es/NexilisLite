@@ -1282,6 +1282,26 @@ public final class Utils {
         return ""
     }
     
+    public static func setTokenAPN(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "token_apn")
+    }
+    public static func getTokenAPN() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "token_apn") {
+            return value
+        }
+        return ""
+    }
+    
+    public static func setLastTabSelected(value: Int) {
+        SecureUserDefaults.shared.set(value, forKey: "last_selected_tab")
+    }
+    public static func getLastTabSelected() -> Int {
+        if let value: Int = SecureUserDefaults.shared.value(forKey: "last_selected_tab") {
+            return value
+        }
+        return 0
+    }
+    
     static func getPasswordDB() -> String? {
         do {
             let p = getPassEncDB()
