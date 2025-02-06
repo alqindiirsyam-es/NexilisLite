@@ -316,11 +316,13 @@ class IncomingThread {
     
     private func notifyCalling(message: TMessage) -> Void {
         let lPin = message.getBody(key: CoreMessage_TMessageKey.L_PIN)
+        let fPin = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
         if let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID] {
             _ = Nexilis.responseString(packetId: packetId, message: "00", timeout: 3000)
         }
         var dataMessage: [AnyHashable : Any] = [:]
         dataMessage["l_pin"] = lPin
+        dataMessage["f_pin"] = fPin
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.callFCM), object: nil, userInfo: dataMessage)
     }
     

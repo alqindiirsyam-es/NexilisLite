@@ -229,32 +229,6 @@ class ContactChatViewController: UITableViewController {
             self.navigationController?.navigationBar.setNeedsLayout()
         }
         getData()
-        DispatchQueue.global().async {
-            self.getOpenGroups(listGroups: self.groups, completion: { g in
-                DispatchQueue.main.async {
-                    for og in g {
-                        if self.groups.first(where: { $0.id == og.id }) == nil {
-                            self.groups.append(og)
-                        }
-                    }
-                    self.groups.sort { (a, b) -> Bool in
-                        if Int(a.official) == 1 {
-                            return true
-                        } else if Int(b.official) == 1 {
-                            return false
-                        } else {
-                            return Int(a.official) ?? 0 > Int(b.official) ?? 0
-                        }
-                    }
-                    DispatchQueue.main.async {
-                        self.tableView.reloadData()
-                    }
-                }
-            })
-        }
-        if segment.selectedSegmentIndex == 0 {
-            Utils.inTabChats = true
-        }
     }
     
     @objc func addFriend(sender: UIBarButtonItem) {
@@ -300,41 +274,8 @@ class ContactChatViewController: UITableViewController {
     }
     
     @objc func onReceiveMessage(notification: NSNotification) {
-        DispatchQueue.main.async { [self] in
-            let data:[AnyHashable : Any] = notification.userInfo!
-            if let dataMessage = data["message"] as? TMessage {
-                let chatData = dataMessage.mBodies
-                if chatData[CoreMessage_TMessageKey.IS_CALL_CENTER] == nil || chatData[CoreMessage_TMessageKey.IS_CALL_CENTER] == "0" {
-                    var indexChat: Int?
-                    if chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == "3" && chatData[CoreMessage_TMessageKey.F_PIN] != User.getMyPin() {
-                        indexChat = chats.firstIndex(where: { $0.fpin == chatData[CoreMessage_TMessageKey.F_PIN] })
-                    } else if chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == "4" && chatData[CoreMessage_TMessageKey.F_PIN] != User.getMyPin() {
-                        indexChat = chats.firstIndex(where: { (chatData[CoreMessage_TMessageKey.CHAT_ID] ?? "").isEmpty ? $0.pin == chatData[CoreMessage_TMessageKey.L_PIN] : $0.pin == chatData[CoreMessage_TMessageKey.CHAT_ID] })
-                    }
-                    let newChat = Chat.getData(messageId: chatData[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")
-                    if newChat.count > 0 {
-                        if indexChat != nil {
-                            chats.remove(at: indexChat!)
-                            chats.insert(newChat[0], at: 0)
-                            if segment.selectedSegmentIndex == 0 {
-                                let indexPathToMove = IndexPath(row: indexChat!, section: 0)
-                                let indexPathNewPosition = IndexPath(row: 0, section: 0)
-                                tableView.performBatchUpdates({
-                                    tableView.moveRow(at: indexPathToMove, to: indexPathNewPosition)
-                                }, completion: nil)
-                                tableView.beginUpdates()
-                                tableView.reloadRows(at: [IndexPath(row: 0, section: 0)], with: .none)
-                                tableView.endUpdates()
-                            } else {
-                                tableView.reloadData()
-                            }
-                        } else {
-                            chats.insert(newChat[0], at: 0)
-                            tableView.reloadData()
-                        }
-                    }
-                }
-            }
+        DispatchQueue.main.async {
+            self.getData()
         }
     }
     
@@ -1221,7 +1162,7 @@ extension ContactChatViewController {
                 messageView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
                     messageView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
-                    messageView.topAnchor.constraint(equalTo: titleView.bottomAnchor, constant: 5.0),
+                    messageView.topAnchor.constraint(equalTo: titleView.bottomAnchor, constant: 2.0),
                     messageView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40.0),
                 ])
                 messageView.textColor = .gray
@@ -1266,7 +1207,7 @@ extension ContactChatViewController {
                         }
                     } else {
                         if data.messageScope == "4" {
-                            stringMessage.append(NSAttributedString(string: User.getData(pin: data.fpin)!.firstName + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
+                            stringMessage.append(NSAttributedString(string: User.getData(pin: data.fpin, lPin: data.pin)!.firstName + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
                         }
                         if data.lock == "1" {
                             stringMessage.append(("🚫 _"+"This message was deleted".localized()+"_").richText())

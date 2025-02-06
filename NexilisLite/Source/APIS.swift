@@ -833,140 +833,155 @@ public class APIS: NSObject {
 //            }
 //        }
         if checkAppStateisBackground() {
-            print("showNotificationNexilis1: \(userInfo)")
-            if let payload = userInfo["payload"] as? [String: Any] {
-                if let messagePayload = payload["message"] as? [String: Any] {
-                    if let data = messagePayload["data"] as? [String: Any] {
-                        let code = data["nx_code"] as? String ?? ""
-                        if code == "CL01" {
-                            if let message = data["bodies"] as? [String: Any] {
-                                var text = message[CoreMessage_TMessageKey.MESSAGE_TEXT] as? String ?? ""
-                                let nameUser = message[CoreMessage_TMessageKey.F_DISPLAY_NAME] as? String ?? ""
-                                let threadIdentifier = message[CoreMessage_TMessageKey.OPPOSITE_PIN] as? String ?? ""
-                                var nameSubtitle = ""
-                                let imageId = CoreMessage_TMessageKey.IMAGE_ID
-                                let videoId = CoreMessage_TMessageKey.VIDEO_ID
-                                let fileId = CoreMessage_TMessageKey.FILE_ID
-                                let audioId = CoreMessage_TMessageKey.AUDIO_ID
-                                let attachmentFlag = CoreMessage_TMessageKey.ATTACHMENT_FLAG
-                                let messageScopeId = CoreMessage_TMessageKey.MESSAGE_SCOPE_ID
-                                let credential = CoreMessage_TMessageKey.CREDENTIAL
-                                let gif_id = CoreMessage_TMessageKey.GIF_ID
-                                let is_secret = CoreMessage_TMessageKey.IS_SECRET
-                                if (message[is_secret] as? String ?? "") == "1" {
-                                  text = "You got messages..."
-                                } else if (message[gif_id] as? String ?? "") != "" {
-                                  text = "Sent GIF 🎬"
-                                } else if !(message[imageId] as? String ?? "").isEmpty {
-                                    text = "Sent Image 📷"
-                                } else if (message[attachmentFlag] as? String ?? "") == "11" {
-                                    text = "Sent Sticker ❤️"
-                                } else if !(message[videoId] as? String ?? "").isEmpty {
-                                    text = "Sent Video 📹"
-                                } else if !(message[fileId] as? String ?? "").isEmpty {
-                                    if (message[messageScopeId] as? String ?? "") == "18" {
-                                        text = "Sent Form 📄"
-                                    } else {
-                                        text = "Sent File 📄"
+            do {
+                let id = Utils.getConnectionID()
+                try API.initConnection(bSwitchIP: false, sAPIK: Nexilis.sAPIKey, aAppMain: nil, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+            } catch {
+                
+            }
+            DispatchQueue.main.async {
+                while (!API.bnuSDKServiceReady() || API.nGetCLXConnState() == 0) {
+                    Thread.sleep(forTimeInterval: 1)
+                }
+                if let payload = userInfo["payload"] as? [String: Any] {
+                    if let messagePayload = payload["message"] as? [String: Any] {
+                        if let data = messagePayload["data"] as? [String: Any] {
+                            let code = data["nx_code"] as? String ?? ""
+                            if code == "CL01" {
+                                if let message = data["bodies"] as? [String: String] {
+                                    let messageToSave = TMessage()
+                                    messageToSave.mBodies = message
+                                    Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
+                                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""))
+                                    var text = message[CoreMessage_TMessageKey.MESSAGE_TEXT] ?? ""
+                                    text = text.toNormalString()
+                                    let nameUser = message[CoreMessage_TMessageKey.F_DISPLAY_NAME] ?? ""
+                                    let threadIdentifier = message[CoreMessage_TMessageKey.OPPOSITE_PIN] ?? ""
+                                    var nameSubtitle = ""
+                                    let imageId = CoreMessage_TMessageKey.IMAGE_ID
+                                    let videoId = CoreMessage_TMessageKey.VIDEO_ID
+                                    let fileId = CoreMessage_TMessageKey.FILE_ID
+                                    let audioId = CoreMessage_TMessageKey.AUDIO_ID
+                                    let attachmentFlag = CoreMessage_TMessageKey.ATTACHMENT_FLAG
+                                    let messageScopeId = CoreMessage_TMessageKey.MESSAGE_SCOPE_ID
+                                    let credential = CoreMessage_TMessageKey.CREDENTIAL
+                                    let gif_id = CoreMessage_TMessageKey.GIF_ID
+                                    let is_secret = CoreMessage_TMessageKey.IS_SECRET
+                                    if (message[is_secret] ?? "") == "1" {
+                                      text = "You got messages..."
+                                    } else if (message[gif_id] ?? "") != "" {
+                                      text = "Sent GIF 🎬"
+                                    } else if !(message[imageId] ?? "").isEmpty {
+                                        text = "Sent Image 📷"
+                                    } else if (message[attachmentFlag] ?? "") == "11" {
+                                        text = "Sent Sticker ❤️"
+                                    } else if !(message[videoId] ?? "").isEmpty {
+                                        text = "Sent Video 📹"
+                                    } else if !(message[fileId] ?? "").isEmpty {
+                                        if (message[messageScopeId] ?? "") == "18" {
+                                            text = "Sent Form 📄"
+                                        } else {
+                                            text = "Sent File 📄"
+                                        }
+                                    } else if !(message[audioId] ?? "").isEmpty {
+                                        text = "Sent Audio ♫"
+                                    } else if text.contains("Share%20location%20") {
+                                        text = "Sent Location 📌"
+                                    } else if (message[attachmentFlag] ?? "") == "27" {
+                                        text = "Sent Live Streaming"
+                                    } else if (message[attachmentFlag] ?? "") == "26" {
+                                        text = "Sent Seminar"
+                                    } else if (message[attachmentFlag] ?? "") == "25" {
+                                        text = "Sent Video Conference Room"
+                                    } else if (message[attachmentFlag] ?? "") == "24" {
+                                        text = "Sent Quiz"
+                                    } else if (message[credential] ?? "") == "1" {
+                                        text = "Sent Confidential Message"
                                     }
-                                } else if !(message[audioId] as? String ?? "").isEmpty {
-                                    text = "Sent Audio ♫"
-                                } else if text.contains("Share%20location%20") {
-                                    text = "Sent Location 📌"
-                                } else if (message[attachmentFlag] as? String ?? "") == "27" {
-                                    text = "Sent Live Streaming"
-                                } else if (message[attachmentFlag] as? String ?? "") == "26" {
-                                    text = "Sent Seminar"
-                                } else if (message[attachmentFlag] as? String ?? "") == "25" {
-                                    text = "Sent Video Conference Room"
-                                } else if (message[attachmentFlag] as? String ?? "") == "24" {
-                                    text = "Sent Quiz"
-                                } else if (message[credential] as? String ?? "") == "1" {
-                                    text = "Sent Confidential Message"
+                                    let center = UNUserNotificationCenter.current()
+                                    let content = UNMutableNotificationContent()
+                                    content.title = nameUser
+                                    content.body = text
+                                    content.sound = .default
+                                    var type = "1"
+                                    if (message[messageScopeId] ?? "") == "3" || (message[messageScopeId] ?? "") == "18" || (message[messageScopeId] ?? "") == "5"{
+                                        type = "0"
+                                    }
+                                    var nameTopic = "Lounge".localized()
+                                    var idGroup = ""
+                                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                        do {
+                                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT title, group_id FROM DISCUSSION_FORUM WHERE chat_id='\(threadIdentifier)'"), cursor.next() {
+                                                nameTopic = cursor.string(forColumnIndex: 0) ?? ""
+                                                idGroup = cursor.string(forColumnIndex: 1) ?? ""
+                                                cursor.close()
+                                            }
+                                            if idGroup.isEmpty {
+                                                idGroup = threadIdentifier
+                                            }
+                                            if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id FROM GROUPZ WHERE group_id='\(idGroup)'"), cursorGroup.next() {
+                                                let nameGroup = cursorGroup.string(forColumnIndex: 0) ?? ""
+                                                nameSubtitle = "\(nameGroup)(\(nameTopic))"
+                                                cursorGroup.close()
+                                            }
+                                        } catch {
+                                            rollback.pointee = true
+                                            print("Access database error: \(error.localizedDescription)")
+                                        }
+                                    })
+                                    if type == "1" {
+                                        content.subtitle = nameSubtitle
+                                    }
+                                    content.userInfo = ["id" : threadIdentifier, "type" : type]
+                                    content.sound = UNNotificationSound(named: UNNotificationSoundName("pb_call_in.mp3"))
+                                    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+                                    let request = UNNotificationRequest(identifier: threadIdentifier, content: content, trigger: trigger)
+                                    center.add(request) { error in
+                                        if let error = error {
+                                            print("Error scheduling notification: \(error.localizedDescription)")
+                                        }
+                                    }
                                 }
+                            } else if code == "CL03" {
+                                let callFromName = data["call-from-name"] as? String ?? ""
+                                let callFrom = data["call-from"] as? String ?? ""
+                                let callType = data["call-type"] as? String ?? ""
+                                uuidCall = UUID()
+                                fpinCall = callFrom
+                                Nexilis.callAPNActivated = true
+    //                                    CallManager.shared.reportIncomingCall(uuid: uuidCall!, callerName: callFromName, callerId: callFrom, isVideo: callType != "1") { error in
+    //                                        if let error = error {
+    //                                            print("Error reporting incoming call: \(error.localizedDescription)")
+    //                                        } else {
+    //                                            print("Incoming call reported successfully")
+    //                                        }
+    //                                    }
                                 copySoundToLocalPath()
                                 let center = UNUserNotificationCenter.current()
                                 let content = UNMutableNotificationContent()
-                                content.title = nameUser
-                                content.body = text
-                                var type = "1"
-                                if (message[messageScopeId] as? String ?? "") == "3" || (message[messageScopeId] as? String ?? "") == "18" || (message[messageScopeId] as? String ?? "") == "5"{
-                                    type = "0"
+                                content.title = callFromName
+                                if callType == "1" {
+                                    content.body = "Incoming Audio Call".localized()
+                                } else {
+                                    content.body = "Incoming Video Call".localized()
                                 }
-                                var nameTopic = "Lounge".localized()
-                                var idGroup = ""
-                                Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                    do {
-                                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT title, group_id FROM DISCUSSION_FORUM WHERE chat_id='\(threadIdentifier)'"), cursor.next() {
-                                            nameTopic = cursor.string(forColumnIndex: 0) ?? ""
-                                            idGroup = cursor.string(forColumnIndex: 1) ?? ""
-                                            cursor.close()
-                                        }
-                                        if idGroup.isEmpty {
-                                            idGroup = threadIdentifier
-                                        }
-                                        if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id FROM GROUPZ WHERE group_id='\(idGroup)'"), cursorGroup.next() {
-                                            let nameGroup = cursorGroup.string(forColumnIndex: 0) ?? ""
-                                            nameSubtitle = "\(nameGroup)(\(nameTopic))"
-                                            cursorGroup.close()
-                                        }
-                                    } catch {
-                                        rollback.pointee = true
-                                        print("Access database error: \(error.localizedDescription)")
-                                    }
-                                })
-                                if type == "1" {
-                                    content.subtitle = nameSubtitle
-                                }
-                                content.userInfo = ["id" : threadIdentifier, "type" : type]
+                                content.userInfo = ["id" : callFrom, "type" : code, "callType": callType]
                                 content.sound = UNNotificationSound(named: UNNotificationSoundName("pb_call_in.mp3"))
                                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-                                let request = UNNotificationRequest(identifier: threadIdentifier, content: content, trigger: trigger)
+                                let request = UNNotificationRequest(identifier: "\(uuidCall!)", content: content, trigger: trigger)
                                 center.add(request) { error in
                                     if let error = error {
                                         print("Error scheduling notification: \(error.localizedDescription)")
                                     }
                                 }
-                            }
-                        } else if code == "CL03" {
-                            let callFromName = data["call-from-name"] as? String ?? ""
-                            let callFrom = data["call-from"] as? String ?? ""
-                            let callType = data["call-type"] as? String ?? ""
-                            uuidCall = UUID()
-                            fpinCall = callFrom
-                            Nexilis.callAPNActivated = true
-//                                    CallManager.shared.reportIncomingCall(uuid: uuidCall!, callerName: callFromName, callerId: callFrom, isVideo: callType != "1") { error in
-//                                        if let error = error {
-//                                            print("Error reporting incoming call: \(error.localizedDescription)")
-//                                        } else {
-//                                            print("Incoming call reported successfully")
-//                                        }
-//                                    }
-                            copySoundToLocalPath()
-                            let center = UNUserNotificationCenter.current()
-                            let content = UNMutableNotificationContent()
-                            content.title = callFromName
-                            if callType == "1" {
-                                content.body = "Incoming Audio Call".localized()
-                            } else {
-                                content.body = "Incoming Video Call".localized()
-                            }
-                            content.userInfo = ["id" : callFrom, "type" : code, "callType": callType]
-                            content.sound = UNNotificationSound(named: UNNotificationSoundName("pb_call_in.mp3"))
-                            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-                            let request = UNNotificationRequest(identifier: "\(uuidCall!)", content: content, trigger: trigger)
-                            center.add(request) { error in
-                                if let error = error {
-                                    print("Error scheduling notification: \(error.localizedDescription)")
+                            } else if code == "CL02" {
+                                if let uuidCall = uuidCall {
+                                    Nexilis.callAPNActivated = false
+                                    let center = UNUserNotificationCenter.current()
+                                    center.removePendingNotificationRequests(withIdentifiers: ["\(uuidCall)"])
+                                    center.removeDeliveredNotifications(withIdentifiers: ["\(uuidCall)"])
+    //                                    CallManager.shared.endCall(with: uuidCall)
                                 }
-                            }
-                        } else if code == "CL02" {
-                            if let uuidCall = uuidCall {
-                                Nexilis.callAPNActivated = false
-                                let center = UNUserNotificationCenter.current()
-                                center.removePendingNotificationRequests(withIdentifiers: ["\(uuidCall)"])
-                                center.removeDeliveredNotifications(withIdentifiers: ["\(uuidCall)"])
-//                                    CallManager.shared.endCall(with: uuidCall)
                             }
                         }
                     }

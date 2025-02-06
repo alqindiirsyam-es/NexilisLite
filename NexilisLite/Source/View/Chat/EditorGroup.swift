@@ -120,9 +120,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             super.viewDidDisappear(true)
             self.removeFromParent()
             self.dismiss(animated: true, completion: nil)
-            var l_pin = self.dataGroup["group_id"] as! String
-            if (self.dataTopic["chat_id"] as! String != "") {
-                l_pin = self.dataTopic["chat_id"] as! String
+            var l_pin = self.dataGroup["group_id"]  as? String ?? ""
+            if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
+                l_pin = self.dataTopic["chat_id"]  as? String ?? ""
             }
             SecureUserDefaults.shared.set("\(textFieldSend.textColor != UIColor.lightGray ? textFieldSend.text! : ""),\(reffId ?? "")", forKey: "saved_\(l_pin)")
         }
@@ -198,9 +198,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         documentPicker = DocumentPicker(presentationController: self, delegate: self)
         
         let fm = FileManager.default
-        if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+        if Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") != nil {
             let path = Bundle.resourceBundle(for: Nexilis.self).resourcePath! //resourcesMediaBundle
-            var items = try! fm.contentsOfDirectory(atPath: path)
+            let items = try! fm.contentsOfDirectory(atPath: path)
             
             for item in items {
                 if item.hasPrefix("sticker") {
@@ -209,7 +209,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             }
         } else {
             let path = Bundle.resourcesMediaBundle(for: Nexilis.self).resourcePath! //resourcesMediaBundle
-            var items = try! fm.contentsOfDirectory(atPath: path)
+            let items = try! fm.contentsOfDirectory(atPath: path)
             
             for item in items {
                 if item.hasPrefix("sticker") {
@@ -249,7 +249,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         if dataMessageForward != nil {
             for i in 0..<dataMessageForward!.count {
                 let isForwarded = (dataMessageForward![i][TypeDataMessage.is_forwarded] as? Int) ?? 0
-                sendChat(message_scope_id: "4", status: "2", message_text: dataMessageForward![i]["message_text"] as! String, credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"] as! String, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"] as! String, audio_id: dataMessageForward![i]["audio_id"] as! String, video_id: dataMessageForward![i]["video_id"] as! String, file_id: dataMessageForward![i]["file_id"] as! String, thumb_id: dataMessageForward![i]["thumb_id"] as! String, reff_id: "", read_receipts: "", is_call_center: "0", call_center_id: "", viewController: self, gif_id: dataMessageForward![i][TypeDataMessage.gif_id] as! String, is_forwarded: isForwarded + 1)
+                sendChat(message_scope_id: "4", status: "2", message_text: dataMessageForward![i]["message_text"]  as? String ?? "", credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"]  as? String ?? "", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"]  as? String ?? "", audio_id: dataMessageForward![i]["audio_id"]  as? String ?? "", video_id: dataMessageForward![i]["video_id"]  as? String ?? "", file_id: dataMessageForward![i]["file_id"]  as? String ?? "", thumb_id: dataMessageForward![i]["thumb_id"]  as? String ?? "", reff_id: "", read_receipts: "", is_call_center: "0", call_center_id: "", viewController: self, gif_id: dataMessageForward![i][TypeDataMessage.gif_id]  as? String ?? "", is_forwarded: isForwarded + 1)
             }
             dataMessageForward = nil
         }
@@ -289,11 +289,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 let alert = LibAlertController(title: "", message: "Are you sure to delete all message in this conversation?".localized(), preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "Cancel".localized(), style: UIAlertAction.Style.default, handler: nil))
                 alert.addAction(UIAlertAction(title: "Delete".localized(), style: .destructive, handler: {(_) in
-                    var l_pin = self.dataGroup["group_id"] as! String
+                    var l_pin = self.dataGroup["group_id"]  as? String ?? ""
                     Database.shared.database?.inTransaction({ (fmdb, rollback) in
                         do {
-                            if (self.dataTopic["chat_id"] as! String != "") {
-                                l_pin = self.dataTopic["chat_id"] as! String
+                            if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
+                                l_pin = self.dataTopic["chat_id"]  as? String ?? ""
                             }
                             _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE", _where: "(l_pin='\(self.dataGroup["group_id"]!!)' and chat_id='\(self.dataTopic["chat_id"]!!)') and message_scope_id='4'")
                             _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", _where: "l_pin='\(l_pin)'")
@@ -381,17 +381,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         }
         
         if !isHistoryCC {
-            let groupId = dataGroup["group_id"] as! String
-            let chatId = dataTopic["chat_id"] as! String
+            let groupId = dataGroup["group_id"]  as? String ?? ""
+            let chatId = dataTopic["chat_id"]  as? String ?? ""
             let dataGT: [String] = [groupId, chatId]
             SecureUserDefaults.shared.set(dataGT, forKey: "inEditorGroup")
             
-            if dataTopic["chat_id"] as! String == "" {
-                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataGroup["group_id"] as! String])
-                sendTyping(l_pin: dataGroup["group_id"] as! String)
+            if dataTopic["chat_id"]  as? String ?? "" == "" {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataGroup["group_id"]  as? String ?? ""])
+                sendTyping(l_pin: dataGroup["group_id"]  as? String ?? "")
             } else {
-                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataTopic["chat_id"] as! String])
-                sendTyping(l_pin: dataTopic["chat_id"] as! String)
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataTopic["chat_id"]  as? String ?? ""])
+                sendTyping(l_pin: dataTopic["chat_id"]  as? String ?? "")
             }
         } else {
             getOfficialGroup()
@@ -424,7 +424,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             if dataMessages.firstIndex(where: {$0["message_id"] as? String == referenceMessageId} ) != 0 {
                 DispatchQueue.main.async {
                     let section = self.dataDates.firstIndex(of: self.referenceChatDate)
-                    let row = self.dataMessages.filter({$0["chat_date"] as! String == self.referenceChatDate}).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
+                    let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.referenceChatDate}).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
                     let indexPath = IndexPath(row: row!, section: section!)
                     self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: false)
                     self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
@@ -437,8 +437,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             if dataMessages.firstIndex(where: {$0["message_id"] as? String == markerCounter} ) != 0 {
                 DispatchQueue.main.async {
                     let data = self.dataMessages.filter({ $0["message_id"] as? String == self.markerCounter })
-                    let section = self.dataDates.firstIndex(of: data[0]["chat_date"] as! String)
-                    let row = self.dataMessages.filter({$0["chat_date"] as! String == data[0]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.markerCounter})
+                    let section = self.dataDates.firstIndex(of: data[0]["chat_date"]  as? String ?? "")
+                    let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == data[0]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.markerCounter})
                     self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .bottom, animated: false)
                 }
             } else {
@@ -450,7 +450,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     if let idx = dataMessages.firstIndex(where: { $0["message_id"] as? String == markerCounter}) {
                         for i in idx..<dataMessages.count {
                             if dataMessages[i]["f_pin"] as? String != idMe {
-                                sendReadMessageStatus(chat_id: self.dataTopic["chat_id"] as! String, f_pin: dataMessages[i]["f_pin"] as! String, message_scope_id: "4", message_id: dataMessages[i]["message_id"] as! String)
+                                sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: "4", message_id: dataMessages[i]["message_id"]  as? String ?? "")
                             }
                         }
                         counter = 0
@@ -459,9 +459,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 }
             }
         } else {
-            var l_pin = self.dataGroup["group_id"] as! String
-            if (self.dataTopic["chat_id"] as! String != "") {
-                l_pin = self.dataTopic["chat_id"] as! String
+            var l_pin = self.dataGroup["group_id"]  as? String ?? ""
+            if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
+                l_pin = self.dataTopic["chat_id"]  as? String ?? ""
             }
             if let dataSaved: String = SecureUserDefaults.shared.value(forKey: "saved_\(l_pin)") {
                 let last_m = dataSaved.components(separatedBy: ",")[0]
@@ -498,8 +498,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     self.listTimerCredential[data.key] = second
                     let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == data.key })
                     if (idx != nil) {
-                        let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-                        let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                        let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
+                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
                         if second == 0 {
                             timer.invalidate()
                             self.listTimerCredential.removeValue(forKey: data.key)
@@ -572,7 +572,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     dataTopic["title"] = cursorTopic.string(forColumnIndex: 1)
                     dataTopic["chat_id"] = unique_l_pin
                     cursorTopic.close()
-                    if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id, official, parent FROM GROUPZ where group_id = '\(dataGroup["group_id"] as! String)'"), cursorGroup.next() {
+                    if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id, official, parent FROM GROUPZ where group_id = '\(dataGroup["group_id"]  as? String ?? "")'"), cursorGroup.next() {
                         dataGroup["f_name"] = cursorGroup.string(forColumnIndex: 0)
                         dataGroup["image_id"] = cursorGroup.string(forColumnIndex: 1)
                         dataGroup["official"] = cursorGroup.string(forColumnIndex: 2)
@@ -590,11 +590,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     private func getData() {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"] as! String)' order by server_date asc"
+                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"]  as? String ?? "")' order by server_date asc"
                 if isHistoryCC {
                     query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc"
-                } else if (dataTopic["chat_id"] as! String != "") {
-                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message FROM MESSAGE where chat_id='\(dataTopic["chat_id"] as! String)' order by server_date asc"
+                } else if (dataTopic["chat_id"]  as? String ?? "" != "") {
+                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message FROM MESSAGE where chat_id='\(dataTopic["chat_id"]  as? String ?? "")' order by server_date asc"
                 }
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     var tempImages: [ImageGrouping] = []
@@ -624,12 +624,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 21)
                         row[TypeDataMessage.is_forwarded] = Int(cursorData.int(forColumnIndex: 22))
                         row["isSelected"] = false
-                        if row["credential"] != nil && row["credential"] as! String == "1" {
+                        if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
                             let idMe = User.getMyPin()!
-                            if row["f_pin"] as! String == idMe {
-                                let second = getSecondsDifferenceFromTwoDates(start: Date.init(milliseconds: Int64(row["server_date"] as! String)!), end: Date())
+                            if row["f_pin"]  as? String ?? "" == idMe {
+                                let second = getSecondsDifferenceFromTwoDates(start: Date.init(milliseconds: Int64(row["server_date"]  as? String ?? "")!), end: Date())
                                 if second > 60 {
-                                    listTimerCredential[row["message_id"] as! String] = 0
+                                    listTimerCredential[row["message_id"]  as? String ?? ""] = 0
                                     row["lock"] = "2"
                                     row["reff_id"] = ""
                                     DispatchQueue.global().async {
@@ -637,7 +637,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                             do {
                                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                                                     "lock" : "2"
-                                                ], _where: "message_id = '\(row["message_id"] as! String)'")
+                                                ], _where: "message_id = '\(row["message_id"]  as? String ?? "")'")
                                             } catch {
                                                 rollback.pointee = true
                                                 print("Access database error: \(error.localizedDescription)")
@@ -646,14 +646,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                     }
                                 } else {
                                     let second = 60 - second
-                                    listTimerCredential[row["message_id"] as! String] = second
+                                    listTimerCredential[row["message_id"]  as? String ?? ""] = second
                                 }
                             } else {
-                                let hasMessageId: String? = SecureUserDefaults.shared.value(forKey: row["message_id"] as! String) ?? nil
+                                let hasMessageId: String? = SecureUserDefaults.shared.value(forKey: row["message_id"]  as? String ?? "") ?? nil
                                 if hasMessageId != nil {
                                     let second = getSecondsDifferenceFromTwoDates(start: Date.init(milliseconds: Int64(hasMessageId!)!), end: Date())
                                     if second > 60 {
-                                        listTimerCredential[row["message_id"] as! String] = 0
+                                        listTimerCredential[row["message_id"]  as? String ?? ""] = 0
                                         row["lock"] = "2"
                                         row["reff_id"] = ""
                                         DispatchQueue.global().async {
@@ -661,7 +661,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                                 do {
                                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                                                         "lock" : "2"
-                                                    ], _where: "message_id = '\(row["message_id"] as! String)'")
+                                                    ], _where: "message_id = '\(row["message_id"]  as? String ?? "")'")
                                                 } catch {
                                                     rollback.pointee = true
                                                     print("Access database error: \(error.localizedDescription)")
@@ -670,11 +670,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                         }
                                     } else {
                                         let second = 60 - second
-                                        listTimerCredential[row["message_id"] as! String] = second
+                                        listTimerCredential[row["message_id"]  as? String ?? ""] = second
                                     }
                                 } else {
-                                    SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: row["message_id"] as! String)
-                                    listTimerCredential[row["message_id"] as! String] = 60
+                                    SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: row["message_id"]  as? String ?? "")
+                                    listTimerCredential[row["message_id"]  as? String ?? ""] = 60
                                 }
                             }
                         }
@@ -685,29 +685,29 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                         if let dirPath = paths.first {
-                            let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["video_id"] as! String)
-                            let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["file_id"] as! String)
-                            if ((row["video_id"] as! String) != "") {
-                                if FileManager.default.fileExists(atPath: videoURL.path) || FileEncryption.shared.isSecureExists(filename: row["video_id"] as! String){
+                            let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["video_id"]  as? String ?? "")
+                            let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["file_id"]  as? String ?? "")
+                            if ((row["video_id"]  as? String ?? "") != "") {
+                                if FileManager.default.fileExists(atPath: videoURL.path) || FileEncryption.shared.isSecureExists(filename: row["video_id"]  as? String ?? ""){
                                     row["progress"] = 100.0
                                 } else {
                                     row["progress"] = 0.0
                                 }
                             } else {
-                                if FileManager.default.fileExists(atPath: fileURL.path) || FileEncryption.shared.isSecureExists(filename: row["file_id"] as! String){
+                                if FileManager.default.fileExists(atPath: fileURL.path) || FileEncryption.shared.isSecureExists(filename: row["file_id"]  as? String ?? ""){
                                     row["progress"] = 100.0
                                 } else {
                                     row["progress"] = 0.0
                                 }
                             }
                         }
-                        row["chat_date"] = chatDate(stringDate: row["server_date"] as! String)
+                        row["chat_date"] = chatDate(stringDate: row["server_date"]  as? String ?? "")
                         
-                        if (dataMessages.count == 0 || dataMessages.last!["f_pin"] as! String == row["f_pin"] as! String) && tempImages.count <= 30 && row["image_id"] != nil && !(row["image_id"] as! String).isEmpty && (row["message_text"] as! String).isEmpty && (row["reff_id"] as! String).isEmpty && (row["read_receipts"] as! String) != "8" {
-                            if tempImages.count != 0 && getSecondsDifferenceFromTwoDates(start: Date.init(milliseconds: Int64(tempImages.last!.time)!), end: Date.init(milliseconds: Int64(row["server_date"] as! String)!))/60 >= 11 {
+                        if (dataMessages.count == 0 || dataMessages.last!["f_pin"]  as? String ?? "" == row["f_pin"]  as? String ?? "") && tempImages.count <= 30 && row["image_id"] != nil && !(row["image_id"]  as? String ?? "").isEmpty && (row["message_text"]  as? String ?? "").isEmpty && (row["reff_id"]  as? String ?? "").isEmpty && (row["read_receipts"]  as? String ?? "") != "8" {
+                            if tempImages.count != 0 && getSecondsDifferenceFromTwoDates(start: Date.init(milliseconds: Int64(tempImages.last!.time)!), end: Date.init(milliseconds: Int64(row["server_date"]  as? String ?? "")!))/60 >= 11 {
                                 if tempImages.count >= 4 {
                                     groupImages[tempImages[0].messageId] = tempImages
-                                    if let idxTemp = dataMessages.firstIndex(where: { $0["message_id"] as! String == tempImages[0].messageId }) {
+                                    if let idxTemp = dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
                                         for _ in 1..<tempImages.count {
                                             dataMessages.remove(at: idxTemp + 1)
                                         }
@@ -715,10 +715,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                 }
                                 tempImages.removeAll()
                             }
-                            tempImages.append(ImageGrouping(messageId: row["message_id"] as! String, thumbId: row["thumb_id"] as! String, imageId: row["image_id"] as! String, status: row["status"] as! String, time: row["server_date"] as! String, lPin: row["l_pin"] as! String, dataMessage: row, dataPerson: [:], dataGroup: dataGroup, dataTopic: dataTopic))
+                            tempImages.append(ImageGrouping(messageId: row["message_id"]  as? String ?? "", thumbId: row["thumb_id"]  as? String ?? "", imageId: row["image_id"]  as? String ?? "", status: row["status"]  as? String ?? "", time: row["server_date"]  as? String ?? "", lPin: row["l_pin"]  as? String ?? "", dataMessage: row, dataPerson: [:], dataGroup: dataGroup, dataTopic: dataTopic))
                         } else if tempImages.count >= 4 {
                             groupImages[tempImages[0].messageId] = tempImages
-                            if let idxTemp = dataMessages.firstIndex(where: { $0["message_id"] as! String == tempImages[0].messageId }) {
+                            if let idxTemp = dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
                                 for _ in 1..<tempImages.count {
                                     dataMessages.remove(at: idxTemp + 1)
                                 }
@@ -737,7 +737,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             tempImages.removeSubrange(30..<tempImages.count)
                         }
                         groupImages[tempImages[0].messageId] = tempImages
-                        if let idxTemp = dataMessages.firstIndex(where: { $0["message_id"] as! String == tempImages[0].messageId }) {
+                        if let idxTemp = dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
                             for _ in 1..<tempImages.count {
                                 dataMessages.remove(at: idxTemp + 1)
                             }
@@ -835,8 +835,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             imageProfile.clipsToBounds = true
             viewAppBar.addSubview(imageProfile)
             let pictureImage = dataGroup["image_id"]!
-            if (pictureImage as! String != "" && pictureImage != nil) {
-                imageProfile.setImage(name: pictureImage! as! String)
+            if (pictureImage  as? String ?? "" != "" && pictureImage != nil) {
+                imageProfile.setImage(name: pictureImage!  as? String ?? "")
                 imageProfile.contentMode = .scaleAspectFill
             } else {
                 imageProfile.image = UIImage(systemName: "person.3")
@@ -849,7 +849,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             }
             let titleNavigation = UILabel(frame: CGRect(x: 35, y: 0, width: widthTitle, height: 44))
             viewAppBar.addSubview(titleNavigation)
-            if (dataGroup["official"] as! String == "1") {
+            if (dataGroup["official"]  as? String ?? "" == "1") {
                 if !isHistoryCC {
                     titleNavigation.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(dataGroup["f_name"]!!) (\(dataTopic["title"]!!))", size: 15, y: -4)
                 } else {
@@ -892,17 +892,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     func updateProgress(_ data: [AnyHashable: Any]){
         var isImage = false
-        var idx = dataMessages.lastIndex(where: { $0["video_id"] as! String == data["name"] as! String || $0["video_id"] as? String == data["video_id"] as? String })
+        var idx = dataMessages.lastIndex(where: { $0["video_id"]  as? String ?? "" == data["name"]  as? String ?? "" || $0["video_id"] as? String == data["video_id"] as? String })
         if (idx == nil) {
-            idx = dataMessages.lastIndex(where: { $0["image_id"] as! String == data["name"] as! String || $0["image_id"] as? String == data["image_id"] as? String })
+            idx = dataMessages.lastIndex(where: { $0["image_id"]  as? String ?? "" == data["name"]  as? String ?? "" || $0["image_id"] as? String == data["image_id"] as? String })
             isImage = true
         }
         if (idx != nil) {
-            let section = dataDates.firstIndex(of: dataMessages[idx!]["chat_date"] as! String)
+            let section = dataDates.firstIndex(of: dataMessages[idx!]["chat_date"]  as? String ?? "")
             if section == nil {
                 return
             }
-            let row = dataMessages.filter({ $0["chat_date"] as! String == dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == dataMessages[idx!]["message_id"] as! String})
+            let row = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[idx!]["message_id"]  as? String ?? ""})
             if row == nil {
                 return
             }
@@ -944,7 +944,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 }
             }
         } else {
-            idx = dataMessages.lastIndex(where: { $0["file_id"] as! String == data["name"] as! String || $0["file_id"] as? String == data["file_id"] as? String })
+            idx = dataMessages.lastIndex(where: { $0["file_id"]  as? String ?? "" == data["name"]  as? String ?? "" || $0["file_id"] as? String == data["file_id"] as? String })
             if (idx != nil) {
                 DispatchQueue.main.async {
                     let section = 0
@@ -1000,16 +1000,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             let data:[AnyHashable : Any] = notification.userInfo!
             if let dataMessage = data["message"] as? TMessage {
                 let chatData = dataMessage.mBodies
-                let group_id = self.dataGroup["group_id"] as! String
-                let chat_id = self.dataTopic["chat_id"] as! String
+                let group_id = self.dataGroup["group_id"]  as? String ?? ""
+                let chat_id = self.dataTopic["chat_id"]  as? String ?? ""
                 if chatData[CoreMessage_TMessageKey.L_PIN] == group_id && (chatData[CoreMessage_TMessageKey.CHAT_ID] ?? "") == chat_id {
                     let idx = self.dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == chatData[CoreMessage_TMessageKey.MESSAGE_ID]})
                     if idx != nil {
                         self.dataMessages[idx!][TypeDataMessage.message_text] = chatData[CoreMessage_TMessageKey.MESSAGE_TEXT]
                         self.dataMessages[idx!][TypeDataMessage.last_edit] = Int64(chatData[CoreMessage_TMessageKey.LAST_EDIT]!)
                         self.dataMessages[idx!][TypeDataMessage.status] = chatData[CoreMessage_TMessageKey.STATUS]
-                        let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-                        let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                        let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
+                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
                         if row != nil && section != nil  {
                             self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                         }
@@ -1081,25 +1081,25 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     }
                     row["chat_date"] = "Today".localized()
                     row["blog_id"] = chatData[CoreMessage_TMessageKey.BLOG_ID]
-                    if row["credential"] != nil && row["credential"] as! String == "1" {
-                        self.listTimerCredential[row["message_id"] as! String] = 60
+                    if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
+                        self.listTimerCredential[row["message_id"]  as? String ?? ""] = 60
                     }
                     self.counter += 1
                     self.dataMessages.append(row)
-                    self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .fade)
-                    if row["credential"] != nil && row["credential"] as! String == "1" {
+                    self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .fade)
+                    if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
                         var timer = Timer()
                         var minute = 60
-                        self.timerCredential[row["message_id"] as! String] = timer
-                        SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: row["message_id"] as! String)
+                        self.timerCredential[row["message_id"]  as? String ?? ""] = timer
+                        SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: row["message_id"]  as? String ?? "")
                         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true, block: {_ in
                             minute -= 1
-                            self.listTimerCredential[row["message_id"] as! String] = minute
+                            self.listTimerCredential[row["message_id"]  as? String ?? ""] = minute
                             if minute == 0 {
                                 timer.invalidate()
-                                self.listTimerCredential.removeValue(forKey: row["message_id"] as! String)
-                                self.timerCredential.removeValue(forKey: row["message_id"] as! String)
-                                SecureUserDefaults.shared.removeValue(forKey: row["message_id"] as! String)
+                                self.listTimerCredential.removeValue(forKey: row["message_id"]  as? String ?? "")
+                                self.timerCredential.removeValue(forKey: row["message_id"]  as? String ?? "")
+                                SecureUserDefaults.shared.removeValue(forKey: row["message_id"]  as? String ?? "")
                                 let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == row["message_id"] as? String})
                                 if idx != nil {
                                     self.dataMessages[idx!]["lock"] = "2"
@@ -1110,7 +1110,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                         do {
                                             _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                                                 "lock" : "2"
-                                            ], _where: "message_id = '\(row["message_id"] as! String)'")
+                                            ], _where: "message_id = '\(row["message_id"]  as? String ?? "")'")
                                         } catch {
                                             rollback.pointee = true
                                             print("Access database error: \(error.localizedDescription)")
@@ -1119,7 +1119,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                 }
                             }
                             let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
-                            let row = self.dataMessages.filter({$0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == row["message_id"] as? String})
+                            let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == row["message_id"] as? String})
                             let indexPath = IndexPath(row: row!, section: section!)
                             if row != nil && section != nil{
                                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
@@ -1128,10 +1128,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     }
                     if  self.currentIndexpath?.row == (self.dataMessages.count - 2) {
                         if (self.viewIfLoaded?.window != nil) {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"] as! String, f_pin: chatData[CoreMessage_TMessageKey.F_PIN]!, message_scope_id: chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]!, message_id: chatData[CoreMessage_TMessageKey.MESSAGE_ID]!)
+                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: chatData[CoreMessage_TMessageKey.F_PIN]!, message_scope_id: chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]!, message_id: chatData[CoreMessage_TMessageKey.MESSAGE_ID]!)
                         }
                         self.tableChatView.scrollToBottom()
-                        if (self.currentIndexpath!.section <= self.dataDates.count - 1 && self.currentIndexpath!.row <= self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1)  {
+                        if (self.currentIndexpath!.section <= self.dataDates.count - 1 && self.currentIndexpath!.row <= self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1)  {
                             self.counter = 0
                             self.updateCounter(counter: self.counter)
                         }
@@ -1142,8 +1142,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         self.tableChatView.beginUpdates()
                         let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
                         if indexMessage != nil {
-                            let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"] as! String)
-                            let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[indexMessage!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                            let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
+                            let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
                             if row != nil && section != nil  {
                                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                             }
@@ -1154,7 +1154,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         self.counter = 0
                         self.updateCounter(counter: self.counter)
                         if (self.viewIfLoaded?.window != nil) {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"] as! String, f_pin: chatData[CoreMessage_TMessageKey.F_PIN]!, message_scope_id: chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]!, message_id: chatData[CoreMessage_TMessageKey.MESSAGE_ID]!)
+                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: chatData[CoreMessage_TMessageKey.F_PIN]!, message_scope_id: chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]!, message_id: chatData[CoreMessage_TMessageKey.MESSAGE_ID]!)
                         }
                     }
                     else if self.counter != 0 {
@@ -1164,8 +1164,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             self.tableChatView.beginUpdates()
                             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
                             if indexMessage != nil {
-                                let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"] as! String)
-                                let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[indexMessage!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                                let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
+                                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
                                 if row != nil && section != nil  {
                                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                                 }
@@ -1190,7 +1190,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 let chatData = dataMessage.mBodies
                 if (chatData[CoreMessage_TMessageKey.F_PIN] == idMe || chatData[CoreMessage_TMessageKey.L_PIN] == self.dataGroup["group_id"] as? String || chatData[CoreMessage_TMessageKey.F_PIN] == self.dataGroup["group_id"] as? String) && chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == "4" {
                     if (chatData.keys.contains(CoreMessage_TMessageKey.MESSAGE_ID) && !(chatData[CoreMessage_TMessageKey.MESSAGE_ID]!).contains("-2,")) {
-                        var idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == chatData[CoreMessage_TMessageKey.MESSAGE_ID]! })
+                        var idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == chatData[CoreMessage_TMessageKey.MESSAGE_ID]! })
                         if let idxMessageIdParent = self.groupImages.firstIndex(where: { $0.value.contains(where: { $0.messageId == chatData[CoreMessage_TMessageKey.MESSAGE_ID]! }) }) {
                             if let idxInImages = self.groupImages[idxMessageIdParent].value.firstIndex(where: { $0.messageId == chatData[CoreMessage_TMessageKey.MESSAGE_ID]! }) {
                                 self.groupImages[idxMessageIdParent].value[idxInImages].status = chatData[CoreMessage_TMessageKey.STATUS]!
@@ -1251,8 +1251,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     @objc func onFailedSendMessage(notification: NSNotification) {
         DispatchQueue.main.async {
             let data:[AnyHashable : Any] = notification.userInfo!
-            let messageId = data["message_id"] as! String
-            let status = data["status"] as! String
+            let messageId = data["message_id"]  as? String ?? ""
+            let status = data["status"]  as? String ?? ""
             
             var idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String ?? "" == messageId })
             if let idxMessageIdParent = self.groupImages.firstIndex(where: { $0.value.contains(where: { $0.messageId == messageId }) }) {
@@ -1266,8 +1266,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             if (idx != nil) {
                 do {
                     self.dataMessages[idx!]["status"] = status
-                    let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-                    let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                    let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
+                    let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
                     if row != nil && section != nil  {
                         self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                     }
@@ -1279,21 +1279,21 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     private func updateStatusDelete(idx: Int?, chatData: [String: String]) {
         do {
-            if self.dataMessages[idx!]["lock"] != nil && self.dataMessages[idx!]["lock"] as! String == "1" {
+            if self.dataMessages[idx!]["lock"] != nil && self.dataMessages[idx!]["lock"]  as? String ?? "" == "1" {
                 return
             }
             self.dataMessages[idx!]["lock"] = "1"
             self.dataMessages[idx!]["reff_id"] = ""
-            let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-            let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as! String == self.dataMessages[idx!]["message_id"] as! String })
+            let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
+            let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
             if row != nil && section != nil  {
                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
             }
-            if self.listTimerCredential[self.dataMessages[idx!]["message_id"] as! String] != nil {
-                self.listTimerCredential.removeValue(forKey: self.dataMessages[idx!]["message_id"] as! String)
-                self.timerCredential[self.dataMessages[idx!]["message_id"] as! String]?.invalidate()
-                self.timerCredential.removeValue(forKey: self.dataMessages[idx!]["message_id"] as! String)
-                SecureUserDefaults.shared.removeValue(forKey: self.dataMessages[idx!]["message_id"] as! String)
+            if self.listTimerCredential[self.dataMessages[idx!]["message_id"]  as? String ?? ""] != nil {
+                self.listTimerCredential.removeValue(forKey: self.dataMessages[idx!]["message_id"]  as? String ?? "")
+                self.timerCredential[self.dataMessages[idx!]["message_id"]  as? String ?? ""]?.invalidate()
+                self.timerCredential.removeValue(forKey: self.dataMessages[idx!]["message_id"]  as? String ?? "")
+                SecureUserDefaults.shared.removeValue(forKey: self.dataMessages[idx!]["message_id"]  as? String ?? "")
             }
             if self.reffId != nil && self.reffId == chatData["message_id"]! {
                 self.deleteReplyView()
@@ -1304,12 +1304,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     private func updateStatusMessage(idx: Int?, chatData: [String: String]) {
         do {
-            if Int(self.dataMessages[idx!]["status"] as! String)! > Int(chatData[CoreMessage_TMessageKey.STATUS]!)! {
+            if Int(self.dataMessages[idx!]["status"]  as? String ?? "")! > Int(chatData[CoreMessage_TMessageKey.STATUS]!)! {
                 return
             }
             self.dataMessages[idx!]["status"] = chatData[CoreMessage_TMessageKey.STATUS]!
-            let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-            let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as! String == self.dataMessages[idx!]["message_id"] as! String })
+            let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
+            let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
             if row != nil && section != nil  {
                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
             }
@@ -1320,16 +1320,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     @objc func onMemberTopic(notification: NSNotification) {
         let data:[AnyHashable : Any] = notification.userInfo!
         DispatchQueue.main.async { [self] in
-            if data["member"] == nil || data["code"] as! String == CoreMessage_TMessageCode.EXIT_GROUP && data["member"] as! String == User.getMyPin()! && data["groupId"] as! String == self.dataGroup["group_id"] as! String && !containerActionGroup.isDescendant(of: self.view) {
+            if data["member"] == nil || data["code"]  as? String ?? "" == CoreMessage_TMessageCode.EXIT_GROUP && data["member"]  as? String ?? "" == User.getMyPin()! && data["groupId"]  as? String ?? "" == self.dataGroup["group_id"]  as? String ?? "" && !containerActionGroup.isDescendant(of: self.view) {
                 dismissKeyboard()
                 let labelKicked = UILabel()
-                if data["member"] == nil && data["code"] as! String == CoreMessage_TMessageCode.DELETE_CHAT && data["topicId"] as! String == dataTopic["chat_id"] as! String {
+                if data["member"] == nil && data["code"]  as? String ?? "" == CoreMessage_TMessageCode.DELETE_CHAT && data["topicId"]  as? String ?? "" == dataTopic["chat_id"]  as? String ?? "" {
                     labelKicked.text = "This topic has been deleted".localized()
-                } else if data["member"] != nil && data["member"] as! String == data["f_pin"] as! String {
+                } else if data["member"] != nil && data["member"]  as? String ?? "" == data["f_pin"]  as? String ?? "" {
                     labelKicked.text = "You have left this group".localized()
                 } else if data["member"] != nil {
                     labelKicked.text = "You have been removed from this group".localized()
-                } else if data["code"] as! String == CoreMessage_TMessageCode.UPDATE_CHAT {
+                } else if data["code"]  as? String ?? "" == CoreMessage_TMessageCode.UPDATE_CHAT {
                     dataGroup.removeAll()
                     dataTopic.removeAll()
                     getDataGroup(unique_l_pin: unique_l_pin)
@@ -1376,7 +1376,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     @objc func onGroup(notification: NSNotification) {
         let data:[AnyHashable : Any] = notification.userInfo!
-        if data["code"] as! String == "A010" && data["groupId"] as! String == self.dataGroup["group_id"] as! String {
+        if data["code"]  as? String ?? "" == "A010" && data["groupId"]  as? String ?? "" == self.dataGroup["group_id"]  as? String ?? "" {
             DispatchQueue.main.async {
                 Database().database?.inTransaction({ fmdb, rollback in
                     if let c = Database().getRecords(fmdb: fmdb, query: "select f_name, image_id from GROUPZ where group_id = '\(self.dataGroup["group_id"]!!)'"), c.next() {
@@ -1570,28 +1570,28 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         }
         dismissKeyboard()
         let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "groupDetailView") as! GroupDetailViewController
-        controller.data = dataGroup["group_id"] as! String
+        controller.data = dataGroup["group_id"]  as? String ?? ""
         controller.checkReadMessage = {
             if self.currentIndexpath == nil {
                 var listData = self.dataMessages
-                listData = listData.filter({$0["status"] as! String != "4" && $0["status"] as! String != "8"})
+                listData = listData.filter({$0["status"]  as? String ?? "" != "4" && $0["status"]  as? String ?? "" != "8"})
                 if listData.count != 0 {
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
                         if listData[i]["f_pin"] as? String != idMe {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"] as! String, f_pin: listData[i]["f_pin"] as! String, message_scope_id: "4", message_id: listData[i]["message_id"] as! String)
+                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: "4", message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
                 }
             } else {
-                let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.currentIndexpath!.section] })
+                let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.currentIndexpath!.section] })
                 var listData = dataMessages
-                listData = listData.filter({$0["status"] as! String != "4" && $0["status"] as! String != "8"})
+                listData = listData.filter({$0["status"]  as? String ?? "" != "4" && $0["status"]  as? String ?? "" != "8"})
                 if listData.count != 0 {
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
                         if listData[i]["f_pin"] as? String != idMe {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"] as! String, f_pin: listData[i]["f_pin"] as! String, message_scope_id: "4", message_id: listData[i]["message_id"] as! String)
+                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: "4", message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
                 }
@@ -1759,9 +1759,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         }
         var message_text = message_text.trimmingCharacters(in: .whitespacesAndNewlines)
         let idMe = User.getMyPin() as String?
-        var opposite_pin = self.dataGroup["group_id"] as! String
-        if (self.dataTopic["chat_id"] as! String != "") {
-            opposite_pin = self.dataTopic["chat_id"] as! String
+        var opposite_pin = self.dataGroup["group_id"]  as? String ?? ""
+        if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
+            opposite_pin = self.dataTopic["chat_id"]  as? String ?? ""
         }
         var credential = credential
         if isConfidential {
@@ -1788,7 +1788,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 diff += "@\(listMentionInTextField[i].pin)".count - nameWithMention.count
             }
         }
-        let message = CoreMessage_TMessageBank.sendMessage(l_pin: dataGroup["group_id"] as! String, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: dataTopic["chat_id"] as! String, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin, gif_id: gif_id, isForwarded: "\(is_forwarded)")
+        let message = CoreMessage_TMessageBank.sendMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: dataTopic["chat_id"]  as? String ?? "", is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin, gif_id: gif_id, isForwarded: "\(is_forwarded)")
         Nexilis.addQueueMessage(message: message)
         let messageId = String(message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID]!)
         if credential == "1" {
@@ -1827,7 +1827,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         }
         row["chat_date"] = "Today".localized()
         dataMessages.append(row)
-        tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"] as! String == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .fade)
+        tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .fade)
         if credential == "1" {
             var timer = Timer()
             var minute = 60
@@ -1857,7 +1857,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     }
                 }
                 let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
-                let row = self.dataMessages.filter({$0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == messageId})
+                let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == messageId})
                 if row != nil && section != nil{
                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                 }
@@ -1883,8 +1883,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 self.tableChatView.beginUpdates()
                 let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
                 if indexMessage != nil {
-                    let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"] as! String)
-                    let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[indexMessage!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                    let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
+                    let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
                     if row != nil && section != nil  {
                         self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                     }
@@ -1906,8 +1906,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     private func getCounter() {
         Database().database?.inTransaction({ fmdb, rollback in
             var l_pin = self.dataGroup["group_id"]!!
-            if (self.dataTopic["chat_id"] as! String != "") {
-                l_pin = self.dataTopic["chat_id"] as! String
+            if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
+                l_pin = self.dataTopic["chat_id"]  as? String ?? ""
             }
             
             if let c = Database().getRecords(fmdb: fmdb, query: "SELECT counter FROM MESSAGE_SUMMARY where l_pin='\(l_pin)'"), c.next() {
@@ -1922,8 +1922,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     var l_pin = self.dataGroup["group_id"]!!
-                    if (self.dataTopic["chat_id"] as! String != "") {
-                        l_pin = self.dataTopic["chat_id"] as! String
+                    if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
+                        l_pin = self.dataTopic["chat_id"]  as? String ?? ""
                     }
                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                         "counter" : "\(counter)"
@@ -2056,17 +2056,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             let auto: Bool = SecureUserDefaults.shared.value(forKey: "autoDownload") ?? false
             if auto {
                 if dataMessages[index]["image_id"] as? String != nil && !((dataMessages[index]["image_id"] as? String)!.isEmpty) {
-                    Download().startHTTP(forKey:dataMessages[index]["image_id"] as! String) { (name, progress) in
+                    Download().startHTTP(forKey:dataMessages[index]["image_id"]  as? String ?? "") { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
                         do {
-                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as! String
+                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0]  as? String ?? ""
                             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                             if let dirPath = paths.first {
-                                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["image_id"] as! String)
+                                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["image_id"]  as? String ?? "")
                                 if FileManager.default.fileExists(atPath: imageURL.path) {
                                     let image    = UIImage(contentsOfFile: imageURL.path)
                                     let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
@@ -2088,25 +2088,25 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             
                         }
                         DispatchQueue.main.async { [self] in
-                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as! String)
-                            let row = dataMessages.filter({$0["chat_date"] as! String == dataMessages[index]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == message_id})
+                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
                             if row != nil && section != nil{
                                 tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .automatic)
                             }
                         }
                     }
                 } else if dataMessages[index]["video_id"] as? String != nil && !((dataMessages[index]["video_id"] as? String)!.isEmpty){
-                    Download().startHTTP(forKey: dataMessages[index]["video_id"] as! String, isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: dataMessages[index]["video_id"]  as? String ?? "", isImage: false) { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
                         do {
-                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as! String
+                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0]  as? String ?? ""
                             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                             if let dirPath = paths.first {
-                                let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["video_id"] as! String)
+                                let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["video_id"]  as? String ?? "")
                                 if FileManager.default.fileExists(atPath: videoURL.path) {
                                     let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
                                     if save {
@@ -2134,8 +2134,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                 }
                             }
                             DispatchQueue.main.async { [self] in
-                                let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as! String)
-                                let row = dataMessages.filter({$0["chat_date"] as! String == dataMessages[index]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == message_id})
+                                let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+                                let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
                                 if row != nil && section != nil{
                                     tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .automatic)
                                 }
@@ -2147,7 +2147,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     }
                 }
                 else if dataMessages[index]["file_id"] as? String != nil && !((dataMessages[index]["file_id"] as? String)!.isEmpty) {
-                    Download().startHTTP(forKey: dataMessages[index]["file_id"] as! String, isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: dataMessages[index]["file_id"]  as? String ?? "", isImage: false) { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
@@ -2157,8 +2157,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             
                         }
                         DispatchQueue.main.async { [self] in
-                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as! String)
-                            let row = dataMessages.filter({$0["chat_date"] as! String == dataMessages[index]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == message_id})
+                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
                             if row != nil && section != nil{
                                 tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .automatic)
                             }
@@ -2180,7 +2180,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         currentIndexpath = tableView.indexPathsForVisibleRows?.last
         let indexFirst = tableView.indexPathsForVisibleRows?.first
         if indexFirst != nil {
-            let dataMessages = dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexFirst!.section] })
+            let dataMessages = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexFirst!.section] })
             if dataMessages.count == 0 {
                 return
             }
@@ -2214,12 +2214,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 return
             }
             var listData = dataMessages[0...currentIndexpath!.row]
-            listData = listData.filter({$0["status"] as! String != "4" && $0["status"] as! String != "8"})
+            listData = listData.filter({$0["status"]  as? String ?? "" != "4" && $0["status"]  as? String ?? "" != "8"})
             if listData.count != 0 {
                 let idMe = User.getMyPin() as String?
                 for i in 0...listData.count - 1 {
                     if listData[i]["f_pin"] as? String != idMe {
-                        sendReadMessageStatus(chat_id: self.dataTopic["chat_id"] as! String, f_pin: listData[i]["f_pin"] as! String, message_scope_id: "4", message_id: listData[i]["message_id"] as! String)
+                        sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: "4", message_id: listData[i]["message_id"]  as? String ?? "")
                     }
                 }
             }
@@ -2228,11 +2228,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
             indicatorCounterBSTB.removeFromSuperview()
         } else if counter != 0 && currentIndexpath != nil {
-            let dataFilter = dataMessages.filter({ $0["chat_date"] as! String == dataDates[currentIndexpath!.section] })
+            let dataFilter = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[currentIndexpath!.section] })
             if dataFilter.count == 0 {
                 return
             }
-            let idx = dataMessages.firstIndex(where: { $0["message_id"] as! String == dataFilter[currentIndexpath!.row]["message_id"] as! String})
+            let idx = dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataFilter[currentIndexpath!.row]["message_id"]  as? String ?? ""})
             if idx == nil {
                 return
             }
@@ -2518,12 +2518,12 @@ extension EditorGroup: UITextViewDelegate {
         }
         if allowTyping {
             allowTyping = false
-            if dataTopic["chat_id"] as! String == "" {
-                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataGroup["group_id"] as! String])
-                sendTyping(l_pin: dataGroup["group_id"] as! String)
+            if dataTopic["chat_id"]  as? String ?? "" == "" {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataGroup["group_id"]  as? String ?? ""])
+                sendTyping(l_pin: dataGroup["group_id"]  as? String ?? "")
             } else {
-                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataTopic["chat_id"] as! String])
-                sendTyping(l_pin: dataTopic["chat_id"] as! String)
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataTopic["chat_id"]  as? String ?? ""])
+                sendTyping(l_pin: dataTopic["chat_id"]  as? String ?? "")
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: {
                 self.allowTyping = true
@@ -2545,7 +2545,7 @@ extension EditorGroup: UITextViewDelegate {
         
         if textView.text.contains("*") || textView.text.contains("_") || textView.text.contains("^") || textView.text.contains("~") || textView.text.contains("@") {
             textView.preserveCursorPosition(withChanges: { _ in
-                textView.attributedText = textView.text.richText(isEditing: true, group_id: self.dataGroup["group_id"] as! String, listMentionInTextField: listMentionInTextField)
+                textView.attributedText = textView.text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
                 return .preserveCursor
             })
         }
@@ -2568,7 +2568,7 @@ extension EditorGroup: UITextViewDelegate {
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
                 let idMe = User.getMyPin()!
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name || ' ' || ifnull(last_name, '') name FROM GROUPZ_MEMBER where group_id='\(self.dataGroup["group_id"] as! String)' AND f_pin <> '\(idMe)' AND name LIKE '%\(text)%'") {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name || ' ' || ifnull(last_name, '') name FROM GROUPZ_MEMBER where group_id='\(self.dataGroup["group_id"]  as? String ?? "")' AND f_pin <> '\(idMe)' AND name LIKE '%\(text)%'") {
                     while cursor.next() {
                         let user = User(pin: "")
                         user.pin = cursor.string(forColumnIndex: 0) ?? ""
@@ -2647,10 +2647,10 @@ extension EditorGroup: UITextViewDelegate {
                 })
                 if !dataURL.isEmpty {
                     if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                        let title = data["title"] as! String
-                        let description = data["description"] as! String
+                        let title = data["title"]  as? String ?? ""
+                        let description = data["description"]  as? String ?? ""
                         let imageUrl = data["imageUrl"] as? String
-                        let link = data["link"] as! String
+                        let link = data["link"]  as? String ?? ""
                         if self.showingLink != text {
                             self.showingLink = text
                             self.deleteLinkPreview()
@@ -2841,7 +2841,7 @@ extension EditorGroup: UITextViewDelegate {
                         let rangeReplacement = NSRange(location: lastPositionCursorMention - nameMention.count - 1, length: nameMention.count + 1)
                         let replacementText = ""
                         
-                        let copyAttributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"] as! String, listMentionInTextField: listMentionInTextField)
+                        let copyAttributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
                         copyAttributedText.removeAttribute(.foregroundColor, range: rangeReplacement)
                         
                         textFieldSend.attributedText = copyAttributedText
@@ -2854,7 +2854,7 @@ extension EditorGroup: UITextViewDelegate {
                         
                         listMentionInTextField.remove(at: i)
                         
-                        textFieldSend.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"] as! String, listMentionInTextField: listMentionInTextField)
+                        textFieldSend.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
                         
                         let newPosition = textFieldSend.position(from: textFieldSend.beginningOfDocument, offset: textView.text.count - diff)
                         textFieldSend.selectedTextRange = textFieldSend.textRange(from: newPosition!, to: newPosition!)
@@ -2900,9 +2900,9 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             textFieldSend.resignFirstResponder()
         }
         let indexPath = self.tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: self.tableChatView))
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath!.section]})
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath!.section]})
         var star: UIAction
-        if (dataMessages[indexPath!.row]["is_stared"] as! String == "0") {
+        if (dataMessages[indexPath!.row]["is_stared"]  as? String ?? "" == "0") {
             star = UIAction(title: "Star".localized(), image: UIImage(systemName: "star"), handler: {(_) in
                 if self.removed {
                     return
@@ -2912,14 +2912,14 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         do {
                             _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                                 "is_stared" : 1
-                            ], _where: "message_id = '\(dataMessages[indexPath!.row]["message_id"] as! String)'")
+                            ], _where: "message_id = '\(dataMessages[indexPath!.row]["message_id"]  as? String ?? "")'")
                         } catch {
                             rollback.pointee = true
                             print("Access database error: \(error.localizedDescription)")
                         }
                     })
                 }
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == dataMessages[indexPath!.row]["message_id"] as! String})
+                let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[indexPath!.row]["message_id"]  as? String ?? ""})
                 if idx != nil{
                     self.dataMessages[idx!]["is_stared"] = "1"
                 }
@@ -2936,14 +2936,14 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         do {
                             _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                                 "is_stared" : 0
-                            ], _where: "message_id = '\(dataMessages[indexPath!.row]["message_id"] as! String)'")
+                            ], _where: "message_id = '\(dataMessages[indexPath!.row]["message_id"]  as? String ?? "")'")
                         } catch {
                             rollback.pointee = true
                             print("Access database error: \(error.localizedDescription)")
                         }
                     })
                 }
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == dataMessages[indexPath!.row]["message_id"] as! String})
+                let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[indexPath!.row]["message_id"]  as? String ?? ""})
                 if idx != nil{
                     self.dataMessages[idx!]["is_stared"] = "0"
                 }
@@ -3049,7 +3049,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                             let dataContent = json["content"]!
                             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String})
                             if idx != nil{
-                                self.dataMessages[idx!][TypeDataMessage.message_text] = dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String + "\n\n" + "%\(dataContent)%"
+                                self.dataMessages[idx!][TypeDataMessage.message_text] = dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "" + "\n\n" + "%\(dataContent)%"
                             }
                             DispatchQueue.main.async{
                                 self.tableChatView.reloadRows(at: [indexPath!], with: .none)
@@ -3134,8 +3134,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         })
         
         let resend = UIAction(title: "Resend".localized(), image: UIImage(systemName: "arrow.clockwise"), handler: {(_) in
-            let messageId = dataMessages[indexPath!.row][TypeDataMessage.message_id] as! String
-            let status = dataMessages[indexPath!.row][TypeDataMessage.status] as! String
+            let messageId = dataMessages[indexPath!.row][TypeDataMessage.message_id]  as? String ?? ""
+            let status = dataMessages[indexPath!.row][TypeDataMessage.status]  as? String ?? ""
             
             var idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String ?? "" == messageId })
             if let idxMessageIdParent = self.groupImages.firstIndex(where: { $0.value.contains(where: { $0.messageId == messageId }) }) {
@@ -3150,8 +3150,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 do {
                     self.dataMessages[idx!][TypeDataMessage.status] = "1"
                     self.dataMessages[idx!][TypeDataMessage.progress] = 0.0
-                    let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-                    let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                    let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
+                    let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
                     if row != nil && section != nil  {
                         self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                     }
@@ -3172,26 +3172,26 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 }
             })
             let message = CoreMessage_TMessageBank.sendMessage(message_id: messageId,
-                                                               l_pin: dataMessages[indexPath!.row][TypeDataMessage.l_pin] as! String,
-                                                               message_scope_id: dataMessages[indexPath!.row][TypeDataMessage.message_scope_id] as! String,
+                                                               l_pin: dataMessages[indexPath!.row][TypeDataMessage.l_pin]  as? String ?? "",
+                                                               message_scope_id: dataMessages[indexPath!.row][TypeDataMessage.message_scope_id]  as? String ?? "",
                                                                status: "1",
-                                                               message_text: dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String,
-                                                               credential: dataMessages[indexPath!.row][TypeDataMessage.credential] as! String,
-                                                               attachment_flag: dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as! String,
-                                                               ex_blog_id: dataMessages[indexPath!.row][TypeDataMessage.blog_id] as! String,
+                                                               message_text: dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "",
+                                                               credential: dataMessages[indexPath!.row][TypeDataMessage.credential]  as? String ?? "",
+                                                               attachment_flag: dataMessages[indexPath!.row][TypeDataMessage.attachment_flag]  as? String ?? "",
+                                                               ex_blog_id: dataMessages[indexPath!.row][TypeDataMessage.blog_id]  as? String ?? "",
                                                                message_large_text: "",
                                                                ex_format: "",
-                                                               image_id: dataMessages[indexPath!.row][TypeDataMessage.image_id] as! String,
-                                                               audio_id: dataMessages[indexPath!.row][TypeDataMessage.audio_id] as! String,
-                                                               video_id: dataMessages[indexPath!.row][TypeDataMessage.video_id] as! String,
-                                                               file_id: dataMessages[indexPath!.row][TypeDataMessage.file_id] as! String,
-                                                               thumb_id: dataMessages[indexPath!.row][TypeDataMessage.thumb_id] as! String,
-                                                               reff_id: dataMessages[indexPath!.row][TypeDataMessage.reff_id] as! String,
-                                                               read_receipts: dataMessages[indexPath!.row][TypeDataMessage.read_receipts] as! String,
-                                                               chat_id: dataMessages[indexPath!.row][TypeDataMessage.chat_id] as! String,
-                                                               is_call_center: dataMessages[indexPath!.row][TypeDataMessage.is_call_center] as! String,
-                                                               call_center_id: dataMessages[indexPath!.row][TypeDataMessage.call_center_id] as! String,
-                                                               opposite_pin: dataMessages[indexPath!.row][TypeDataMessage.opposite_pin] as! String)
+                                                               image_id: dataMessages[indexPath!.row][TypeDataMessage.image_id]  as? String ?? "",
+                                                               audio_id: dataMessages[indexPath!.row][TypeDataMessage.audio_id]  as? String ?? "",
+                                                               video_id: dataMessages[indexPath!.row][TypeDataMessage.video_id]  as? String ?? "",
+                                                               file_id: dataMessages[indexPath!.row][TypeDataMessage.file_id]  as? String ?? "",
+                                                               thumb_id: dataMessages[indexPath!.row][TypeDataMessage.thumb_id]  as? String ?? "",
+                                                               reff_id: dataMessages[indexPath!.row][TypeDataMessage.reff_id]  as? String ?? "",
+                                                               read_receipts: dataMessages[indexPath!.row][TypeDataMessage.read_receipts]  as? String ?? "",
+                                                               chat_id: dataMessages[indexPath!.row][TypeDataMessage.chat_id]  as? String ?? "",
+                                                               is_call_center: dataMessages[indexPath!.row][TypeDataMessage.is_call_center]  as? String ?? "",
+                                                               call_center_id: dataMessages[indexPath!.row][TypeDataMessage.call_center_id]  as? String ?? "",
+                                                               opposite_pin: dataMessages[indexPath!.row][TypeDataMessage.opposite_pin]  as? String ?? "")
             Nexilis.addQueueMessage(message: message)
         })
         
@@ -3200,41 +3200,41 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
 //        let copyOption = self.copyOption(indexPath: indexPath!)
         let idMe = User.getMyPin() as String?
         
-        if dataMessages[indexPath!.row]["status"] as! String == "0" {
+        if dataMessages[indexPath!.row]["status"]  as? String ?? "" == "0" {
             children = [resend, delete]
-        } else if (dataMessages[indexPath!.row]["lock"] != nil && dataMessages[indexPath!.row]["lock"] as! String == "1") {
+        } else if (dataMessages[indexPath!.row]["lock"] != nil && dataMessages[indexPath!.row]["lock"]  as? String ?? "" == "1") {
             children = [delete]
-        } else if (groupImages[dataMessages[indexPath!.row]["message_id"] as! String] != nil) {
+        } else if (groupImages[dataMessages[indexPath!.row]["message_id"]  as? String ?? ""] != nil) {
             forward.title = "Forward All".localized()
             delete.title = "Delete All".localized()
             children = [forward, delete]
         } 
-        else if dataMessages[indexPath!.row]["f_pin"] as! String == "-999" {
+        else if dataMessages[indexPath!.row]["f_pin"]  as? String ?? "" == "-999" {
             children = [star, reply ,delete]
-            if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
+            if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                 children.insert(info, at: children.count - 1)
             }
         }
-        else if !(dataMessages[indexPath!.row]["image_id"] as! String).isEmpty || !(dataMessages[indexPath!.row]["video_id"] as! String).isEmpty || !(dataMessages[indexPath!.row]["file_id"] as! String).isEmpty {
+        else if !(dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty {
             children = [star, reply, forward ,delete]
-            if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
+            if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                 children.insert(info, at: children.count - 1)
             }
-        } else if dataMessages[indexPath!.row]["attachment_flag"] as! String == "11" {
+        } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
             children = [reply, delete]
-            if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
+            if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                 children.insert(info, at: children.count - 1)
             }
         } else {
-            if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
+            if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                 children.insert(info, at: children.count - 1)
             }
-            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String).isEmpty {
-                if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
+            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
+                if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                     children.insert(edit, at: children.count - 1)
                 }
-                if !(dataMessages[indexPath!.row][TypeDataMessage.message_text] as! String).isEmpty {
-                    if (dataMessages[indexPath!.row]["f_pin"] as! String) == idMe {
+                if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
+                    if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                         children.insert(edit, at: children.count - 1)
                     }
                     isMore = true
@@ -3255,8 +3255,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     }
     
     func showEditMessageView(at indexPath: IndexPath) {
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
-        let oldText = dataMessages[indexPath.row][TypeDataMessage.message_text] as! String
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        let oldText = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
         editVC = UIViewController()
         if let view = editVC.view {
             view.backgroundColor = .clear
@@ -3302,7 +3302,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 let newText = self.editTextView.text ?? ""
                 if newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
                     let lastEdited = Int64(Date().currentTimeMillis())
-                    let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id] as! String, l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin] as! String, message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as! String, status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential] as! String, attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as! String, ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id] as! String, message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id] as! String, audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id] as! String, video_id: dataMessages[indexPath.row][TypeDataMessage.video_id] as! String, file_id: dataMessages[indexPath.row][TypeDataMessage.file_id] as! String, thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id] as! String, reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id] as! String, read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts] as! String, chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id] as! String, is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center] as! String, call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id] as! String, opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin] as! String, last_edit: lastEdited)
+                    let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id]  as? String ?? "", l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin]  as? String ?? "", message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id]  as? String ?? "", status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential]  as? String ?? "", attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag]  as? String ?? "", ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id]  as? String ?? "", message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id]  as? String ?? "", audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id]  as? String ?? "", video_id: dataMessages[indexPath.row][TypeDataMessage.video_id]  as? String ?? "", file_id: dataMessages[indexPath.row][TypeDataMessage.file_id]  as? String ?? "", thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id]  as? String ?? "", reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id]  as? String ?? "", read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts]  as? String ?? "", chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id]  as? String ?? "", is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center]  as? String ?? "", call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id]  as? String ?? "", opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin]  as? String ?? "", last_edit: lastEdited)
                     Nexilis.addQueueMessage(message: message, isEditMessage: true)
                     DispatchQueue.global().async {
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -3310,7 +3310,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                                     "message_text" : newText,
                                     "last_edited" : lastEdited
-                                ], _where: "message_id = '\(dataMessages[indexPath.row]["message_id"] as! String)'")
+                                ], _where: "message_id = '\(dataMessages[indexPath.row]["message_id"]  as? String ?? "")'")
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                             } catch {
                                 rollback.pointee = true
@@ -3411,7 +3411,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
             let data = self.dataMessages.filter({ $0["isSelected"] as! Bool == true })
             for i in 0..<data.count {
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == data[i]["message_id"] as! String})
+                let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == data[i]["message_id"]  as? String ?? ""})
                 if idx != nil{
                     self.dataMessages[idx!]["isSelected"] = false
                 }
@@ -3510,7 +3510,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             let selectedMessage = dataMessages.filter({ $0["isSelected"] as! Bool == true })
             if selectedMessage.count > 0 {
                 for i in 0..<selectedMessage.count {
-                    if let isGroupingImages = groupImages[selectedMessage[i]["message_id"] as! String] {
+                    if let isGroupingImages = groupImages[selectedMessage[i]["message_id"]  as? String ?? ""] {
                         title.text = "\(countSelected + (isGroupingImages.count - 1)) " + "Selected".localized()
                     }
                 }
@@ -3577,11 +3577,11 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
             var nameTopic = "Lounge".localized()
             if !dataTopic.isEmpty {
-                nameTopic = dataTopic["title"] as! String
+                nameTopic = dataTopic["title"]  as? String ?? ""
             }
             var text = "*^\(dataGroup["f_name"]!!) (\(nameTopic))^*"
             for i in 0..<countSelected {
-                let stringDate = (dataMessages[i]["server_date"] as! String)
+                let stringDate = (dataMessages[i]["server_date"]  as? String ?? "")
                 let date = Date(milliseconds: Int64(stringDate)!)
                 let formatterDate = DateFormatter()
                 let formatterTime = DateFormatter()
@@ -3589,8 +3589,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 formatterDate.locale = NSLocale(localeIdentifier: "id") as Locale?
                 formatterTime.dateFormat = "HH:mm"
                 formatterTime.locale = NSLocale(localeIdentifier: "id") as Locale?
-                let dataProfile = getDataProfile(f_pin: dataMessages[i]["f_pin"] as! String, message_id: dataMessages[i]["message_id"] as! String)
-                text = text + "\n\n*[\(formatterDate.string(from: date as Date)) \(formatterTime.string(from: date as Date))] \(dataProfile["name"]!):*\n\(dataMessages[i]["message_text"] as! String)"
+                let dataProfile = getDataProfile(f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                text = text + "\n\n*[\(formatterDate.string(from: date as Date)) \(formatterTime.string(from: date as Date))] \(dataProfile["name"]!):*\n\(dataMessages[i]["message_text"]  as? String ?? "")"
             }
             text = text + "\n\n\nchat " + "Powered by Nexilis".localized()
             DispatchQueue.main.async {
@@ -3605,10 +3605,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 return
             }
             for i in 0..<countSelected {
-                if let groupingImages = groupImages[dataMessages[i]["message_id"] as! String] {
+                if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
                     var tempData = dataMessages
                     tempData.remove(at: 0)
-                    var dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"] as! String]!).map({ $0.dataMessage })
+                    var dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"]  as? String ?? ""]!).map({ $0.dataMessage })
                     tempData.insert(contentsOf: dataMessageInGrouping, at: i)
                     dataMessages = tempData
                 }
@@ -3650,8 +3650,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             let idMe = User.getMyPin() as String?
             let dataFilterFpin = dataMessages.filter({ $0["f_pin"] as? String != idMe})
             let dataFilterLock = dataMessages.filter({ $0["lock"] as? String == "1"})
-//            let statusDataRead = dataMessages.filter({ Int($0["status"] as! String)! >= 4})
-            let statusFailed = dataMessages.filter({ Int($0["status"] as! String)! == 0})
+//            let statusDataRead = dataMessages.filter({ Int($0["status"]  as? String ?? "")! >= 4})
+            let statusFailed = dataMessages.filter({ Int($0["status"]  as? String ?? "")! == 0})
             if dataFilterFpin.count == 0 && dataFilterLock.count == 0 && statusFailed.count == 0 {
                 if let action = self.actionDelete(for: "everyone", title: "Delete".localized() + " \(countSelected) " + "For Everyone".localized(), dataMessages: dataMessages) {
                     alertController.addAction(action)
@@ -3700,10 +3700,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     
     private func copyOption(indexPath: IndexPath) -> UIMenu {
         var ratingButtonTitles = ["Text".localized(), "Image".localized()]
-        if (dataMessages[indexPath.row]["message_text"] as! String).isEmpty {
+        if (dataMessages[indexPath.row]["message_text"]  as? String ?? "").isEmpty {
             ratingButtonTitles = ["Image".localized()]
         }
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         let copyActions = ratingButtonTitles
             .enumerated()
             .map { index, title in
@@ -3711,13 +3711,13 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     title: title,
                     identifier: nil,
                     handler: {(_) in
-                        if (dataMessages[indexPath.row]["message_text"] as! String).isEmpty {
+                        if (dataMessages[indexPath.row]["message_text"]  as? String ?? "").isEmpty {
                             DispatchQueue.main.async {
                                 let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                                 let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                                 if let dirPath = paths.first {
-                                    let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(dataMessages[indexPath.row]["image_id"] as! String)
+                                    let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(dataMessages[indexPath.row]["image_id"]  as? String ?? "")
                                     if FileManager.default.fileExists(atPath: imageURL.path) {
                                         let image    = UIImage(contentsOfFile: imageURL.path)
                                         UIPasteboard.general.image = image
@@ -3749,7 +3749,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                 let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                                 if let dirPath = paths.first {
-                                    let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(dataMessages[indexPath.row]["image_id"] as! String)
+                                    let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(dataMessages[indexPath.row]["image_id"]  as? String ?? "")
                                     if FileManager.default.fileExists(atPath: imageURL.path) {
                                         let image    = UIImage(contentsOfFile: imageURL.path)
                                         UIPasteboard.general.image = image
@@ -3782,9 +3782,9 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         return UIAlertAction(title: title, style: .destructive) { [unowned self] _ in
             for i in 0..<dataMessages.count {
                 if (type == "me") {
-                    if let groupingImages = groupImages[dataMessages[i]["message_id"] as! String] {
+                    if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
                         for i in 0..<groupingImages.count {
-                            self.deleteMessage(l_pin: dataGroup["group_id"] as! String, message_id: groupingImages[i].messageId, scope: "4", type: "1", chat: dataTopic["chat_id"] as! String)
+                            self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: groupingImages[i].messageId, scope: "4", type: "1", chat: dataTopic["chat_id"]  as? String ?? "")
                             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId })
                             if idx != nil {
                                 self.dataMessages.remove(at: idx!)
@@ -3792,7 +3792,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                     NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                                 }
                                 for i in 0..<dataDates.count {
-                                    if self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[i] }).count == 0 {
+                                    if self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[i] }).count == 0 {
                                         dataDates.remove(at: i)
                                     }
                                 }
@@ -3806,9 +3806,9 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
                             banner.show()
                         } else {
-                            if let groupingImages = groupImages[dataMessages[i]["message_id"] as! String] {
+                            if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
                                 for i in 0..<groupingImages.count {
-                                    self.deleteMessage(l_pin: dataGroup["group_id"] as! String, message_id: groupingImages[i].messageId, scope: "4", type: "2", chat: dataTopic["chat_id"] as! String)
+                                    self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: groupingImages[i].messageId, scope: "4", type: "2", chat: dataTopic["chat_id"]  as? String ?? "")
                                     let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId})
                                     if idx != nil {
                                         self.dataMessages[idx!]["lock"] = "1"
@@ -3817,13 +3817,13 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                     }
                                 }
                                 if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[0].messageId}) {
-                                    var dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"] as! String]!).map({ $0.dataMessage })
+                                    var dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"]  as? String ?? ""]!).map({ $0.dataMessage })
                                     dataMessageInGrouping.remove(at: 0)
                                     self.dataMessages.insert(contentsOf: dataMessageInGrouping, at: idx+1)
                                     self.groupImages.removeValue(forKey: groupingImages[0].messageId)
                                 }
                             } else {
-                                self.deleteMessage(l_pin: dataGroup["group_id"] as! String, message_id: dataMessages[i]["message_id"] as! String, scope: "4", type: "1", chat: dataTopic["chat_id"] as! String)
+                                self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: "4", type: "1", chat: dataTopic["chat_id"]  as? String ?? "")
                                 let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
                                 if idx != nil {
                                     self.dataMessages.remove(at: idx!)
@@ -3831,7 +3831,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                                     }
                                     for i in 0..<dataDates.count {
-                                        if self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[i] }).count == 0 {
+                                        if self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[i] }).count == 0 {
                                             dataDates.remove(at: i)
                                         }
                                     }
@@ -3840,18 +3840,18 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         }
                     }
                 } else {
-                    self.deleteMessage(l_pin: dataGroup["group_id"] as! String, message_id: dataMessages[i]["message_id"] as! String, scope: "4", type: "2", chat: dataTopic["chat_id"] as! String)
-                    let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == dataMessages[i]["message_id"] as! String})
+                    self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: "4", type: "2", chat: dataTopic["chat_id"]  as? String ?? "")
+                    let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[i]["message_id"]  as? String ?? ""})
                     if idx != nil {
                         self.dataMessages[idx!]["lock"] = "1"
                         self.dataMessages[idx!]["attachment_flag"] = "0"
                         self.dataMessages[idx!]["reff_id"] = ""
                     }
                 }
-                if self.listTimerCredential[dataMessages[i]["message_id"] as! String] != nil {
-                    self.listTimerCredential.removeValue(forKey: dataMessages[i]["message_id"] as! String)
-                    self.timerCredential[dataMessages[i]["message_id"] as! String]?.invalidate()
-                    self.timerCredential.removeValue(forKey: dataMessages[i]["message_id"] as! String)
+                if self.listTimerCredential[dataMessages[i]["message_id"]  as? String ?? ""] != nil {
+                    self.listTimerCredential.removeValue(forKey: dataMessages[i]["message_id"]  as? String ?? "")
+                    self.timerCredential[dataMessages[i]["message_id"]  as? String ?? ""]?.invalidate()
+                    self.timerCredential.removeValue(forKey: dataMessages[i]["message_id"]  as? String ?? "")
                 }
             }
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
@@ -3975,7 +3975,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         if tableView == tableMention {
             return listMentionWithText.count
         }
-        let count = dataMessages.filter({ $0["chat_date"] as! String == dataDates[section] }).count
+        let count = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[section] }).count
         return count
     }
     
@@ -4050,7 +4050,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     text.replaceSubrange(startIndex..<endIndex, with: replacementText + addSpaceAfterReplacement)
                 }
                 
-                textFieldSend.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"] as! String, listMentionInTextField: listMentionInTextField)
+                textFieldSend.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
                 
                 let newPosition = textFieldSend.position(from: textFieldSend.beginningOfDocument, offset: textFieldSend.text.count - diff)
                 textFieldSend.selectedTextRange = textFieldSend.textRange(from: newPosition!, to: newPosition!)
@@ -4061,15 +4061,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             }
             return
         }
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section] })
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
         if copySession || forwardSession || deleteSession {
-            if copySession && dataMessages[indexPath.row]["f_pin"] as! String != "-999" {
+            if copySession && dataMessages[indexPath.row]["f_pin"]  as? String ?? "" != "-999" {
                 return
             }
-            if (dataMessages[indexPath.row]["attachment_flag"] as! String != "0" || dataMessages[indexPath.row]["lock"] as? String == "1") && !forwardSession && !deleteSession {
+            if (dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" != "0" || dataMessages[indexPath.row]["lock"] as? String == "1") && !forwardSession && !deleteSession {
                 return
             }
-            let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == dataMessages[indexPath.row]["message_id"] as! String})
+            let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[indexPath.row]["message_id"]  as? String ?? ""})
             if idx != nil {
                 self.dataMessages[idx!]["isSelected"] = !(self.dataMessages[idx!]["isSelected"] as! Bool)
                 self.tableChatView.reloadRows(at: [indexPath], with: .none)
@@ -4078,12 +4078,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             addSubviewMultipleSession()
             return
         }
-        if !(dataMessages[indexPath.row]["image_id"] as! String).isEmpty || !(dataMessages[indexPath.row]["video_id"] as! String).isEmpty || !(dataMessages[indexPath.row]["file_id"] as! String).isEmpty {
-            var file = dataMessages[indexPath.row]["image_id"] as! String
+        if !(dataMessages[indexPath.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath.row]["file_id"]  as? String ?? "").isEmpty {
+            var file = dataMessages[indexPath.row]["image_id"]  as? String ?? ""
             if file.isEmpty {
-                file = dataMessages[indexPath.row]["video_id"] as! String
+                file = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
                 if file.isEmpty {
-                    file = dataMessages[indexPath.row]["file_id"] as! String
+                    file = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
                 }
             }
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -4156,7 +4156,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             return cellMention
         }
         let idMe = User.getMyPin() as String?
-        let dataMessages = dataMessages.filter({$0["chat_date"] as! String == dataDates[indexPath.section]})
+        let dataMessages = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         
         let cellMessage = tableView.dequeueReusableCell(withIdentifier: "cellEditorGroup", for: indexPath as IndexPath)
         cellMessage.backgroundColor = .clear
@@ -4168,21 +4168,21 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         cellMessage.contentView.addSubview(profileMessage)
         profileMessage.translatesAutoresizingMaskIntoConstraints = false
         let tapGestureRecognizer = ObjectGesture(target: self, action: #selector(profilePersonTapped(_:)))
-        tapGestureRecognizer.message_id = dataMessages[indexPath.row]["f_pin"] as! String
+        tapGestureRecognizer.message_id = dataMessages[indexPath.row]["f_pin"]  as? String ?? ""
         profileMessage.isUserInteractionEnabled = true
         profileMessage.addGestureRecognizer(tapGestureRecognizer)
         
         let containerMessage = UIView()
         
         let messageIdChat = (dataMessages[indexPath.row]["message_id"] as? String) ?? ""
-        let thumbChat = dataMessages[indexPath.row]["thumb_id"] as! String
-        let imageChat = dataMessages[indexPath.row]["image_id"] as! String
-        let videoChat = dataMessages[indexPath.row]["video_id"] as! String
-        let fileChat = dataMessages[indexPath.row]["file_id"] as! String
-        let reffChat = dataMessages[indexPath.row]["reff_id"] as! String
+        let thumbChat = dataMessages[indexPath.row]["thumb_id"]  as? String ?? ""
+        let imageChat = dataMessages[indexPath.row]["image_id"]  as? String ?? ""
+        let videoChat = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
+        let fileChat = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
+        let reffChat = dataMessages[indexPath.row]["reff_id"]  as? String ?? ""
         let audioChat = (dataMessages[indexPath.row]["audio_id"] as? String) ?? ""
         let gifChat = (dataMessages[indexPath.row]["gif_id"] as? String) ?? ""
-        let dataTimer = listTimerCredential[(dataMessages[indexPath.row]["message_id"] as! String)]
+        let dataTimer = listTimerCredential[(dataMessages[indexPath.row]["message_id"]  as? String ?? "")]
         
         cellMessage.contentView.addSubview(containerMessage)
         containerMessage.translatesAutoresizingMaskIntoConstraints = false
@@ -4209,18 +4209,18 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         messageText.translatesAutoresizingMaskIntoConstraints = false
         let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32)
         
-        let dataProfile = getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"] as! String, message_id: dataMessages[indexPath.row]["message_id"] as! String)
+        let dataProfile = getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"]  as? String ?? "", message_id: dataMessages[indexPath.row]["message_id"]  as? String ?? "")
         
         let statusMessage = UIImageView()
         
         if (dataMessages[indexPath.row]["attachment_flag"] as? String == "0" && dataMessages[indexPath.row]["lock"] as? String != "1") || forwardSession || deleteSession {
             var showSelectedImage = true
             if (!imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty) && forwardSession {
-                var file = dataMessages[indexPath.row]["image_id"] as! String
+                var file = dataMessages[indexPath.row]["image_id"]  as? String ?? ""
                 if file.isEmpty {
-                    file = dataMessages[indexPath.row]["video_id"] as! String
+                    file = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
                     if file.isEmpty {
-                        file = dataMessages[indexPath.row]["file_id"] as! String
+                        file = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
                     }
                 }
                 let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -4233,7 +4233,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     }
                 }
             }
-            if dataMessages[indexPath.row]["f_pin"] as! String == "-999" && !deleteSession {
+            if dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" && !deleteSession {
                 showSelectedImage = false
             }
             if showSelectedImage {
@@ -4296,14 +4296,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             
             timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
             
-            if dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String == "0" {
+            if dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" == "0" {
                 cellMessage.contentView.addSubview(statusMessage)
                 statusMessage.translatesAutoresizingMaskIntoConstraints = false
                 statusMessage.bottomAnchor.constraint(equalTo: timeMessage.topAnchor).isActive = true
                 statusMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
                 statusMessage.widthAnchor.constraint(equalToConstant: 15).isActive = true
                 statusMessage.heightAnchor.constraint(equalToConstant: 15).isActive = true
-                let status = getRealStatus(messageId: dataMessages[indexPath.row]["message_id"] as! String)
+                let status = getRealStatus(messageId: dataMessages[indexPath.row]["message_id"]  as? String ?? "")
                 if status == "0" {
                     statusMessage.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
                 } else if status == "1" {
@@ -4413,7 +4413,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             }
             containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cellMessage.contentView.trailingAnchor, constant: -60).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
-            if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+            if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                 containerMessage.backgroundColor = .clear
             } else {
                 containerMessage.backgroundColor = .whiteBubbleColor
@@ -4442,7 +4442,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         }
         
         let imageStared = UIImageView()
-        if dataMessages[indexPath.row]["is_stared"] as? String == "1" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String == "0") {
+        if dataMessages[indexPath.row]["is_stared"] as? String == "1" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" == "0") {
             cellMessage.contentView.addSubview(imageStared)
             imageStared.translatesAutoresizingMaskIntoConstraints = false
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
@@ -4467,7 +4467,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             imageAckView.widthAnchor.constraint(equalToConstant: 30).isActive = true
             imageAckView.heightAnchor.constraint(equalToConstant: 30).isActive = true
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                let status = getRealStatus(messageId: dataMessages[indexPath.row]["message_id"] as! String)
+                let status = getRealStatus(messageId: dataMessages[indexPath.row]["message_id"]  as? String ?? "")
                 if status == "8" {
                     imageAck = UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
                 }
@@ -4520,7 +4520,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
         }
         topMarginText.isActive = true
-        if dataMessages[indexPath.row]["attachment_flag"] as! String == "27" || dataMessages[indexPath.row]["attachment_flag"] as! String == "26" {
+        if dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "27" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "26" {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
             let imageLS = UIImageView()
             containerMessage.addSubview(imageLS)
@@ -4531,9 +4531,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 imageLS.centerYAnchor.constraint(equalTo: containerMessage.centerYAnchor),
                 imageLS.heightAnchor.constraint(equalToConstant: 60.0)
             ])
-            if dataMessages[indexPath.row]["attachment_flag"] as! String == "26" {
+            if dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "26" {
                 imageLS.image = UIImage(named: "pb_seminar_wpr", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-            } else if dataMessages[indexPath.row]["attachment_flag"] as! String == "27" {
+            } else if dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "27" {
                 imageLS.image = UIImage(named: "pb_live_tv", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             }
         } else if !audioChat.isEmpty {
@@ -4570,10 +4570,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             if attachmentFlag == "27" || attachmentFlag == "26", let data = textChat { // live streaming
                 if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
                     Database().database?.inTransaction({ fmdb, rollback in
-                        let title = json["title"] as! String
-                        let description = json["description"] as! String
+                        let title = json["title"]  as? String ?? ""
+                        let description = json["description"]  as? String ?? ""
                         let start = json["time"] as! Int64
-                        let by = json["by"] as! String
+                        let by = json["by"]  as? String ?? ""
                         let textLS = "Live Streaming".localized()
                         var type = "*\(textLS)*"
                         if attachmentFlag == "26" {
@@ -4590,7 +4590,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     })
                 }
             }
-            else if attachmentFlag == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+            else if attachmentFlag == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                 messageText.text = ""
                 topMarginText.constant = topMarginText.constant + 100
                 containerMessage.addSubview(imageSticker)
@@ -4613,11 +4613,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 imageSticker.contentMode = .scaleAspectFit
             }
             else {
-                messageText.attributedText = textChat!.richText(group_id: self.dataGroup["group_id"] as! String)
+                messageText.attributedText = textChat!.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
                 modifyText()
             }
         } else {
-            messageText.attributedText = textChat!.richText(group_id: self.dataGroup["group_id"] as! String)
+            messageText.attributedText = textChat!.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
             modifyText()
         }
         
@@ -4627,7 +4627,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     textChat = textChat!.components(separatedBy: "■")[0]
                     textChat = textChat!.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                let finalAtribute = textChat!.richText()
+                let finalAtribute = textChat!.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
                 textChat = finalAtribute.string
                 let urlPattern = "(https?://|www\\.)\\S+"
                 if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
@@ -4655,13 +4655,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         }
         
         if isSearching && textSearch.count > 1 {
-            messageText.attributedText = textChat!.richText(isSearching: true, textSearch: textSearch, group_id: self.dataGroup["group_id"] as! String)
+            messageText.attributedText = textChat!.richText(isSearching: true, textSearch: textSearch, group_id: self.dataGroup["group_id"]  as? String ?? "")
             if textChat!.lowercased().contains(textSearch) {
                 countMatchesSearch += 1
             }
         }
         
-        let stringDate = (dataMessages[indexPath.row]["server_date"] as! String)
+        let stringDate = (dataMessages[indexPath.row]["server_date"]  as? String ?? "")
         if !stringDate.isEmpty {
             if (dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2" {
                 if dataTimer! >= 10 {
@@ -4711,7 +4711,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             objectTap.audio_id = audioChat
         }
         
-        if (thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1")) {
+        if (thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1")) {
             if let listImages = groupImages[messageIdChat] {
                 timeMessage.isHidden = true
                 statusMessage.isHidden = true
@@ -4985,7 +4985,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             }
         }
         
-        if (fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1")) {
+        if (fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1")) {
             topMarginText.constant = topMarginText.constant + 55
             
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -5294,13 +5294,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 containerReply.translatesAutoresizingMaskIntoConstraints = false
                 containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32).isActive = true
-                if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+                if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                     containerReply.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
-                } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+                } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                     containerReply.bottomAnchor.constraint(equalTo: containerViewFile.topAnchor, constant: -5).isActive = true
                 } else if containerMessage.subviews.contains(containerLinkMessage) {
                     containerReply.bottomAnchor.constraint(equalTo: containerLinkMessage.topAnchor, constant: -5).isActive = true
-                } else if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+                } else if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                     containerReply.bottomAnchor.constraint(equalTo: imageSticker.topAnchor, constant: -5).isActive = true
                 } else {
                     containerReply.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
@@ -5340,7 +5340,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     }
                 } else {
                     if data["f_pin"] as? String != "-999" {
-                        let dataProfile = getDataProfile(f_pin: data["f_pin"] as! String, message_id: data["message_id"] as! String)
+                        let dataProfile = getDataProfile(f_pin: data["f_pin"]  as? String ?? "", message_id: data["message_id"]  as? String ?? "")
                         titleReply.text = dataProfile["name"]
                     } else {
                         titleReply.text = "Bot"
@@ -5368,18 +5368,18 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 let file_chat = data["file_id"] as? String ?? ""
                 if (attachment_flag == "0" && thumb_chat == "") {
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                    contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+                    contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
                 } else if (attachment_flag == "1" || image_chat != "") {
                     if (message_text == "") {
                         contentReply.text = "📷 Photo".localized()
                     } else {
-                        contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+                        contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
                     }
                 } else if (attachment_flag == "2" || video_chat != "") {
                     if (message_text == "") {
                         contentReply.text = "📹 Video".localized()
                     } else {
-                        contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+                        contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
                     }
                 } else if (attachment_flag == "6" || file_chat != ""){
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
@@ -5456,7 +5456,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
                     containerReply.addGestureRecognizer(objectTap)
                     objectTap.indexPath = indexPath
-                    objectTap.message_id = data["message_id"] as! String
+                    objectTap.message_id = data["message_id"]  as? String ?? ""
                 }
             }
         }
@@ -5475,13 +5475,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             containerForwarded.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32).isActive = true
             containerForwarded.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
             containerForwarded.heightAnchor.constraint(equalToConstant: 20).isActive = true
-            if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+            if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                 containerForwarded.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
-            } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+            } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                 containerForwarded.bottomAnchor.constraint(equalTo: containerViewFile.topAnchor, constant: -5).isActive = true
             } else if containerMessage.subviews.contains(containerLinkMessage) {
                 containerForwarded.bottomAnchor.constraint(equalTo: containerLinkMessage.topAnchor, constant: -5).isActive = true
-            } else if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") {
+            } else if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                 containerForwarded.bottomAnchor.constraint(equalTo: imageSticker.topAnchor, constant: -5).isActive = true
             }
             
@@ -5520,7 +5520,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                             var dataWillEmpty = updatedData
                             while dataWillEmpty.count > 0 {
                                 if let lastIdx = dataWillEmpty.lastIndex(where: { $0.dataMessage["lock"] as? String == "1" }) {
-                                    if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.listImageFromGrouping[0].messageId }) {
+                                    if let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == sender.listImageFromGrouping[0].messageId }) {
                                         if dataWillEmpty[lastIdx].messageId == sender.listImageFromGrouping[0].messageId {
                                             self.dataMessages.remove(at: idx)
                                             self.dataMessages.insert(dataWillEmpty[lastIdx].dataMessage, at: idx)
@@ -5542,7 +5542,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                                     groupImages[dataWillEmpty[0].messageId] = dataWillEmpty
                                     dataWillEmpty.removeAll()
                                 } else {
-                                    if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.listImageFromGrouping[0].messageId }) {
+                                    if let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == sender.listImageFromGrouping[0].messageId }) {
                                         self.dataMessages.remove(at: idx)
                                         self.dataMessages.insert(contentsOf: dataWillEmpty.map({ $0.dataMessage }), at: idx)
                                         groupImages.removeValue(forKey: sender.listImageFromGrouping[0].messageId)
@@ -5558,7 +5558,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                             if updatedData[0].messageId == sender.listImageFromGrouping[0].messageId {
                                 groupImages[sender.listImageFromGrouping[0].messageId] = updatedData
                             } else {
-                                if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.listImageFromGrouping[0].messageId }) {
+                                if let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == sender.listImageFromGrouping[0].messageId }) {
                                     self.dataMessages.remove(at: idx)
                                     self.dataMessages.insert(updatedData[0].dataMessage, at: idx)
                                     groupImages.removeValue(forKey: sender.listImageFromGrouping[0].messageId)
@@ -5566,7 +5566,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                                 }
                             }
                         } else {
-                            if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.listImageFromGrouping[0].messageId }) {
+                            if let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == sender.listImageFromGrouping[0].messageId }) {
                                 groupImages.removeValue(forKey: sender.listImageFromGrouping[0].messageId)
                                 self.dataMessages.remove(at: idx)
                                 let dataMessageInGrouping = updatedData.map({ $0.dataMessage })
@@ -5576,7 +5576,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                     }
                 } else {
                     groupImages.removeValue(forKey: sender.listImageFromGrouping[0].messageId)
-                    if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.listImageFromGrouping[0].messageId }) {
+                    if let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == sender.listImageFromGrouping[0].messageId }) {
                         self.dataMessages.remove(at: idx)
                     }
                 }
@@ -5592,8 +5592,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
     
     @objc func tapAck(_ sender: ObjectGesture) {
         let indexPath = sender.indexPath
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
-        if dataMessages[indexPath.row]["status"] as! String == "8" {
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        if dataMessages[indexPath.row]["status"]  as? String ?? "" == "8" {
             return
         }
         if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
@@ -5604,17 +5604,17 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             return
         }
         DispatchQueue.global().async {
-            var opposite_pin = self.dataGroup["group_id"] as! String
-            if (self.dataTopic["chat_id"] as! String != "") {
-                opposite_pin = self.dataTopic["chat_id"] as! String
+            var opposite_pin = self.dataGroup["group_id"]  as? String ?? ""
+            if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
+                opposite_pin = self.dataTopic["chat_id"]  as? String ?? ""
             }
-            let result = Nexilis.write(message: CoreMessage_TMessageBank.getAckLocationMessage(f_pin: dataMessages[indexPath.row]["f_pin"] as! String, message_id: dataMessages[indexPath.row]["message_id"] as! String, l_pin: opposite_pin, server_date: "\(Date().currentTimeMillis())", message_scope_id: dataMessages[indexPath.row]["message_scope_id"] as! String, longitude: self.longitude, latitude: self.latitude, description: ""))
+            let result = Nexilis.write(message: CoreMessage_TMessageBank.getAckLocationMessage(f_pin: dataMessages[indexPath.row]["f_pin"]  as? String ?? "", message_id: dataMessages[indexPath.row]["message_id"]  as? String ?? "", l_pin: opposite_pin, server_date: "\(Date().currentTimeMillis())", message_scope_id: dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "", longitude: self.longitude, latitude: self.latitude, description: ""))
             if result != nil {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
                         _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                             "status" : "8"
-                        ], _where: "message_id = '\(dataMessages[indexPath.row]["message_id"] as! String)'")
+                        ], _where: "message_id = '\(dataMessages[indexPath.row]["message_id"]  as? String ?? "")'")
                     } catch {
                         rollback.pointee = true
                         print("Access database error: \(error.localizedDescription)")
@@ -5623,8 +5623,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 DispatchQueue.main.async {
                     if let index = self.dataMessages.firstIndex(where: {$0["message_id"] as? String == dataMessages[indexPath.row]["message_id"] as? String}) {
                         self.dataMessages[index]["status"] = "8"
-                        let section = self.dataDates.firstIndex(of: self.dataMessages[index]["chat_date"] as! String)
-                        let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == self.dataMessages[index]["message_id"] as! String})
+                        let section = self.dataDates.firstIndex(of: self.dataMessages[index]["chat_date"]  as? String ?? "")
+                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[index]["message_id"]  as? String ?? ""})
                         if row != nil && section != nil {
                             self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                         }
@@ -5682,7 +5682,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                             return
                         }
                         do {
-                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as! String
+                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0]  as? String ?? ""
                             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -5829,7 +5829,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                                         }
                                     }
                                 }
-                                let idx = self.dataMessages.firstIndex(where: { $0["video_id"] as! String == sender.video_id})
+                                let idx = self.dataMessages.firstIndex(where: { $0["video_id"]  as? String ?? "" == sender.video_id})
                                 if idx != nil {
                                     self.dataMessages[idx!]["progress"] = progress
                                     self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
@@ -5919,7 +5919,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                             } catch {
                                 
                             }
-                            let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as! String == sender.file_id})
+                            let idx = self.dataMessages.firstIndex(where: { $0["file_id"]  as? String ?? "" == sender.file_id})
                             if idx != nil {
                                 self.dataMessages[idx!]["progress"] = progress
                                 self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
@@ -5968,15 +5968,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             }
         } else {
             DispatchQueue.main.async {
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as! String == sender.message_id})
+                let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == sender.message_id})
                 if idx == nil {
                     return
                 }
-                let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
+                let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
                 if section == nil {
                     return
                 }
-                let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == self.dataMessages[idx!]["message_id"] as! String})
+                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? ""})
                 if row == nil {
                     return
                 }
@@ -6060,7 +6060,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
     //    }
     
     private func handleReply(indexPath: IndexPath, dataMessagesImage: [String: Any?] = [:], reffId: String = "") {
-        var dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath.section]})
+        var dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         if reffId.isEmpty {
             self.deleteReplyView()
             if dataMessagesImage.count != 0 {
@@ -6070,7 +6070,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             }
             self.reffId = dataMessages[indexPath.row]["message_id"] as? String
         } else {
-            dataMessages = self.dataMessages.filter({ $0["message_id"] as! String == reffId })
+            dataMessages = self.dataMessages.filter({ $0["message_id"]  as? String ?? "" == reffId })
             self.reffId = reffId
         }
         UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
@@ -6120,7 +6120,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             titleReply.text = "You".localized()
         } else {
             if dataMessages[indexPath.row]["f_pin"] as? String != "-999" {
-                let dataPerson = self.getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"] as! String, message_id: dataMessages[indexPath.row]["message_id"] as! String)
+                let dataPerson = self.getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"]  as? String ?? "", message_id: dataMessages[indexPath.row]["message_id"]  as? String ?? "")
                 titleReply.text = dataPerson["name"]
             } else {
                 titleReply.text = "Bot"
@@ -6134,25 +6134,25 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
         contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
         contentReply.font = UIFont.systemFont(ofSize: 10)
-        let message_text = dataMessages[indexPath.row]["message_text"] as! String
-        let attachment_flag = dataMessages[indexPath.row]["attachment_flag"] as! String
-        let thumb_chat = dataMessages[indexPath.row]["thumb_id"] as! String
-        let image_chat = dataMessages[indexPath.row]["image_id"] as! String
-        let video_chat = dataMessages[indexPath.row]["video_id"] as! String
-        let file_chat = dataMessages[indexPath.row]["file_id"] as! String
+        let message_text = dataMessages[indexPath.row]["message_text"]  as? String ?? ""
+        let attachment_flag = dataMessages[indexPath.row]["attachment_flag"]  as? String ?? ""
+        let thumb_chat = dataMessages[indexPath.row]["thumb_id"]  as? String ?? ""
+        let image_chat = dataMessages[indexPath.row]["image_id"]  as? String ?? ""
+        let video_chat = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
+        let file_chat = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
         if (attachment_flag == "0" && thumb_chat == "") {
-            contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+            contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
         } else if (attachment_flag == "1" || image_chat != "") {
             if (message_text == "") {
                 contentReply.text = "📷 Photo".localized()
             } else {
-                contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+                contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
             }
         } else if (attachment_flag == "2" || video_chat != "") {
             if (message_text == "") {
                 contentReply.text = "📹 Video".localized()
             } else {
-                contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"] as! String)
+                contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
             }
         } else if (attachment_flag == "6" || file_chat != ""){
             contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
@@ -6235,17 +6235,17 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         var lastIndex = 0
         let messageTextForSearch: [[String: Any?]] = self.dataMessages.reversed()
         for idx in 0..<messageTextForSearch.count {
-            if (messageTextForSearch[idx]["message_text"] as! String).lowercased().contains(textSearch) {
+            if (messageTextForSearch[idx]["message_text"]  as? String ?? "").lowercased().contains(textSearch) {
                 lastIndex += 1
                 if lastIndex < indexScroll {
                     continue
                 }
                 lastScrollIdxSearch = lastIndex
-                let section = self.dataDates.firstIndex(of: messageTextForSearch[idx]["chat_date"] as! String)
+                let section = self.dataDates.firstIndex(of: messageTextForSearch[idx]["chat_date"]  as? String ?? "")
                 if section == nil {
                     return
                 }
-                let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as! String == messageTextForSearch[idx]["message_id"] as! String})
+                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == messageTextForSearch[idx]["message_id"]  as? String ?? ""})
                 if row == nil {
                     return
                 }

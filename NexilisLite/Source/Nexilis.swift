@@ -346,7 +346,7 @@ public class Nexilis: NSObject {
                     if let json = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any?] {
                         do {
                             if Utils.getBEId().isEmpty {
-                                Utils.setBEId(value: "\(json["be_id"]!!)")
+                                Utils.setBEId(value: "\(json["be_id"] as? Int ?? 0)")
                                 getPullPrefs()
                             } else {
                                 let dataArray: [[String: Any?]] = [json]
@@ -877,10 +877,10 @@ public class Nexilis: NSObject {
     public static func writeSync(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
         isProcessWriteSync = true
         do {
-            print(">> SENDING MESSAGE >> ", message.toLogString())
+//            print(">> SENDING MESSAGE >> ", message.toLogString())
             if let data = try API.sGetResponse(sRequest: message.pack(), lTimeout: timeout, bKeepTOResp: true) {
                 let response = TMessage(data: data)
-                print(">> RESPONSE WRITESYNC >> ")
+//                print(">> RESPONSE WRITESYNC >> ")
 //                print("<< RESPONSE MESSAGE << ", response.toLogString())
                 isProcessWriteSync = false
                 return response
@@ -1283,7 +1283,7 @@ public class Nexilis: NSObject {
         IncomingThread.default.addQueue(message: message)
     }
     
-    static func saveMessage(message: TMessage, withStatus: Bool = true) {
+    static func saveMessage(message: TMessage, withStatus: Bool = true, fromAPNS: Bool = false) {
 //        print("save message \(message.toLogString())")
         guard let me = User.getMyPin() else {
             return
@@ -1298,13 +1298,13 @@ public class Nexilis: NSObject {
         }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-//                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'") {
-//                    if cursor.next() {
-//                        //print("message exist")
-//                        return
-//                    }
-//                    cursor.close()
-//                }
+                var messageExist = false
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'") {
+                    if cursor.next() {
+                        messageExist = true
+                    }
+                    cursor.close()
+                }
                 let l_pin = message.getBody(key : CoreMessage_TMessageKey.L_PIN, default_value : "")
                 let scope = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_SCOPE_ID, default_value : "3")
                 let status = message.getBody(key : CoreMessage_TMessageKey.STATUS, default_value : "")
@@ -1316,6 +1316,7 @@ public class Nexilis: NSObject {
                 let is_secret = message.getBodyAsLong(key: CoreMessage_TMessageKey.IS_SECRET, default_value: 0)
                 let is_delete_retention = message.getBodyAsLong(key: CoreMessage_TMessageKey.IS_DELETED_RETENTION, default_value: 0)
                 let is_forwarded_message = message.getBodyAsLong(key: CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE, default_value: 0)
+                let opposite_pin = message.getBody(key: CoreMessage_TMessageKey.OPPOSITE_PIN, default_value: "")
                 //print("prepare save db")
                 do {
                     _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
@@ -1383,12 +1384,9 @@ public class Nexilis: NSObject {
                         //print(error)
                     }
                 }
-                var pin = l_pin
-                if l_pin == me {
-                    pin = f_pin
-                }
-                if !chat_id.isEmpty {
-                    pin = chat_id
+                var pin = opposite_pin
+                if pin == me {
+                    pin = l_pin
                 }
                 var counter : Int? = nil
                 if !withStatus {
@@ -1422,7 +1420,7 @@ public class Nexilis: NSObject {
                             messageId = cursorData.string(forColumnIndex: 0) ?? ""
                             cursorData.close()
                         }
-                        if !messageId.isEmpty {
+                        if !messageId.isEmpty && !messageExist {
                             _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                                 "l_pin" : pin,
                                 "message_id" : messageId,
@@ -1434,7 +1432,7 @@ public class Nexilis: NSObject {
                         //print(error)
                     }
                 }
-                if !withStatus {
+                if !withStatus && !fromAPNS {
                     DispatchQueue.main.async {
                         if let delegate = Nexilis.shared.messageDelegate, Utils.getSetProfile() {
                             message.mBodies[CoreMessage_TMessageKey.MESSAGE_TEXT] = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_TEXT, default_value : "").toNormalString()

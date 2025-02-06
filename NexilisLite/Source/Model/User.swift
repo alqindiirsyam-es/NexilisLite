@@ -127,7 +127,7 @@ public class User: Model {
         return nil
     }
     
-    public static func getData(pin: String?, fmdb: FMDatabase? = nil) -> User? {
+    public static func getData(pin: String?, lPin: String = "", fmdb: FMDatabase? = nil) -> User? {
         guard let pin = pin else {
             return nil
         }
@@ -146,6 +146,26 @@ public class User: Model {
                             device_id: cursor.string(forColumnIndex: 8) ?? "",
                             status: cursor.string(forColumnIndex: 10) ?? "")
                 cursor.close()
+            } else if let cursor = Database.shared.getRecords(fmdb: fmdb!, query: """
+                                                              SELECT a.f_pin, a.first_name, a.last_name, a.thumb_id
+                                                              FROM GROUPZ_MEMBER a
+                                                              LEFT JOIN DISCUSSION_FORUM b ON a.group_id = b.group_id
+                                                              LEFT JOIN GROUPZ c ON a.group_id = c.group_id
+                                                              WHERE a.f_pin = '\(pin)'
+                                                              AND (
+                                                                  (b.chat_id = '\(lPin)' AND a.group_id = b.group_id)
+                                                                  OR 
+                                                                  (c.group_id = '\(lPin)' AND a.group_id = c.group_id)
+                                                              )
+                                                              """), cursor.next() {
+                user = User(pin: cursor.string(forColumnIndex: 0) ?? "",
+                            firstName: cursor.string(forColumnIndex: 1) ?? "",
+                            lastName: cursor.string(forColumnIndex: 2) ?? "",
+                            thumb: cursor.string(forColumnIndex: 3) ?? "",
+                            userType: "",
+                            privacy_flag: "",
+                            offline_mode: "",
+                            ex_block: "")
             } else {
                 user = User(pin: pin,
                             firstName: "User".localized(),
@@ -172,6 +192,26 @@ public class User: Model {
                                     device_id: cursor.string(forColumnIndex: 8) ?? "",
                                     status: cursor.string(forColumnIndex: 10) ?? "")
                         cursor.close()
+                    } else if let cursor = Database.shared.getRecords(fmdb: fmdb, query: """
+                                                              SELECT a.f_pin, a.first_name, a.last_name, a.thumb_id
+                                                              FROM GROUPZ_MEMBER a
+                                                              LEFT JOIN DISCUSSION_FORUM b ON a.group_id = b.group_id
+                                                              LEFT JOIN GROUPZ c ON a.group_id = c.group_id
+                                                              WHERE a.f_pin = '\(pin)'
+                                                              AND (
+                                                                  (b.chat_id = '\(lPin)' AND a.group_id = b.group_id)
+                                                                  OR 
+                                                                  (c.group_id = '\(lPin)' AND a.group_id = c.group_id)
+                                                              )
+                                                              """), cursor.next() {
+                        user = User(pin: cursor.string(forColumnIndex: 0) ?? "",
+                                    firstName: cursor.string(forColumnIndex: 1) ?? "",
+                                    lastName: cursor.string(forColumnIndex: 2) ?? "",
+                                    thumb: cursor.string(forColumnIndex: 3) ?? "",
+                                    userType: "",
+                                    privacy_flag: "",
+                                    offline_mode: "",
+                                    ex_block: "")
                     } else {
                         user = User(pin: pin,
                                     firstName: "User".localized(),
