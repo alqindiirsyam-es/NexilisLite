@@ -849,14 +849,16 @@ public class APIS: NSObject {
 //                                    Thread.sleep(forTimeInterval: 1)
 //                                }
 //                            }
+                            while (!API.bnuSDKServiceReady() || API.nGetCLXConnState() == 0) {
+                            }
                             if code == "CL01" {
                                 if let message = data["bodies"] as? [String: String] {
                                     let messageToSave = TMessage()
                                     messageToSave.mBodies = message
-//                                    Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
-//                                    DispatchQueue.global().async {
-//                                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""))
-//                                    }
+                                    Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
+                                    DispatchQueue.global().async {
+                                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""))
+                                    }
                                     addNotificationNexilis(messageToSave)
                                 }
                             } else if code == "CL03" {
@@ -1012,7 +1014,7 @@ public class APIS: NSObject {
                 print("Error scheduling notification: \(error.localizedDescription)")
             }
         }
-        UIApplication.shared.applicationIconBadgeNumber += 1
+        UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
     }
     
     private static func copySoundToLocalPath() {
@@ -1206,6 +1208,7 @@ public class APIS: NSObject {
 //            try API.switchCBI(cbiI: Callback(), bLight: true)
 //        } catch {
 //        }
+        exit(0)
     }
     
     public static func enterForeground() {

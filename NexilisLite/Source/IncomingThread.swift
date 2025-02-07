@@ -1301,17 +1301,17 @@ class IncomingThread {
         } else {
             Nexilis.saveMessage(message: message, withStatus: false)
         }
-//        DispatchQueue.main.async {
-//            if APIS.checkAppStateisBackground() {
-//                UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
-//                    let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
-//                    let matchingNotifications = notifications.filter { $0.request.identifier == identifier }
-//                    if !matchingNotifications.isEmpty {
-//                        APIS.addNotificationNexilis(message)
-//                    }
-//                }
-//            }
-//        }
+        DispatchQueue.main.async {
+            if APIS.checkAppStateisBackground() {
+                UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
+                    let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
+                    let matchingNotifications = notifications.filter { $0.request.identifier == identifier }
+                    if matchingNotifications.isEmpty {
+                        APIS.addNotificationNexilis(message)
+                    }
+                }
+            }
+        }
         //print("save message incoming")
         if !withoutACK {
             ack(message: message)
