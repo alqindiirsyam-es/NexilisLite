@@ -632,9 +632,9 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             } else {
                 labelRestoring.text = "Successfully Restored Data".localized()
             }
-            DispatchQueue.global().async { [self] in
-                _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupRestored(option: optionBackup, fileid: fileIdBackup))
-            }
+//            DispatchQueue.global().async { [self] in
+//                _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupRestored(option: optionBackup, fileid: fileIdBackup))
+//            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
                 isRestoreStart = false
                 valueLastBackup = "-"
@@ -647,9 +647,9 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
         } catch {
             //print(error)
             self.view.makeToast("Backup files are corrupted".localized(), duration: 3)
-            DispatchQueue.global().async { [self] in
-                _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupRestored(option: optionBackup, fileid: fileIdBackup))
-            }
+//            DispatchQueue.global().async { [self] in
+//                _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupRestored(option: optionBackup, fileid: fileIdBackup))
+//            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
                 isRestoreStart = false
                 valueLastBackup = "-"

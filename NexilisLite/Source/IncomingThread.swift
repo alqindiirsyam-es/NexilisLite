@@ -1267,7 +1267,6 @@ class IncomingThread {
     }
     
     public func receiveMessage(message: TMessage, withoutACK: Bool = false) -> Void {
-        let message_id = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
         guard let _: String = SecureUserDefaults.shared.value(forKey: "status") else {
             //print("App not ready!!! skip receive message \(message_id)")
             if !withoutACK {
@@ -1275,42 +1274,21 @@ class IncomingThread {
             }
             return
         }
-        var messageExist = false
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
-                    if !withoutACK {
-                        ack(message: message)
-                    }
-                    cursor.close()
-                    messageExist = true
-                    print("MASUK RETURN MESSAGE EXIST")
-                }
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
-            }
-        })
-        if messageExist {
-            return
-        }
         let media = message.getMedia()
         //print("MEDIA \(media)");
         let thumb_id = message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)
-        if media.count > 0 {
-            do {
-                let data = Data(media)
-                let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                let url = documentDir.appendingPathComponent(thumb_id)
-                //print("write thumb \(url.path)")
-                try data.write(to: url, options: .atomic)
+        do {
+            let data = Data(media)
+            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let url = documentDir.appendingPathComponent(thumb_id)
+            //print("write thumb \(url.path)")
+            try data.write(to: url, options: .atomic)
 //                let image = UIImage(data: data)
 //                if save {
 //                    UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
 //                }
-            } catch {
-                //print(error)
-            }
+        } catch {
+            //print(error)
         }
         if (!thumb_id.isEmpty) {
             Download().startHTTP(forKey: thumb_id) { (file, progress) in
@@ -1320,12 +1298,20 @@ class IncomingThread {
                     //print("save message incoming")
                 }
             }
-            if !withoutACK {
-                ack(message: message)
-            }
-            return
+        } else {
+            Nexilis.saveMessage(message: message, withStatus: false)
         }
-        Nexilis.saveMessage(message: message, withStatus: false)
+//        DispatchQueue.main.async {
+//            if APIS.checkAppStateisBackground() {
+//                UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
+//                    let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
+//                    let matchingNotifications = notifications.filter { $0.request.identifier == identifier }
+//                    if !matchingNotifications.isEmpty {
+//                        APIS.addNotificationNexilis(message)
+//                    }
+//                }
+//            }
+//        }
         //print("save message incoming")
         if !withoutACK {
             ack(message: message)

@@ -399,9 +399,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         }
         
         if fromNotification {
-            let imageButton = UIImageView(frame: CGRect(x: 0, y: 0, width: 20, height: 44))
-            imageButton.image = UIImage(systemName: "chevron.backward")?.withTintColor(.white)
-            imageButton.contentMode = .right
+            let imageButton = UIImageView(frame: CGRect(x: -16, y: 0, width: 20, height: 44))
+            imageButton.image = UIImage(systemName: "chevron.backward", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular, scale: .default))?.withTintColor(.white)
+            imageButton.contentMode = .left
             let tapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(didTapExit))
             imageButton.isUserInteractionEnabled = true
             imageButton.addGestureRecognizer(tapGestureRecognizer)
@@ -834,7 +834,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             imageProfile.circle()
             imageProfile.clipsToBounds = true
             viewAppBar.addSubview(imageProfile)
-            let pictureImage = dataGroup["image_id"]!
+            let pictureImage = dataGroup["image_id"] ?? ""
             if (pictureImage  as? String ?? "" != "" && pictureImage != nil) {
                 imageProfile.setImage(name: pictureImage!  as? String ?? "")
                 imageProfile.contentMode = .scaleAspectFill
@@ -856,7 +856,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     titleNavigation.text = (dataGroup["f_name"] as? String)! + " " + "Contact Center".localized()
                 }
             } else {
-                titleNavigation.text = (dataGroup["f_name"] as? String)! + " (\(dataTopic["title"]!!))"
+                titleNavigation.text = (dataGroup["f_name"] as? String ?? "") + " (\(dataTopic["title"] as? String ?? ""))"
             }
             titleNavigation.textColor = .white
             titleNavigation.font = UIFont.systemFont(ofSize: 12).bold
@@ -1905,7 +1905,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     private func getCounter() {
         Database().database?.inTransaction({ fmdb, rollback in
-            var l_pin = self.dataGroup["group_id"]!!
+            var l_pin = self.dataGroup["group_id"] as? String ?? ""
             if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
                 l_pin = self.dataTopic["chat_id"]  as? String ?? ""
             }
@@ -2047,9 +2047,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             message.mStatus = CoreMessage_TMessageUtil.getTID()
             message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
             message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
-            DispatchQueue.global().async {
-                _ = Nexilis.write(message: message)
-            }
+            _ = Nexilis.write(message: message)
         }
         if let index = dataMessages.firstIndex(where: {$0["message_id"] as? String == message_id}) {
             dataMessages[index]["status"] = "4"
@@ -4296,7 +4294,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             
             timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
             
-            if dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" == "0" {
+            if (dataMessages[indexPath.row]["lock"] as? String != "2") {
                 cellMessage.contentView.addSubview(statusMessage)
                 statusMessage.translatesAutoresizingMaskIntoConstraints = false
                 statusMessage.bottomAnchor.constraint(equalTo: timeMessage.topAnchor).isActive = true

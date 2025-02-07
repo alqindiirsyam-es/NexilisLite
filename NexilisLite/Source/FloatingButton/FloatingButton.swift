@@ -668,9 +668,6 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 print("Access database error: \(error.localizedDescription)")
             }
         })
-        if !Nexilis.fromMAB {
-            UIApplication.shared.applicationIconBadgeNumber = Int(counter ?? 0)
-        }
         return counter ?? 0
     }
     

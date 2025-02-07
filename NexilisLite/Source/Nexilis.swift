@@ -1299,10 +1299,8 @@ public class Nexilis: NSObject {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 var messageExist = false
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'") {
-                    if cursor.next() {
-                        messageExist = true
-                    }
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
+                    messageExist = true
                     cursor.close()
                 }
                 let l_pin = message.getBody(key : CoreMessage_TMessageKey.L_PIN, default_value : "")
@@ -1385,6 +1383,13 @@ public class Nexilis: NSObject {
                     }
                 }
                 var pin = opposite_pin
+                if pin.isEmpty {
+                    if scope == "4" {
+                        pin = chat_id.isEmpty ? l_pin : chat_id
+                    } else {
+                        pin = f_pin
+                    }
+                }
                 if pin == me {
                     pin = l_pin
                 }
@@ -1392,7 +1397,7 @@ public class Nexilis: NSObject {
                 if !withStatus {
                     if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select counter from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
                         counter = Int(cursor.int(forColumnIndex: 0))
-                        if last_edited == 0 {
+                        if last_edited == 0 && !messageExist {
                             counter! += 1
                         }
                         cursor.close()
@@ -1403,28 +1408,22 @@ public class Nexilis: NSObject {
                         //print("set counter message summary")
                     }
                 }
-                if counter == nil {
-                    counter = 0
-                }
                 if is_call_center == "0" {
                     do {
-                        var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where f_pin = '\(pin)' OR l_pin = '\(pin)' order by server_date desc LIMIT 1"
+                        var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND message_scope_id = '3' order by server_date desc LIMIT 1"
                         if scope == "4" {
-                            queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(pin)' AND chat_id = '' order by server_date desc LIMIT 1"
-                            if !chat_id.isEmpty {
-                                queryGetLastMessageId = "SELECT message_id FROM MESSAGE where chat_id = '\(pin)' order by server_date desc LIMIT 1"
-                            }
+                            queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(chat_id.isEmpty ? pin : l_pin)' AND chat_id = '\(chat_id)' AND message_scope_id = '4' order by server_date desc LIMIT 1"
                         }
                         var messageId = ""
                         if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: queryGetLastMessageId), cursorData.next() {
                             messageId = cursorData.string(forColumnIndex: 0) ?? ""
                             cursorData.close()
                         }
-                        if !messageId.isEmpty && !messageExist {
+                        if !messageId.isEmpty {
                             _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                                 "l_pin" : pin,
                                 "message_id" : messageId,
-                                "counter" : counter!
+                                "counter" : counter ?? 0
                             ], replace: true)
                         }
                     } catch {

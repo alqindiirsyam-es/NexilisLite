@@ -3085,9 +3085,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     message.mStatus = CoreMessage_TMessageUtil.getTID()
                     message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
                     message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(valueListGroupImages[i].messageId)"
-                    DispatchQueue.global().async {
-                        _ = Nexilis.write(message: message)
-                    }
                 }
             } else {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -3103,10 +3100,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 message.mStatus = CoreMessage_TMessageUtil.getTID()
                 message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
                 message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
-                DispatchQueue.global().async {
-                    _ = Nexilis.write(message: message)
-                }
             }
+            _ = Nexilis.write(message: message)
         }
         if let index = dataMessages.firstIndex(where: {$0["message_id"] as? String == message_id}) {
             dataMessages[index]["status"] = "4"
@@ -5530,7 +5525,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             
             timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
             
-            if (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" == "0") && (dataMessages[indexPath.row]["lock"] as? String != "2") {
+            if (dataMessages[indexPath.row]["lock"] as? String != "2") {
                 cell.contentView.addSubview(statusMessage)
                 statusMessage.translatesAutoresizingMaskIntoConstraints = false
                 statusMessage.bottomAnchor.constraint(equalTo: timeMessage.topAnchor).isActive = true
