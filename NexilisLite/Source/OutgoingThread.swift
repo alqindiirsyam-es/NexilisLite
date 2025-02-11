@@ -180,9 +180,10 @@ class OutgoingThread {
                                 if let delegate = Nexilis.shared.messageDelegate {
                                     delegate.onUpload(name: fileName, progress: progress)
                                 }
+                                print("progress upload", progress)
                                 if progress == 100 {
                                     if let response = Nexilis.writeSync(message: message) {
-                                        //print("sendChat", response.toLogString())
+                                        print("sendChat", response.toLogString())
                                         let messageId = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
                                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                                             do {
@@ -391,12 +392,9 @@ class OutgoingThread {
                         if !chat.isEmpty {
                             pin = chat
                         }
-                        var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where f_pin = '\(pin)' OR l_pin = '\(pin)' order by server_date desc LIMIT 1"
+                        var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND message_scope_id = '3' order by server_date desc LIMIT 1"
                         if scope == "4" {
-                            queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(pin)' AND chat_id = '' order by server_date desc LIMIT 1"
-                            if !chat.isEmpty {
-                                queryGetLastMessageId = "SELECT message_id FROM MESSAGE where chat_id = '\(pin)' order by server_date desc LIMIT 1"
-                            }
+                            queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(chat.isEmpty ? pin : l_pin)' AND chat_id = '\(chat)' AND message_scope_id = '4' order by server_date desc LIMIT 1"
                         }
                         var messageId = ""
                         if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: queryGetLastMessageId), cursorData.next() {

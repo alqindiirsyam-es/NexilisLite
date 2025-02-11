@@ -27,6 +27,8 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     
     var indexImageVideoWv = 0
     var imageVideoPicker: ImageVideoPicker!
+    var blockedCertificate = ""
+    var allowedURLs = Set<String>()
     
     public override var preferredStatusBarStyle: UIStatusBarStyle {
         return .default
@@ -693,53 +695,115 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         sender.endRefreshing()
     }
     
-//    public func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-//        guard let serverTrust = challenge.protectionSpace.serverTrust else {
-//            completionHandler(.cancelAuthenticationChallenge, nil)
-//            return
-//        }
-//        if let serverCertificate = SecTrustGetCertificateAtIndex(serverTrust, 0),
-//           let pinnedCertificateHash = getCertificateHash(from: serverCertificate),
-//           pinnedCertificateHash == Utils.getCertificatePinningWebview() {
-//            let credential = URLCredential(trust: serverTrust)
-//            completionHandler(.useCredential, credential) // Certificate matches, proceed
-//        } else {
-//            completionHandler(.cancelAuthenticationChallenge, nil) // Certificate doesn't match, cancel
-//        }
-//    }
-    
-    private func getCertificateHash(from certificate: SecCertificate) -> String? {
-        guard let publicKey = getPublicKey(from: certificate) else { return nil }
-        return hashPublicKey(publicKey)
+    public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        if allowedURLs.contains(url.absoluteString) {
+            print("✅ URL already allowed: \(url)")
+            decisionHandler(.allow)
+            return
+        }
+        validateSSLCertificate(url: url) { isValid in
+            print("is VALID? : \(isValid)")
+            if isValid {
+                self.allowedURLs.insert(url.absoluteString)
+                decisionHandler(.allow)
+            } else {
+                let host = url.host ?? ""
+                DispatchQueue.main.async {
+                    var messageText = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability".localized()
+                    messageText = messageText.replacingOccurrences(of: "<<domain>>", with: host)
+                    let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
+                                                  message: messageText,
+                                                  preferredStyle: .alert)
+
+                    let yesAction = UIAlertAction(title: "Yes", style: .default) { _ in
+                        let storedCertificate = Utils.getCertificatePinningWebview()
+                        if let jsonData = storedCertificate.data(using: .utf8),
+                           let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
+                            var certJson = certJson
+                            certJson[host] = self.blockedCertificate
+                            if let jsonData = try? JSONSerialization.data(withJSONObject: certJson, options: []),
+                               let jsonString = String(data: jsonData, encoding: .utf8) {
+                                Utils.setCertificatePinningWebview(value: jsonString)
+                            }
+                        }
+                        self.allowedURLs.insert(url.absoluteString)
+                        decisionHandler(.allow)
+                    }
+                    let noAction = UIAlertAction(title: "No", style: .cancel) { _ in
+                        decisionHandler(.cancel)
+                    }
+                    alert.addAction(yesAction)
+                    alert.addAction(noAction)
+                    self.present(alert, animated: true, completion: nil)
+                }
+            }
+        }
     }
     
-    private func getPublicKey(from certificate: SecCertificate) -> Data? {
-        var trust: SecTrust?
-        let policy = SecPolicyCreateBasicX509()
-        let status = SecTrustCreateWithCertificates(certificate, policy, &trust)
+    private func validateSSLCertificate(url: URL, completion: @escaping (Bool) -> Void) {
+        let session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+        let request = URLRequest(url: url)
 
-        guard status == errSecSuccess, let trust = trust else { return nil }
+        let task = session.dataTask(with: request) { _, response, error in
+            if let error = error {
+                print("SSL Validation Error: \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+            completion(true)
+        }
+        task.resume()
+    }
+}
 
-        guard let publicKey = SecTrustCopyKey(trust) else { return nil }
-
-        var error: Unmanaged<CFError>?
-        if let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) {
-            return publicKeyData as Data
+extension BNIBookingWebView: URLSessionDelegate {
+    public func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard let serverTrust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        if let publicKeyHash = extractPublicKeyHash(from: serverTrust) {
+            let domain = challenge.protectionSpace.host
+            let storedCertificate = Utils.getCertificatePinningWebview()
+            if let jsonData = storedCertificate.data(using: .utf8),
+               let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
+                if publicKeyHash == certJson[domain] {
+                    print("✅ Certificate Matched. Allowing Navigation.")
+                    completionHandler(.useCredential, URLCredential(trust: serverTrust))
+                } else {
+                    print("❌ Certificate Mismatch! Blocking Navigation.")
+                    blockedCertificate = publicKeyHash
+                    completionHandler(.cancelAuthenticationChallenge, nil)
+                }
+            }
         } else {
-            print("Error extracting public key: \(String(describing: error?.takeRetainedValue()))")
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        }
+    }
+    
+    func extractPublicKeyHash(from serverTrust: SecTrust) -> String? {
+        guard let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else { return nil }
+        guard let publicKey = SecCertificateCopyKey(certificate) else { return nil }
+        
+        var error: Unmanaged<CFError>?
+        guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
+            print("❌ Failed to extract public key")
             return nil
         }
-    }
-
-    private func hashPublicKey(_ publicKey: Data) -> String? {
-        // SHA-256 hash
+        
+        // Compute SHA-256 hash
         var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        publicKey.withUnsafeBytes {
-            _ = CC_SHA256($0.baseAddress, CC_LONG(publicKey.count), &hash)
+        publicKeyData.withUnsafeBytes {
+            _ = CC_SHA256($0.baseAddress, CC_LONG(publicKeyData.count), &hash)
         }
-
-        // Base64 encode the hash
-        let base64Hash = Data(hash).base64EncodedString()
-        return "sha256/\(base64Hash)"
+        
+        let hashData = Data(hash)
+        let base64Hash = hashData.base64EncodedString()
+        
+        return base64Hash
     }
 }

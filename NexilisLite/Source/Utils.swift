@@ -359,12 +359,12 @@ public final class Utils {
         return dateFormatter.string(from: todaysDate as Date)
     }
     
-    static func setCertificatePinningWebview(value: String) {
-        SecureUserDefaults.shared.set(value, forKey: "certificate_pinning_webview")
+    public static func setCertificatePinningWebview(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_certificate_pinning_webview")
     }
 
     public static func getCertificatePinningWebview() -> String {
-        if let value: String = SecureUserDefaults.shared.value(forKey: "certificate_pinning_webview") {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_certificate_pinning_webview") {
             return value
         }
         return ""

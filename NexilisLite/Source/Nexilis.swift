@@ -124,6 +124,7 @@ public class Nexilis: NSObject {
     
     static var ringtonePlayer: AVAudioPlayer?
     static var ringbacktonePlayer: AVAudioPlayer?
+    static var sharedAudioPlayer: AVAudioPlayer?
     
     private func createDelegate() {
         //print("createDelegate...")
@@ -147,7 +148,13 @@ public class Nexilis: NSObject {
         do {
             try MasterKeyUtil.shared.generateAndStoreMasterKey()
             try MasterKeyUtil.shared.generateAndStorePrefsKey()
-            Utils.setCertificatePinningWebview(value: Utils.decrypt(str: "6]qaAhNXHAxGKAOsFZmoIRUIn2Hp3rdfGAOFEfcnY4SIZ"))
+            if Utils.getCertificatePinningWebview().isEmpty {
+                let cert: [String: String] = ["nexilis.io": Utils.decrypt(str: "7^reFspLRnRz3NaVjeI2AUQ0l5JFQbf0bZZ3dfYaBMqnL"), "newuniverse.io": Utils.decrypt(str: "6]umyRKg9l6D2N?2wVaejmtPrWNtVKpjqt0mqyA68XwFi")]
+                if let jsonData = try? JSONSerialization.data(withJSONObject: cert, options: []),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    Utils.setCertificatePinningWebview(value: jsonString)
+                }
+            }
         } catch {
         }
         
@@ -3815,27 +3822,25 @@ extension Nexilis: MessageDelegate {
                     }
                     
                     floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
-                    let vibrateMode: Bool = SecureUserDefaults.shared.value(forKey: "vibrateMode") ?? false
-                    var soundId: String = SecureUserDefaults.shared.value(forKey: "notifSoundPersonal") ?? ""
+//                    let vibrateMode: Bool = SecureUserDefaults.shared.value(forKey: "vibrateMode") ?? false
+                    var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"
                     if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == "4" {
-                        soundId = SecureUserDefaults.shared.value(forKey: "notifSoundGroup") ?? ""
+                        soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
                     }
-                    var systemSoundID: SystemSoundID!
-                    if soundId.isEmpty {
-                        systemSoundID = 1007
-                    } else {
-                        systemSoundID = SystemSoundID(Int(soundId.components(separatedBy: ":")[0])!)
-                    }
-                    if vibrateMode {
-                        AudioServicesPlaySystemSound(systemSoundID)
-                    } else {
-                        var nameSound = "sms-received1"
-                        if systemSoundID != 1007 {
-                            nameSound = soundId.components(separatedBy: ":")[1]
+                    do {
+                        var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+                        if nameSound.contains("_(Default)") {
+                            nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
                         }
-                        let url = URL(fileURLWithPath: "/System/Library/Audio/UISounds/\(nameSound).caf")
-                        AudioServicesCreateSystemSoundID(url as CFURL, &systemSoundID)
-                        AudioServicesPlaySystemSound(systemSoundID)
+                        var soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                        if soundURL == nil {
+                            soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                        }
+                        Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
+                        Nexilis.sharedAudioPlayer?.prepareToPlay()
+                        Nexilis.sharedAudioPlayer?.play()
+                    } catch {
+                        
                     }
                     if !onGoingCC.isEmpty {
                         floating.autoDismiss = false

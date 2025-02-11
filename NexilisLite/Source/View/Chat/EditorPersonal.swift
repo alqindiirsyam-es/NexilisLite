@@ -3464,9 +3464,9 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
             let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
             UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
         }
-        picker.dismiss(animated: true, completion: nil)
         guard let result = results.first else { return }
         if result.itemProvider.hasItemConformingToTypeIdentifier("com.compuserve.gif") {
+            picker.dismiss(animated: true, completion: nil)
             result.itemProvider.loadDataRepresentation(forTypeIdentifier: "com.compuserve.gif") { data, error in
                 if let error = error {
                     print("Error loading GIF: \(error.localizedDescription)")
@@ -3489,6 +3489,7 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
                 }
             }
         } else if result.itemProvider.hasItemConformingToTypeIdentifier("public.image") {
+            picker.dismiss(animated: true, completion: nil)
             result.itemProvider.loadObject(ofClass: UIImage.self) { object, error in
                 if let image = object as? UIImage {
                     DispatchQueue.main.async {
@@ -3508,34 +3509,39 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
                 }
             }
         } else if result.itemProvider.hasItemConformingToTypeIdentifier("public.movie") {
-            result.itemProvider.loadFileRepresentation(forTypeIdentifier: "public.movie") { tempURL, error in
-                if let tempURL = tempURL {
-                    let fileManager = FileManager.default
-                    let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-                    let destinationURL = documentsDirectory.appendingPathComponent(tempURL.lastPathComponent)
-                    do {
-                        if fileManager.fileExists(atPath: destinationURL.path) {
-                            try fileManager.removeItem(at: destinationURL)
-                        }
-                        try fileManager.copyItem(at: tempURL, to: destinationURL)
-                        DispatchQueue.main.async {
-                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                            if (self.textFieldSend.textColor != .lightGray) {
-                                previewImageVC.currentTextTextField = self.textFieldSend.text
+            picker.dismiss(animated: true, completion: {
+                Nexilis.showLoader()
+                result.itemProvider.loadFileRepresentation(forTypeIdentifier: "public.movie") { tempURL, error in
+                    if let tempURL = tempURL {
+                        let fileManager = FileManager.default
+                        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+                        let destinationURL = documentsDirectory.appendingPathComponent(tempURL.lastPathComponent)
+                        do {
+                            if fileManager.fileExists(atPath: destinationURL.path) {
+                                try fileManager.removeItem(at: destinationURL)
                             }
-                            previewImageVC.modalPresentationStyle = .custom
-                            previewImageVC.urlVideoPhpPicker = destinationURL
-                            previewImageVC.delegate = self
-                            previewImageVC.isAck = self.isAck
-                            previewImageVC.isConfidential = self.isConfidential
-                            previewImageVC.isCC = self.isContactCenter
-                            self.present(previewImageVC, animated: true, completion: nil)
+                            try fileManager.copyItem(at: tempURL, to: destinationURL)
+                            DispatchQueue.main.async {
+                                Nexilis.hideLoader {
+                                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                                    if (self.textFieldSend.textColor != .lightGray) {
+                                        previewImageVC.currentTextTextField = self.textFieldSend.text
+                                    }
+                                    previewImageVC.modalPresentationStyle = .custom
+                                    previewImageVC.urlVideoPhpPicker = destinationURL
+                                    previewImageVC.delegate = self
+                                    previewImageVC.isAck = self.isAck
+                                    previewImageVC.isConfidential = self.isConfidential
+                                    previewImageVC.isCC = self.isContactCenter
+                                    self.present(previewImageVC, animated: true, completion: nil)
+                                }
+                            }
+                        } catch {
+                            print("Error copying video file: \(error.localizedDescription)")
                         }
-                    } catch {
-                        print("Error copying video file: \(error.localizedDescription)")
                     }
                 }
-            }
+            })
         }
     }
     

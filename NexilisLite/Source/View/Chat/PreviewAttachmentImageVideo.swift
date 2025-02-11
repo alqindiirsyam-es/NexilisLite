@@ -357,106 +357,124 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self)
             }
         } else {
-            var dataVideo: Data?
-            if imageVideoData != nil || urlVideoPhpPicker != nil {
-                if imageVideoData != nil {
-                    dataVideo = try? Data(contentsOf: imageVideoData![.mediaURL] as! URL)
-                } else {
-                    dataVideo = try? Data(contentsOf: urlVideoPhpPicker!)
+            Nexilis.showLoader()
+            DispatchQueue.global().async { [self] in
+                var dataVideo: Data?
+                if imageVideoData != nil || urlVideoPhpPicker != nil {
+                    if imageVideoData != nil {
+                        dataVideo = try? Data(contentsOf: imageVideoData![.mediaURL] as! URL)
+                    } else {
+                        dataVideo = try? Data(contentsOf: urlVideoPhpPicker!)
+                    }
                 }
-            }
-            if var dataVideo = dataVideo {
-                let sizeOfVideo = Double(dataVideo.count / 1048576)
-                if (sizeOfVideo > 10.0) {
-                    let compressedURL = NSURL.fileURL(withPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
-                    compressVideo(inputURL: imageVideoData![.mediaURL] as! URL,
-                                  outputURL: compressedURL) { exportSession in
-                        guard let session = exportSession else {
-                            return
-                        }
-                        
-                        switch session.status {
-                        case .unknown:
-                            break
-                        case .waiting:
-                            break
-                        case .exporting:
-                            break
-                        case .completed:
-                            guard let compressedData = try? Data(contentsOf: compressedURL) else {
+                if let dataVideotoCompress = dataVideo {
+                    let sizeInKB = Double(dataVideotoCompress.count) / 1024.0
+                    let sizeOfVideo = sizeInKB / 1024.0
+                    if (sizeOfVideo > 10.0) {
+                        Nexilis.dispatch = DispatchGroup()
+                        Nexilis.dispatch?.enter()
+                        let compressedURL = NSURL.fileURL(withPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
+                        compressVideo(inputURL: (imageVideoData != nil ? imageVideoData![.mediaURL] as? URL : urlVideoPhpPicker)!,
+                                      outputURL: compressedURL) { exportSession in
+                            guard let session = exportSession else {
+                                if let dispatch = Nexilis.dispatch {
+                                    dispatch.leave()
+                                }
                                 return
                             }
-                            dataVideo = compressedData
-                        case .failed:
-                            break
-                        case .cancelled:
-                            break
-                        @unknown default:
-                            break
-                        }
-                    }
-                }
-            }
-            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            var urlVideo = ""
-            var originalVideoName = ""
-            var renamedVideoName = ""
-            var thumbName = ""
-            if (fromCopy && dataGIF != nil) {
-                originalVideoName = "\(Date().currentTimeMillis())_copyGif"
-                renamedVideoName = "Nexilis_gif_\(originalVideoName)"
-                thumbName = "THUMB_Nexilis_gif_\(originalVideoName)"
-            } else {
-                if imageVideoData != nil {
-                    urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString!
-                } else {
-                    urlVideo = (urlVideoPhpPicker! as NSURL).absoluteString!
-                }
-                originalVideoName = (urlVideo as NSString).lastPathComponent
-                renamedVideoName = "Nexilis_video_\(originalVideoName)"
-                thumbName = "THUMB_Nexilis_video_\(originalVideoName)"
-            }
-            let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
-            if !FileManager.default.fileExists(atPath: fileURL.path) {
-                do {
-                    if let dataVideo = dataVideo {
-                        try dataVideo.write(to: fileURL)
-                    } else if let dataGIF = dataGIF {
-                        try dataGIF.write(to: fileURL)
-                    }
-                    //print("file saved")
-                } catch {
-                    //print("error saving file:", error)
-                }
-            }
-            var dataThumbVideo: Data?
-            if !fromCopy {
-                dataThumbVideo = imagePreview.image!.jpegData(compressionQuality:  1.0)
-            }
-            let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
-            if !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
-                do {
-                    if let dataThumbVideo = dataThumbVideo {
-                        try dataThumbVideo.write(to: fileURLTHUMB)
-                    } else {
-                        if let dataGIF = dataGIF {
-                            if let dataThumbGif = UIImage(data: dataGIF) {
-                                if let compressedDataThumbGif = dataThumbGif.jpegData(compressionQuality: 1.0) {
-                                    try compressedDataThumbGif.write(to: fileURLTHUMB)
+                            
+                            switch session.status {
+                            case .unknown:
+                                break
+                            case .waiting:
+                                break
+                            case .exporting:
+                                break
+                            case .completed:
+                                guard let compressedData = try? Data(contentsOf: compressedURL) else {
+                                    return
                                 }
+                                dataVideo = compressedData
+                                if let dispatch = Nexilis.dispatch {
+                                    dispatch.leave()
+                                }
+                            case .failed:
+                                break
+                            case .cancelled:
+                                break
+                            @unknown default:
+                                break
                             }
                         }
                     }
-                    //print("thumb saved")
-                } catch {
-                    //print("error saving file:", error)
                 }
-            }
-            self.dismiss(animated: true, completion: nil)
-            if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
-                delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self)
-            } else {
-                delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self)
+                Nexilis.dispatch?.wait()
+                Nexilis.dispatch = nil
+                DispatchQueue.main.async {
+                    Nexilis.hideLoader { [self] in
+                        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                        var urlVideo = ""
+                        var originalVideoName = ""
+                        var renamedVideoName = ""
+                        var thumbName = ""
+                        if (fromCopy && dataGIF != nil) {
+                            originalVideoName = "\(Date().currentTimeMillis())_copyGif"
+                            renamedVideoName = "Nexilis_gif_\(originalVideoName)"
+                            thumbName = "THUMB_Nexilis_gif_\(originalVideoName)"
+                        } else {
+                            if imageVideoData != nil {
+                                urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString!
+                            } else {
+                                urlVideo = (urlVideoPhpPicker! as NSURL).absoluteString!
+                            }
+                            originalVideoName = (urlVideo as NSString).lastPathComponent
+                            renamedVideoName = "Nexilis_video_\(originalVideoName)"
+                            thumbName = "THUMB_Nexilis_video_\(originalVideoName)"
+                        }
+                        let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
+                        if !FileManager.default.fileExists(atPath: fileURL.path) {
+                            do {
+                                if let dataVideo = dataVideo {
+                                    try dataVideo.write(to: fileURL)
+                                } else if let dataGIF = dataGIF {
+                                    try dataGIF.write(to: fileURL)
+                                }
+                                //print("file saved")
+                            } catch {
+                                //print("error saving file:", error)
+                            }
+                        }
+                        var dataThumbVideo: Data?
+                        if !fromCopy {
+                            dataThumbVideo = imagePreview.image!.jpegData(compressionQuality:  1.0)
+                        }
+                        let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
+                        if !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
+                            do {
+                                if let dataThumbVideo = dataThumbVideo {
+                                    try dataThumbVideo.write(to: fileURLTHUMB)
+                                } else {
+                                    if let dataGIF = dataGIF {
+                                        if let dataThumbGif = UIImage(data: dataGIF) {
+                                            if let compressedDataThumbGif = dataThumbGif.jpegData(compressionQuality: 1.0) {
+                                                try compressedDataThumbGif.write(to: fileURLTHUMB)
+                                            }
+                                        }
+                                    }
+                                }
+                                //print("thumb saved")
+                            } catch {
+                                //print("error saving file:", error)
+                            }
+                        }
+                        self.dismiss(animated: true, completion: nil)
+                        if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
+                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self)
+                        } else {
+                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self)
+                        }
+                    }
+                }
             }
         }
     }
@@ -474,6 +492,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         
         exportSession.outputURL = outputURL
         exportSession.outputFileType = .mp4
+        exportSession.shouldOptimizeForNetworkUse = true
         exportSession.exportAsynchronously {
             handler(exportSession)
         }

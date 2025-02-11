@@ -7,7 +7,7 @@ target 'NexilisLite' do
 
   # Pods for NexilisLite
 
-  pod 'nuSDKService', '~> 4.0.2'
+  pod 'nuSDKService', '~> 4.0.3'
   pod 'FMDB', '~> 2.7.12'
   pod 'NotificationBannerSwift', '3.1.0'
   pod 'Alamofire', '~> 5.10.1'

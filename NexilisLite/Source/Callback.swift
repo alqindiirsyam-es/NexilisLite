@@ -9,6 +9,7 @@
 import Foundation
 import nuSDKService
 import Network
+import NotificationBannerSwift
 
 class Callback : CallBack {
     var sID: String = "Callback"
@@ -143,6 +144,8 @@ class NetworkMonitor {
     
     private let monitor = NWPathMonitor()
     private var isMonitoring = false
+    var isConnected: Bool = false
+    var fromDisconnect = false
     
     private init() {}
     
@@ -150,12 +153,32 @@ class NetworkMonitor {
         guard !isMonitoring else { return }
         
         monitor.pathUpdateHandler = { path in
-            //print("CONNECTION \(path.status == .satisfied)")
-            InquiryThread.default.set(wait: !(path.status == .satisfied))
-            OutgoingThread.default.set(wait: !(path.status == .satisfied))
+            self.isConnected = path.status == .satisfied
+            self.canAccessGoogle(completion: { [self] connected in
+                InquiryThread.default.set(wait: !connected)
+                OutgoingThread.default.set(wait: !connected)
+                if !connected {
+                    fromDisconnect = true
+                    DispatchQueue.main.async {
+                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                        imageView.tintColor = .white
+                        let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                        banner.show()
+                    }
+                }
+                if connected && fromDisconnect {
+                    fromDisconnect = false
+                    DispatchQueue.main.async {
+                        let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+                        imageView.tintColor = .white
+                        let banner = FloatingNotificationBanner(title: "You're Connected".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                        banner.show()
+                    }
+                }
+            })
         }
         
-        let queue = DispatchQueue(label: "NetworkMonitor")
+        let queue = DispatchQueue.global(qos: .background)
         monitor.start(queue: queue)
         isMonitoring = true
     }
@@ -164,5 +187,24 @@ class NetworkMonitor {
         guard isMonitoring else { return }
         monitor.cancel()
         isMonitoring = false
+    }
+    
+    func canAccessGoogle(completion: @escaping (Bool) -> Void) {
+        guard isConnected, let url = URL(string: "https://www.google.com") else {
+            completion(false)
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+        
+        let task = URLSession.shared.dataTask(with: request) { _, response, error in
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                completion(true)
+            } else {
+                completion(false)
+            }
+        }
+        task.resume()
     }
 }

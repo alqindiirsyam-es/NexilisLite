@@ -1266,12 +1266,10 @@ class IncomingThread {
         }
     }
     
-    public func receiveMessage(message: TMessage, withoutACK: Bool = false) -> Void {
+    private func receiveMessage(message: TMessage) -> Void {
         guard let _: String = SecureUserDefaults.shared.value(forKey: "status") else {
             //print("App not ready!!! skip receive message \(message_id)")
-            if !withoutACK {
-                ack(message: message)
-            }
+            ack(message: message)
             return
         }
         let media = message.getMedia()
@@ -1313,9 +1311,7 @@ class IncomingThread {
             }
         }
         //print("save message incoming")
-        if !withoutACK {
-            ack(message: message)
-        }
+        ack(message: message)
     }
     
     private func receiveMessageStatus(message: TMessage) -> Void {

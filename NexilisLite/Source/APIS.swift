@@ -875,7 +875,7 @@ public class APIS: NSObject {
     //                                            print("Incoming call reported successfully")
     //                                        }
     //                                    }
-                                copySoundToLocalPath()
+                                copySoundToLocalPath("pb_call_in")
                                 let center = UNUserNotificationCenter.current()
                                 let content = UNMutableNotificationContent()
                                 content.title = callFromName
@@ -970,6 +970,7 @@ public class APIS: NSObject {
         if scope == "3" || scope == "18" || scope == "5"{
             type = "0"
         }
+        var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"
         if type == "1" {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
@@ -991,14 +992,19 @@ public class APIS: NSObject {
                     print("Access database error: \(error.localizedDescription)")
                 }
             })
+            soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
             if idGroup.isEmpty {
                 return
             }
         }
+        var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+        if nameSound.contains("_(Default)") {
+            nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+        }
+        copySoundToLocalPath(nameSound)
         let center = UNUserNotificationCenter.current()
         let content = UNMutableNotificationContent()
         content.title = nameUser
-        content.sound = .default
         if type == "1" {
             content.body = text.richText(group_id: idGroup).string
             content.subtitle = nameSubtitle
@@ -1006,7 +1012,7 @@ public class APIS: NSObject {
             content.body = text.richText().string
         }
         content.userInfo = ["id" : threadIdentifier, "type" : type]
-        content.sound = UNNotificationSound(named: UNNotificationSoundName("pb_call_in.mp3"))
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("\(nameSound).mp3"))
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
         let request = UNNotificationRequest(identifier: messageId, content: content, trigger: trigger)
         center.add(request) { error in
@@ -1014,19 +1020,18 @@ public class APIS: NSObject {
                 print("Error scheduling notification: \(error.localizedDescription)")
             }
         }
-        UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+        DispatchQueue.main.async {
+            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+        }
     }
     
-    private static func copySoundToLocalPath() {
-        guard let sourceURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_in", withExtension: "mp3") else {
-            return
+    private static func copySoundToLocalPath(_ nameSound: String) {
+        var sourceURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+        if sourceURL == nil {
+            sourceURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
         }
-
-        // Define the destination path in the Library/Sounds directory
         let fileManager = FileManager.default
         let soundDirectory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!.appendingPathComponent("Sounds", isDirectory: true)
-
-        // Ensure the Sounds directory exists
         if !fileManager.fileExists(atPath: soundDirectory.path) {
             do {
                 try fileManager.createDirectory(at: soundDirectory, withIntermediateDirectories: true, attributes: nil)
@@ -1035,11 +1040,10 @@ public class APIS: NSObject {
                 return
             }
         }
-
-        let destinationURL = soundDirectory.appendingPathComponent("pb_call_in.mp3")
+        let destinationURL = soundDirectory.appendingPathComponent("\(nameSound).mp3")
         if !fileManager.fileExists(atPath: destinationURL.path) {
             do {
-                try fileManager.copyItem(at: sourceURL, to: destinationURL)
+                try fileManager.copyItem(at: sourceURL!, to: destinationURL)
             } catch {
                 
             }
@@ -1093,7 +1097,6 @@ public class APIS: NSObject {
                                 idGroup = id
                             }
                             if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id FROM GROUPZ WHERE group_id='\(idGroup)'"), cursorGroup.next() {
-                                let nameGroup = cursorGroup.string(forColumnIndex: 0) ?? ""
                                 groupExist = true
                                 cursorGroup.close()
                             }
@@ -1195,7 +1198,7 @@ public class APIS: NSObject {
         case .active:
             return false
         case .inactive:
-            return true
+            return false
         case .background:
             return true
         @unknown default:
@@ -1208,7 +1211,7 @@ public class APIS: NSObject {
 //            try API.switchCBI(cbiI: Callback(), bLight: true)
 //        } catch {
 //        }
-        exit(0)
+//        exit(0)
     }
     
     public static func enterForeground() {

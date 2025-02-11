@@ -24,7 +24,7 @@ Pod::Spec.new do |spec|
   spec.resource_bundles = { 'NexilisLite' => ['NexilisLite/Resource/**/*']}
   spec.swift_version = '5.5.1'
   spec.dependency 'FMDB', '~> 2.7.12'
-  spec.dependency 'nuSDKService', '~> 4.0.2'
+  spec.dependency 'nuSDKService', '~> 4.0.3'
   spec.dependency 'NotificationBannerSwift', '~> 3.1.0'
   spec.dependency 'Alamofire', '~> 5.10.1'
   spec.dependency 'SDWebImage', '~> 5.20.0'
@@ -33,7 +33,7 @@ Pod::Spec.new do |spec|
   spec.dependency 'SwiftLinkPreview', '~> 3.4.0'
   spec.dependency 'KeychainAccess'
   spec.dependency 'Popover'
-#  spec.static_framework = true
+# spec.static_framework = true
 # spec.dependency 'iOS-WebP'
 #  spec.vendored_frameworks = 'nuSDKService.framework'
   spec.ios.vendored_frameworks = "NexilisLite.framework"

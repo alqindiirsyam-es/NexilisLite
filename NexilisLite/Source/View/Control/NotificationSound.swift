@@ -14,6 +14,8 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
     let tableView = UITableView()
     var data: [NotifSound] = []
     var isSelectedSound = 0
+    var lastSelectedSound = 0
+    var audioPlayer: AVAudioPlayer?
 
     public override func viewDidLoad() {
         super.viewDidLoad()
@@ -45,15 +47,22 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
         
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Save".localized(), style: .plain, target: self, action: #selector(save(sender:)))
-        data.append(NotifSound(id: 1007, name: "sms-received1 (Default)", isSelected: false))
-        data.append(NotifSound(id: 1008, name: "sms-received2", isSelected: false))
-        data.append(NotifSound(id: 1009, name: "sms-received3", isSelected: false))
-        data.append(NotifSound(id: 1010, name: "sms-received4", isSelected: false))
-        data.append(NotifSound(id: 1013, name: "sms-received5", isSelected: false))
-        data.append(NotifSound(id: 1014, name: "sms-received6", isSelected: false))
-        var selectedSound: String = SecureUserDefaults.shared.value(forKey: "notifSoundPersonal") ?? ""
+        data.append(NotifSound(id: 001, name: "Nexilis Message (Default)", isSelected: false))
+        data.append(NotifSound(id: 002, name: "Dutifully", isSelected: false))
+        data.append(NotifSound(id: 003, name: "Elegant", isSelected: false))
+        data.append(NotifSound(id: 004, name: "Eventually", isSelected: false))
+        data.append(NotifSound(id: 005, name: "Hangover", isSelected: false))
+        data.append(NotifSound(id: 006, name: "Juntos", isSelected: false))
+        data.append(NotifSound(id: 007, name: "Light Hearted", isSelected: false))
+        data.append(NotifSound(id: 008, name: "Magic", isSelected: false))
+        data.append(NotifSound(id: 009, name: "Out of Nowhere", isSelected: false))
+        data.append(NotifSound(id: 010, name: "Relax", isSelected: false))
+        data.append(NotifSound(id: 011, name: "Strong Minded", isSelected: false))
+        data.append(NotifSound(id: 012, name: "Swift gesture", isSelected: false))
+        data.append(NotifSound(id: 013, name: "Upset", isSelected: false))
+        var selectedSound: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? ""
         if !isPersonal {
-            selectedSound = SecureUserDefaults.shared.value(forKey: "notifSoundGroup") ?? ""
+            selectedSound = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? ""
         }
         if !selectedSound.isEmpty {
             let selectedSoundId = Int(selectedSound.components(separatedBy: ":")[0])
@@ -63,11 +72,11 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
                 isSelectedSound = selectedSoundId!
             } else {
                 data[0].isSelected = true
-                isSelectedSound = 1007
+                isSelectedSound = 001
             }
         } else {
             data[0].isSelected = true
-            isSelectedSound = 1007
+            isSelectedSound = 001
         }
     }
     
@@ -78,9 +87,13 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
     @objc func save(sender: Any) {
         let idx = data.firstIndex(where: {$0.id == isSelectedSound})
         if isPersonal {
-            SecureUserDefaults.shared.set("\(data[idx!].id):\(data[idx!].name)", forKey: "notifSoundPersonal")
+            SecureUserDefaults.shared.set("\(data[idx!].id):\(data[idx!].name)", forKey: "newNotifSoundPersonal")
         } else {
-            SecureUserDefaults.shared.set("\(data[idx!].id):\(data[idx!].name)", forKey: "notifSoundGroup")
+            SecureUserDefaults.shared.set("\(data[idx!].id):\(data[idx!].name)", forKey: "newNotifSoundGroup")
+        }
+        //stopSound
+        if audioPlayer != nil && audioPlayer!.isPlaying {
+            audioPlayer?.stop()
         }
         navigationController?.dismiss(animated: true, completion: nil)
     }
@@ -93,10 +106,28 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
         
         let idxNew = data.firstIndex(where: {$0.id == data[indexPath.row].id})
         data[idxNew!].isSelected = true
+        if lastSelectedSound != 0 {
+            //stopSound
+            audioPlayer?.stop()
+        }
+        lastSelectedSound = data[indexPath.row].id
         isSelectedSound = data[indexPath.row].id
-        
-        let systemSoundID: SystemSoundID = SystemSoundID(isSelectedSound)
-        AudioServicesPlaySystemSound(systemSoundID)
+        //playSound
+        var nameSound = data[indexPath.row].name.replacingOccurrences(of: " ", with: "_")
+        if nameSound.contains("_(Default)") {
+            nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+        }
+        var soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+        if soundURL == nil {
+            soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+        }
+        do {
+            audioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
+            audioPlayer?.prepareToPlay()
+            audioPlayer?.play()
+        } catch {
+            
+        }
         tableView.reloadData()
     }
 

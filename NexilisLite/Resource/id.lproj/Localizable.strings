@@ -389,3 +389,5 @@
 "Unable to complete action" = "Gagal";
 "Successfully added a new friend" = "Teman baru berhasil ditambahkan";
 "Friend is invalid or not found" = "Teman tidak valid atau tidak ditemukan";
+"Warning Unknown Url!" = "Peringatan Url Tidak Dikenal!";
+"You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability" = "Anda akan mengakses situs web yang saat ini tidak dipercaya oleh Nexilis Browser Anda. Sertifikat keamanan situs web ini tidak dikenali.\n\nApakah Anda ingin melanjutkan ke <<domain>> dan mempercayai sertifikat keamanan situs web tersebut?\n\nCatatan: Menambahkan situs web ke daftar tepercaya dapat meningkatkan risiko kerentanan keamanan Anda";
