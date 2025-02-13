@@ -321,14 +321,14 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 originalImageName = (urlImage! as NSString).lastPathComponent
             }
             let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let compressedImageName = "Nexilis_image_\(originalImageName)"
-            let thumbName = "THUMB_Nexilis_image_\(originalImageName)"
+            let compressedImageName = "Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName)"
+            let thumbName = "THUMB_Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName)"
             let fileURL = documentsDirectory.appendingPathComponent(compressedImageName)
             var compressedImage:Data?
             if (image != nil) {
-                compressedImage = image!.jpegData(compressionQuality:  1.0)
+                compressedImage = image!.jpegData(compressionQuality:  0.5)
             } else {
-                compressedImage = (imageVideoData![.originalImage] as! UIImage).jpegData(compressionQuality:  1.0)
+                compressedImage = (imageVideoData![.originalImage] as! UIImage).jpegData(compressionQuality:  0.5)
             }
             if let data = compressedImage,
                !FileManager.default.fileExists(atPath: fileURL.path) {
@@ -419,8 +419,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                         var thumbName = ""
                         if (fromCopy && dataGIF != nil) {
                             originalVideoName = "\(Date().currentTimeMillis())_copyGif"
-                            renamedVideoName = "Nexilis_gif_\(originalVideoName)"
-                            thumbName = "THUMB_Nexilis_gif_\(originalVideoName)"
+                            renamedVideoName = "Nexilis_gif_\(Date().currentTimeMillis())_\(originalVideoName)"
+                            thumbName = "THUMB_Nexilis_gif_\(Date().currentTimeMillis())_\(originalVideoName)"
                         } else {
                             if imageVideoData != nil {
                                 urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString!
@@ -428,8 +428,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                                 urlVideo = (urlVideoPhpPicker! as NSURL).absoluteString!
                             }
                             originalVideoName = (urlVideo as NSString).lastPathComponent
-                            renamedVideoName = "Nexilis_video_\(originalVideoName)"
-                            thumbName = "THUMB_Nexilis_video_\(originalVideoName)"
+                            renamedVideoName = "Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName)"
+                            thumbName = "THUMB_Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName)"
                         }
                         let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
                         if !FileManager.default.fileExists(atPath: fileURL.path) {
@@ -446,7 +446,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                         }
                         var dataThumbVideo: Data?
                         if !fromCopy {
-                            dataThumbVideo = imagePreview.image!.jpegData(compressionQuality:  1.0)
+                            dataThumbVideo = imagePreview.image!.jpegData(compressionQuality:  0.5)
                         }
                         let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
                         if !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
@@ -456,7 +456,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                                 } else {
                                     if let dataGIF = dataGIF {
                                         if let dataThumbGif = UIImage(data: dataGIF) {
-                                            if let compressedDataThumbGif = dataThumbGif.jpegData(compressionQuality: 1.0) {
+                                            if let compressedDataThumbGif = dataThumbGif.jpegData(compressionQuality: 0.5) {
                                                 try compressedDataThumbGif.write(to: fileURLTHUMB)
                                             }
                                         }

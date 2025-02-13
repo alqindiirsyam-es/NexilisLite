@@ -163,6 +163,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 //        navigationController?.navigationBar.topItem?.title = ""
         Utils.addBackground(view: contactChatNav.view)
         
+        if Nexilis.fromMAB {
+            Nexilis.floatingButton.isHidden = true
+        }
+        
         viewButton.layer.shadowColor = self.traitCollection.userInterfaceStyle == .dark ? UIColor.white.cgColor : UIColor.gray.cgColor
         viewButton.layer.shadowOpacity = 1
         viewButton.layer.shadowOffset = .zero
@@ -2126,8 +2130,16 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 }
                 present(picker, animated: true, completion: nil)
             case "imageCamera":
+                if isContactCenter && channelContactCenter == "2" {
+                    self.view.makeToast("You can't take photo when Video Call".localized(), duration: 3)
+                    return
+                }
                 imageVideoPicker.present(source: .imageCamera)
             case "videoCamera":
+                if isContactCenter && channelContactCenter == "2" {
+                    self.view.makeToast("You can't take video when Video Call".localized(), duration: 3)
+                    return
+                }
                 imageVideoPicker.present(source: .videoCamera)
             default:
                 break
@@ -3594,7 +3606,7 @@ extension EditorPersonal: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPr
             let urlFile = self.previewItem?.absoluteString
             var originaFileName = (urlFile! as NSString).lastPathComponent
             originaFileName = NSString(string: originaFileName).removingPercentEncoding!
-            let renamedNameFile = "Nexilis_doc_" + "\(Date().currentTimeMillis())_" + originaFileName
+            let renamedNameFile = "Nexilis_\(Date().currentTimeMillis())_" + originaFileName
             let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
             let fileURL = documentsDirectory.appendingPathComponent(renamedNameFile)
             if !FileManager.default.fileExists(atPath: fileURL.path) {
@@ -3634,20 +3646,23 @@ extension EditorPersonal: UITextViewDelegate {
             UIView.animate(withDuration: 0.3) {
                 let numberOfLines = textView.textContainer.lineBreakMode == .byWordWrapping ? Int(textView.contentSize.height / textView.font!.lineHeight) - 1 : 1
                 if currentLine == 0 && numberOfLines == 1 {
-                    self.heightTextFieldSend.constant = 40
                     if self.isEditingMessage {
                         self.constraintHeighteditTextView.constant = 40
+                    } else {
+                        self.heightTextFieldSend.constant = 40
                     }
                 } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintHeighteditTextView != nil && self.constraintHeighteditTextView.constant < 95.0)) && currentLine >= 4 {
-                    self.heightTextFieldSend.constant = 95.0
                     if self.isEditingMessage {
                         self.constraintHeighteditTextView.constant = 95.0
+                    } else {
+                        self.heightTextFieldSend.constant = 95.0
                     }
                 } else if currentLine < 4 && numberOfLines < 5 {
                     if (nowTextFieldSend!.text.count > 0 && self.heightTextFieldSend.constant != nowTextFieldSend!.contentSize.height) {
-                        self.heightTextFieldSend.constant = nowTextFieldSend!.contentSize.height
                         if self.isEditingMessage {
                             self.constraintHeighteditTextView.constant = nowTextFieldSend!.contentSize.height
+                        } else {
+                            self.heightTextFieldSend.constant = nowTextFieldSend!.contentSize.height
                         }
                     }
                 }
@@ -3674,12 +3689,10 @@ extension EditorPersonal: UITextViewDelegate {
         timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
             self.checkLink(fullText: textView.text)
         })
-        if textView.text.contains("*") || textView.text.contains("_") || textView.text.contains("^") || textView.text.contains("~") {
-            textView.preserveCursorPosition(withChanges: { _ in
-                textView.attributedText = textView.text.richText(isEditing: true)
-                return .preserveCursor
-            })
-        }
+        textView.preserveCursorPosition(withChanges: { _ in
+            textView.attributedText = textView.text.richText(isEditing: true)
+            return .preserveCursor
+        })
     }
     
     private func checkLink(fullText: String) {
@@ -3873,7 +3886,7 @@ extension EditorPersonal: UITextViewDelegate {
     }
     
     public func textViewDidEndEditing(_ textView: UITextView) {
-        if textView.text.isEmpty {
+        if textView.text.isEmpty && textView != editTextView {
             textView.text = "Send message".localized()
             textView.textColor = UIColor.lightGray
         }
@@ -4100,7 +4113,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                             let dataContent = json["content"]!
                             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String})
                             if idx != nil{
-                                self.dataMessages[idx!][TypeDataMessage.message_text] = dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "" + "\n\n" + "%\(dataContent)%"
+                                self.dataMessages[idx!][TypeDataMessage.message_text] = (dataMessages[indexPath!.row][TypeDataMessage.message_text] as? String ?? "") + "\n\n" + "$\(dataContent)$"
                             }
                             DispatchQueue.main.async{
                                 self.tableChatView.reloadRows(at: [indexPath!], with: .none)
@@ -4292,7 +4305,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 children.insert(info, at: children.count - 1)
             }
             if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
-                if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
+                if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 {
                     children.insert(edit, at: children.count - 1)
                 }
                 isMore = true
@@ -4356,7 +4369,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             buttonSend.actionHandle(controlEvents: .touchUpInside,
              ForAction:{() -> Void in
                 let newText = self.editTextView.text ?? ""
-                if newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
+                if !newText.isEmpty && newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
                     let lastEdited = Int64(Date().currentTimeMillis())
                     let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id]  as? String ?? "", l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin]  as? String ?? "", message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id]  as? String ?? "", status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential]  as? String ?? "", attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag]  as? String ?? "", ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id]  as? String ?? "", message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id]  as? String ?? "", audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id]  as? String ?? "", video_id: dataMessages[indexPath.row][TypeDataMessage.video_id]  as? String ?? "", file_id: dataMessages[indexPath.row][TypeDataMessage.file_id]  as? String ?? "", thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id]  as? String ?? "", reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id]  as? String ?? "", read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts]  as? String ?? "", chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id]  as? String ?? "", is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center]  as? String ?? "", call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id]  as? String ?? "", opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin]  as? String ?? "", last_edit: lastEdited)
                     Nexilis.addQueueMessage(message: message, isEditMessage: true)
@@ -4423,7 +4436,12 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         }
         editVC.modalTransitionStyle = .crossDissolve
         editVC.modalPresentationStyle = .overFullScreen
-        self.present(editVC, animated: true)
+        self.present(editVC, animated: true, completion: {
+            self.constraintHeighteditTextView.constant = self.editTextView.contentSize.height
+            if self.constraintHeighteditTextView.constant > 95 {
+                self.constraintHeighteditTextView.constant = 95.0
+            }
+        })
     }
     
     @objc func dismissEditVC() {
@@ -5753,6 +5771,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         }
         messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
         var textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
+        let originalMessageText = textChat
         if (dataMessages[indexPath.row]["lock"] != nil && (dataMessages[indexPath.row]["lock"])! as? String == "1") {
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
                 textChat = "🚫 _"+"You were deleted this message".localized()+"_"
@@ -5841,6 +5860,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                 if textChat.contains("■"){
                     textChat = textChat.components(separatedBy: "■")[0]
                     textChat = textChat.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if !fileChat.isEmpty {
+                    textChat = textChat.components(separatedBy: "|")[1]
                 }
                 let finalAtribute = textChat.richText()
                 textChat = finalAtribute.string
@@ -6209,12 +6231,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-            let arrExtFile = (textChat.components(separatedBy: "|")[0]).split(separator: ".")
+            let arrExtFile = (originalMessageText.components(separatedBy: "|")[0]).split(separator: ".")
             let finalExtFile = arrExtFile[arrExtFile.count - 1]
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(fileChat)
                 if FileManager.default.fileExists(atPath: fileURL.path) {
-                    if let dataFile = try? Data(contentsOf: fileURL) {
+                    if let dataFile = try? Data(contentsOf: fileURL), textChat.isEmpty {
                         var sizeOfFile = Int(dataFile.count / 1000000)
                         if (sizeOfFile < 1) {
                             sizeOfFile = Int(dataFile.count / 1000)
@@ -6230,12 +6252,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                                 messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
                             }
                         }
-                    } else {
-                        messageText.text = ""
                     }
                 }
                 else if FileEncryption.shared.isSecureExists(filename: fileChat) {
-                    if let dataFile = try? FileEncryption.shared.readSecure(filename: fileChat) {
+                    if let dataFile = try? FileEncryption.shared.readSecure(filename: fileChat), textChat.isEmpty {
                         var sizeOfFile = Int(dataFile.count / 1000000)
                         if (sizeOfFile < 1) {
                             sizeOfFile = Int(dataFile.count / 1000)
@@ -6251,8 +6271,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                                 messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
                             }
                         }
-                    } else {
-                        messageText.text = ""
                     }
                 }
             }
@@ -6289,7 +6307,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
             nameFile.font = UIFont.systemFont(ofSize: 12, weight: .medium)
             nameFile.textColor = .white
-            nameFile.text = textChat.components(separatedBy: "|")[0]
+            nameFile.text = originalMessageText.components(separatedBy: "|")[0]
             
             if (dataMessages[indexPath.row]["progress"] as! Double != 100.0) {
                 let containerLoading = UIView()
@@ -6703,7 +6721,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
             titleForwarded.anchor(top: containerForwarded.topAnchor, left: imageForwarded.rightAnchor, right: containerForwarded.rightAnchor, height: 15)
             titleForwarded.font = .systemFont(ofSize: 15)
             let textForwarded = "Forwarded".localized()
-            titleForwarded.attributedText = " %\(textForwarded)%".richText()
+            titleForwarded.attributedText = " $\(textForwarded)$".richText()
         }
         topMarginText.isActive = true
 //        let panGestureRecognizer = UIPanGestureRecognizer(target: self, action: #selector(panGestureCellAction))
@@ -7116,6 +7134,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         } else if (sender.file_id != "") {
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.file_id)
+                print("MASUK SINI KAH? \(fileURL)")
                 if FileManager.default.fileExists(atPath: fileURL.path) {
                     self.previewItem = fileURL as NSURL
                     let previewController = QLPreviewController()

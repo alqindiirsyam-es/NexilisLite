@@ -411,6 +411,22 @@ public class APIS: NSObject {
         }
     }
     
+    public static func openSecureFolder() {
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "secureFolderView") as! SecureFolderViewController
+        let navigationController = CustomNavigationController(rootViewController: controller)
+        navigationController.defaultStyle()
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+        }
+    }
+    
     public static func openCreateGroup() {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
@@ -984,7 +1000,7 @@ public class APIS: NSObject {
                     }
                     if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id FROM GROUPZ WHERE group_id='\(idGroup)'"), cursorGroup.next() {
                         let nameGroup = cursorGroup.string(forColumnIndex: 0) ?? ""
-                        nameSubtitle = "\(nameGroup)(\(nameTopic))"
+                        nameSubtitle = "\(nameGroup) (\(nameTopic))"
                         cursorGroup.close()
                     }
                 } catch {
@@ -1219,8 +1235,248 @@ public class APIS: NSObject {
 //            try API.switchCBI(cbiI: Callback(), bLight: false)
 //        } catch {
 //        }
+//        setDataForShareExtension()
+        checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
+    
+    private static func checkDataForShareExtension() {
+        DispatchQueue.global().async {
+            if let userDefaults = UserDefaults(suiteName: "group.nexilis.share") {
+                if let value = userDefaults.string(forKey: "sharedItem") {
+                    if !value.isEmpty {
+                        if let jsonData = value.data(using: .utf8) {
+                            do {
+                                if let json = try JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: Any] {
+                                    let typeImage = 2
+                                    let typeVideo = 3
+                                    let typeFile = 4
+                                    let typeContact = json["typeContact"] as? String ?? "0"
+                                    var data = json["data"] as? String ?? ""
+                                    let idContact = json["idContact"] as? String ?? ""
+                                    let typeShare = json["typeShare"] as? Int ?? 1
+                                    var message = TMessage()
+                                    var groupId = ""
+                                    var chatId = ""
+                                    let scopeId = typeContact == "1" ? "4" : "3"
+                                    let thumb = json["thumb"] as? String ?? ""
+                                    let imageId = json["image"] as? String ?? ""
+                                    let videoId = json["video"] as? String ?? ""
+                                    let fileId = json["file"] as? String ?? ""
+                                    var renamedFileId = ""
+                                    var attachmentFlag = ""
+                                    if scopeId == "4" {
+                                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT group_id id FROM DISCUSSION_FORUM WHERE chat_id = '\(idContact)'"), cursor.next() {
+                                                groupId = cursor.string(forColumnIndex: 0) ?? ""
+                                                chatId = idContact
+                                                cursor.close()
+                                            } else {
+                                                groupId = idContact
+                                            }
+                                        })
+                                    }
+                                    if typeShare == typeImage {
+                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                            let sharedImageURL = appGroupURL.appendingPathComponent(imageId)
+                                            let sharedThumbURL = appGroupURL.appendingPathComponent(thumb)
+                                            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                            if FileManager.default.fileExists(atPath: sharedImageURL.path) {
+                                                let file = documentDir.appendingPathComponent(imageId)
+                                                if !FileManager().fileExists(atPath: file.path) {
+                                                    try? FileManager.default.copyItem(at: sharedImageURL, to: file)
+                                                }
+                                            }
+                                            if FileManager.default.fileExists(atPath: sharedThumbURL.path) {
+                                                let file = documentDir.appendingPathComponent(thumb)
+                                                if !FileManager().fileExists(atPath: file.path) {
+                                                    try? FileManager.default.copyItem(at: sharedThumbURL, to: file)
+                                                }
+                                            }
+                                        }
+                                        attachmentFlag = "1"
+                                    } else if typeShare == typeVideo {
+                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                            let sharedVideoURL = appGroupURL.appendingPathComponent(videoId)
+                                            let sharedThumbURL = appGroupURL.appendingPathComponent(thumb)
+                                            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                            if FileManager.default.fileExists(atPath: sharedVideoURL.path) {
+                                                let file = documentDir.appendingPathComponent(videoId)
+                                                if !FileManager().fileExists(atPath: file.path) {
+                                                    try? FileManager.default.copyItem(at: sharedVideoURL, to: file)
+                                                }
+                                            }
+                                            if FileManager.default.fileExists(atPath: sharedThumbURL.path) {
+                                                let file = documentDir.appendingPathComponent(thumb)
+                                                if !FileManager().fileExists(atPath: file.path) {
+                                                    try? FileManager.default.copyItem(at: sharedThumbURL, to: file)
+                                                }
+                                            }
+                                        }
+                                        attachmentFlag = "2"
+                                    } else if typeShare == typeFile {
+                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                            renamedFileId = "Nexilis_\(Date().currentTimeMillis())_" + fileId
+                                            let sharedFileURL = appGroupURL.appendingPathComponent(fileId)
+                                            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                            if FileManager.default.fileExists(atPath: sharedFileURL.path) {
+                                                let file = documentDir.appendingPathComponent(renamedFileId)
+                                                if !FileManager().fileExists(atPath: file.path) {
+                                                    try? FileManager.default.copyItem(at: sharedFileURL, to: file)
+                                                }
+                                            }
+                                            data = "\(fileId)|\(data)"
+                                        }
+                                        attachmentFlag = "6"
+                                    }
+                                    message = CoreMessage_TMessageBank.sendMessage(l_pin: groupId.isEmpty ? idContact : groupId, message_scope_id: scopeId, status: scopeId == "3" ? "1" : "2", message_text: data, credential: "0", attachment_flag: attachmentFlag, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageId, audio_id: "", video_id: videoId, file_id: renamedFileId, thumb_id: thumb, reff_id: "", read_receipts: "4", chat_id: chatId, is_call_center: "0", call_center_id: "", opposite_pin: scopeId == "3" ? (User.getMyPin() ?? "") : idContact, gif_id: "", isForwarded: "0", isSecret: "0")
+                                    Nexilis.addQueueMessage(message: message)
+                                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5, execute: {
+                                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                                    })
+                                    userDefaults.set("", forKey: "sharedItem")
+                                    userDefaults.synchronize()
+                                }
+                            } catch {
+                                print("Error parsing JSON: \(error)")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    public static func setDataForShareExtension() {
+        DispatchQueue.global().async {
+            if let userDefaults = UserDefaults(suiteName: "group.nexilis.share") {
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    var dataShared: [[String: Any]] = []
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin id, image_id image, first_name || ' ' || ifnull(last_name, '') name FROM BUDDY WHERE f_pin != '\(User.getMyPin() ?? "")' AND f_pin != '-997' AND official_account != '1'") {
+                        var dataTemp: [String: Any] = [:]
+                        while cursor.next() {
+                            for columnIndex in 0..<cursor.columnCount {
+                                if let columnName = cursor.columnName(for: columnIndex) {
+                                    if let value = cursor.object(forColumn: columnName) {
+                                        if columnName == "image" {
+                                           dataTemp[columnName] = value
+                                           if let imageString = dataTemp[columnName] as? String, !imageString.isEmpty {
+                                               do {
+                                                   let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                                   let file = documentDir.appendingPathComponent(imageString)
+                                                   if FileManager().fileExists(atPath: file.path) {
+                                                       if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                                           let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
+                                                           if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
+                                                               try? FileManager.default.copyItem(at: file, to: sharedFileURL)
+                                                           }
+                                                       }
+                                                   }
+                                               } catch {
+                                                   
+                                               }
+                                           }
+                                        } else {
+                                            dataTemp[columnName] = value
+                                        }
+                                    }
+                                }
+                                dataTemp["type"] = 0
+                            }
+                        }
+                        dataShared.append(dataTemp)
+                        cursor.close()
+                    }
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT group_id id, image_id image, f_name name FROM GROUPZ WHERE official != 1") {
+                        var dataTemp: [String: Any] = [:]
+                        var dataTempTopic: [String: Any] = [:]
+                        while cursor.next() {
+                            for columnIndex in 0..<cursor.columnCount {
+                                if let columnName = cursor.columnName(for: columnIndex) {
+                                    if let value = cursor.object(forColumn: columnName) {
+                                        if columnName == "name" {
+                                            dataTemp[columnName] = "\(value) (Lounge)"
+                                        } else if columnName == "image" {
+                                            dataTemp[columnName] = value
+                                            if let imageString = dataTemp[columnName] as? String, !imageString.isEmpty {
+                                                do {
+                                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                                    let file = documentDir.appendingPathComponent(imageString)
+                                                    if FileManager().fileExists(atPath: file.path) {
+                                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                                            let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
+                                                            if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
+                                                                try? FileManager.default.copyItem(at: file, to: sharedFileURL)
+                                                            }
+                                                        }
+                                                    }
+                                                } catch {
+                                                    
+                                                }
+                                            }
+                                        } else {
+                                            dataTemp[columnName] = value
+                                        }
+                                    }
+                                }
+                                dataTemp["type"] = 1
+                            }
+                            dataShared.append(dataTemp)
+                            let group_id = cursor.string(forColumnIndex: 0) ?? ""
+                            let image_group = cursor.string(forColumnIndex: 1) ?? ""
+                            let name_group = cursor.string(forColumnIndex: 2) ?? ""
+                            if let cursorTopic = Database.shared.getRecords(fmdb: fmdb, query: "SELECT chat_id id, thumb image, title name FROM DISCUSSION_FORUM WHERE group_id = '\(group_id)'") {
+                                while cursorTopic.next() {
+                                    for columnIndex in 0..<cursorTopic.columnCount {
+                                        if let columnName = cursorTopic.columnName(for: columnIndex) {
+                                            if let value = cursorTopic.object(forColumn: columnName) {
+                                                if columnName == "name" {
+                                                    dataTempTopic[columnName] = "\(name_group) (\(value))"
+                                                } else if columnName == "image" {
+                                                    dataTempTopic[columnName] = "\(value)".isEmpty ? image_group : "\(value)"
+                                                    if let imageString = dataTempTopic[columnName] as? String, !imageString.isEmpty {
+                                                        do {
+                                                            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                                            let file = documentDir.appendingPathComponent(imageString)
+                                                            if FileManager().fileExists(atPath: file.path) {
+                                                                if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                                                    let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
+                                                                    if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
+                                                                        try? FileManager.default.copyItem(at: file, to: sharedFileURL)
+                                                                    }
+                                                                }
+                                                            }
+                                                        } catch {
+                                                            
+                                                        }
+                                                    }
+                                                } else {
+                                                    dataTempTopic[columnName] = value
+                                                }
+                                            }
+                                        }
+                                        dataTempTopic["type"] = 1
+                                    }
+                                    dataShared.append(dataTempTopic)
+                                    cursorTopic.close()
+                                }
+                            }
+                        }
+                        cursor.close()
+                    }
+                    do {
+                        let jsonData = try JSONSerialization.data(withJSONObject: dataShared, options: .prettyPrinted)
+                        if let jsonString = String(data: jsonData, encoding: .utf8) {
+                            userDefaults.set(jsonString, forKey: "shareContacts")
+                            userDefaults.synchronize()
+                        }
+                    } catch {
+                        print("Error converting to JSON: \(error)")
+                    }
+                })
+            }
+        }
     }
     
     public static func setCheckEmulator(isActive: Bool) {

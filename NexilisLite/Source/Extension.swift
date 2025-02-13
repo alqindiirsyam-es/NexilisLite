@@ -764,7 +764,7 @@ extension String {
         let italicSign: Character = "_"
         let underlineSign: Character = "^"
         let strikethroughSign: Character = "~"
-        let italicGreySign: Character = "%"
+        let italicGreySign: Character = "$"
         var locationBold: [NSRange] = []
         
         //Bold
@@ -1034,17 +1034,8 @@ extension String {
         return false
     }
     
-    func checkCharBefore(char: String) -> Bool {
-        return char == " " || char == "\n"
-    }
-    
-    func checkCharRich(char: String) -> Bool {
-        return char == "*" || char == "_" || char == "^" || char == "~"
-    }
-    
     func checkStartWithLink() -> Bool {
         return self.starts(with: "https://") || self.starts(with: "http://") || self.starts(with: "www.")
-        //|| self.starts(with: "*https://") || self.starts(with: "*http://") || self.starts(with: "*www.") || self.starts(with: "_https://") || self.starts(with: "_http://") || self.starts(with: "_www.") || self.starts(with: "^https://") || self.starts(with: "^http://") || self.starts(with: "^www.") || self.starts(with: "~https://") || self.starts(with: "~http://") || self.starts(with: "~www.")
     }
     
     func getRangeOfWordWithSign(sentence: String, sign: Character) -> [Range<Int>] {

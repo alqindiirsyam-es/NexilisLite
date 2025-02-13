@@ -73,63 +73,20 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         tableChatView.reloadData()
         
         let center: NotificationCenter = NotificationCenter.default
-        center.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
+        center.addObserver(self, selector: #selector(onRefreshData(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
         center.addObserver(self, selector: #selector(onRefreshData(notification:)), name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil)
 
     }
     
     @objc func onRefreshData(notification: NSNotification) {
-        getData()
-        tableChatView.reloadData()
+        DispatchQueue.main.async { [self] in
+            getData()
+            tableChatView.reloadData()
+        }
     }
     
     @objc func didTapExit() {
         self.dismiss(animated: true, completion: nil)
-    }
-    
-    @objc func onStatusChat(notification: NSNotification) {
-        DispatchQueue.main.async {
-            let data:[AnyHashable : Any] = notification.userInfo!
-            if let dataMessage = data["message"] as? TMessage {
-                let chatData = dataMessage.mBodies
-                if (chatData.keys.contains(CoreMessage_TMessageKey.MESSAGE_ID) && !(chatData[CoreMessage_TMessageKey.MESSAGE_ID]!).contains("-2,")) {
-                    let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == chatData[CoreMessage_TMessageKey.MESSAGE_ID]! })
-                    if (idx != nil) {
-                        if (chatData[CoreMessage_TMessageKey.DELETE_MESSAGE_FLAG] == "1") {
-                            let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-                            let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
-                            self.dataMessages.remove(at: idx!)
-                            if row != nil && section != nil  {
-                                let indexPath = IndexPath(row: row!, section: section!)
-                                self.tableChatView.deleteRows(at: [indexPath], with: .fade)
-                                if self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[indexPath.row]["chat_date"] as! String }).count == 0 {
-                                    self.dataDates.remove(at: indexPath.section)
-                                    self.tableChatView.deleteSections(IndexSet(integer: indexPath.section), with: .fade)
-                                }
-                            }
-                        }
-                    }
-                }
-                else if (chatData.keys.contains("message_id")) {
-                    let idx = self.dataMessages.firstIndex(where: { "'\(String(describing: $0["message_id"] as? String))'" == chatData["message_id"]! })
-                    if (idx != nil) {
-                        if (chatData[CoreMessage_TMessageKey.DELETE_MESSAGE_FLAG] == "1") {
-                            let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"] as! String)
-                            let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[idx!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
-                            self.dataMessages.remove(at: idx!)
-                            if row != nil && section != nil  {
-                                let indexPath = IndexPath(row: row!, section: section!)
-                                self.tableChatView.deleteRows(at: [indexPath], with: .fade)
-                                if self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[indexPath.row]["chat_date"] as! String }).count == 0 {
-                                    self.dataDates.remove(at: indexPath.section)
-                                    self.tableChatView.deleteSections(IndexSet(integer: indexPath.section), with: .fade)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
     
     public func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {

@@ -75,22 +75,22 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
             return cellNoData
         }
         let cell = tableView.dequeueReusableCell(withIdentifier: "cellHistoryCC", for: indexPath) as! CellMyHistory
-        let dataOfficer = getDataProfile(f_pin: data[indexPath.row]["officer"] as! String)
-        let dataRequester = getDataProfile(f_pin: data[indexPath.row]["requester"] as! String)
+        let dataOfficer = getDataProfile(f_pin: data[indexPath.row]["officer"] as? String ?? "")
+        let dataRequester = getDataProfile(f_pin: data[indexPath.row]["requester"] as? String ?? "")
         cell.imageOfficer.image = nil
         if dataOfficer.count > 0 {
             if isOfficer {
                 cell.labelOfficer.text = dataRequester["name"] ?? ""
             } else {
-                cell.labelOfficer.text = "Officer".localized() + " : " + dataOfficer["name"]!
+                cell.labelOfficer.text = "Officer".localized() + " : " + (dataOfficer["name"] ?? "")
             }
             if !(dataOfficer["image"] ?? "").isEmpty || !(dataRequester["image"] ?? "").isEmpty {
                 if isOfficer {
-                    getImage(name: dataRequester["image"]!, placeholderImage: UIImage(systemName: "person.circle.fill")!, isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                    getImage(name: dataRequester["image"] ?? "", placeholderImage: UIImage(systemName: "person.circle.fill")!, isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
                         cell.imageOfficer.image = image
                     }
                 } else {
-                    getImage(name: dataOfficer["image"]!, placeholderImage: UIImage(systemName: "person.circle.fill")!, isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                    getImage(name: dataOfficer["image"] ?? "", placeholderImage: UIImage(systemName: "person.circle.fill")!, isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
                         cell.imageOfficer.image = image
                     }
                 }
@@ -114,8 +114,8 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
                 cell.labelRequester.text = "Requester".localized() + " : User"
             }
         }
-        cell.labelComplaintId.text = data[indexPath.row]["complaint_id"] as? String
-        let stringDate = data[indexPath.row]["date_start"] as! String
+        cell.labelComplaintId.text = data[indexPath.row]["complaint_id"] as? String ?? ""
+        let stringDate = data[indexPath.row]["date_start"] as? String ?? ""
         let date = Date(milliseconds: Int64(stringDate) ?? 0)
         let formatter = DateFormatter()
         formatter.dateFormat = "dd/MM/yyyy HH:mm"

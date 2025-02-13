@@ -336,13 +336,6 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         } else if Int(Date().timeIntervalSince(datePull!)) < 60 {
             return
         }
-        if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
-            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-            imageView.tintColor = .white
-            let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-            banner.show()
-            return
-        }
         if groupView.subviews.count == 0 {
             getDefaultButton()
         }
@@ -432,9 +425,10 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                                     newButton.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                     newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                 } else if mode == MODE_VERTICAL_SIDE_TAB {
-                                    newButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+                                    newButton.frame = CGRect(x: 0, y: 0, width: 25, height: 25)
+                                    newButton.widthAnchor.constraint(equalToConstant: 25).isActive = true
                                     newButton.heightAnchor.constraint(equalToConstant: 25).isActive = true
-                                    newButton.contentMode = .scaleAspectFit
+                                    newButton.contentMode = .scaleAspectFill
                                     newButton.clipsToBounds = true
                                 } else {
                                     newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
@@ -526,7 +520,11 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 newButton.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                 newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
             } else if mode == MODE_VERTICAL_SIDE_TAB {
-                newButton.imageView?.contentMode = .scaleAspectFit
+                newButton.frame = CGRect(x: 0, y: 0, width: 25, height: 25)
+                newButton.widthAnchor.constraint(equalToConstant: 25).isActive = true
+                newButton.heightAnchor.constraint(equalToConstant: 25).isActive = true
+                newButton.contentMode = .scaleAspectFill
+                newButton.clipsToBounds = true
             } else {
                 newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
             }

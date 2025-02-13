@@ -678,6 +678,7 @@ class QmeraVideoViewController: UIViewController {
         editorPersonalVC.complaintId = ticketId
         editorPersonalVC.onGoingCC = true
         editorPersonalVC.isRequestContactCenter = false
+        editorPersonalVC.channelContactCenter = "2"
         editorPersonalVC.users = users
         editorPersonalVC.fromVCAC = true
         let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)

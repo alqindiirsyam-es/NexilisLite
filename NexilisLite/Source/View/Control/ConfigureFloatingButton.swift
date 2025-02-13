@@ -119,7 +119,7 @@ public class ConfigureFloatingButton: UIViewController {
             Nexilis.floatingButton.removeFromSuperview()
             Nexilis.floatingButton = FloatingButton()
             let viewController = (UIApplication.shared.windows.first?.rootViewController)!
-            Nexilis.addFB(viewController: viewController, fromMAB: true)
+            Nexilis.addFB(viewController: viewController, fromMAB: Nexilis.fromMAB)
         }
         close()
     }

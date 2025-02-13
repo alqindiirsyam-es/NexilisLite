@@ -224,6 +224,17 @@ public final class Utils {
         return ""
     }
     
+    static func setCookiesMobileForStorage(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "cookies_mobile_storage")
+    }
+
+    public static func getCookiesMobileForStorage() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "cookies_mobile_storage") {
+            return value
+        }
+        return ""
+    }
+    
     static func getBackground() -> String {
         if let value: String = SecureUserDefaults.shared.value(forKey: "app_builder_background") {
             return value
@@ -401,45 +412,55 @@ public final class Utils {
         if chat.credential == "1" && chat.lock == "2" {
             return ("🚫 _"+"Message has expired".localized()+"_").richText(group_id: chat.pin)
         } else if chat.credential == "1" {
-            return "Confidential Message".localized().richText(group_id: chat.pin)
+            return showNSMutableAttributedString("Confidential Message".localized())
         } else if chat.attachmentFlag == "27" {
-            return ("📄 " + "Live Streaming".localized()).richText(group_id: chat.pin)
+            return showNSMutableAttributedString(("📄 " + "Live Streaming".localized()))
         } else if chat.attachmentFlag == "26" {
-            return ("📄 " + "Seminar".localized()).richText(group_id: chat.pin)
+            return showNSMutableAttributedString(("📄 " + "Seminar".localized()))
         } else if !chat.audio.isEmpty {
-            return ("♫ " + "Audio".localized()).richText(group_id: chat.pin)
+            return showNSMutableAttributedString(("♫ " + "Audio".localized()))
         } else if !chat.image.isEmpty {
             if !chat.messageText.isEmpty {
                 return "📷 \(chat.messageText)".richText(group_id: chat.pin)
             } else {
-                return ("📷 " + "Photo".localized()).richText(group_id: chat.pin)
+                return showNSMutableAttributedString(("📷 " + "Photo".localized()))
             }
         }
         else if !chat.gif.isEmpty {
             if !chat.messageText.isEmpty {
                 return "🎬 \(chat.messageText)".richText(group_id: chat.pin)
             } else {
-                return ("🎬 " + "GIF".localized()).richText(group_id: chat.pin)
+                return showNSMutableAttributedString("🎬 GIF")
             }
         }
         else if !chat.video.isEmpty {
             if !chat.messageText.isEmpty {
                 return "📹 \(chat.messageText)".richText(group_id: chat.pin)
             } else {
-                return ("📹 " + "Video".localized()).richText(group_id: chat.pin)
+                return showNSMutableAttributedString(("📹 " + "Video".localized()))
             }
         }
         else if !chat.file.isEmpty {
             if chat.messageScope == "18" {
-                return ("📄 Form").richText(group_id: chat.pin)
+                return showNSMutableAttributedString(("📄 Form"))
             }
-            return ("📄 " + chat.messageText.components(separatedBy: "|")[0]).richText(group_id: chat.pin)
+            let nameFile = chat.messageText.components(separatedBy: "|")[0]
+            let dataText = chat.messageText.components(separatedBy: "|")[1]
+            if !dataText.isEmpty {
+                return ("📄 " + dataText).richText(group_id: chat.pin)
+            }
+            return showNSMutableAttributedString(("📄 \(nameFile)"))
         } else if chat.attachmentFlag == "11" {
-            return ("❤️ " + "Sticker".localized()).richText(group_id: chat.pin)
+            return showNSMutableAttributedString(("❤️ " + "Sticker".localized()))
         }
         else {
             return chat.messageText.richText(group_id: chat.pin)
         }
+    }
+    
+    private static func showNSMutableAttributedString(_ text: String) -> NSMutableAttributedString {
+        let font = UIFont.systemFont(ofSize: 12)
+        return NSMutableAttributedString(string: text, attributes: [NSAttributedString.Key.font: font])
     }
     
     static func getURLBase() -> String {

@@ -438,10 +438,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 navigationController?.show(controller, sender: nil)
             }
         } else if item.title == "Secure Folder" {
-            if(Nexilis.checkIsChangePerson()){
-                let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "secureFolderView") as! SecureFolderViewController
-                navigationController?.show(controller, sender: nil)
-            }
+            APIS.openSecureFolder()
         } else if item.title == "Access Admin / Internal Features".localized() || item.title == "Change Admin / Internal Password".localized() {
             if(Nexilis.checkIsChangePerson()){
                 if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {

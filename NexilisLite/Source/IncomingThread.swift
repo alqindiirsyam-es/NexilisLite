@@ -379,9 +379,9 @@ class IncomingThread {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             let channelCC: String = SecureUserDefaults.shared.value(forKey: "channelCC") ?? ""
-            let complaintId = onGoingCC.components(separatedBy: ",")[2]
+            let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
             let fPinCC = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-            if fPinCC == User.getMyPin() {
+            if fPinCC == User.getMyPin() || fPinCC.isEmpty || complaintId.isEmpty {
                 return
             }
             if channelCC == "1" {

@@ -229,6 +229,7 @@ class ContactChatViewController: UITableViewController {
             self.navigationController?.navigationBar.setNeedsLayout()
         }
         getData()
+        APIS.setDataForShareExtension()
     }
     
     @objc func addFriend(sender: UIBarButtonItem) {
@@ -322,7 +323,36 @@ class ContactChatViewController: UITableViewController {
     @objc func segmentChanged(sender: Any) {
         switch segment.selectedSegmentIndex {
         case 0:
-            Utils.inTabChats = true
+            if segment.numberOfSegments == 3 {
+                Utils.inTabChats = true
+            }
+        case 1:
+            Utils.inTabChats = false
+            if segment.numberOfSegments < 3 {
+                DispatchQueue.global().async {
+                    self.getOpenGroups(listGroups: self.groups, completion: { g in
+                        DispatchQueue.main.async {
+                            for og in g {
+                                if self.groups.first(where: { $0.id == og.id }) == nil {
+                                    self.groups.append(og)
+                                }
+                            }
+                            self.groups.sort { (a, b) -> Bool in
+                                if Int(a.official) == 1 {
+                                    return true
+                                } else if Int(b.official) == 1 {
+                                    return false
+                                } else {
+                                    return Int(a.official) ?? 0 > Int(b.official) ?? 0
+                                }
+                            }
+                            DispatchQueue.main.async {
+                                self.tableView.reloadData()
+                            }
+                        }
+                    })
+                }
+            }
         case 2:
             Utils.inTabChats = false
             DispatchQueue.global().async {

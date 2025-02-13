@@ -38,10 +38,23 @@ class SecureFolderViewController: UIViewController, UISearchBarDelegate, UIColle
         super.viewDidLoad()
         self.title = "Secure Folder"
         view.backgroundColor = .white
+        let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
+        let navBarAppearance = UINavigationBarAppearance()
+        navBarAppearance.configureWithOpaqueBackground()
+        navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
+        navBarAppearance.titleTextAttributes = attributes
+        navigationController?.navigationBar.standardAppearance = navBarAppearance
+        navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
+        
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
         
         setupSubviews()
         loadFiles()
         filteredFiles = files
+    }
+    
+    @objc func cancel(sender: Any) {
+        navigationController?.dismiss(animated: true, completion: nil)
     }
     
     func getThumbnail(for fileName: String) -> UIImage? {

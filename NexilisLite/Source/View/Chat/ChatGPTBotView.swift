@@ -152,6 +152,9 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         guard let me = User.getMyPin() else {
             return
         }
+        if dataMessages.count > 0 { // && (dataMessages[dataMessages.count - 1]["read_receipts"] as? String ?? "0") == "0"
+            return
+        }
         var user_id:String? = ""
         let message_id = me + CoreMessage_TMessageUtil.getTID()
         let server_date = String(Date().currentTimeMillis())
@@ -422,7 +425,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                             "opposite_pin" : "",
                                             "format" : "",
                                             "blog_id" : "",
-                                            "read_receipts" : "0",
+                                            "read_receipts" : "4",
                                             "chat_id" : "",
                                             "account_type" : "1",
                                             "credential" :"",
@@ -480,7 +483,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                 row["video_id"] = ""
                                 row["image_id"] = ""
                                 row["thumb_id"] = ""
-                                row["read_receipts"] = "0"
+                                row["read_receipts"] = "4"
                                 row["credential"] = ""
                                 row["file_id"] = ""
                                 row["reff_id"] = ""
@@ -661,7 +664,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     }
     
     private func getData() {
-        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '31' order by server_date asc"
+        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '31' order by server_date asc"
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
@@ -697,17 +700,17 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                         if let dirPath = paths.first {
-                            let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["video_id"] as! String)
-                            let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["file_id"] as! String)
+                            let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["video_id"] as? String ?? "")
+                            let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["file_id"] as? String ?? "")
                             do {
                                 if ((row["video_id"] as! String) != "") {
-                                    if FileManager.default.fileExists(atPath: videoURL.path) || FileEncryption.shared.isSecureExists(filename: row["video_id"] as! String){
+                                    if FileManager.default.fileExists(atPath: videoURL.path) || FileEncryption.shared.isSecureExists(filename: row["video_id"] as? String ?? ""){
                                         row["progress"] = 100.0
                                     } else {
                                         row["progress"] = 0.0
                                     }
                                 } else {
-                                    if FileManager.default.fileExists(atPath: fileURL.path) || FileEncryption.shared.isSecureExists(filename: row["file_id"] as! String){
+                                    if FileManager.default.fileExists(atPath: fileURL.path) || FileEncryption.shared.isSecureExists(filename: row["file_id"] as? String ?? ""){
                                         row["progress"] = 100.0
                                     } else {
                                         row["progress"] = 0.0
@@ -715,12 +718,12 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                 }
                             }
                         }
-                        row["chat_date"] = chatDate(stringDate: row["server_date"] as! String)
+                        row["chat_date"] = chatDate(stringDate: row["server_date"] as? String ?? "")
                         row["isSelected"] = false
                         dataMessages.append(row)
                         var gptRow : [String: String] = [:]
                         gptRow["role"] = row["f_pin"] as! String == "-997" ? "assistant" : "user"
-                        gptRow["content"] = row["message_text"] as! String
+                        gptRow["content"] = row["message_text"] as? String ?? ""
                         chatGPTMessages.append(gptRow)
                     }
                     cursorData.close()
@@ -1342,9 +1345,9 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
             }
         })
         
-        var children: [UIMenuElement] = [copy, delete]
+        let children: [UIMenuElement] = [copy, delete]
 //        let copyOption = self.copyOption(indexPath: indexPath!)
-        let idMe = User.getMyPin() as String?
+//        let idMe = User.getMyPin() as String?
 //        if (dataMessages[indexPath!.row]["lock"] != nil && dataMessages[indexPath!.row]["lock"] as! String == "1") || dataMessages[indexPath!.row]["message_scope_id"] as! String == "18" || dataPerson["f_pin"] == "-999" || dataMessages[indexPath!.row]["credential"] as! String == "1" {
 //            children = [delete]
 //        } else {

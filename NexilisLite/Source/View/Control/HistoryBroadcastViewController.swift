@@ -41,8 +41,9 @@ class HistoryBroadcastViewController: UIViewController, UITableViewDelegate, UIT
         let me = User.getMyPin()!
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select FIRST_NAME, LAST_NAME, IMAGE_ID, USER_TYPE from BUDDY where F_PIN = '\(me)'"), cursor.next() {
-                    isAdmin = cursor.string(forColumnIndex: 3) == "23" || cursor.string(forColumnIndex: 3) == "24"
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select official_account from BUDDY where F_PIN = '\(me)'"), cursor.next() {
+                    let official = cursor.string(forColumnIndex: 0)!
+                    isAdmin = User.isOfficial(official_account: official)
                     cursor.close()
                 }
             } catch {
@@ -50,7 +51,7 @@ class HistoryBroadcastViewController: UIViewController, UITableViewDelegate, UIT
                 print("Access database error: \(error.localizedDescription)")
             }
         })
-        if isAdmin {
+        if isAdmin  {
             let broadcastImage = UIImage(systemName: "plus.bubble.fill")
             let buttonBroadcast = UIBarButtonItem(image: broadcastImage,  style: .plain, target: self, action: #selector(didTapBroadcastButton(sender:)))
             navigationItem.rightBarButtonItem = buttonBroadcast

@@ -115,6 +115,7 @@ public class Nexilis: NSObject {
     public static let IDX_CREATE_GROUP = 21
     public static let IDX_ADDFRIEND = 22
     public static let IDX_SIGNUP_OR_IN_PAGE = 23
+    public static let IDX_SECURE_FOLDER = 29
     public static let IDX_POST = 99
     public static let IDX_SELF_ACT = 100
     public static let IDX_SOCIAL_COMMERCE = 101
@@ -165,27 +166,26 @@ public class Nexilis: NSObject {
         
         DispatchQueue.global().async {
             do {
+                if Utils.getFinishInitPrefsr() {
+                    Utils.setFinishInitPrefs(value: false)
+                }
                 let address = Nexilis.getAddressNew(apiKey:apiKey)
                 if address.isEmpty {
                     return
                 }
-                Nexilis.dispatch = DispatchGroup()
-                Nexilis.dispatch?.enter()
+                var id = Utils.getConnectionID()
                 Nexilis.ADDRESS = address.components(separatedBy: ":")[0]
                 Nexilis.PORT = Int(address.components(separatedBy: ":")[1]) ?? 0
-                var id = Utils.getConnectionID()
                 if id.isEmpty {
                     let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
                     id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...])
                     Utils.setConnectionID(value: id)
                 }
                 try API.initConnection(bSwitchIP: false, sAPIK: apiKey, aAppMain: nil, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-                
-                // wait until connection true
-                Nexilis.dispatch?.wait()
-                Nexilis.dispatch = nil
-                
-                if(User.getMyPin() == nil){
+                while (API.nGetCLXConnState() == 0) {
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+                if(User.getMyPin() == nil) {
                     if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpApi(api: apiKey, p_pin: id), timeout: 30 * 1000){
                         id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
                         let enable_signup = (response.getBody(key: CoreMessage_TMessageKey.IS_ENABLED_ANONYMOUS, default_value: "0")) == "1"
@@ -271,10 +271,10 @@ public class Nexilis: NSObject {
                             }
                         }
                     }
-                    Nexilis.destroyAll()
                     if (Utils.getSetProfile() && !Utils.getFinishInitPrefsr()) || (!Utils.getForceAnonymous() && !Utils.getFinishInitPrefsr()) {
                         Utils.setFinishInitPrefs(value: true)
                     }
+                    Nexilis.destroyAll()
                     if !Utils.getLoginMultipleFPin().isEmpty {
                         let dialog = DialogUnableAccess()
                         dialog.modalTransitionStyle = .crossDissolve
@@ -797,6 +797,7 @@ public class Nexilis: NSObject {
             
             let cookies = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url)
             //print("MASUK SINI1 \(cookies)")
+            Utils.setCookiesMobileForStorage(value: convertCookiesToJSONString(cookies: cookies) ?? "")
             HTTPCookieStorage.shared.setCookies(cookies, for: url, mainDocumentURL: nil)
             if let cookieHeader = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] {
              Utils.setCookiesMobile(value: cookieHeader.replacingOccurrences(of: "; ", with: ";"))
@@ -835,8 +836,60 @@ public class Nexilis: NSObject {
         task.resume()
         _ = semaphore.wait(timeout: .distantFuture)
         result = Utils.getIpOpr()
-        //print("[App] getAddress:", result)
+        if HTTPCookieStorage.shared.cookies(for: URL(string: Utils.getDomainOpr())!)!.count == 0 && !Utils.getCookiesMobileForStorage().isEmpty {
+            HTTPCookieStorage.shared.setCookies(convertJSONStringToCookies(jsonString: Utils.getCookiesMobileForStorage()), for: url, mainDocumentURL: nil)
+        }
+        print("[App] getAddress:", result)
         return result
+    }
+    
+    private static func convertCookiesToJSONString(cookies: [HTTPCookie]) -> String? {
+        let cookiesArray = cookies.map { cookie -> [String: Any] in
+            return [
+                "name": cookie.name,
+                "value": cookie.value,
+                "domain": cookie.domain,
+                "path": cookie.path,
+                "expiresDate": cookie.expiresDate?.timeIntervalSince1970 ?? NSNull(),
+                "isSecure": cookie.isSecure,
+                "isHTTPOnly": cookie.isHTTPOnly
+            ]
+        }
+        
+        if let jsonData = try? JSONSerialization.data(withJSONObject: cookiesArray, options: .prettyPrinted) {
+            return String(data: jsonData, encoding: .utf8)
+        }
+        
+        return nil
+    }
+    
+    private static func convertJSONStringToCookies(jsonString: String) -> [HTTPCookie] {
+        guard let jsonData = jsonString.data(using: .utf8),
+              let jsonArray = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [[String: Any]] else {
+            return []
+        }
+        
+        var cookies: [HTTPCookie] = []
+        
+        for cookieDict in jsonArray {
+            var properties: [HTTPCookiePropertyKey: Any] = [
+                .name: cookieDict["name"] as? String ?? "",
+                .value: cookieDict["value"] as? String ?? "",
+                .domain: cookieDict["domain"] as? String ?? "",
+                .path: cookieDict["path"] as? String ?? "/",
+                .secure: cookieDict["isSecure"] as? Bool ?? false
+            ]
+            
+            if let expiresTimeInterval = cookieDict["expiresDate"] as? TimeInterval {
+                properties[.expires] = Date(timeIntervalSince1970: expiresTimeInterval)
+            }
+            
+            if let cookie = HTTPCookie(properties: properties) {
+                cookies.append(cookie)
+            }
+        }
+        
+        return cookies
     }
     
     private static func checkNewDomain(_ newDomain: String) -> Bool {
@@ -859,6 +912,7 @@ public class Nexilis: NSObject {
                     
                     let cookies = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url)
                     HTTPCookieStorage.shared.setCookies(cookies, for: url, mainDocumentURL: nil)
+                    Utils.setCookiesMobileForStorage(value: convertCookiesToJSONString(cookies: cookies) ?? "")
                     if let cookieHeader = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] {
                      Utils.setCookiesMobile(value: cookieHeader.replacingOccurrences(of: "; ", with: ";"))
                     }
@@ -1041,6 +1095,8 @@ public class Nexilis: NSObject {
             APIS.openConversation()
         } else if index == IDX_FAVORITEMESSAGE {
             APIS.openFavoriteMessage()
+        } else if index == IDX_SECURE_FOLDER {
+            APIS.openSecureFolder()
         } else {
             openApp(id: id)
         }
@@ -1438,7 +1494,7 @@ public class Nexilis: NSObject {
                         //print(error)
                     }
                 }
-                if !withStatus && !fromAPNS {
+                if !withStatus && !fromAPNS && !messageExist {
                     DispatchQueue.main.async {
                         if let delegate = Nexilis.shared.messageDelegate, Utils.getSetProfile() {
                             message.mBodies[CoreMessage_TMessageKey.MESSAGE_TEXT] = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_TEXT, default_value : "").toNormalString()
@@ -3378,7 +3434,6 @@ extension Nexilis: MessageDelegate {
                                                 }
                                             }
                                         }
-                                        print("HEHE0 \(members)")
                                         SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                                         if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "0" {
                                             let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal

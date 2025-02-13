@@ -182,7 +182,7 @@ public class Chat: Model {
                                         lock: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 12) ?? "" : cursorData.string(forColumnIndex: 16) ?? "",
                                         thumb: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 3) ?? "" : "",
                                         audio: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 13) ?? "" : cursorData.string(forColumnIndex: 17) ?? "",
-                                        gif: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 14) ?? "" : cursorData.string(forColumnIndex: 18) ?? "")
+                                        gif: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 17) ?? "" : cursorData.string(forColumnIndex: 18) ?? "")
                         chats.append(chat)
                     }
                     cursorData.close()
