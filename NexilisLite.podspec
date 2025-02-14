@@ -8,7 +8,7 @@
 
 Pod::Spec.new do |spec|
   spec.name         = "NexilisLite"
-  spec.version      = "3.3.1"
+  spec.version      = "5.0.5"
   spec.summary      = "NexilisLite Framework"
   spec.description  = <<-DESC
   NexilisLite Framework, embed Contact Center, Live Streaming, Push Notifications, Instant Messaging, Video and VoIP Calling features into your mobile apps within minutes...
@@ -24,7 +24,7 @@ Pod::Spec.new do |spec|
   spec.resource_bundles = { 'NexilisLite' => ['NexilisLite/Resource/**/*']}
   spec.swift_version = '5.5.1'
   spec.dependency 'FMDB', '~> 2.7.12'
-  spec.dependency 'nuSDKService', '~> 4.0.3'
+  spec.dependency 'nuSDKService', '~> 4.0.4'
   spec.dependency 'NotificationBannerSwift', '~> 3.1.0'
   spec.dependency 'Alamofire', '~> 5.10.1'
   spec.dependency 'SDWebImage', '~> 5.20.0'

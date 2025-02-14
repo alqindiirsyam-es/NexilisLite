@@ -4560,7 +4560,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         messageText.font = .systemFont(ofSize: 12)
         
-        var textChat = (dataMessages[indexPath.row]["message_text"])! as? String
+        var textChat = dataMessages[indexPath.row]["message_text"] as? String ?? ""
         let originalMessageText = textChat
         if (dataMessages[indexPath.row]["lock"] != nil && (dataMessages[indexPath.row]["lock"])! as? String == "1") {
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
@@ -4575,14 +4575,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         }
         
         if !audioChat.isEmpty {
-            textChat = textChat!.components(separatedBy: "|")[0]
+            textChat = textChat.components(separatedBy: "|")[0]
         }
         
         let imageSticker = UIImageView()
         
         if let attachmentFlag = dataMessages[indexPath.row]["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
-            if attachmentFlag == "27" || attachmentFlag == "26", let data = textChat { // live streaming
-                if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+            if attachmentFlag == "27" || attachmentFlag == "26" { // live streaming
+                if let json = try! JSONSerialization.jsonObject(with: textChat.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
                     Database().database?.inTransaction({ fmdb, rollback in
                         let title = json["title"]  as? String ?? ""
                         let description = json["description"]  as? String ?? ""
@@ -4619,41 +4619,41 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 imageSticker.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 imageSticker.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 imageSticker.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                var imageStickerBundle = UIImage(named: (textChat!.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                var imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 if imageStickerBundle == nil {
-                    imageStickerBundle = UIImage(named: (textChat!.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+                    imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
                 }
                 imageSticker.image = imageStickerBundle //resourcesMediaBundle
                 imageSticker.contentMode = .scaleAspectFit
             }
             else {
-                messageText.attributedText = textChat!.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+                messageText.attributedText = textChat.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
                 modifyText()
             }
         } else {
-            messageText.attributedText = textChat!.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+            messageText.attributedText = textChat.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
             modifyText()
         }
         
         func modifyText() {
-            if !textChat!.isEmpty {
-                if textChat!.contains("■"){
-                    textChat = textChat!.components(separatedBy: "■")[0]
-                    textChat = textChat!.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !textChat.isEmpty {
+                if textChat.contains("■"){
+                    textChat = textChat.components(separatedBy: "■")[0]
+                    textChat = textChat.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
                 if !fileChat.isEmpty {
-                    textChat = textChat!.components(separatedBy: "|")[1]
+                    textChat = textChat.components(separatedBy: "|")[1]
                 }
-                let finalAtribute = textChat!.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+                let finalAtribute = textChat.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
                 textChat = finalAtribute.string
                 let urlPattern = "(https?://|www\\.)\\S+"
                 if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
-                    let matches = regex.matches(in: textChat!, options: [], range: NSRange(textChat!.startIndex..., in: textChat!))
+                    let matches = regex.matches(in: textChat, options: [], range: NSRange(textChat.startIndex..., in: textChat))
                     
                     for match in matches {
-                        if let range = Range(match.range, in: textChat!) {
-                            let linkText = String(textChat![range])
-                            let nsRange = NSRange(range, in: textChat!)
+                        if let range = Range(match.range, in: textChat) {
+                            let linkText = String(textChat[range])
+                            let nsRange = NSRange(range, in: textChat)
                             finalAtribute.addAttribute(.link, value: linkText, range: nsRange)
                             finalAtribute.addAttribute(.foregroundColor, value: UIColor.blue, range: nsRange)
                             finalAtribute.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: nsRange)
@@ -4672,8 +4672,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         }
         
         if isSearching && textSearch.count > 1 {
-            messageText.attributedText = textChat!.richText(isSearching: true, textSearch: textSearch, group_id: self.dataGroup["group_id"]  as? String ?? "")
-            if textChat!.lowercased().contains(textSearch) {
+            messageText.attributedText = textChat.richText(isSearching: true, textSearch: textSearch, group_id: self.dataGroup["group_id"]  as? String ?? "")
+            if textChat.lowercased().contains(textSearch) {
                 countMatchesSearch += 1
             }
         }
@@ -5008,12 +5008,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-            let arrExtFile = (originalMessageText!.components(separatedBy: "|")[0]).split(separator: ".")
+            let arrExtFile = (originalMessageText.components(separatedBy: "|")[0]).split(separator: ".")
             let finalExtFile = arrExtFile[arrExtFile.count - 1]
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(fileChat)
                 if FileManager.default.fileExists(atPath: fileURL.path) {
-                    if let dataFile = try? Data(contentsOf: fileURL), textChat!.isEmpty {
+                    if let dataFile = try? Data(contentsOf: fileURL), textChat.isEmpty {
                         var sizeOfFile = Int(dataFile.count / 1000000)
                         if (sizeOfFile < 1) {
                             sizeOfFile = Int(dataFile.count / 1000)
@@ -5033,7 +5033,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
                 }
                 else if FileEncryption.shared.isSecureExists(filename: fileChat) {
                     do {
-                        if let dataFile = try FileEncryption.shared.readSecure(filename: fileChat), textChat!.isEmpty {
+                        if let dataFile = try FileEncryption.shared.readSecure(filename: fileChat), textChat.isEmpty {
                             var sizeOfFile = Int(dataFile.count / 1000000)
                             if (sizeOfFile < 1) {
                                 sizeOfFile = Int(dataFile.count / 1000)
@@ -5088,7 +5088,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
             nameFile.font = UIFont.systemFont(ofSize: 12, weight: .medium)
             nameFile.textColor = .white
-            nameFile.text = originalMessageText?.components(separatedBy: "|")[0]
+            nameFile.text = originalMessageText.components(separatedBy: "|")[0]
             
             if (dataMessages[indexPath.row]["progress"] as! Double != 100.0) {
                 let containerLoading = UIView()
@@ -5139,9 +5139,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         
         let containerLinkMessage = UIView()
         var isLoadingShowLink = false
-        if thumbChat.isEmpty && fileChat.isEmpty && !textChat!.isEmpty {
+        if thumbChat.isEmpty && fileChat.isEmpty && !textChat.isEmpty {
             var text = ""
-            let listTextSplitBreak = textChat!.components(separatedBy: "\n")
+            let listTextSplitBreak = textChat.components(separatedBy: "\n")
             let indexFirstLinkSplitBreak = listTextSplitBreak.firstIndex(where: { $0.contains("www.") || $0.contains("http://") || $0.contains("https://") })
             if indexFirstLinkSplitBreak != nil {
                 let listTextSplitSpace = listTextSplitBreak[indexFirstLinkSplitBreak!].components(separatedBy: " ")

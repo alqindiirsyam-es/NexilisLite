@@ -120,6 +120,7 @@ public class Nexilis: NSObject {
     public static let IDX_SELF_ACT = 100
     public static let IDX_SOCIAL_COMMERCE = 101
     public static let IDX_NEWS = 102
+    public static let IDX_SECURE_BROWSER = 105
     
     public static var callAPNActivated = false
     
@@ -164,6 +165,8 @@ public class Nexilis: NSObject {
         imageCache.countLimit = 100
         imageCache.totalCostLimit = 1024 * 1024 * 200
         
+        UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
+        
         DispatchQueue.global().async {
             do {
                 if Utils.getFinishInitPrefsr() {
@@ -181,7 +184,7 @@ public class Nexilis: NSObject {
                     id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...])
                     Utils.setConnectionID(value: id)
                 }
-                try API.initConnection(bSwitchIP: false, sAPIK: apiKey, aAppMain: nil, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+                try API.initConnection(sAPIK: apiKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
                 while (API.nGetCLXConnState() == 0) {
                     Thread.sleep(forTimeInterval: 0.5)
                 }
@@ -297,39 +300,44 @@ public class Nexilis: NSObject {
         }
         
         _ = LocationManager()
-        
-        initiateSoundCall()
-        
-        //print("MANIA \(UIFont.systemFont(ofSize: 12)) <> \(UIFont.italicSystemFont(ofSize: 12)) <> \(UIFont.boldSystemFont(ofSize: 12))")
     }
     
-    private static func initiateSoundCall() {
+    public static func playRingtoneCall() {
+        var ringtonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_in", withExtension: "mp3")
+        if ringtonePath == nil {
+            ringtonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_in", withExtension: "mp3")
+        }
         do {
-            guard let ringtonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_in", withExtension: "mp3") else {
-                return
-            }
-//            print("ringtone ada")
-            
-            ringtonePlayer = try AVAudioPlayer(contentsOf:ringtonePath)
+            ringtonePlayer = try AVAudioPlayer(contentsOf:ringtonePath!)
             ringtonePlayer?.numberOfLoops = -1
             ringtonePlayer?.prepareToPlay()
-            
-//            print("END INITIATE ringtone")
-            
-            guard let ringbacktonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_out", withExtension: "mp3") else {
-                return
-            }
-//            print("ringbacktone ada")
-            
-            ringbacktonePlayer = try AVAudioPlayer(contentsOf:ringbacktonePath)
-            ringbacktonePlayer?.numberOfLoops = -1
-            ringbacktonePlayer?.prepareToPlay()
-            
-//            print("END INITIATE ringbacktone")
-            
+            ringtonePlayer?.play()
         } catch {
             
         }
+    }
+    
+    public static func stopRingtoneCall() {
+        ringtonePlayer?.stop()
+    }
+    
+    public static func playRingbacktoneCall() {
+        var ringbacktonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_out", withExtension: "mp3")
+        if ringbacktonePath == nil {
+            ringbacktonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_out", withExtension: "mp3")
+        }
+        do {
+            ringbacktonePlayer = try AVAudioPlayer(contentsOf:ringbacktonePath!)
+            ringbacktonePlayer?.numberOfLoops = -1
+            ringbacktonePlayer?.prepareToPlay()
+            ringbacktonePlayer?.play()
+        } catch {
+            
+        }
+    }
+    
+    public static func stopRingbacktoneCall() {
+        ringbacktonePlayer?.stop()
     }
     
     public static func addFB(viewController: UIViewController, fromMAB: Bool) {
@@ -629,23 +637,23 @@ public class Nexilis: NSObject {
         SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
     }
     
-    public static func changeUser(f_pin: String){
-        do {
-            //print("change user to fpin")
-            Nexilis.dispatch = DispatchGroup()
-            Nexilis.dispatch?.enter()
-            
-            try API.switchUser(cbiI: Callback(), sUserID: f_pin)
-            
-            // wait until connection true
-            Nexilis.dispatch?.wait()
-            Nexilis.dispatch = nil
-            //print("success change user to fpin")
-//            _ = Nexilis.write(message: CoreMessage_TMessageBank.getChangeConnectionID(p_pin: f_pin))
-        } catch{
-            //print(error)
-        }
-    }
+//    public static func changeUser(f_pin: String){
+//        do {
+//            //print("change user to fpin")
+//            Nexilis.dispatch = DispatchGroup()
+//            Nexilis.dispatch?.enter()
+//            
+//            try API.switchUser(cbiI: Callback(), sUserID: f_pin)
+//            
+//            // wait until connection true
+//            Nexilis.dispatch?.wait()
+//            Nexilis.dispatch = nil
+//            //print("success change user to fpin")
+////            _ = Nexilis.write(message: CoreMessage_TMessageBank.getChangeConnectionID(p_pin: f_pin))
+//        } catch{
+//            //print(error)
+//        }
+//    }
     
     public static func apiSendChat(destination: String, message: String, isGroup: Bool, thumbnailName: String = "", imageName: String = "", videoName: String = "", fileName: String = "", audioName: String = "", replyMessageId : String = "") -> String {
         let message = CoreMessage_TMessageBank.sendMessage(l_pin: destination, message_scope_id: isGroup ? "4" : "3", status: "3", message_text: message, credential: "", attachment_flag: !imageName.isEmpty ? "1" : !videoName.isEmpty ? "2" : !audioName.isEmpty ? "5" : !fileName.isEmpty ? "6" : "0", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageName, audio_id: audioName, video_id: videoName, file_id: fileName, thumb_id: thumbnailName, reff_id: replyMessageId, read_receipts: "4", chat_id: "", is_call_center: "0", call_center_id: "", opposite_pin: User.getMyPin() ?? "")
@@ -839,7 +847,7 @@ public class Nexilis: NSObject {
         if HTTPCookieStorage.shared.cookies(for: URL(string: Utils.getDomainOpr())!)!.count == 0 && !Utils.getCookiesMobileForStorage().isEmpty {
             HTTPCookieStorage.shared.setCookies(convertJSONStringToCookies(jsonString: Utils.getCookiesMobileForStorage()), for: url, mainDocumentURL: nil)
         }
-        print("[App] getAddress:", result)
+//        print("[App] getAddress:", result)
         return result
     }
     
@@ -1097,6 +1105,8 @@ public class Nexilis: NSObject {
             APIS.openFavoriteMessage()
         } else if index == IDX_SECURE_FOLDER {
             APIS.openSecureFolder()
+        } else if index == IDX_SECURE_BROWSER {
+            APIS.openSecureBrowser()
         } else {
             openApp(id: id)
         }
@@ -3819,89 +3829,122 @@ extension Nexilis: MessageDelegate {
                     subtitle.textColor = .white
                     
                     if floating != nil {
-                        floating.dismiss()
-                    }
-                    floating = FloatingNotificationBanner(customView: container)
-                    floating.bannerHeight = 100.0
-                    floating.transparency = 0.9
-                    
-                    if threadIdentifier == "-999" {
-                        if !Utils.getIconDock().isEmpty {
-                            let dataImage = try? Data(contentsOf: URL(string: Utils.getUrlDock()!)!) //make sure your image in this url does exist, otherwise unwrap in a if let check / try-catch
-                            if dataImage != nil {
-                                profileImage.image = UIImage(data: dataImage!)
-                            }
-                        } else {
-                            profileImage.image = UIImage(named: "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                        }
-                    } else if profile != "" {
-                        profileImage.circle()
-                        do {
-                            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                            let file = documentDir.appendingPathComponent(profile)
-                            if FileManager().fileExists(atPath: file.path) {
-                                profileImage.image = UIImage(contentsOfFile: file.path)
-                                profileImage.backgroundColor = .clear
-                            } else {
-                                Download().startHTTP(forKey: profile) { (name, progress) in
-                                    guard progress == 100 else {
-                                        return
-                                    }
-                                    
-                                    DispatchQueue.main.async { [self] in
-                                        profileImage.image = UIImage(contentsOfFile: file.path)
-                                        profileImage.backgroundColor = .clear
-                                        if !onGoingCC.isEmpty {
-                                            floating.autoDismiss = false
-                                        }
-                                        floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
-                                        floating.onTap = {
-                                            showNotif()
-                                        }
-                                    }
-                                }
-                                return
-                            }
-                        } catch {}
-                        profileImage.contentMode = .scaleAspectFill
-                    } else {
-                        profileImage.circle()
-                        if message.getBody(key: messageScopeId) == "3" {
-                            profileImage.image = UIImage(systemName: "person")
-                        } else {
-                            profileImage.image = UIImage(systemName: "person.3")
-                        }
-                        profileImage.contentMode = .scaleAspectFit
-                        profileImage.backgroundColor = .lightGray
-                        profileImage.tintColor = .white
+                        return
                     }
                     
-                    floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
-//                    let vibrateMode: Bool = SecureUserDefaults.shared.value(forKey: "vibrateMode") ?? false
-                    var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"
-                    if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == "4" {
-                        soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
-                    }
-                    do {
-                        var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
-                        if nameSound.contains("_(Default)") {
-                            nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
-                        }
-                        var soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
-                        if soundURL == nil {
-                            soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
-                        }
-                        Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
-                        Nexilis.sharedAudioPlayer?.prepareToPlay()
-                        Nexilis.sharedAudioPlayer?.play()
-                    } catch {
+                    displayNotif()
+                    
+                    func displayNotif() {
+                        floating = FloatingNotificationBanner(customView: container)
+                        floating.bannerHeight = 100.0
+                        floating.transparency = 0.9
                         
-                    }
-                    if !onGoingCC.isEmpty {
-                        floating.autoDismiss = false
-                    }
-                    floating.onTap = {
-                        showNotif()
+                        if threadIdentifier == "-999" {
+                            if !Utils.getIconDock().isEmpty {
+                                let dataImage = try? Data(contentsOf: URL(string: Utils.getUrlDock()!)!) //make sure your image in this url does exist, otherwise unwrap in a if let check / try-catch
+                                if dataImage != nil {
+                                    profileImage.image = UIImage(data: dataImage!)
+                                }
+                            } else {
+                                profileImage.image = UIImage(named: "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                            }
+                        } else if profile != "" {
+                            profileImage.circle()
+                            do {
+                                let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                let file = documentDir.appendingPathComponent(profile)
+                                if FileManager().fileExists(atPath: file.path) {
+                                    profileImage.image = UIImage(contentsOfFile: file.path)
+                                    profileImage.backgroundColor = .clear
+                                } else {
+                                    Download().startHTTP(forKey: profile) { (name, progress) in
+                                        guard progress == 100 else {
+                                            return
+                                        }
+                                        
+                                        DispatchQueue.main.async { [self] in
+                                            profileImage.image = UIImage(contentsOfFile: file.path)
+                                            profileImage.backgroundColor = .clear
+                                            if !onGoingCC.isEmpty {
+                                                floating.autoDismiss = false
+                                            }
+                                            floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
+                                            floating.onTap = {
+                                                self.floating = nil
+                                                showNotif()
+                                            }
+                                            var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"
+                                            if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == "4" {
+                                                soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
+                                            }
+                                            do {
+                                                var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+                                                if nameSound.contains("_(Default)") {
+                                                    nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+                                                }
+                                                var soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                                                if soundURL == nil {
+                                                    soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                                                }
+                                                Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
+                                                Nexilis.sharedAudioPlayer?.prepareToPlay()
+                                                Nexilis.sharedAudioPlayer?.play()
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: {
+                                                    self.floating = nil
+                                                })
+                                            } catch {
+                                                
+                                            }
+                                        }
+                                    }
+                                    return
+                                }
+                            } catch {}
+                            profileImage.contentMode = .scaleAspectFill
+                        } else {
+                            profileImage.circle()
+                            if message.getBody(key: messageScopeId) == "3" {
+                                profileImage.image = UIImage(systemName: "person")
+                            } else {
+                                profileImage.image = UIImage(systemName: "person.3")
+                            }
+                            profileImage.contentMode = .scaleAspectFit
+                            profileImage.backgroundColor = .lightGray
+                            profileImage.tintColor = .white
+                        }
+                        
+                        print("SHOW KAH?0")
+                        floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
+    //                    let vibrateMode: Bool = SecureUserDefaults.shared.value(forKey: "vibrateMode") ?? false
+                        var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"
+                        if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == "4" {
+                            soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
+                        }
+                        do {
+                            var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+                            if nameSound.contains("_(Default)") {
+                                nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+                            }
+                            var soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                            if soundURL == nil {
+                                soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                            }
+                            Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
+                            Nexilis.sharedAudioPlayer?.prepareToPlay()
+                            Nexilis.sharedAudioPlayer?.play()
+                        } catch {
+                            
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: {
+                            self.floating = nil
+                        })
+//                        if !onGoingCC.isEmpty {
+//                            floating.autoDismiss = false
+//                        }
+                        floating.onTap = {
+                            self.floating = nil
+                            showNotif()
+                        }
                     }
                     func showNotif() {
                         if message.getBody(key: attachmentFlag) == "59" {

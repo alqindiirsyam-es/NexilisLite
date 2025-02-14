@@ -1299,13 +1299,19 @@ class IncomingThread {
         } else {
             Nexilis.saveMessage(message: message, withStatus: false)
         }
-        DispatchQueue.main.async {
-            if APIS.checkAppStateisBackground() {
+        UNUserNotificationCenter.current().getPendingNotificationRequests{ notificationsPending in
+            let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
+            let matchingNotifications = notificationsPending.filter { $0.identifier == identifier }
+            if matchingNotifications.isEmpty {
                 UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
                     let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
                     let matchingNotifications = notifications.filter { $0.request.identifier == identifier }
                     if matchingNotifications.isEmpty {
-                        APIS.addNotificationNexilis(message)
+                        DispatchQueue.main.async {
+                            if APIS.checkAppStateisBackground() {
+                                APIS.addNotificationNexilis(message)
+                            }
+                        }
                     }
                 }
             }

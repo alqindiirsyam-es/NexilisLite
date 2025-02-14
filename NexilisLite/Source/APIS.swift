@@ -427,6 +427,21 @@ public class APIS: NSObject {
         }
     }
     
+    public static func openSecureBrowser() {
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        let controller = BNIBookingWebView()
+        controller.isSecureBrowser = true
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
+        }
+    }
+    
     public static func openCreateGroup() {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
@@ -1228,14 +1243,23 @@ public class APIS: NSObject {
 //        } catch {
 //        }
 //        exit(0)
+        UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
     }
     
     public static func enterForeground() {
-//        do {
-//            try API.switchCBI(cbiI: Callback(), bLight: false)
-//        } catch {
-//        }
-//        setDataForShareExtension()
+        do {
+            if !Nexilis.sAPIKey.isEmpty {
+                print("MASUK initConnection enterForeground")
+                var id = Utils.getConnectionID()
+                if id.isEmpty {
+                    let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
+                    id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...])
+                    Utils.setConnectionID(value: id)
+                }
+                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+            }
+        } catch {
+        }
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()

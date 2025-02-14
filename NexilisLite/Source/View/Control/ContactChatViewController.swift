@@ -23,6 +23,8 @@ class ContactChatViewController: UITableViewController {
     
     var chats: [Chat] = []
     
+    var chatGroupMaps: [String: [Chat]] = [:]
+    
     var contacts: [User] = []
     
     var groups: [Group] = []
@@ -45,6 +47,9 @@ class ContactChatViewController: UITableViewController {
     
     var noData = false
     
+    var loadingData = true
+    var waitingLoading = false
+    
     var noUCList = false
     
     func filterContentForSearchText(_ searchText: String) {
@@ -64,7 +69,12 @@ class ContactChatViewController: UITableViewController {
                 case 2:
                     fillteredData = self.groups.filter { $0.name.lowercased().contains(searchText.lowercased()) }
                 default:
-                    fillteredData = self.chats.filter { $0.name.lowercased().contains(searchText.lowercased()) || $0.messageText.lowercased().contains(searchText.lowercased()) }
+                    var group_id: String?
+                    if let filterGroupKey = self.chatGroupMaps.first(where: { $0.value.contains { $0.name.lowercased().contains(searchText.lowercased()) || $0.groupName.lowercased().contains(searchText.lowercased()) || $0.messageText.lowercased().contains(searchText.lowercased()) } } ) {
+                        group_id = filterGroupKey.key
+                    }
+                    let deepCopyChats = self.chats.map{ $0.copy() }
+                    fillteredData = deepCopyChats.filter { $0.name.lowercased().contains(searchText.lowercased()) || $0.messageText.lowercased().contains(searchText.lowercased()) || $0.groupId == group_id }
                 }
             } else {
                 switch segment.selectedSegmentIndex {
@@ -254,30 +264,35 @@ class ContactChatViewController: UITableViewController {
 //        tableView.reloadData()
 //    }
     
-    @objc func onReload(notification: NSNotification) {
-        let data:[AnyHashable : Any] = notification.userInfo!
-        if data["member"] as? String == User.getMyPin() {
-            DispatchQueue.main.async {
-                self.getData()
+    private func reloadAllData() {
+        DispatchQueue.global().async { [self] in
+            if waitingLoading {
+                return
             }
-        } else if data["state"] as? Int == 99 {
-            //print("MASUK 99")
-            DispatchQueue.main.async {
-                self.getData()
+            waitingLoading = true
+            while loadingData {
+                Thread.sleep(forTimeInterval: 0.5)
             }
+            waitingLoading = false
+            getData()
         }
     }
     
     @objc func onReloadTab(notification: NSNotification) {
-        DispatchQueue.main.async {
-            self.getData()
+        reloadAllData()
+    }
+    
+    @objc func onReload(notification: NSNotification) {
+        let data:[AnyHashable : Any] = notification.userInfo!
+        if data["member"] as? String == User.getMyPin()! {
+            reloadAllData()
+        } else if data["state"] as? Int == 99 {
+            reloadAllData()
         }
     }
     
     @objc func onReceiveMessage(notification: NSNotification) {
-        DispatchQueue.main.async {
-            self.getData()
-        }
+        reloadAllData()
     }
     
     @objc func onStatusChat(notification: NSNotification) {
@@ -411,7 +426,41 @@ class ContactChatViewController: UITableViewController {
     
     func getChats(completion: @escaping ()->()) {
         DispatchQueue.global().async {
-            self.chats = Chat.getData()
+            self.chatGroupMaps.removeAll()
+            let previousChat = self.chats
+            let allChats = Chat.getData()
+            var tempChats: [Chat] = []
+            for singleChat in allChats {
+                if !singleChat.groupId.isEmpty {
+                    let chatParentInPreviousChats = previousChat.first(where: { $0.isParent && $0.groupId == singleChat.groupId })
+                    if self.chatGroupMaps[singleChat.groupId] != nil {
+                        self.chatGroupMaps[singleChat.groupId]!.insert(singleChat, at: 0)
+                        if let parentChat = tempChats.first(where: { $0.groupId == singleChat.groupId && $0.isParent }) {
+                            let counterParent = parentChat.counter
+                            parentChat.counter = "\(Int(counterParent)! + Int(singleChat.counter)!)"
+                        }
+                        if let parentExist = chatParentInPreviousChats, parentExist.isSelected {
+                            if let indexParent = previousChat.firstIndex(where: { $0.isParent && $0.groupId == singleChat.groupId }){
+                                tempChats.insert(singleChat, at: indexParent + self.chatGroupMaps[singleChat.groupId]!.count)
+                            }
+                        }
+                    } else {
+                        self.chatGroupMaps[singleChat.groupId] = [singleChat]
+                        let parentChat = Chat(profile: singleChat.profile, groupName: singleChat.groupName, counter: singleChat.counter, groupId: singleChat.groupId)
+                        parentChat.isParent = true
+                        if let parentExist = chatParentInPreviousChats, parentExist.isSelected {
+                            parentChat.isSelected = true
+                            tempChats.append(parentChat)
+                            tempChats.append(singleChat)
+                        } else {
+                            tempChats.append(parentChat)
+                        }
+                    }
+                } else {
+                    tempChats.append(singleChat)
+                }
+            }
+            self.chats = tempChats
             completion()
         }
     }
@@ -654,6 +703,10 @@ extension ContactChatViewController {
                 } else {
                     data = chats[indexPath.row]
                 }
+                if data.isParent {
+                    expandCollapseChats(tableView: tableView, indexPath: indexPath)
+                    return
+                }
                 if let chooser = isChooser {
                     var exblock = User.getDataCanNil(pin: data.pin)?.ex_block
                     exblock = exblock == nil ? "0" : exblock!.isEmpty ? "0" : exblock!
@@ -714,6 +767,40 @@ extension ContactChatViewController {
                 navigationController?.show(editorPersonalVC, sender: nil)
             }
         }
+    }
+    
+    func expandCollapseChats(tableView: UITableView, indexPath: IndexPath) {
+        let data: Chat
+        if isFilltering {
+            data = fillteredData[indexPath.row] as! Chat
+        } else {
+            data = chats[indexPath.row]
+        }
+        data.isSelected = !data.isSelected
+        if data.isSelected {
+            for dataSubChat in self.chatGroupMaps[data.groupId]! {
+                if var indexParent = chats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
+                    if isFilltering {
+                        fillteredData.insert(dataSubChat, at: indexParent + 1)
+                        indexParent+=1
+                    } else {
+                        chats.insert(dataSubChat, at: indexParent + 1)
+                        indexParent+=1
+                    }
+                }
+                
+            }
+        } else {
+            if isFilltering {
+                if var changedFillteredData = fillteredData as? [Chat] {
+                    changedFillteredData.removeAll(where: { $0.isParent == false && $0.groupId == data.groupId })
+                    self.fillteredData = changedFillteredData
+                }
+            } else {
+                chats.removeAll(where: { $0.isParent == false && $0.groupId == data.groupId })
+            }
+        }
+        tableView.reloadData()
     }
     
     func expandCollapseGroup(tableView: UITableView, indexPath: IndexPath) {
@@ -831,21 +918,15 @@ extension ContactChatViewController {
             } else {
                 getGroups(id: group.id) { g in
                     DispatchQueue.main.async {
-                        //print("index path section: \(indexPath.section)")
-                        //print("index path row: \(indexPath.row)")
-                        //print("index path item: \(indexPath.item)")
                         if self.isFilltering {
-//                                self.fillteredData.remove(at: indexPath.section)
                             if self.fillteredData[indexPath.section] is Group {
                                 self.groupMap[(self.fillteredData[indexPath.section] as! Group).id] = 1
                                 self.fillteredData.insert(contentsOf: g, at: indexPath.section + 1)
                             }
                         } else {
-//                                self.groups.remove(at: indexPath.section)
                             self.groupMap[self.groups[indexPath.section].id] = 1
                             self.groups.insert(contentsOf: g, at: indexPath.section + 1)
                         }
-                        //print("groupMap: \(self.groupMap)")
                         tableView.reloadData()
                         
                         self.expandCollapseGroup(tableView: tableView, indexPath: IndexPath(row: 0, section: indexPath.section + 1))
@@ -1116,12 +1197,12 @@ extension ContactChatViewController {
                 content.addSubview(imageView)
                 imageView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
-                    imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10.0),
                     imageView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10.0),
                     imageView.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10.0),
                     imageView.widthAnchor.constraint(equalToConstant: 55.0),
                     imageView.heightAnchor.constraint(equalToConstant: 55.0)
                 ])
+                var leadingAnchor = imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10.0)
                 if data.profile.isEmpty && data.pin != "-999" && data.pin != "-997" {
                     if data.messageScope == "3" {
                         imageView.image = UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
@@ -1131,7 +1212,7 @@ extension ContactChatViewController {
                 } else if data.pin == "-997" {
                     imageView.frame = CGRect(x: 0, y: 0, width: 55.0, height: 55.0)
                     imageView.circle()
-                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {//resourcesMediaBundle
+                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
                         imageView.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
                             if error == nil {
                                 imageView.animationImages = image?.images
@@ -1171,136 +1252,36 @@ extension ContactChatViewController {
                             }
                         }
                     } else {
-                        getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : data.messageScope == "3" ? "Profile---Purple" : "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                        if data.messageScope == "3" || data.isParent || data.pin == "-999" {
+                            getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : data.messageScope == "3" ? "Profile---Purple" : "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                                imageView.image = image
+                            })
+                        } else {
+                            leadingAnchor = imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 40.0)
+                            let image = UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                             imageView.image = image
-                        })
+                        }
                     }
                 }
+                leadingAnchor.isActive = true
+                
                 let titleView = UILabel()
                 content.addSubview(titleView)
                 titleView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
                     titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
-                    titleView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10.0),
                     titleView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40.0),
                 ])
-                titleView.text = data.name
                 titleView.font = UIFont.systemFont(ofSize: 14, weight: .medium)
                 
-                let messageView = UILabel()
-                content.addSubview(messageView)
-                messageView.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    messageView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
-                    messageView.topAnchor.constraint(equalTo: titleView.bottomAnchor, constant: 2.0),
-                    messageView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40.0),
-                ])
-                messageView.textColor = .gray
-                if data.messageText.contains("■") {
-                    data.messageText = data.messageText.components(separatedBy: "■")[0]
-                    data.messageText = data.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                let text = Utils.previewMessageText(chat: data)
-                let idMe = User.getMyPin() as String?
-                if let attributeText = text as? NSMutableAttributedString {
-                    let stringMessage = NSMutableAttributedString(string: "")
-                    if data.fpin == idMe {
-                        if data.lock == "1" {
-                            if data.messageScope == "4" {
-                                stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
-                            }
-                            stringMessage.append(("🚫 _"+"You were deleted this message".localized()+"_").richText())
-                        } else {
-                            let imageStatus = NSTextAttachment()
-                            let status = getRealStatus(messageId: data.messageId)
-                            if status == "0" {
-                                imageStatus.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
-                            } else if status == "1" {
-                                imageStatus.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
-                            } else if status == "2" {
-                                imageStatus.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
-                            } else if (status == "3") {
-                                imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
-                            } else if (status == "8") {
-                                imageStatus.image = UIImage(named: "message_status_ack", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
-                            } else {
-                                imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.systemBlue)
-                            }
-                            imageStatus.bounds = CGRect(x: 0, y: -2, width: 15, height: 15)
-                            let imageStatusString = NSAttributedString(attachment: imageStatus)
-                            stringMessage.append(imageStatusString)
-                            stringMessage.append(NSAttributedString(string: " "))
-                            if data.messageScope == "4" {
-                                stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
-                            }
-                            stringMessage.append(attributeText)
-                        }
-                    } else {
-                        if data.messageScope == "4" {
-                            stringMessage.append(NSAttributedString(string: User.getData(pin: data.fpin, lPin: data.pin)!.firstName + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
-                        }
-                        if data.lock == "1" {
-                            stringMessage.append(("🚫 _"+"This message was deleted".localized()+"_").richText())
-                        } else {
-                            stringMessage.append(attributeText)
-                        }
-                    }
-                    messageView.attributedText = stringMessage
-                }
-                messageView.numberOfLines = 2
-                
                 let timeView = UILabel()
-                content.addSubview(timeView)
-                timeView.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    timeView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10.0),
-                    timeView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20.0),
-                ])
-                timeView.textColor = .gray
-                timeView.font = UIFont.systemFont(ofSize: 14)
-                
-                let date = Date(milliseconds: Int64(data.serverDate)!)
-                let calendar = Calendar.current
-                
-                if (calendar.isDateInToday(date)) {
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "HH:mm"
-                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                    timeView.text = formatter.string(from: date as Date)
-                } else {
-                    let startOfNow = calendar.startOfDay(for: Date())
-                    let startOfTimeStamp = calendar.startOfDay(for: date)
-                    let components = calendar.dateComponents([.day], from: startOfNow, to: startOfTimeStamp)
-                    let day = -(components.day!)
-                    if day == 1 {
-                        timeView.text = "Yesterday".localized()
-                    } else {
-                        if day < 7 {
-                            let formatter = DateFormatter()
-                            formatter.dateFormat = "EEEE"
-                            let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
-                            if lang == "id" {
-                                formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                            }
-                            timeView.text = formatter.string(from: date)
-                        } else {
-                            let formatter = DateFormatter()
-                            formatter.dateFormat = "M/dd/yy"
-                            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                            let stringFormat = formatter.string(from: date as Date)
-                            timeView.text = stringFormat
-                        }
-                    }
-                }
+                let viewCounter = UIView()
                 
                 if data.counter != "0" {
                     timeView.textColor = .systemRed
-                    let viewCounter = UIView()
                     content.addSubview(viewCounter)
                     viewCounter.translatesAutoresizingMaskIntoConstraints = false
                     NSLayoutConstraint.activate([
-                        viewCounter.topAnchor.constraint(equalTo: timeView.bottomAnchor, constant: 5.0),
-                        viewCounter.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
                         viewCounter.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
                         viewCounter.heightAnchor.constraint(equalToConstant: 20)
                     ])
@@ -1327,8 +1308,147 @@ extension ContactChatViewController {
                     labelCounter.textColor = .secondaryColor
                     labelCounter.textAlignment = .center
                 }
+                
+                if !data.isParent {
+                    titleView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10.0).isActive = true
+                    titleView.text = data.name
+                    
+                    content.addSubview(timeView)
+                    timeView.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        timeView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10.0),
+                        timeView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20.0),
+                    ])
+                    timeView.textColor = .gray
+                    timeView.font = UIFont.systemFont(ofSize: 14)
+                    
+                    let date = Date(milliseconds: Int64(data.serverDate) ?? 0)
+                    let calendar = Calendar.current
+                    
+                    if (calendar.isDateInToday(date)) {
+                        let formatter = DateFormatter()
+                        formatter.dateFormat = "HH:mm"
+                        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
+                        timeView.text = formatter.string(from: date as Date)
+                    } else {
+                        let startOfNow = calendar.startOfDay(for: Date())
+                        let startOfTimeStamp = calendar.startOfDay(for: date)
+                        let components = calendar.dateComponents([.day], from: startOfNow, to: startOfTimeStamp)
+                        let day = -(components.day!)
+                        if day == 1 {
+                            timeView.text = "Yesterday".localized()
+                        } else {
+                            if day < 7 {
+                                let formatter = DateFormatter()
+                                formatter.dateFormat = "EEEE"
+                                let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
+                                if lang == "id" {
+                                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
+                                }
+                                timeView.text = formatter.string(from: date)
+                            } else {
+                                let formatter = DateFormatter()
+                                formatter.dateFormat = "M/dd/yy"
+                                formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
+                                let stringFormat = formatter.string(from: date as Date)
+                                timeView.text = stringFormat
+                            }
+                        }
+                    }
+                    
+                    let messageView = UILabel()
+                    content.addSubview(messageView)
+                    messageView.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        messageView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
+                        messageView.topAnchor.constraint(equalTo: titleView.bottomAnchor),
+                        messageView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40.0),
+                    ])
+                    messageView.textColor = .gray
+                    if data.messageText.contains("■") {
+                        data.messageText = data.messageText.components(separatedBy: "■")[0]
+                        data.messageText = data.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    let text = Utils.previewMessageText(chat: data)
+                    let idMe = User.getMyPin() as String?
+                    if let attributeText = text as? NSMutableAttributedString {
+                        let stringMessage = NSMutableAttributedString(string: "")
+                        if data.fpin == idMe {
+                            if data.lock == "1" {
+                                if data.messageScope == "4" {
+                                    stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
+                                }
+                                stringMessage.append(("🚫 _"+"You were deleted this message".localized()+"_").richText())
+                            } else {
+                                let imageStatus = NSTextAttachment()
+                                let status = getRealStatus(messageId: data.messageId)
+                                if status == "0" {
+                                    imageStatus.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
+                                } else if status == "1" {
+                                    imageStatus.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
+                                } else if status == "2" {
+                                    imageStatus.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
+                                } else if (status == "3") {
+                                    imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
+                                } else if (status == "8") {
+                                    imageStatus.image = UIImage(named: "message_status_ack", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
+                                } else {
+                                    imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.systemBlue)
+                                }
+                                imageStatus.bounds = CGRect(x: 0, y: -5, width: 15, height: 15)
+                                let imageStatusString = NSAttributedString(attachment: imageStatus)
+                                stringMessage.append(imageStatusString)
+                                stringMessage.append(NSAttributedString(string: " "))
+                                if data.messageScope == "4" {
+                                    stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
+                                }
+                                stringMessage.append(attributeText)
+                            }
+                        } else {
+                            if data.messageScope == "4" {
+                                var fullname = User.getData(pin: data.fpin, lPin: data.pin)!.fullName
+                                let components = fullname.split(separator: " ")
+                                if components.count >= 2 {
+                                    fullname = components.prefix(2).joined(separator: " ")
+                                }
+                                stringMessage.append(NSAttributedString(string: fullname + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
+                            }
+                            if data.lock == "1" {
+                                stringMessage.append(("🚫 _"+"This message was deleted".localized()+"_").richText())
+                            } else {
+                                stringMessage.append(attributeText)
+                            }
+                        }
+                        messageView.attributedText = stringMessage
+                    }
+                    messageView.numberOfLines = 2
+                    
+                    if data.counter != "0" {
+                        viewCounter.topAnchor.constraint(equalTo: timeView.bottomAnchor, constant: 5.0).isActive = true
+                        viewCounter.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20).isActive = true
+                    }
+                } else {
+                    titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor).isActive = true
+                    titleView.text = data.groupName
+                    
+                    let iconName = (data.isSelected) ? "chevron.up.circle" : "chevron.down.circle"
+                    let imageView = UIImageView(image: UIImage(systemName: iconName))
+                    imageView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+                    content.addSubview(imageView)
+                    imageView.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        imageView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+                        imageView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                        imageView.widthAnchor.constraint(equalToConstant: 20),
+                        imageView.heightAnchor.constraint(equalToConstant: 20)
+                    ])
+                    
+                    if data.counter != "0" {
+                        viewCounter.trailingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: -5).isActive = true
+                        viewCounter.centerYAnchor.constraint(equalTo: content.centerYAnchor).isActive = true
+                    }
+                }
             }
-            
         case 1:
             if segment.numberOfSegments < 3 {
                 cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierGroup", for: indexPath)

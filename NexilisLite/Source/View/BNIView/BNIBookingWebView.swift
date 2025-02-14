@@ -15,6 +15,8 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     var webView = WKWebView()
     let closeButton = UIButton()
     public var customUrl = ""
+    public var isSecureBrowser = false
+    let textField = UITextField()
     
     var isAllowSpeech = false
     
@@ -44,9 +46,46 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         configuration.applicationNameForUserAgent = finalUserAgent
         webView = WKWebView(frame: .zero, configuration: configuration)
         
+        let containerView = UIView()
+        containerView.backgroundColor = .white
+        if isSecureBrowser {
+            view.addSubview(containerView)
+            containerView.translatesAutoresizingMaskIntoConstraints = false
+            containerView.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
+            containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor).isActive = true
+            containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor).isActive = true
+            containerView.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            
+            containerView.addSubview(textField)
+            textField.translatesAutoresizingMaskIntoConstraints = false
+            textField.leftAnchor.constraint(equalTo: containerView.leftAnchor, constant: 10.0).isActive = true
+            textField.centerYAnchor.constraint(equalTo: containerView.centerYAnchor).isActive = true
+            textField.heightAnchor.constraint(equalToConstant: 40).isActive = true
+            textField.widthAnchor.constraint(equalToConstant: view.bounds.size.width - 80).isActive = true
+            textField.layer.borderColor = UIColor.lightGray.cgColor
+            textField.layer.borderWidth = 1.0
+            textField.layer.cornerRadius = 5.0
+            textField.clipsToBounds = true
+            
+            let buttonGo = UIButton(type: .custom)
+            buttonGo.setTitle("Go".localized(), for: .normal)
+            buttonGo.setTitleColor(.black, for: .normal)
+            buttonGo.addTarget(self, action: #selector(goAction), for: .touchUpInside)
+            containerView.addSubview(buttonGo)
+            buttonGo.translatesAutoresizingMaskIntoConstraints = false
+            buttonGo.leftAnchor.constraint(equalTo: textField.rightAnchor, constant: 10.0).isActive = true
+            buttonGo.rightAnchor.constraint(equalTo: containerView.rightAnchor, constant: -10.0).isActive = true
+            buttonGo.centerYAnchor.constraint(equalTo: containerView.centerYAnchor).isActive = true
+            buttonGo.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        }
+        
         view.addSubview(webView)
         webView.translatesAutoresizingMaskIntoConstraints = false
-        webView.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
+        if isSecureBrowser {
+            webView.topAnchor.constraint(equalTo: containerView.bottomAnchor).isActive = true
+        } else {
+            webView.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
+        }
         webView.leadingAnchor.constraint(equalTo: view.leadingAnchor).isActive = true
         webView.bottomAnchor.constraint(equalTo: view.bottomAnchor).isActive = true
         webView.trailingAnchor.constraint(equalTo: view.trailingAnchor).isActive = true
@@ -115,7 +154,20 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         }
         stringQMS = stringQMS + "&lang=\(intLang)&theme=\(self.traitCollection.userInterfaceStyle == .dark ? "0" : "1")"
         let url = URL(string: "\(stringQMS)")!
-        loadURLWithCookie(url: url)
+        if !isSecureBrowser {
+            loadURLWithCookie(url: url)
+        }
+    }
+    
+    @objc func goAction() {
+        if let text = textField.text, !text.isEmpty {
+            var urlString = text
+            if !text.starts(with: "www.") && !text.starts(with: "https://") {
+                urlString = "https://www.google.com/search?q=\(text)"
+            }
+            let url = URL(string: urlString)!
+            loadURLWithCookie(url: url)
+        }
     }
     
     func loadURLWithCookie(url: URL) {
