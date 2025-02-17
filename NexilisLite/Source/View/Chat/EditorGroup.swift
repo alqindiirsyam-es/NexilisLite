@@ -112,6 +112,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var longitude = ""
     var latitude = ""
     var isBlackCancelButton = false
+    let buttonSendEdit = UIButton(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
     
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
@@ -1878,32 +1879,21 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         deleteLinkPreview()
         listMentionInTextField.removeAll()
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            self.tableChatView.scrollToBottom()
-            if self.markerCounter != nil {
-                let lastMarkerCounter = self.markerCounter
-                self.markerCounter = nil
-                self.tableChatView.beginUpdates()
-                let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
-                if indexMessage != nil {
-                    let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
-                    let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
-                    if row != nil && section != nil  {
-                        self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                    }
+        self.tableChatView.scrollToBottom()
+        if self.markerCounter != nil {
+            let lastMarkerCounter = self.markerCounter
+            self.markerCounter = nil
+            self.tableChatView.beginUpdates()
+            let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
+            if indexMessage != nil {
+                let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
+                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                if row != nil && section != nil  {
+                    self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                 }
-                self.tableChatView.endUpdates()
             }
+            self.tableChatView.endUpdates()
         }
-        //        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-        //            self.timerFakeProgress = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-        //                self.updateProgress(row as [AnyHashable : Any])
-        //                if self.fakeProgMultip == self.maxFakeProgMultip {
-        //                    self.timerFakeProgress?.invalidate()
-        //                    self.fakeProgMultip = 0
-        //                }
-        //            }
-        //        }
     }
     
     private func getCounter() {
@@ -2506,20 +2496,11 @@ extension EditorGroup: UITextViewDelegate {
                 }
             }
         }
-//        let cursorPosition = textView.caretRect(for: self.textFieldSend.selectedTextRange!.start).origin
-//        let currentLine = Int(cursorPosition.y / self.textFieldSend.font!.lineHeight)
-//        UIView.animate(withDuration: 0.3) {
-//            let numberOfLines = textView.textContainer.lineBreakMode == .byWordWrapping ? Int(textView.contentSize.height / textView.font!.lineHeight) - 1 : 1
-//            if currentLine == 0 && numberOfLines == 1 {
-//                self.heightTextFieldSend.constant = 40
-//            } else if self.heightTextFieldSend.constant < 95.0 && currentLine >= 4 {
-//                self.heightTextFieldSend.constant = 95.0
-//            } else if currentLine < 4 && numberOfLines < 5 {
-//                if (self.textFieldSend.text.count > 0 && self.heightTextFieldSend.constant != self.textFieldSend.contentSize.height) {
-//                    self.heightTextFieldSend.constant = self.textFieldSend.contentSize.height
-//                }
-//            }
-//        }
+        if self.isEditingMessage && textView == editTextView {
+            if textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                buttonSendEdit.isEnabled = false
+            }
+        }
     }
     
     public func textViewDidChange(_ textView: UITextView) {
@@ -3243,7 +3224,12 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 }
                 if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
                     if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 {
-                        children.insert(edit, at: children.count - 1)
+                        let date = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
+                        let pastDate = date.addingTimeInterval(-10 * 60)
+                        let differenceInSeconds = date.timeIntervalSince(pastDate)
+                        if abs(differenceInSeconds) <= 15 * 60 {
+                            children.insert(edit, at: children.count - 1)
+                        }
                     }
                     isMore = true
                 }
@@ -3302,10 +3288,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             editTextView.text = oldText
             editTextView.becomeFirstResponder()
             
-            let buttonSend = UIButton(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
-            buttonSend.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
-            buttonSend.circle()
-            buttonSend.actionHandle(controlEvents: .touchUpInside,
+            buttonSendEdit.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
+            buttonSendEdit.circle()
+            buttonSendEdit.isEnabled = true
+            buttonSendEdit.actionHandle(controlEvents: .touchUpInside,
              ForAction:{() -> Void in
                 let newText = self.editTextView.text ?? ""
                 if !newText.isEmpty && newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
@@ -3334,10 +3320,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     }
                 }
              })
-            buttonSend.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
-            view.addSubview(buttonSend)
-            buttonSend.anchor(right: view.rightAnchor, paddingRight: 15, width: 40, height: 40)
-            constraintBottomSendEditTV = buttonSend.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -15)
+            buttonSendEdit.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+            view.addSubview(buttonSendEdit)
+            buttonSendEdit.anchor(right: view.rightAnchor, paddingRight: 15, width: 40, height: 40)
+            constraintBottomSendEditTV = buttonSendEdit.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -15)
             constraintBottomSendEditTV.isActive = true
             
             let viewMessage = UIView()
@@ -4174,6 +4160,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         let cellMessage = tableView.dequeueReusableCell(withIdentifier: "cellEditorGroup", for: indexPath as IndexPath)
         cellMessage.backgroundColor = .clear
         cellMessage.selectionStyle = .none
+        cellMessage.contentView.subviews.forEach({ $0.removeConstraints($0.constraints) })
         cellMessage.contentView.subviews.forEach({ $0.removeFromSuperview() })
         
         let profileMessage = UIImageView()

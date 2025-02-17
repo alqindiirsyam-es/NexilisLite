@@ -598,10 +598,54 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
     }
     
     func didTapProfile() {
-        if let userImage = user?.thumb {
-            if !userImage.isEmpty {
-                let firstAlert = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
-                firstAlert.addAction(UIAlertAction(title: "Change Profile Picture".localized(), style: .default, handler: { action in
+        if let me = User.getMyPin(), me == data || flag == Flag.me {
+            if let userImage = user?.thumb {
+                if !userImage.isEmpty {
+                    let firstAlert = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+                    firstAlert.addAction(UIAlertAction(title: "Change Profile Picture".localized(), style: .default, handler: { action in
+                        let alert = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+                        alert.addAction(UIAlertAction(title: "Take Photo".localized(), style: .default, handler: { action in
+                            self.imageVideoPicker.present(source: .imageCamera)
+                        }))
+                        alert.addAction(UIAlertAction(title: "Choose Photo".localized(), style: .default, handler: { action in
+                            self.imageVideoPicker.present(source: .imageAlbum)
+                        }))
+                        alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { action in
+                            
+                        }))
+                        self.navigationController?.present(alert, animated: true)
+                    }))
+                    firstAlert.addAction(UIAlertAction(title: "Remove Profile Picture".localized(), style: .default, handler: { action in
+                        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChangePersonImage(thumb_id: "")), response.isOk() {
+                            guard let me = User.getMyPin() else {
+                                return
+                            }
+                            Database.shared.database?.inTransaction({ fmdb, rollback in
+                                do {
+                                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "BUDDY", cvalues: ["image_id": ""], _where: "f_pin = '\(me)'")
+                                } catch {
+                                    rollback.pointee = true
+                                    print("Access database error: \(error.localizedDescription)")
+                                }
+                            })
+                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "updateFifthTab"), object: nil, userInfo: nil)
+                            
+                            DispatchQueue.main.async { [self] in
+                                self.profile.image = UIImage(systemName: "person.circle.fill")!
+                                self.profile.backgroundColor = .white
+                                self.user?.thumb = ""
+                                let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+                                imageView.tintColor = .white
+                                publicBanner.dismiss()
+                                publicBanner = FloatingNotificationBanner(title: "Successfully removed profile picture".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                                publicBanner.show()
+                                self.dismissImage?(UIImage(systemName: "person.circle.fill")!, "")
+                            }
+                        }
+                    }))
+                    firstAlert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
+                    self.navigationController?.present(firstAlert, animated: true)
+                } else {
                     let alert = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
                     alert.addAction(UIAlertAction(title: "Take Photo".localized(), style: .default, handler: { action in
                         self.imageVideoPicker.present(source: .imageCamera)
@@ -613,49 +657,37 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                         
                     }))
                     self.navigationController?.present(alert, animated: true)
-                }))
-                firstAlert.addAction(UIAlertAction(title: "Remove Profile Picture".localized(), style: .default, handler: { action in
-                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChangePersonImage(thumb_id: "")), response.isOk() {
-                        guard let me = User.getMyPin() else {
-                            return
-                        }
-                        Database.shared.database?.inTransaction({ fmdb, rollback in
-                            do {
-                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "BUDDY", cvalues: ["image_id": ""], _where: "f_pin = '\(me)'")
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
-                            }
-                        })
-                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "updateFifthTab"), object: nil, userInfo: nil)
-                        
-                        DispatchQueue.main.async { [self] in
-                            self.profile.image = UIImage(systemName: "person.circle.fill")!
-                            self.profile.backgroundColor = .white
-                            self.user?.thumb = ""
-                            let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
-                            imageView.tintColor = .white
-                            publicBanner.dismiss()
-                            publicBanner = FloatingNotificationBanner(title: "Successfully removed profile picture".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                            publicBanner.show()
-                            self.dismissImage?(UIImage(systemName: "person.circle.fill")!, "")
-                        }
+                }
+            }
+        } else {
+            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+            if let dirPath = paths.first {
+                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.user!.thumb)
+                if FileManager.default.fileExists(atPath: imageURL.path) {
+                    let image    = UIImage(contentsOfFile: imageURL.path)
+                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                    previewImageVC.image = image
+                    previewImageVC.isHiddenTextField = true
+                    previewImageVC.modalPresentationStyle = .custom
+                    previewImageVC.modalTransitionStyle  = .crossDissolve
+                    self.present(previewImageVC, animated: true, completion: nil)
+                } else if FileEncryption.shared.isSecureExists(filename: self.user!.thumb) {
+                    do {
+                        let data = try FileEncryption.shared.readSecure(filename: self.user!.thumb)
+                        let image = UIImage(data: data!)
+                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                        previewImageVC.image = image
+                        previewImageVC.isHiddenTextField = true
+                        previewImageVC.modalPresentationStyle = .custom
+                        previewImageVC.modalTransitionStyle  = .crossDissolve
+                        self.present(previewImageVC, animated: true, completion: nil)
                     }
-                }))
-                firstAlert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
-                self.navigationController?.present(firstAlert, animated: true)
-            } else {
-                let alert = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
-                alert.addAction(UIAlertAction(title: "Take Photo".localized(), style: .default, handler: { action in
-                    self.imageVideoPicker.present(source: .imageCamera)
-                }))
-                alert.addAction(UIAlertAction(title: "Choose Photo".localized(), style: .default, handler: { action in
-                    self.imageVideoPicker.present(source: .imageAlbum)
-                }))
-                alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { action in
-                    
-                }))
-                self.navigationController?.present(alert, animated: true)
+                    catch {
+                        print("Error reading secure file")
+                    }
+                }
             }
         }
     }
@@ -790,9 +822,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
     }
     
     @objc func profileTapped() {
-        if let me = User.getMyPin(), me == data || flag == Flag.me {
-            didTapProfile()
-        }
+        didTapProfile()
     }
     
     @objc func friendsTapped() {

@@ -67,6 +67,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     var lastY: CGFloat = 0
     
     var allowTyping = true
+    var loadingResponse = false
     
     struct Payload: Encodable {
         let use_video : String
@@ -113,6 +114,9 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     public override func viewDidLoad() {
         super.viewDidLoad()
         navigationController?.navigationBar.topItem?.title = "GPT SmartBot"
+        if Nexilis.fromMAB {
+            Nexilis.floatingButton.isHidden = true
+        }
         
         buttonSendChat.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
         buttonSendChat.circle()
@@ -292,13 +296,13 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                 return
             }
         }
-        var l_pin = dataPerson["f_pin"]!!
-        var message_scope_id = message_scope_id
-        var chat_id = chat_id
+        let l_pin = dataPerson["f_pin"]!!
+        let message_scope_id = message_scope_id
+        let chat_id = chat_id
         let message_text = message_text.trimmingCharacters(in: .whitespacesAndNewlines)
         
         let idMe = User.getMyPin() as String?
-        var opposite_pin = idMe ?? ""
+        let opposite_pin = idMe ?? ""
         sendTyping(l_pin: l_pin, isTyping: true)
         let message = CoreMessage_TMessageBank.sendMessage(l_pin: l_pin, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: chat_id, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin)
         Nexilis.saveMessage(message: message)
@@ -330,13 +334,24 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             tableChatView.insertSections(IndexSet(integer: dataDates.count - 1), with: .none)
         }
         row["chat_date"] = "Today".localized()
-        dataMessages.append(row)
+        if loadingResponse {
+            dataMessages.insert(row, at: dataMessages.count - 2)
+            tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"] as! String == dataDates[dataDates.count - 1]}).count - 2, section: dataDates.count - 1)], with: .none)
+        } else {
+            row["is_loading"] = false
+            dataMessages.append(row)
+            tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"] as! String == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .none)
+            row["is_loading"] = true
+            row["f_pin"] = dataPerson["f_pin"]!!
+            row["l_pin"] = idMe
+            dataMessages.append(row)
+            tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"] as! String == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .none)
+        }
         var gptRow : [String: String] = [:]
         gptRow["role"] = row["f_pin"] as! String == "-997" ? "assistant" : "user"
         gptRow["content"] = row["message_text"] as? String
         chatGPTMessages.append(gptRow)
         request(mesage: row["message_text"] as! String)
-        tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"] as! String == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .none)
         if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintViewTextField.constant == 0 {
             textFieldSend.text = "Send message".localized()
             textFieldSend.textColor = UIColor.lightGray
@@ -345,43 +360,22 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             heightTextFieldSend.constant = 40
         }
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            self.tableChatView.scrollToBottom()
-            if self.markerCounter != nil {
-                let lastMarkerCounter = self.markerCounter
-                self.markerCounter = nil
-                self.tableChatView.beginUpdates()
-                let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
-                if indexMessage != nil {
-                    let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"] as! String)
-                    let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[indexMessage!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
-                    if row != nil && section != nil  {
-                        self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                    }
-                }
-                self.tableChatView.endUpdates()
-            }
-        }
-//        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-//            self.timerFakeProgress = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-//                self.updateProgress(row as [AnyHashable : Any])
-//                if self.fakeProgMultip == self.maxFakeProgMultip {
-//                    self.timerFakeProgress?.invalidate()
-//                    self.fakeProgMultip = 0
-//                }
-//            }
-//        }
+        self.tableChatView.scrollToBottom()
     }
     
     private func request(mesage: String) {
+        if !loadingResponse {
+            loadingResponse = true
+        }
         DispatchQueue.global().async {
             do {
                 if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.requestGPTBot(message: mesage)) {
                     if response.isOk() {
                         let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
                         if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any?] {
-                            print("HMM \(json)")
                             DispatchQueue.main.async {
+                                self.dataMessages.removeAll(where: { $0["is_loading"] as? Bool == true })
+                                self.tableChatView.reloadData()
                                 var gptRow : [String: String] = [:]
                                 gptRow["role"] = json["role"] as? String
                                 gptRow["content"] = json["content"] as? String
@@ -440,30 +434,12 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                     }
                                 })
                                 let pin = "-997"
-                                var counter : Int? = nil
-                                Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                    do {
-                                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select counter from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
-                                            counter = Int(cursor.int(forColumnIndex: 0))
-                                            counter! += 1
-                                            cursor.close()
-                                            //print("select db message summary")
-                                        }
-                                    } catch {
-                                        rollback.pointee = true
-                                        print("Access database error: \(error.localizedDescription)")
-                                    }
-                                })
-                                if counter == nil {
-                                    counter = 1
-                                    //print("set counter message summary")
-                                }
                                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                                     do {
                                         _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                                             "l_pin" : pin,
                                             "message_id" : message_id,
-                                            "counter" : counter!
+                                            "counter" : 0
                                         ], replace: true)
                                     } catch {
                                         rollback.pointee = true
@@ -501,55 +477,9 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                 self.counter += 1
                                 self.dataMessages.append(row)
                                 self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
-                                if self.currentIndexpath?.row == (self.dataMessages.count - 2) {
-                                    if (self.viewIfLoaded?.window != nil) {
-                                        self.sendReadMessageStatus(chat_id: "", f_pin: row["f_pin"] as! String, message_scope_id: row["message_scope_id"] as! String, message_id: message_id)
-                                    }
-                                    self.tableChatView.scrollToBottom()
-                                    if ( self.currentIndexpath!.section <= self.dataDates.count - 1 && self.currentIndexpath!.row <= self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1)  {
-                                        self.counter = 0
-                                        self.updateCounter(counter: self.counter)
-                                    }
-                                    let lastMarkerCounter = self.markerCounter
-                                    if self.markerCounter != nil {
-                                        self.markerCounter = nil
-                                    }
-                                    self.tableChatView.beginUpdates()
-                                    let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
-                                    if indexMessage != nil {
-                                        let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"] as! String)
-                                        let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[indexMessage!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
-                                        if row != nil && section != nil  {
-                                            self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                                        }
-                                    }
-                                    self.tableChatView.endUpdates()
-                                }
-                                else if self.currentIndexpath == nil {
-                                    self.counter = 0
-                                    self.updateCounter(counter: self.counter)
-                                    if (self.viewIfLoaded?.window != nil) {
-                                        self.sendReadMessageStatus(chat_id: "", f_pin: row["f_pin"] as! String, message_scope_id: row["message_scope_id"] as! String, message_id: message_id)
-                                    }
-                                }
-                                else if self.counter != 0 {
-                                    if !self.indicatorCounterBSTB.isDescendant(of: self.view) && self.buttonScrollToBottom.isDescendant(of: self.view) {
-                                        self.markerCounter = row["message_id"] as? String
-                                        self.addCounterAtButttonScrollToBottom()
-                                        self.tableChatView.beginUpdates()
-                                        let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
-                                        if indexMessage != nil {
-                                            let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"] as! String)
-                                            let row = self.dataMessages.filter({ $0["chat_date"] as! String == self.dataMessages[indexMessage!]["chat_date"] as! String}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
-                                            if row != nil && section != nil  {
-                                                self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                                            }
-                                        }
-                                        self.tableChatView.endUpdates()
-                                    } else if self.indicatorCounterBSTB.isDescendant(of: self.view) {
-                                        self.labelCounter.text = "\(self.counter)"
-                                    }
-                                }
+                                self.tableChatView.scrollToBottom()
+                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                                self.loadingResponse = false
                             }
                         }
                     }
@@ -1844,15 +1774,11 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let idMe = User.getMyPin() as String?
         let dataMessages = dataMessages.filter({$0["chat_date"] as! String == dataDates[indexPath.section]})
-        let profileMessage = UIImageView()
         let cell = tableView.dequeueReusableCell(withIdentifier: "cellEditorPersonal", for: indexPath as IndexPath)
         cell.contentView.subviews.forEach({ $0.removeFromSuperview() })
         
-        let messageIdChat = (dataMessages[indexPath.row]["message_id"] as? String) ?? ""
-        
         cell.backgroundColor = .clear
         cell.selectionStyle = .none
-        let nameSender = UILabel()
         
         let containerMessage = UIView()
         cell.contentView.addSubview(containerMessage)
@@ -1983,147 +1909,55 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             imageStared.tintColor = .systemYellow
         }
         
-        if dataMessages[indexPath.row]["read_receipts"] as? String == "8" {
-            let imageAckView = UIImageView()
-            var imageAck = UIImage(named: "ack_icon_gray", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
-            if dataMessages[indexPath.row]["status"] as? String == "8" {
-                imageAck = UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
-            }
-            imageAckView.image = imageAck
-            cell.contentView.addSubview(imageAckView)
-            imageAckView.translatesAutoresizingMaskIntoConstraints = false
-            imageAckView.widthAnchor.constraint(equalToConstant: 30).isActive = true
-            imageAckView.heightAnchor.constraint(equalToConstant: 30).isActive = true
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                imageAckView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
-                imageAckView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 30).isActive = true
-            } else {
-                imageAckView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
-                imageAckView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
-                let tap = ObjectGesture(target: self, action: #selector(tapAck(_:)))
-                tap.indexPath = indexPath
-                imageAckView.addGestureRecognizer(tap)
-                imageAckView.isUserInteractionEnabled = true
-            }
-        }
-        
-        if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" {
-            let imageCredentialView = UIImageView()
-            let imageCredential = UIImage(named: "confidential_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
-            imageCredentialView.image = imageCredential
-            cell.contentView.addSubview(imageCredentialView)
-            imageCredentialView.translatesAutoresizingMaskIntoConstraints = false
-            imageCredentialView.widthAnchor.constraint(equalToConstant: 30).isActive = true
-            imageCredentialView.heightAnchor.constraint(equalToConstant: 30).isActive = true
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                imageCredentialView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
-                imageCredentialView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 30).isActive = true
-            } else {
-                imageCredentialView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
-                imageCredentialView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
-            }
-        }
-        
         let messageText = UILabel()
-        messageText.numberOfLines = 0
-        messageText.lineBreakMode = .byWordWrapping
-        containerMessage.addSubview(messageText)
-        messageText.translatesAutoresizingMaskIntoConstraints = false
-        let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
-        topMarginText.isActive = true
-        messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        messageText.font = .systemFont(ofSize: 12)
-        messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-        if dataMessages[indexPath.row]["f_pin"] as? String == "-999" && (dataMessages[indexPath.row]["blog_id"] as? String) != nil && !(dataMessages[indexPath.row]["blog_id"] as! String).isEmpty && (dataMessages[indexPath.row]["message_text"] as! String).contains("Berikut QR Code dan detil booking Anda") {
-            messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -115).isActive = true
-            let imageQR = UIImageView()
-            containerMessage.addSubview(imageQR)
-            imageQR.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                imageQR.centerXAnchor.constraint(equalTo: containerMessage.centerXAnchor),
-                imageQR.topAnchor.constraint(equalTo: messageText.bottomAnchor),
-                imageQR.widthAnchor.constraint(equalToConstant: 100.0),
-                imageQR.heightAnchor.constraint(equalToConstant: 100.0)
-            ])
-            imageQR.image = generateQRCode(from: dataMessages[indexPath.row]["blog_id"] as! String)
-        } else {
+        let textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
+        let isLoading = dataMessages[indexPath.row]["is_loading"] as? Bool ?? false
+        if !isLoading {
+            messageText.numberOfLines = 0
+            messageText.lineBreakMode = .byWordWrapping
+            containerMessage.addSubview(messageText)
+            messageText.translatesAutoresizingMaskIntoConstraints = false
+            let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
+            topMarginText.isActive = true
+            messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+            messageText.font = .systemFont(ofSize: 12)
+            messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
             messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15).isActive = true
-        }
-        messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-        var textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
-        if (dataMessages[indexPath.row]["lock"] != nil && (dataMessages[indexPath.row]["lock"])! as? String == "1") {
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                textChat = "🚫 _"+"You were deleted this message".localized()+"_"
-            } else {
-                textChat = "🚫 _"+"This message was deleted".localized()+"_"
-            }
-        }
-        
-        if dataMessages[indexPath.row]["lock"] as? String == "2" {
-            textChat = "🚫 _"+"Message has expired".localized()+"_"
-        }
-        
-        let imageSticker = UIImageView()
-        if let attachmentFlag = dataMessages[indexPath.row]["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
-            if attachmentFlag == "27" || attachmentFlag == "26" { // live streaming
-                let data = textChat
-                if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                    Database().database?.inTransaction({ fmdb, rollback in
-                        let title = json["title"] as? String ?? ""
-                        let description = json["description"] as? String ?? ""
-                        let start = json["time"] as? Int64 ?? 0
-                        let by = json["by"] as? String ?? ""
-                        let textLS = "Live Streaming".localized()
-                        var type = "*\(textLS)*"
-                        if attachmentFlag == "26" {
-                            let textSeminar = "Seminar".localized()
-                            type = "*\(textSeminar)*"
-                        }
-                        if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || last_name from BUDDY where f_pin = '\(by)'"), c.next() {
-                            let name = c.string(forColumnIndex: 0)!
-                            messageText.attributedText = "\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm")) \nBroadcaster: \(name)".richText()
-                            c.close()
-                        } else {
-                            messageText.attributedText = ("\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm"))").richText()
-                        }
-                    })
-                }
-            }
-            else if attachmentFlag == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String != "1") && (dataMessages[indexPath.row]["lock"] as? String != "2") {
-                messageText.text = ""
-                topMarginText.constant = topMarginText.constant + 100
-                containerMessage.addSubview(imageSticker)
-                imageSticker.translatesAutoresizingMaskIntoConstraints = false
-                imageSticker.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
-                imageSticker.widthAnchor.constraint(equalToConstant: 80).isActive = true
-                imageSticker.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-                imageSticker.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
-                imageSticker.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                var imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                if imageStickerBundle == nil {
-                    imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
-                }
-                imageSticker.image = imageStickerBundle //resourcesMediaBundle
-                imageSticker.contentMode = .scaleAspectFit
-            }
-            else {
-                messageText.attributedText = textChat.richText()
-            }
-        } else {
+            messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+            let textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
             messageText.attributedText = textChat.richText()
-        }
-        
-        messageText.isUserInteractionEnabled = false
-        if !textChat.isEmpty {
-            if textChat.contains("■"){
-                textChat = textChat.components(separatedBy: "■")[0]
-                textChat = textChat.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            let gifTyping = UIImageView()
+            containerMessage.addSubview(gifTyping)
+            gifTyping.translatesAutoresizingMaskIntoConstraints = false
+            gifTyping.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor).isActive = true
+            gifTyping.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
+            gifTyping.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor).isActive = true
+            gifTyping.topAnchor.constraint(equalTo: containerMessage.topAnchor).isActive = true
+            gifTyping.widthAnchor.constraint(equalToConstant: 60).isActive = true
+            gifTyping.heightAnchor.constraint(equalToConstant: 60).isActive = true
+            if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_typing_chat", withExtension: "gif") {
+                gifTyping.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                    if error == nil {
+                        gifTyping.animationImages = image?.images
+                        gifTyping.animationDuration = image?.duration ?? 0.0
+                        gifTyping.animationRepeatCount = 0
+                        gifTyping.startAnimating()
+                    }
+                }
+            } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_typing_chat", withExtension: "gif") {
+                gifTyping.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                    if error == nil {
+                        gifTyping.animationImages = image?.images
+                        gifTyping.animationDuration = image?.duration ?? 0.0
+                        gifTyping.animationRepeatCount = 0
+                        gifTyping.startAnimating()
+                    }
+                }
             }
-            let listTextEnter = textChat.split(separator: "\n")
-            let finalAtribute = textChat.richText()
         }
         
-        if !copySession && !deleteSession && messageText.isUserInteractionEnabled == false {
+        if !copySession && !deleteSession && !isLoading {
             let interaction = UIContextMenuInteraction(delegate: self)
             containerMessage.addInteraction(interaction)
             containerMessage.isUserInteractionEnabled = true
@@ -2146,9 +1980,6 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             timeMessage.textColor = .lightGray
             timeMessage.font = UIFont.systemFont(ofSize: 10, weight: .medium)
         }
-//        let panGestureRecognizer = UIPanGestureRecognizer(target: self, action: #selector(panGestureCellAction))
-//        panGestureRecognizer.delegate = self
-//        cellMessage.addGestureRecognizer(panGestureRecognizer)
         return cell
     }
     
@@ -2192,59 +2023,6 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             }
         }
     }
-    
-//    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-//        let velocity : CGPoint = gestureRecognizer.location(in: tableChatView)
-//        if velocity.x < 0 {
-//            return false
-//        }
-//        return abs(Float(velocity.x)) > abs(Float(velocity.y))
-//    }
-//
-//    @objc func panGestureCellAction(recognizer: UIPanGestureRecognizer)  {
-//        let translation = recognizer.translation(in: tableChatView)
-//        let x = recognizer.view?.frame.origin.x ?? 0
-//        if x >= -(recognizer.view?.frame.size.width ?? 0) * 0.05 {
-//            recognizer.view?.center = CGPoint(
-//                x: (recognizer.view?.center.x ?? 0) + translation.x,
-//                y: (recognizer.view?.center.y ?? 0))
-//            recognizer.setTranslation(CGPoint(x: 0, y: 0), in: view)
-//            if (recognizer.view?.frame.origin.x ?? 0) > UIScreen.main.bounds.size.width * 0.9 {
-//                UIView.animate(withDuration: 0.25, delay: 0, options: .curveEaseOut, animations: {
-//                    recognizer.view?.frame = CGRect(x: 0, y: recognizer.view?.frame.origin.y ?? 0, width: recognizer.view?.frame.size.width ?? 0, height: recognizer.view?.frame.size.height ?? 0)
-//                })
-//            }
-//        }
-//        if x <= -(recognizer.view?.frame.size.width ?? 0) * 0.05 {
-//            let idMe = User.getMyPin() as String?
-//            let indexPath = self.tableChatView.indexPath(for: recognizer.view! as! UITableViewCell)
-//            let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath!.section]})
-//            if (dataMessages[indexPath!.row]["f_pin"] as? String == idMe) {
-//                let messageInfoVC = MessageInfo()
-//                messageInfoVC.data = dataMessages[indexPath!.row]
-//                self.navigationController?.pushViewController(messageInfoVC, animated: true)
-//                return
-//            }
-//        }
-//        if x >= ((recognizer.view?.frame.size.width ?? 0) * 0.2) {
-//            if !hapticSwipeLeft {
-//                UINotificationFeedbackGenerator().notificationOccurred(.success)
-//            }
-//            hapticSwipeLeft = true
-//        } else if x < ((recognizer.view?.frame.size.width ?? 0) * 0.2) {
-//            hapticSwipeLeft = false
-//        }
-//        if recognizer.state == .ended {
-//            UIView.animate(withDuration: 0.25, delay: 0, options: .curveEaseOut) {
-//                recognizer.view?.frame = CGRect(x: 0, y: recognizer.view?.frame.origin.y ?? 0, width: recognizer.view?.frame.size.width ?? 0, height: recognizer.view?.frame.size.height ?? 0)
-//            } completion: { (finished) in
-//                if x > ((recognizer.view?.frame.size.width ?? 0) * 0.2) {
-//                    self.hapticSwipeLeft = false
-//
-//                }
-//            }
-//        }
-//    }
     
     public func numberOfSections(in tableView: UITableView) -> Int {
         dataDates.count

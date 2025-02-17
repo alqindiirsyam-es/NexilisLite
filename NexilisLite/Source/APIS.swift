@@ -1238,17 +1238,12 @@ public class APIS: NSObject {
     }
     
     public static func enterBackground() {
-//        do {
-//            try API.switchCBI(cbiI: Callback(), bLight: true)
-//        } catch {
-//        }
-//        exit(0)
         UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
     }
     
     public static func enterForeground() {
         do {
-            if !Nexilis.sAPIKey.isEmpty {
+            if !Nexilis.afterConnect {
                 var id = Utils.getConnectionID()
                 if id.isEmpty {
                     let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
@@ -1256,12 +1251,18 @@ public class APIS: NSObject {
                     Utils.setConnectionID(value: id)
                 }
                 try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
             }
+            Nexilis.afterConnect = false
         } catch {
         }
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
+    
+    public static func willTerminate() {
+        Nexilis.destroyAll()
     }
     
     private static func checkDataForShareExtension() {

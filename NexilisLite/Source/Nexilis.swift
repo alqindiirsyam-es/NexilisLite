@@ -63,6 +63,7 @@ public class Nexilis: NSObject {
     
     public static var showButtonFB = false
     public static var isShowForceSignIn = true
+    public static var afterConnect = true
     
     public static var imageCache = NSCache<NSString, UIImage>()
     
@@ -1504,7 +1505,7 @@ public class Nexilis: NSObject {
                         //print(error)
                     }
                 }
-                if !withStatus && !fromAPNS && !messageExist {
+                if !withStatus && !fromAPNS && (!messageExist || last_edited != 0) {
                     DispatchQueue.main.async {
                         if let delegate = Nexilis.shared.messageDelegate, Utils.getSetProfile() {
                             message.mBodies[CoreMessage_TMessageKey.MESSAGE_TEXT] = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_TEXT, default_value : "").toNormalString()

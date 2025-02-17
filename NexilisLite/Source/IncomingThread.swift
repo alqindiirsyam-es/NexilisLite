@@ -1299,17 +1299,19 @@ class IncomingThread {
         } else {
             Nexilis.saveMessage(message: message, withStatus: false)
         }
-        UNUserNotificationCenter.current().getPendingNotificationRequests{ notificationsPending in
-            let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
-            let matchingNotifications = notificationsPending.filter { $0.identifier == identifier }
-            if matchingNotifications.isEmpty {
-                UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
+        DispatchQueue.main.async {
+            if APIS.checkAppStateisBackground() {
+                UNUserNotificationCenter.current().getPendingNotificationRequests{ notificationsPending in
                     let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
-                    let matchingNotifications = notifications.filter { $0.request.identifier == identifier }
+                    let matchingNotifications = notificationsPending.filter { $0.identifier == identifier }
                     if matchingNotifications.isEmpty {
-                        DispatchQueue.main.async {
-                            if APIS.checkAppStateisBackground() {
-                                APIS.addNotificationNexilis(message)
+                        UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
+                            let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
+                            let matchingNotifications = notifications.filter { $0.request.identifier == identifier }
+                            if matchingNotifications.isEmpty && message.getBody(key : CoreMessage_TMessageKey.LAST_EDIT, default_value : "0") == "0" {
+                                DispatchQueue.main.async {
+                                    APIS.addNotificationNexilis(message)
+                                }
                             }
                         }
                     }
