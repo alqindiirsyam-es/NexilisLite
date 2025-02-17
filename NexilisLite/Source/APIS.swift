@@ -1249,7 +1249,6 @@ public class APIS: NSObject {
     public static func enterForeground() {
         do {
             if !Nexilis.sAPIKey.isEmpty {
-                print("MASUK initConnection enterForeground")
                 var id = Utils.getConnectionID()
                 if id.isEmpty {
                     let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
@@ -1378,8 +1377,8 @@ public class APIS: NSObject {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     var dataShared: [[String: Any]] = []
                     if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin id, image_id image, first_name || ' ' || ifnull(last_name, '') name FROM BUDDY WHERE f_pin != '\(User.getMyPin() ?? "")' AND f_pin != '-997' AND official_account != '1'") {
-                        var dataTemp: [String: Any] = [:]
                         while cursor.next() {
+                            var dataTemp: [String: Any] = [:]
                             for columnIndex in 0..<cursor.columnCount {
                                 if let columnName = cursor.columnName(for: columnIndex) {
                                     if let value = cursor.object(forColumn: columnName) {
@@ -1404,18 +1403,17 @@ public class APIS: NSObject {
                                         } else {
                                             dataTemp[columnName] = value
                                         }
+                                        dataTemp["type"] = 0
                                     }
                                 }
-                                dataTemp["type"] = 0
                             }
+                            dataShared.append(dataTemp)
                         }
-                        dataShared.append(dataTemp)
                         cursor.close()
                     }
                     if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT group_id id, image_id image, f_name name FROM GROUPZ WHERE official != 1") {
-                        var dataTemp: [String: Any] = [:]
-                        var dataTempTopic: [String: Any] = [:]
                         while cursor.next() {
+                            var dataTemp: [String: Any] = [:]
                             for columnIndex in 0..<cursor.columnCount {
                                 if let columnName = cursor.columnName(for: columnIndex) {
                                     if let value = cursor.object(forColumn: columnName) {
@@ -1442,9 +1440,9 @@ public class APIS: NSObject {
                                         } else {
                                             dataTemp[columnName] = value
                                         }
+                                        dataTemp["type"] = 1
                                     }
                                 }
-                                dataTemp["type"] = 1
                             }
                             dataShared.append(dataTemp)
                             let group_id = cursor.string(forColumnIndex: 0) ?? ""
@@ -1452,6 +1450,7 @@ public class APIS: NSObject {
                             let name_group = cursor.string(forColumnIndex: 2) ?? ""
                             if let cursorTopic = Database.shared.getRecords(fmdb: fmdb, query: "SELECT chat_id id, thumb image, title name FROM DISCUSSION_FORUM WHERE group_id = '\(group_id)'") {
                                 while cursorTopic.next() {
+                                    var dataTempTopic: [String: Any] = [:]
                                     for columnIndex in 0..<cursorTopic.columnCount {
                                         if let columnName = cursorTopic.columnName(for: columnIndex) {
                                             if let value = cursorTopic.object(forColumn: columnName) {
@@ -1478,13 +1477,13 @@ public class APIS: NSObject {
                                                 } else {
                                                     dataTempTopic[columnName] = value
                                                 }
+                                                dataTempTopic["type"] = 1
                                             }
                                         }
-                                        dataTempTopic["type"] = 1
                                     }
                                     dataShared.append(dataTempTopic)
-                                    cursorTopic.close()
                                 }
+                                cursorTopic.close()
                             }
                         }
                         cursor.close()

@@ -725,341 +725,105 @@ extension String {
         return String(self[startIndex ..< endIndex])
     }
     
-    func countEmojiCharacter() -> Int {
+    public func richText(
+        isEditing: Bool = false,
+        isSearching: Bool = false,
+        textSearch: String = "",
+        group_id: String = "",
+        listMentionInTextField: [User] = []
+    ) -> NSMutableAttributedString {
         
-        func isEmoji(s:NSString) -> Bool {
-            
-            let high:Int = Int(s.character(at: 0))
-            if 0xD800 <= high && high <= 0xDBFF {
-                let low:Int = Int(s.character(at: 1))
-                let codepoint: Int = ((high - 0xD800) * 0x400) + (low - 0xDC00) + 0x10000
-                return (0x1D000 <= codepoint && codepoint <= 0x1F9FF)
-            }
-            else {
-                return (0x2100 <= high && high <= 0x27BF)
-            }
-        }
-        
-        let nsString = self as NSString
-        var length = 0
-        
-        nsString.enumerateSubstrings(in: NSMakeRange(0, nsString.length), options: NSString.EnumerationOptions.byComposedCharacterSequences) { (subString, substringRange, enclosingRange, stop) -> Void in
-            
-            if isEmoji(s: subString! as NSString) {
-                length+=1
-            }
-        }
-        
-        return length
-    }
-    
-    public func richText(isEditing: Bool = false, isSearching: Bool = false, textSearch: String = "", group_id: String = "", listMentionInTextField: [User] = []) -> NSMutableAttributedString {
         let font = UIFont.systemFont(ofSize: 12)
         let boldFont = UIFont.boldSystemFont(ofSize: 12)
         let italicFont = UIFont.italicSystemFont(ofSize: 12)
         let boldItalicFont = UIFont.systemFont(ofSize: 12, weight: .semibold)
-        let textUTF8 = String(self.utf8)
-        let finalText = NSMutableAttributedString(string: textUTF8, attributes: [NSAttributedString.Key.font: font])
-        let boldSign: Character = "*"
-        let italicSign: Character = "_"
-        let underlineSign: Character = "^"
-        let strikethroughSign: Character = "~"
-        let italicGreySign: Character = "$"
-        var locationBold: [NSRange] = []
         
-        //Bold
-        let rangeBold = getRangeOfWordWithSign(sentence: textUTF8, sign: boldSign)
-        if rangeBold.count > 0 {
-            var lastFirstRange = -1
-            var countRemoveBoldSign = 0
-            var continueCheckingBold = false
-            var totalEmoji = 0
-            for i in 0..<rangeBold.count {
-                if rangeBold[i].startIndex > lastFirstRange {
-                    let charStart: Character = rangeBold[i].startIndex != 0 ? Array(textUTF8.substring(from: rangeBold[i].startIndex - 1, to: rangeBold[i].startIndex - 1))[0] : Array("0")[0]
-                    if (rangeBold[i].startIndex == 0 || (!charStart.isLetter && !charStart.isNumber)) {
-                        lastFirstRange = rangeBold[i].startIndex
-                        continueCheckingBold = true
-                    } else {
-                        continueCheckingBold = false
-                    }
-                }
-                if !continueCheckingBold {
-                    continue
-                }
-                if rangeBold[i].endIndex != (textUTF8.count-1) {
-                    let char: Character = Array(textUTF8.substring(from: rangeBold[i].endIndex + 1, to: rangeBold[i].endIndex + 1))[0]
-                    if char.isLetter || char.isNumber {
-                        continue
-                    }
-                }
-                let countEmojiBefore = finalText.string.substring(from: 0, to: lastFirstRange - (2*countRemoveBoldSign)).countEmojiCharacter()
-                let countEmoji = finalText.string.substring(from: lastFirstRange - (2*countRemoveBoldSign), to: rangeBold[i].endIndex - (2*countRemoveBoldSign)).countEmojiCharacter()
-                totalEmoji = countEmoji + countEmojiBefore
-                locationBold.append(NSRange(location: lastFirstRange - (2*countRemoveBoldSign) + countEmojiBefore, length: (rangeBold[i].endIndex + countEmoji + 1) - lastFirstRange))
-                finalText.addAttribute(.font, value: boldFont, range: NSRange(location: lastFirstRange - (2*countRemoveBoldSign) + countEmojiBefore, length: (rangeBold[i].endIndex + countEmoji + 1) - lastFirstRange))
-                if !isEditing{
-                    finalText.mutableString.replaceOccurrences(of: "\(boldSign)", with: "", options: .literal, range: NSRange(location: lastFirstRange + countEmojiBefore - (2*countRemoveBoldSign), length: 1))
-                    finalText.mutableString.replaceOccurrences(of: "\(boldSign)", with: "", options: .literal, range: NSRange(location: rangeBold[i].endIndex + totalEmoji - (2*countRemoveBoldSign) - 1, length: 1))
-                    countRemoveBoldSign += 1
-                } else {
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: lastFirstRange + countEmojiBefore, length: 1))
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: rangeBold[i].endIndex + totalEmoji, length: 1))
-                }
-                lastFirstRange = rangeBold[i].endIndex
-                continueCheckingBold = false
-            }
+        let textUTF8 = self
+        let finalText = NSMutableAttributedString(string: textUTF8, attributes: [.font: font])
+        
+        let formattingRules: [(String, [NSAttributedString.Key: Any])] = [
+            ("*_", [.font: boldItalicFont]), // Bold + Italic
+            ("_*", [.font: boldItalicFont]), // Bold + Italic
+            ("*", [.font: boldFont]), // Bold
+            ("_", [.font: italicFont]), // Italic
+            ("~", [.strikethroughStyle: NSUnderlineStyle.single.rawValue]),
+            ("^", [.underlineStyle: NSUnderlineStyle.single.rawValue]),
+            ("$", [.font: italicFont, .foregroundColor: UIColor.darkGray]) // Italic + Gray for $
+        ]
+
+        for (sign, attributes) in formattingRules {
+            applyTextFormatting(to: finalText, sign: sign, attributes: attributes, isEditing: isEditing)
         }
         
-        //Italic
-        let textAfterbold = finalText.string
-        let rangeItalic = getRangeOfWordWithSign(sentence: textAfterbold, sign: italicSign)
-        if rangeItalic.count > 0 {
-            var lastFirstRange = -1
-            var countRemoveItalicSign = 0
-            var continueCheckingItalic = false
-            var totalEmoji = 0
-            for i in 0..<rangeItalic.count {
-                if rangeItalic[i].startIndex > lastFirstRange {
-                    let charStart: Character = rangeItalic[i].startIndex != 0 ? Array(textAfterbold.substring(from: rangeItalic[i].startIndex - 1, to: rangeItalic[i].startIndex - 1))[0] : Array("0")[0]
-                    if (rangeItalic[i].startIndex == 0 || (!charStart.isLetter && !charStart.isNumber)) {
-                        lastFirstRange = rangeItalic[i].startIndex
-                        continueCheckingItalic = true
-                    } else {
-                        continueCheckingItalic = false
-                    }
-                }
-                if !continueCheckingItalic {
-                    continue
-                }
-                if rangeItalic[i].endIndex != (textAfterbold.count-1) {
-                    let char: Character = Array(textAfterbold.substring(from: rangeItalic[i].endIndex + 1, to: rangeItalic[i].endIndex + 1))[0]
-                    if char.isLetter || char.isNumber {
-                        continue
-                    }
-                }
-                let countEmojiBefore = finalText.string.substring(from: 0, to: lastFirstRange - (2*countRemoveItalicSign)).countEmojiCharacter()
-                let countEmoji = finalText.string.substring(from: lastFirstRange - (2*countRemoveItalicSign), to: rangeItalic[i].endIndex - (2*countRemoveItalicSign)).countEmojiCharacter()
-                totalEmoji = countEmoji + countEmojiBefore
-                if isIntInRangeList((rangeItalic[i].endIndex + countEmoji + 1) - lastFirstRange - lastFirstRange - (2*countRemoveItalicSign) + countEmojiBefore, rangeList: locationBold) {
-                    finalText.addAttribute(.font, value: boldItalicFont, range: NSRange(location: lastFirstRange - (2*countRemoveItalicSign) + countEmojiBefore, length: (rangeItalic[i].endIndex + countEmoji + 1) - lastFirstRange))
-                } else {
-                    finalText.addAttribute(.font, value: italicFont, range: NSRange(location: lastFirstRange - (2*countRemoveItalicSign) + countEmojiBefore, length: (rangeItalic[i].endIndex + countEmoji + 1) - lastFirstRange))
-                }
-                if !isEditing{
-                    finalText.mutableString.replaceOccurrences(of: "\(italicSign)", with: "", options: .literal, range: NSRange(location: lastFirstRange + countEmojiBefore - (2*countRemoveItalicSign), length: 1))
-                    finalText.mutableString.replaceOccurrences(of: "\(italicSign)", with: "", options: .literal, range: NSRange(location: rangeItalic[i].endIndex + totalEmoji - (2*countRemoveItalicSign) - 1, length: 1))
-                    countRemoveItalicSign += 1
-                } else {
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: lastFirstRange + countEmojiBefore, length: 1))
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: rangeItalic[i].endIndex + totalEmoji, length: 1))
-                }
-                lastFirstRange = rangeItalic[i].endIndex
-                continueCheckingItalic = false
-            }
-        }
+        processMentions(in: finalText, groupID: group_id, isEditing: isEditing)
         
-        //Underline
-        let textAfterItalic = finalText.string
-        let rangeUnderline = getRangeOfWordWithSign(sentence: textAfterItalic, sign: underlineSign)
-        if rangeUnderline.count > 0 {
-            var lastFirstRange = -1
-            var countRemoveUnderlineSign = 0
-            var continueCheckingUnderline = false
-            var totalEmoji = 0
-            for i in 0..<rangeUnderline.count {
-                if rangeUnderline[i].startIndex > lastFirstRange {
-                    let charStart: Character = rangeUnderline[i].startIndex != 0 ? Array(textAfterItalic.substring(from: rangeUnderline[i].startIndex - 1, to: rangeUnderline[i].startIndex - 1))[0] : Array("0")[0]
-                    if (rangeUnderline[i].startIndex == 0 || (!charStart.isLetter && !charStart.isNumber)) {
-                        lastFirstRange = rangeUnderline[i].startIndex
-                        continueCheckingUnderline = true
-                    } else {
-                        continueCheckingUnderline = false
-                    }
-                }
-                if !continueCheckingUnderline {
-                    continue
-                }
-                if rangeUnderline[i].endIndex != (textAfterItalic.count-1) {
-                    let char: Character = Array(textAfterItalic.substring(from: rangeUnderline[i].endIndex + 1, to: rangeUnderline[i].endIndex + 1))[0]
-                    if char.isLetter || char.isNumber {
-                        continue
-                    }
-                }
-                let countEmojiBefore = finalText.string.substring(from: 0, to: lastFirstRange - (2*countRemoveUnderlineSign)).countEmojiCharacter()
-                let countEmoji = finalText.string.substring(from: lastFirstRange - (2*countRemoveUnderlineSign), to: rangeUnderline[i].endIndex - (2*countRemoveUnderlineSign)).countEmojiCharacter()
-                totalEmoji = countEmoji + countEmojiBefore
-                finalText.addAttribute(.underlineStyle, value: NSUnderlineStyle.thick.rawValue, range: NSRange(location: lastFirstRange - (2*countRemoveUnderlineSign) + countEmojiBefore + 1, length: (rangeUnderline[i].endIndex + countEmoji - 1) - lastFirstRange))
-                if !isEditing{
-                    finalText.mutableString.replaceOccurrences(of: "\(underlineSign)", with: "", options: .literal, range: NSRange(location: lastFirstRange + countEmojiBefore - (2*countRemoveUnderlineSign), length: 1))
-                    finalText.mutableString.replaceOccurrences(of: "\(underlineSign)", with: "", options: .literal, range: NSRange(location: rangeUnderline[i].endIndex + totalEmoji - (2*countRemoveUnderlineSign) - 1, length: 1))
-                    countRemoveUnderlineSign += 1
-                } else {
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: lastFirstRange + countEmojiBefore, length: 1))
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: rangeUnderline[i].endIndex + totalEmoji, length: 1))
-                }
-                lastFirstRange = rangeUnderline[i].endIndex
-                continueCheckingUnderline = false
-            }
-        }
-        
-        //Strikethrough
-        let textAfterUnderline = finalText.string
-        let rangeStrikethrough = getRangeOfWordWithSign(sentence: textAfterUnderline, sign: strikethroughSign)
-        if rangeStrikethrough.count > 0 {
-            var lastFirstRange = -1
-            var countRemoveStrikethroughSign = 0
-            var continueCheckingStrikethrough = false
-            var totalEmoji = 0
-            for i in 0..<rangeStrikethrough.count {
-                if rangeStrikethrough[i].startIndex > lastFirstRange {
-                    let charStart: Character = rangeStrikethrough[i].startIndex != 0 ? Array(textAfterUnderline.substring(from: rangeStrikethrough[i].startIndex - 1, to: rangeStrikethrough[i].startIndex - 1))[0] : Array("0")[0]
-                    if (rangeStrikethrough[i].startIndex == 0 || (!charStart.isLetter && !charStart.isNumber)) {
-                        lastFirstRange = rangeStrikethrough[i].startIndex
-                        continueCheckingStrikethrough = true
-                    } else {
-                        continueCheckingStrikethrough = false
-                    }
-                }
-                if !continueCheckingStrikethrough {
-                    continue
-                }
-                if rangeStrikethrough[i].endIndex != (textAfterUnderline.count-1) {
-                    let char: Character = Array(textAfterUnderline.substring(from: rangeStrikethrough[i].endIndex + 1, to: rangeStrikethrough[i].endIndex + 1))[0]
-                    if char.isLetter || char.isNumber {
-                        continue
-                    }
-                }
-                let countEmojiBefore = finalText.string.substring(from: 0, to: lastFirstRange - (2*countRemoveStrikethroughSign)).countEmojiCharacter()
-                let countEmoji = finalText.string.substring(from: lastFirstRange - (2*countRemoveStrikethroughSign), to: rangeStrikethrough[i].endIndex - (2*countRemoveStrikethroughSign)).countEmojiCharacter()
-                totalEmoji = countEmoji + countEmojiBefore
-                finalText.addAttribute(.strikethroughStyle, value: 2, range: NSRange(location: lastFirstRange - (2*countRemoveStrikethroughSign) + countEmojiBefore + 1, length: (rangeStrikethrough[i].endIndex + countEmoji - 1) - lastFirstRange))
-                if !isEditing{
-                    finalText.mutableString.replaceOccurrences(of: "\(strikethroughSign)", with: "", options: .literal, range: NSRange(location: lastFirstRange + countEmojiBefore - (2*countRemoveStrikethroughSign), length: 1))
-                    finalText.mutableString.replaceOccurrences(of: "\(strikethroughSign)", with: "", options: .literal, range: NSRange(location: rangeStrikethrough[i].endIndex + totalEmoji - (2*countRemoveStrikethroughSign) - 1, length: 1))
-                    countRemoveStrikethroughSign += 1
-                } else {
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: lastFirstRange + countEmojiBefore, length: 1))
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: rangeStrikethrough[i].endIndex + totalEmoji, length: 1))
-                }
-                lastFirstRange = rangeStrikethrough[i].endIndex
-                continueCheckingStrikethrough = false
-            }
-        }
-        
-        //ItalicGrey
-        let textAfterStrikeThrough = finalText.string
-        let rangeItalicGrey = getRangeOfWordWithSign(sentence: textAfterStrikeThrough, sign: italicGreySign)
-        if rangeItalicGrey.count > 0 {
-            var lastFirstRange = -1
-            var countRemoveItalicGreySign = 0
-            var continueCheckingItalicGrey = false
-            var totalEmoji = 0
-            for i in 0..<rangeItalicGrey.count {
-                if rangeItalicGrey[i].startIndex > lastFirstRange {
-                    let charStart: Character = rangeItalicGrey[i].startIndex != 0 ? Array(textAfterStrikeThrough.substring(from: rangeItalicGrey[i].startIndex - 1, to: rangeItalicGrey[i].startIndex - 1))[0] : Array("0")[0]
-                    if (rangeItalicGrey[i].startIndex == 0 || (!charStart.isLetter && !charStart.isNumber)) {
-                        lastFirstRange = rangeItalicGrey[i].startIndex
-                        continueCheckingItalicGrey = true
-                    } else {
-                        continueCheckingItalicGrey = false
-                    }
-                }
-                if !continueCheckingItalicGrey {
-                    continue
-                }
-                if rangeItalicGrey[i].endIndex != (textAfterStrikeThrough.count-1) {
-                    let char: Character = Array(textAfterStrikeThrough.substring(from: rangeItalicGrey[i].endIndex + 1, to: rangeItalicGrey[i].endIndex + 1))[0]
-                    if char.isLetter || char.isNumber {
-                        continue
-                    }
-                }
-                let countEmojiBefore = finalText.string.substring(from: 0, to: lastFirstRange - (2*countRemoveItalicGreySign)).countEmojiCharacter()
-                let countEmoji = finalText.string.substring(from: lastFirstRange - (2*countRemoveItalicGreySign), to: rangeItalicGrey[i].endIndex - (2*countRemoveItalicGreySign)).countEmojiCharacter()
-                totalEmoji = countEmoji + countEmojiBefore
-                finalText.addAttribute(.font, value: italicFont, range: NSRange(location: lastFirstRange - (2*countRemoveItalicGreySign) + countEmojiBefore, length: (rangeItalicGrey[i].endIndex + countEmoji + 1) - lastFirstRange))
-                finalText.addAttribute(.foregroundColor, value: UIColor.darkGray, range: NSRange(location: lastFirstRange - (2*countRemoveItalicGreySign) + countEmojiBefore, length: (rangeItalicGrey[i].endIndex + countEmoji + 1) - lastFirstRange))
-                if !isEditing{
-                    finalText.mutableString.replaceOccurrences(of: "\(italicGreySign)", with: "", options: .literal, range: NSRange(location: lastFirstRange + countEmojiBefore - (2*countRemoveItalicGreySign), length: 1))
-                    finalText.mutableString.replaceOccurrences(of: "\(italicGreySign)", with: "", options: .literal, range: NSRange(location: rangeItalicGrey[i].endIndex + totalEmoji - (2*countRemoveItalicGreySign) - 1, length: 1))
-                    countRemoveItalicGreySign += 1
-                } else {
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: lastFirstRange + countEmojiBefore, length: 1))
-                    finalText.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: rangeItalicGrey[i].endIndex + totalEmoji, length: 1))
-                }
-                lastFirstRange = rangeItalicGrey[i].endIndex
-                continueCheckingItalicGrey = false
-            }
-        }
-        
-        //Check Mention
-        let finalTextAfterRichText = finalText.string
-        if finalTextAfterRichText.contains("@") {
-            let listTextEnter = finalText.string.split(separator: "\n")
-            for j in 0...listTextEnter.count - 1 {
-                let listText = listTextEnter[j].split(separator: " ")
-                let listMention = listText.filter({ $0.starts(with: "@")})
-                if listMention.count > 0 {
-                    for i in 0..<listMention.count {
-                        let f_pin = (String(listMention[i])).substring(from: 1, to: listMention[i].count)
-                        let member = Member.getMember(f_pin: f_pin)
-                        if member != nil {
-                            let name = (member!.firstName + " " + member!.lastName).trimmingCharacters(in: .whitespaces)
-                            finalText.mutableString.replaceOccurrences(of: f_pin, with: name, options: .literal, range: NSString(string: finalText.string).range(of: f_pin))
-                            if !group_id.isEmpty && Member.getMemberInGroup(f_pin: f_pin, group_id: group_id) != nil {
-                                finalText.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSString(string: finalText.string).range(of: "@\(name)"))
-                            }
-                        }
-                    }
-                }
-            }
-        }
         if isSearching {
-            let range = NSString(string: finalText.string).range(of: textSearch, options: .caseInsensitive) // 2
-            let highlightColor = UIColor.systemYellow // 3
-            let highlightedAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.backgroundColor: highlightColor] // 4
-            
-            finalText.addAttributes(highlightedAttributes, range: range) // 5
+            highlightSearchText(in: finalText, searchText: textSearch)
         }
         
         return finalText
     }
-    
-    func isIntInRangeList(_ intValue: Int, rangeList: [NSRange]) -> Bool {
-        for range in rangeList {
-            if intValue >= range.location && intValue < range.location + range.length {
-                return true
+
+    // MARK: - Helper Functions
+
+    private func applyTextFormatting(
+        to text: NSMutableAttributedString,
+        sign: String,
+        attributes: [NSAttributedString.Key: Any],
+        isEditing: Bool
+    ) {
+        let escapedSign = NSRegularExpression.escapedPattern(for: sign)
+        let pattern = "\(escapedSign)(.+?)\(escapedSign)" // Ensure sign is correctly escaped in regex
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return }
+
+        let matches = regex.matches(in: text.string, options: [], range: NSRange(location: 0, length: text.length))
+
+        for match in matches.reversed() { // Iterate in reverse to prevent index shifting
+            let fullRange = match.range
+            let textRange = match.range(at: 1)
+
+            // Apply the desired formatting
+            for (key, value) in attributes {
+                text.addAttribute(key, value: value, range: textRange)
+            }
+
+            if !isEditing {
+                // Remove formatting characters (signs)
+                text.replaceCharacters(in: NSRange(location: fullRange.upperBound - sign.count, length: sign.count), with: "")
+                text.replaceCharacters(in: NSRange(location: fullRange.lowerBound, length: sign.count), with: "")
+            } else {
+                // Change color of formatting characters (grayed out)
+                text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.lowerBound, length: sign.count))
+                text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.upperBound - sign.count, length: sign.count))
             }
         }
-        return false
     }
-    
-    func checkStartWithLink() -> Bool {
-        return self.starts(with: "https://") || self.starts(with: "http://") || self.starts(with: "www.")
-    }
-    
-    func getRangeOfWordWithSign(sentence: String, sign: Character) -> [Range<Int>] {
-        let asterisk: Character = sign
-        var ranges = [Range<Int>]()
-        
-        var startIndex = sentence.startIndex
-        
-        while let startRange = sentence[startIndex...].firstIndex(of: asterisk),
-              let endRange = sentence[startRange...].dropFirst().firstIndex(of: asterisk) {
+
+    private func processMentions(in text: NSMutableAttributedString, groupID: String, isEditing: Bool) {
+        let regex = try? NSRegularExpression(pattern: "@(\\w+)", options: [])
+        let matches = regex?.matches(in: text.string, options: [], range: NSRange(location: 0, length: text.length)) ?? []
+
+        for match in matches.reversed() {
+            let range = match.range(at: 1)
+            let username = (text.string as NSString).substring(with: range)
             
-            let range = startRange..<endRange
-            let word = sentence[range].replacingOccurrences(of: "\(sign)", with: "")
-            
-            if !word.isEmpty {
-                let lower = sentence.distance(from: sentence.startIndex, to: startRange)
-                let upper = sentence.distance(from: sentence.startIndex, to: endRange)
-                ranges.append(Range(uncheckedBounds: (lower: lower, upper: upper)))
+            if let member = Member.getMember(f_pin: username) {
+                let fullName = "\(member.firstName) \(member.lastName)".trimmingCharacters(in: .whitespaces)
+                text.replaceCharacters(in: range, with: fullName)
+                
+                if !groupID.isEmpty, Member.getMemberInGroup(f_pin: username, group_id: groupID) != nil {
+                    let newRange = (text.string as NSString).range(of: "@\(fullName)")
+                    text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: newRange)
+                }
             }
-            
-            startIndex = endRange
         }
-        
-        return ranges
+    }
+
+    private func highlightSearchText(in text: NSMutableAttributedString, searchText: String) {
+        let range = (text.string as NSString).range(of: searchText, options: .caseInsensitive)
+        if range.location != NSNotFound {
+            text.addAttribute(.backgroundColor, value: UIColor.systemYellow, range: range)
+        }
     }
     
 }

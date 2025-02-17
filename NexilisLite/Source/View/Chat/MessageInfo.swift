@@ -735,19 +735,6 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             } else {
                 messageText.attributedText = textChat.richText()
             }
-            messageText.isUserInteractionEnabled = true
-            if !textChat.isEmpty {
-                let listText = textChat.split(separator: " ")
-                for i in 0...listText.count - 1 {
-                    if listText[i].lowercased().checkStartWithLink() {
-                        if ((listText[i].lowercased().starts(with: "www.") && listText[i].lowercased().split(separator: ".").count >= 3) || (!listText[i].lowercased().starts(with: "www.") && listText[i].lowercased().split(separator: ".").count >= 2)) && listText[i].lowercased().split(separator: ".").last!.count >= 2 {
-                            let objectGesture = ObjectGesture(target: self, action: #selector(tapMessageText(_:)))
-                            objectGesture.message_id = "\(listText[i])"
-                            messageText.addGestureRecognizer(objectGesture)
-                        }
-                    }
-                }
-            }
             
             let stringDate = (data["server_date"] as? String) ?? ""
             if !stringDate.isEmpty {

@@ -296,35 +296,7 @@ class ContactChatViewController: UITableViewController {
     }
     
     @objc func onStatusChat(notification: NSNotification) {
-        DispatchQueue.main.async { [self] in
-            let data:[AnyHashable : Any] = notification.userInfo!
-            if let dataMessage = data["message"] as? TMessage {
-                var idMessage = dataMessage.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
-                if dataMessage.mBodies["message_id"] != nil {
-                    idMessage = dataMessage.getBody(key: "message_id")
-                    if idMessage.contains("'") {
-                        idMessage = idMessage.replacingOccurrences(of: "'", with: "")
-                    }
-                }
-                if idMessage.contains(",") {
-                    let listString = dataMessage.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID).components(separatedBy: ",")
-                    idMessage = listString[listString.count - 1]
-                }
-                let indexChat = chats.firstIndex(where: { $0.messageId == idMessage })
-                if indexChat != nil {
-                    if dataMessage.getBody(key: CoreMessage_TMessageKey.DELETE_MESSAGE_FLAG) == "1" {
-                        chats[indexChat!].lock = "1"
-                    }
-                    if segment.selectedSegmentIndex == 0 {
-                        tableView.beginUpdates()
-                        tableView.reloadRows(at: [IndexPath(row: indexChat!, section: 0)], with: .none)
-                        tableView.endUpdates()
-                    } else {
-                        tableView.reloadData()
-                    }
-                }
-            }
-        }
+        reloadAllData()
     }
     
     @objc func add(sender: Any) {
@@ -440,7 +412,7 @@ class ContactChatViewController: UITableViewController {
                             parentChat.counter = "\(Int(counterParent)! + Int(singleChat.counter)!)"
                         }
                         if let parentExist = chatParentInPreviousChats, parentExist.isSelected {
-                            if let indexParent = previousChat.firstIndex(where: { $0.isParent && $0.groupId == singleChat.groupId }){
+                            if let indexParent = tempChats.firstIndex(where: { $0.isParent && $0.groupId == singleChat.groupId }){
                                 tempChats.insert(singleChat, at: indexParent + self.chatGroupMaps[singleChat.groupId]!.count)
                             }
                         }
