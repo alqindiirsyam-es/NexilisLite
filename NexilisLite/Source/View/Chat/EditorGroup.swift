@@ -145,7 +145,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         }
         updateProfile()
         let indexPath = tableChatView.indexPathsForVisibleRows?.first
-        if indexPath != nil {
+        if indexPath != nil && currentIndexpath != nil {
             let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
             let isPinned = headerRect.origin.y <= tableChatView.contentOffset.y
             if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
@@ -416,7 +416,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         changeAppBar()
         getData()
         getCounter()
-        if counter > 0 {
+        if counter > 0 && dataMessages.count >= counter {
             markerCounter = dataMessages[dataMessages.count - counter]["message_id"] as? String
         }
         
@@ -485,7 +485,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tapGesture.cancelsTouchesInView = false
         tableChatView.addGestureRecognizer(tapGesture)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
             if self.tableChatView.alpha != 1.0 {
                 UIView.animate(withDuration: 0.5, animations: {
                     self.tableChatView.alpha = 1.0
@@ -1954,6 +1954,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     private func addButtonScrollToBottom() {
+        if tableChatView.alpha != 1 {
+            return
+        }
         self.view.addSubview(buttonScrollToBottom)
         buttonScrollToBottom.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -2499,6 +2502,8 @@ extension EditorGroup: UITextViewDelegate {
         if self.isEditingMessage && textView == editTextView {
             if textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 buttonSendEdit.isEnabled = false
+            } else if !buttonSendEdit.isEnabled {
+                buttonSendEdit.isEnabled = true
             }
         }
     }
@@ -3949,16 +3954,21 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
     //    }
     
     public func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        if self.tableChatView.alpha != 1.0 {
-            UIView.animate(withDuration: 0.5, animations: {
-                self.tableChatView.alpha = 1.0
-            })
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
+            if self.tableChatView.alpha != 1.0 {
+                UIView.animate(withDuration: 0.5, animations: {
+                    self.tableChatView.alpha = 1.0
+                })
+            }
+        })
     }
     
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         lastY = scrollView.contentOffset.y
         DispatchQueue.main.async { [self] in
+            if tableChatView.alpha != 1 {
+                return
+            }
             checkNewMessage(tableView: self.tableChatView)
         }
     }

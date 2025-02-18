@@ -512,6 +512,9 @@ public class APIS: NSObject {
         vc.fromAPI = true
         Utils.addBackground(view: navigationController.view)
         navigationController.defaultStyle()
+        if UIApplication.shared.visibleViewController is UINavigationController && (UIApplication.shared.visibleViewController as! UINavigationController).rootViewController is SettingTableViewController {
+            return
+        }
         if UIApplication.shared.visibleViewController?.navigationController != nil {
             UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
         } else {
@@ -849,6 +852,7 @@ public class APIS: NSObject {
     
     public static var uuidCall: UUID?
     public static var fpinCall: String?
+    public static var listIdentifierNotif: [String] = []
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
 //        let center = UNUserNotificationCenter.current()
 //        let content = UNMutableNotificationContent()
@@ -890,7 +894,10 @@ public class APIS: NSObject {
                                     DispatchQueue.global().async {
                                         _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""))
                                     }
-                                    addNotificationNexilis(messageToSave)
+                                    if !listIdentifierNotif.contains(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""){
+                                        listIdentifierNotif.append(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")
+                                        APIS.addNotificationNexilis(messageToSave)
+                                    }
                                 }
                             } else if code == "CL03" {
                                 let callFromName = data["call-from-name"] as? String ?? ""
@@ -1086,6 +1093,11 @@ public class APIS: NSObject {
             if let userInfo = response.notification.request.content.userInfo as? [String: String] {
                 let id = userInfo["id"] ?? ""
                 let type = userInfo["type"] ?? ""
+                if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
+                    if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
+                        navigationC.popViewController(animated: true)
+                    }
+                }
                 if type == "0" {
                     if User.getDataCanNil(pin: id) == nil {
                         return
@@ -1106,14 +1118,8 @@ public class APIS: NSObject {
                     let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
                     navigationController.navigationBar.titleTextAttributes = textAttributes
                     if UIApplication.shared.visibleViewController?.navigationController != nil {
-                        if UIApplication.shared.visibleViewController?.navigationController?.presentedViewController == editorPersonalVC {
-                            return
-                        }
                         UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
                     } else {
-                        if UIApplication.shared.visibleViewController == editorPersonalVC {
-                            return
-                        }
                         UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
                     }
                 } else if type == "1" {
@@ -1152,14 +1158,8 @@ public class APIS: NSObject {
                     let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
                     navigationController.navigationBar.titleTextAttributes = textAttributes
                     if UIApplication.shared.visibleViewController?.navigationController != nil {
-                        if UIApplication.shared.visibleViewController?.navigationController?.presentedViewController == editorGroupVC {
-                            return
-                        }
                         UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
                     } else {
-                        if UIApplication.shared.visibleViewController == editorGroupVC {
-                            return
-                        }
                         UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
                     }
                 } else if type == "CL03" {
@@ -1242,19 +1242,16 @@ public class APIS: NSObject {
     }
     
     public static func enterForeground() {
-        do {
-            if !Nexilis.afterConnect {
-                var id = Utils.getConnectionID()
-                if id.isEmpty {
-                    let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
-                    id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...])
-                    Utils.setConnectionID(value: id)
+        DispatchQueue.global().async {
+            do {
+                if !Nexilis.afterConnect {
+                    var id = Utils.getConnectionID()
+                    try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
                 }
-                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                listIdentifierNotif.removeAll()
+                Nexilis.afterConnect = false
+            } catch {
             }
-            Nexilis.afterConnect = false
-        } catch {
         }
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
@@ -1356,9 +1353,6 @@ public class APIS: NSObject {
                                     }
                                     message = CoreMessage_TMessageBank.sendMessage(l_pin: groupId.isEmpty ? idContact : groupId, message_scope_id: scopeId, status: scopeId == "3" ? "1" : "2", message_text: data, credential: "0", attachment_flag: attachmentFlag, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageId, audio_id: "", video_id: videoId, file_id: renamedFileId, thumb_id: thumb, reff_id: "", read_receipts: "4", chat_id: chatId, is_call_center: "0", call_center_id: "", opposite_pin: scopeId == "3" ? (User.getMyPin() ?? "") : idContact, gif_id: "", isForwarded: "0", isSecret: "0")
                                     Nexilis.addQueueMessage(message: message)
-                                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5, execute: {
-                                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-                                    })
                                     userDefaults.set("", forKey: "sharedItem")
                                     userDefaults.synchronize()
                                 }
@@ -1369,6 +1363,9 @@ public class APIS: NSObject {
                     }
                 }
             }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5, execute: {
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+            })
         }
     }
     

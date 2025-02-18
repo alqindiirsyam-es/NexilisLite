@@ -218,7 +218,7 @@ class IncomingThread {
             _ = Nexilis.responseString(packetId: packetId, message: "00", timeout: 3000)
         }
         DispatchQueue.global().async {
-            var viewController = UIApplication.shared.visibleViewController
+            let viewController = UIApplication.shared.visibleViewController
             DispatchQueue.main.async {
                 if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
@@ -1301,20 +1301,9 @@ class IncomingThread {
         }
         DispatchQueue.main.async {
             if APIS.checkAppStateisBackground() {
-                UNUserNotificationCenter.current().getPendingNotificationRequests{ notificationsPending in
-                    let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
-                    let matchingNotifications = notificationsPending.filter { $0.identifier == identifier }
-                    if matchingNotifications.isEmpty {
-                        UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
-                            let identifier = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
-                            let matchingNotifications = notifications.filter { $0.request.identifier == identifier }
-                            if matchingNotifications.isEmpty && message.getBody(key : CoreMessage_TMessageKey.LAST_EDIT, default_value : "0") == "0" {
-                                DispatchQueue.main.async {
-                                    APIS.addNotificationNexilis(message)
-                                }
-                            }
-                        }
-                    }
+                if !APIS.listIdentifierNotif.contains(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)){
+                    APIS.listIdentifierNotif.append(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))
+                    APIS.addNotificationNexilis(message)
                 }
             }
         }

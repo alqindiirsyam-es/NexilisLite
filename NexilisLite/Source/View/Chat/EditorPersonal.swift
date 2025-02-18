@@ -148,7 +148,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         updateProfile()
         gettingDataMessage = false
         let indexPath = tableChatView.indexPathsForVisibleRows?.first
-        if indexPath != nil {
+        if indexPath != nil && currentIndexpath != nil {
             let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
             let isPinned = headerRect.origin.y <= tableChatView.contentOffset.y
             if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
@@ -567,7 +567,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 markerCounter = dataMessages[dataMessages.count - counter]["message_id"] as? String
             }
             
-            tableChatView.alpha = 0
             if !referenceMessageId.isEmpty {
                 if dataMessages.firstIndex(where: {$0["message_id"] as? String == referenceMessageId} ) != 0 {
                     DispatchQueue.main.async {
@@ -633,13 +632,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         } else {
             tableChatView.scrollToBottom(isAnimated: false)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
-            if self.tableChatView.alpha != 1.0 {
+        if tableChatView.alpha != 1 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
                 UIView.animate(withDuration: 0.5, animations: {
                     self.tableChatView.alpha = 1.0
                 })
-            }
-        })
+            })
+        }
         for data in listTimerCredential {
             if data.value > 0 {
                 var second = data.value
@@ -3310,6 +3309,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func addButtonScrollToBottom() {
+        if tableChatView.alpha != 1 {
+            return
+        }
         self.view.addSubview(buttonScrollToBottom)
         buttonScrollToBottom.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -3670,6 +3672,8 @@ extension EditorPersonal: UITextViewDelegate {
         if self.isEditingMessage && textView == editTextView {
             if textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 buttonSendEdit.isEnabled = false
+            } else if !buttonSendEdit.isEnabled {
+                buttonSendEdit.isEnabled = true
             }
         }
     }
@@ -5066,9 +5070,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
 //    }
     
     public func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        if self.tableChatView.alpha != 1.0 {
-            UIView.animate(withDuration: 0.5, animations: {
-                self.tableChatView.alpha = 1.0
+        if tableChatView.alpha != 1 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
+                UIView.animate(withDuration: 0.5, animations: {
+                    self.tableChatView.alpha = 1.0
+                })
             })
         }
     }
@@ -5076,6 +5082,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         lastY = scrollView.contentOffset.y
         DispatchQueue.main.async { [self] in
+            if tableChatView.alpha != 1 {
+                return
+            }
             checkNewMessage(tableView: self.tableChatView)
         }
     }
@@ -5301,7 +5310,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                 let containerButton = UIView()
                 cell.contentView.addSubview(containerButton)
                 containerButton.translatesAutoresizingMaskIntoConstraints = false
-                containerButton.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
+                containerButton.topAnchor.constraint(equalTo: messageText.bottomAnchor, constant: 5).isActive = true
                 containerButton.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
                 containerButton.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 15).isActive = true
                 containerButton.widthAnchor.constraint(equalToConstant: self.view!.frame.size.width * 0.9).isActive = true
@@ -7636,7 +7645,7 @@ extension UITableView {
     
     func scrollToBottom(isAnimated:Bool = true){
         
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (isAnimated ? 0 : 0.6), execute: {
             if self.numberOfSections == 0 {
                 return
             }
@@ -7646,7 +7655,7 @@ extension UITableView {
             if indexPath.row != -1 {
                 self.scrollToRow(at: indexPath, at: .bottom, animated: isAnimated)
             }
-        }
+        })
     }
     
     func scrollToTop(isAnimated:Bool = true) {
