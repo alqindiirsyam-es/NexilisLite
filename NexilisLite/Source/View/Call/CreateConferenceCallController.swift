@@ -9,26 +9,40 @@ import UIKit
 import NotificationBannerSwift
 import AVFoundation
 
-public class CreateSeminarViewController: UITableViewController {
+public class CreateConferenceCallController: UITableViewController {
     
     var isJoin = false
-    var startTime = 0
     
     var data: [String: Any] = [:]
     
     private enum Section {
+        case chooser
         case title
-        case start
-        case participants
+        case description
+        case users
+        case groups
     }
     
     private var sections: [Section] = [
+        .chooser,
         .title,
-        .start,
-        .participants
+        .description
+    ]
+    
+    private var chooser: [ConfChooser] = [
+        ConfChooser(title: "Target Audience".localized(), value: AudienceViewController().data.first),
+        ConfChooser(title: "Promotion Type".localized(), value: TypeViewController().data.first)
     ]
     
     private var users: [User] = [] {
+        didSet {
+            DispatchQueue.main.async { [weak self] in
+                self?.tableView.reloadData()
+            }
+        }
+    }
+    
+    private var groups: [Group] = [] {
         didSet {
             DispatchQueue.main.async { [weak self] in
                 self?.tableView.reloadData()
@@ -51,40 +65,28 @@ public class CreateSeminarViewController: UITableViewController {
         return textField
     }()
     
-    lazy var startView: UITextField = {
-        let textField = UITextField()
-        textField.placeholder = "Start".localized()
-        textField.borderStyle = .none
-        return textField
-    }()
-    
-    let datePicker: UIDatePicker = {
-        let picker = UIDatePicker()
-        picker.datePickerMode = .dateAndTime // Allows both date and time selection
-        picker.preferredDatePickerStyle = .wheels // Optional: change the picker style
-        return picker
+    lazy var descriptionView: UITextView = {
+        let textView = UITextView()
+        textView.text = "Description".localized()
+        textView.textColor = UIColor.lightGray
+        return textView
     }()
     
     deinit {
         //print(#function, ">>>> TADAA1")
         NotificationCenter.default.removeObserver(self)
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "refreshView"), object: nil, userInfo: nil)
     }
     
     public override func viewDidLoad() {
         super.viewDidLoad()
         
-        title = "Video Conference Room".localized()
-        
-        let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
-        let navBarAppearance = UINavigationBarAppearance()
-        navBarAppearance.configureWithOpaqueBackground()
-        navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
-        navBarAppearance.titleTextAttributes = attributes
-        navigationController?.navigationBar.standardAppearance = navBarAppearance
-        navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
+        title = "Conference Call".localized()
         
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapCancel(sender:)))
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Start".localized(), style: .plain, target: self, action: #selector(didTapRight(sender:)))
+        
+        descriptionView.delegate = self
         
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tapGesture.cancelsTouchesInView = false
@@ -93,61 +95,43 @@ public class CreateSeminarViewController: UITableViewController {
         if isJoin {
             navigationItem.rightBarButtonItem?.title = "Join".localized()
             titleView.isEnabled = false
-            if let a = data["title"] as? String {
-                titleView.isUserInteractionEnabled = false
-                titleView.text = a
+            descriptionView.isEditable = false
+            if let a = data["type"] as? String {
+                chooser[0].value = AudienceViewController().data[getTypeIndex(value: a)]
             }
-            if let b = data["start"] as? String {
-                startView.isUserInteractionEnabled = false
-                startView.text = b
+            if let b = data["broadcast_type"] as? String {
+                chooser[1].value = TypeViewController().data[getBroadcastIndex(value: b)]
+            }
+            if let c = data["title"] as? String {
+                titleView.text = c
+            }
+            if let d = data["description"] as? String {
+                descriptionView.text = d
             }
         } else if !isJoin && !data.isEmpty {
             navigationItem.rightBarButtonItem?.title = "Start".localized()
             titleView.isEnabled = false
-            if let a = data["title"] as? String {
-                titleView.text = a
+            descriptionView.isEditable = false
+            if let a = data["type"] as? String {
+                chooser[0].value = AudienceViewController().data[getTypeIndex(value: a)]
             }
-            if let b = data["start"] as? String {
-                startView.text = b
+            if let b = data["broadcast_type"] as? String {
+                chooser[1].value = TypeViewController().data[getBroadcastIndex(value: b)]
+            }
+            if let c = data["title"] as? String {
+                titleView.text = c
+            }
+            if let d = data["description"] as? String {
+                descriptionView.text = d
             }
         }
         
         tableView = table
     }
     
-    private func configureDatePicker() {
-        // Set the date picker as the input view for the text field
-        startView.inputView = datePicker
-        
-        // Create a toolbar with a "Done" button
-        let toolbar = UIToolbar()
-        toolbar.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
-        toolbar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
-        toolbar.sizeToFit()
-        let doneButton = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(doneButtonTapped))
-        toolbar.setItems([doneButton], animated: true)
-        
-        // Set the toolbar as the accessory view for the text field
-        startView.inputAccessoryView = toolbar
-    }
-    
-    @objc private func doneButtonTapped() {
-        // Format the selected date and time
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        
-        // Update the text field with the formatted date and time
-        startTime = datePicker.date.currentTimeMillis()
-        startView.text = formatter.string(from: datePicker.date)
-        
-        // Dismiss the date picker
-        view.endEditing(true)
-    }
-    
-    
     @objc func dismissKeyboard() {
         titleView.resignFirstResponder()
+        descriptionView.resignFirstResponder()
     }
     
     @objc func didTapCancel(sender: AnyObject) {
@@ -155,36 +139,32 @@ public class CreateSeminarViewController: UITableViewController {
     }
     
     @objc func didTapRight(sender: Any?) {
-        let controller = VideoConferenceViewController()
-        controller.isInisiator = !isJoin
-//    TODO:    let controller = SeminarViewController()
-//    TODO:    controller.isLive = !isJoin
+        let controller = SeminarViewController()
+        controller.isLive = !isJoin
         if isJoin {
-//            guard let by = data["by"] as? String else {
-//                return
-//            }
-            if let dataBlog = data["blog"] as? String {
-                controller.roomId = dataBlog
+            guard let by = data["by"] as? String else {
+                return
             }
+            let dataBlog = data["blog"] as? String
 //            if dataBlog != nil {
-//                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.joinVCallConference(blog_id: dataBlog!)) {
+//                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getIsInitiatorJoin(p_broadcaster: by, p_category: "3", blog_id: dataBlog!)) {
 //                    if response.getBody(key: CoreMessage_TMessageKey.ERRCOD) != "00" {
-//                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-//                            imageView.tintColor = .white
-//                            let banner = FloatingNotificationBanner(title: "Conference call session hasn\'t started yet".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-//                            banner.show()
-//                            return
-//                        }
-//                    } else {
 //                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
 //                        imageView.tintColor = .white
-//                        let banner = FloatingNotificationBanner(title: "No Network. Please try again.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+//                        let banner = FloatingNotificationBanner(title: "Seminar session hasn\'t started yet".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
 //                        banner.show()
 //                        return
 //                    }
+//                } else {
+//                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+//                    imageView.tintColor = .white
+//                    let banner = FloatingNotificationBanner(title: "No Network. Please try again.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+//                    banner.show()
+//                    return
 //                }
-//      TODO:      controller.data = by
-//      TODO:      controller.streamingData = data
+//            }
+            controller.data = by
+            controller.streamingData = data
         } else {
             let goAudioCall = Nexilis.checkMicPermission()
             if !goAudioCall {
@@ -238,59 +218,71 @@ public class CreateSeminarViewController: UITableViewController {
             if !isJoin && !self.data.isEmpty {
                 data = self.data
             } else if self.data.isEmpty {
-                guard let conferenceTitle = titleView.text else {
+                guard let streamingTitle = titleView.text else {
+                    return
+                }
+                guard let streamingDesc = descriptionView.text else {
                     return
                 }
                 
-                let id = "CR\(Date().currentTimeMillis().toHex())"
+                let id = "LST\(Date().currentTimeMillis().toHex())"
                 
-                data["title"] = conferenceTitle
-//         TODO:        data["start"]
+                data["title"] = streamingTitle
+                data["description"] = streamingDesc
                 data["by"] = User.getMyPin() ?? ""
                 data["time"] = Date().currentTimeMillis()
                 data["blog"] = id
                 
-                if conferenceTitle.trimmingCharacters(in: .whitespaces).isEmpty {
+                if streamingTitle.trimmingCharacters(in: .whitespaces).isEmpty {
                     let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                     imageView.tintColor = .white
-                    let banner = FloatingNotificationBanner(title: "Video Conference title can't be empty".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    let banner = FloatingNotificationBanner(title: "Seminar title can't be empty".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    banner.show()
+                    return
+                } else if streamingDesc.trimmingCharacters(in: .whitespaces).isEmpty {
+                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "Seminar description can't be empty".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
                     banner.show()
                     return
                 }
-//                
-//                var type: String = "0" // Friend
+                
+                var type: String = "0" // Friend
+                let groups: [String] = groups.map{ $0.id }
                 let members: [String] = users.map{ $0.pin }
-//                switch chooser[0].id {
-//                case 0:
-//                    type = "7"
-//                case 1:
-//                    type = "8"
-//                case 2:
-//                    type = "3"
-//                case 3:
-//                    type = "6"
-//                case 4:
-//                    type = "5"
-//                default:
-//                    type = "0"
-//                }
-//                
+                switch chooser[0].id {
+                case 0:
+                    type = "7"
+                case 1:
+                    type = "8"
+                case 2:
+                    type = "3"
+                case 3:
+                    type = "6"
+                case 4:
+                    type = "5"
+                default:
+                    type = "0"
+                }
+                
+                data["groups"] = groups
                 data["members"] = members
+                data["type"] = type
                 
-//                var notif: String = "0"
-//                switch chooser[1].id {
-//                case 0:
-//                    notif = "1"
-//                default:
-//                    notif = "2"
-//                }
+                var notif: String = "0"
+                switch chooser[1].id {
+                case 0:
+                    notif = "1"
+                default:
+                    notif = "2"
+                }
                 
-//                data["broadcast_type"] = notif
+                data["broadcast_type"] = notif
                 guard let json = String(data: try! JSONSerialization.data(withJSONObject: data, options: []), encoding: String.Encoding.utf8) else {
                     return
                 }
                 
-                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.createVCallConference(blog_id: data["blog"] as! String, data: json)) {
+                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.createSeminar(title: "1~\(data["title"] ?? "")", type: data["type"] as! String, category: "4", notifType: data["broadcast_type"] as! String, blogId: data["blog"] as! String, data: json)) {
                     if response.getBody(key: CoreMessage_TMessageKey.ERRCOD) != "00" {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
@@ -306,65 +298,75 @@ public class CreateSeminarViewController: UITableViewController {
                     return
                 }
                 
-//                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.startVCallConference(blog_id: data["blog"] as! String, time: data["time"] as! String), timeout: 30 * 1000) {
-//                    if response.getBody(key: CoreMessage_TMessageKey.ERRCOD) != "00" {
-//                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-//                        imageView.tintColor = .white
-//                        let banner = FloatingNotificationBanner(title: "Server Busy. Please try again.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-//                        banner.show()
-//                        return
-//                    }
-//                } else {
-//                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-//                    imageView.tintColor = .white
-//                    let banner = FloatingNotificationBanner(title: "No Network. Please try again.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-//                    banner.show()
-//                    return
-//                }
-                
 //                Nexilis.saveMessageBot(textMessage: json, blog_id: data["blog"] as? String ?? "", attachment_type: "26")
                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
             }
-//          TODO:  controller.data = User.getMyPin()!
-//          TODO:  controller.streamingData = data
-            controller.roomId = data["blog"] as! String
+            controller.data = User.getMyPin()!
+            controller.streamingData = data
         }
-//       TODO: navigationController?.show(controller, sender: nil)
         navigationController?.show(controller, sender: nil)
-//        navigationController?.dismiss(animated: true, completion: nil)
     }
     
+    private func getTypeIndex(value: String) -> Int {
+        var type = 0
+        switch value {
+        case "7":
+            type = 0
+        case "8":
+            type = 1
+        case "3":
+            type = 2
+        case "6":
+            type = 3
+        case "5":
+            type = 4
+        default:
+            type = 0
+        }
+        return type
+    }
+    
+    private func getBroadcastIndex(value: String) -> Int {
+        var notif = 0
+        switch value {
+        case "1":
+            notif = 0
+        default:
+            notif = 1
+        }
+        return notif
+    }
     
     // MARK: - Table view data source
     
     public override func numberOfSections(in tableView: UITableView) -> Int {
-        if isJoin {
-            return sections.count - 1
-        }
         return sections.count
     }
     
     public override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch sections[section] {
-        case .participants:
+        case .chooser:
+            return 2
+        case .users:
             return users.count + 1
+        case .groups:
+            return groups.count + 1
         default:
             return 1
         }
     }
     
     public override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        return 44
-//        switch sections[indexPath.section] {
-//        case .description:
-//            return 100
-//        default:
-//            return 44
-//        }
+        switch sections[indexPath.section] {
+        case .description:
+            return 100
+        default:
+            return 44
+        }
     }
     
     public override func tableView(_ tableView: UITableView, willSelectRowAt indexPath: IndexPath) -> IndexPath? {
-        if isJoin, sections[indexPath.section] == .participants {
+        if isJoin, sections[indexPath.section] == .chooser {
             return nil
         }
         return indexPath
@@ -373,58 +375,76 @@ public class CreateSeminarViewController: UITableViewController {
     public override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         switch sections[indexPath.section] {
-        case .start:
-            if !isJoin {
-                sections.append(.participants)
-                if users.count != 0{
-                    users.removeAll()
+        case .chooser:
+            if indexPath.row == 0 {
+                if isJoin || (!isJoin && !data.isEmpty){
+                    return
                 }
+                let chooser = chooser[indexPath.row]
+                let controller = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "audienceView") as AudienceViewController
+                controller.selected = chooser.value
+                controller.isDismiss = { [weak self] index in
+                    chooser.id = index
+                    chooser.value = AudienceViewController().data[index]
+                    guard let sec = self?.sections else {
+                        return
+                    }
+                    if sec.count > 4 {
+                        self?.sections.removeLast()
+                    }
+                    if chooser.value == "Group".localized() {
+                        self?.sections.append(.groups)
+                        if self?.users.count != 0 {
+                            self?.users.removeAll()
+                        }
+                    } else if chooser.value == "User".localized() {
+                        self?.sections.append(.users)
+                        if self?.groups.count != 0{
+                            self?.groups.removeAll()
+                        }
+                    } else {
+                        if self?.users.count != 0 {
+                            self?.users.removeAll()
+                        } else if self?.groups.count != 0{
+                            self?.groups.removeAll()
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        tableView.reloadData()
+                    }
+                }
+                navigationController?.show(controller, sender: nil)
+            } else if indexPath.row == 1 {
+                if isJoin || (!isJoin && !data.isEmpty){
+                    return
+                }
+                let chooser = chooser[indexPath.row]
+                let controller = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "typeView") as TypeViewController
+                controller.selected = chooser.value
+                controller.isDismiss = { index in
+                    chooser.id = index
+                    chooser.value = TypeViewController().data[index]
+                    DispatchQueue.main.async {
+                        tableView.reloadRows(at: [indexPath], with: .automatic)
+                    }
+                }
+                navigationController?.show(controller, sender: nil)
             }
-//            if indexPath.row == 0 {
-//                if isJoin || (!isJoin && !data.isEmpty){
-//                    return
-//                }
-//                let chooser = chooser[indexPath.row]
-//                let controller = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "audienceView") as AudienceViewController
-//                controller.selected = chooser.value
-//                controller.isDismiss = { [weak self] index in
-//                    chooser.id = index
-//                    chooser.value = AudienceViewController().data[index]
-//                    guard let sec = self?.sections else {
-//                        return
-//                    }
-//                    if sec.count > 4 {
-//                        self?.sections.removeLast()
-//                    }
-//                    if chooser.value == "Group".localized() {
-//                        self?.sections.append(.groups)
-//                        if self?.users.count != 0 {
-//                            self?.users.removeAll()
-//                        }
-//                    } else if chooser.value == "User".localized() {
-//                        self?.sections.append(.users)
-//                        if self?.groups.count != 0{
-//                            self?.groups.removeAll()
-//                        }
-//                    } else {
-//                        if self?.users.count != 0 {
-//                            self?.users.removeAll()
-//                        } else if self?.groups.count != 0{
-//                            self?.groups.removeAll()
-//                        }
-//                    }
-//                    DispatchQueue.main.async {
-//                        tableView.reloadData()
-//                    }
-//                }
-//                navigationController?.show(controller, sender: nil)
-//            }
-        case .participants:
-            if indexPath.row == 0 && !isJoin {
+        case .users:
+            if indexPath.row == 0 {
                 let controller = QmeraUserChooserViewController()
                 controller.ignored.append(contentsOf: users)
                 controller.isDismiss = { users in
                     self.users.append(contentsOf: users)
+                }
+                navigationController?.show(controller, sender: nil)
+            }
+        case .groups:
+            if indexPath.row == 0 {
+                let controller = QmeraGroupStreamingViewController()
+                controller.ignored.append(contentsOf: groups)
+                controller.isDismiss = { groups in
+                    self.groups.append(contentsOf: groups)
                 }
                 navigationController?.show(controller, sender: nil)
             }
@@ -440,25 +460,29 @@ public class CreateSeminarViewController: UITableViewController {
         cell.accessoryType = .none
         cell.selectionStyle = .none
         switch sections[indexPath.section] {
-        case .start:
-//            var content = cell.defaultContentConfiguration()
-//            let data = chooser[indexPath.row]
-//            content.text = data.title
-//            content.secondaryText = data.value
-//            content.textProperties.font = UIFont.systemFont(ofSize: 14)
-//            content.secondaryTextProperties.color = .systemGray
-//            content.secondaryTextProperties.font = UIFont.systemFont(ofSize: 14)
-//            content.prefersSideBySideTextAndSecondaryText = true
-//            cell.contentConfiguration = content
-//            cell.accessoryType = .disclosureIndicator
-//            cell.selectionStyle = .default
-            cell.contentView.addSubview(startView)
-            startView.anchor(top: cell.topAnchor, left: cell.leftAnchor, bottom: cell.bottomAnchor, right: cell.rightAnchor, paddingLeft: 20, paddingRight: 20)
-            configureDatePicker()
+        case .chooser:
+            var content = cell.defaultContentConfiguration()
+            let data = chooser[indexPath.row]
+            content.text = data.title
+            content.secondaryText = data.value
+            content.textProperties.font = UIFont.systemFont(ofSize: 14)
+            content.secondaryTextProperties.color = .systemGray
+            content.secondaryTextProperties.font = UIFont.systemFont(ofSize: 14)
+            content.prefersSideBySideTextAndSecondaryText = true
+            cell.contentConfiguration = content
+            cell.accessoryType = .disclosureIndicator
+            cell.selectionStyle = .default
         case .title:
             cell.contentView.addSubview(titleView)
             titleView.anchor(top: cell.topAnchor, left: cell.leftAnchor, bottom: cell.bottomAnchor, right: cell.rightAnchor, paddingLeft: 20, paddingRight: 20)
-        case .participants:
+        case .description:
+            let stack = UIStackView()
+            stack.axis = .vertical
+            stack.distribution = .fill
+            cell.contentView.addSubview(stack)
+            stack.anchor(top: cell.topAnchor, left: cell.leftAnchor, bottom: cell.bottomAnchor, right: cell.rightAnchor, paddingTop: 8, paddingLeft: 20, paddingBottom: 8, paddingRight: 20)
+            stack.addArrangedSubview(descriptionView)
+        case .users:
             var content = cell.defaultContentConfiguration()
             if indexPath.row == 0 {
                 content.image = UIImage(systemName: "plus.circle.fill")
@@ -476,15 +500,38 @@ public class CreateSeminarViewController: UITableViewController {
                 content.textProperties.font = UIFont.systemFont(ofSize: 14)
             }
             cell.contentConfiguration = content
+        case .groups:
+            var content = cell.defaultContentConfiguration()
+            if indexPath.row == 0 {
+                content.image = UIImage(systemName: "plus.circle.fill")
+                content.imageProperties.tintColor = .mainColor
+                content.text = "Add group".localized()
+                content.textProperties.font = UIFont.systemFont(ofSize: 14)
+                cell.accessoryType = .disclosureIndicator
+                cell.selectionStyle = .default
+            } else {
+                let data = groups[indexPath.row - 1]
+                getImage(name: data.profile, placeholderImage: UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                    content.image = image
+                }
+                content.text = data.name
+                content.textProperties.font = UIFont.systemFont(ofSize: 14)
+            }
+            cell.contentConfiguration = content
         }
         return cell
     }
     
     public override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
         switch sections[indexPath.section] {
-        case .participants:
+        case .users:
             if (editingStyle == .delete) {
                 users.remove(at: indexPath.row - 1)
+                tableView.deleteRows(at: [indexPath], with: .automatic)
+            }
+        case .groups:
+            if (editingStyle == .delete) {
+                groups.remove(at: indexPath.row - 1)
                 tableView.deleteRows(at: [indexPath], with: .automatic)
             }
         default:
@@ -508,7 +555,7 @@ public class CreateSeminarViewController: UITableViewController {
     
 }
 
-private class Chooser {
+private class ConfChooser {
     
     let title: String
     var id: Int = 0
@@ -522,7 +569,7 @@ private class Chooser {
     
 }
 
-extension CreateSeminarViewController: UITextViewDelegate {
+extension CreateConferenceCallController: UITextViewDelegate {
     public func textViewDidBeginEditing(_ textView: UITextView) {
         if textView.textColor == UIColor.lightGray {
             textView.text = nil
@@ -532,7 +579,7 @@ extension CreateSeminarViewController: UITextViewDelegate {
     
     public func textViewDidEndEditing(_ textView: UITextView) {
         if textView.text.isEmpty {
-            textView.text = "Title".localized()
+            textView.text = "Description".localized()
             textView.textColor = UIColor.lightGray
         }
     }

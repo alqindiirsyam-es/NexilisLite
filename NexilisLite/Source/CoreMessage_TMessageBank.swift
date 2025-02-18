@@ -1258,7 +1258,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mPIN = me
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
         tmessage.mBodies[CoreMessage_TMessageKey.F_PIN] = me
-        tmessage.mBodies[CoreMessage_TMessageKey.BROADCAST_ID] = blog_id
+        tmessage.mBodies[CoreMessage_TMessageKey.BROADCAST_ID] = me +  CoreMessage_TMessageUtil.getTID()
         tmessage.mBodies[CoreMessage_TMessageKey.START_DATE] = time
         return tmessage
     }

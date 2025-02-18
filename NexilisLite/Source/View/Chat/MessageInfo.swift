@@ -628,7 +628,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
             topMarginText.isActive = true
             messageText.textColor = .black
-            if data["attachment_flag"] as? String == "27" || data["attachment_flag"] as? String == "26" || data["message_scope_id"] as? String == "18" {
+            if data["attachment_flag"] as? String == "27" || data["attachment_flag"] as? String == "26" || data["attachment_flag"] as? String == "25" || data["message_scope_id"] as? String == "18" {
                 messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
                 let imageLS = UIImageView()
                 containerMessage.addSubview(imageLS)
@@ -696,6 +696,25 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             } else {
                                 messageText.attributedText = ("\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm"))").richText()
                             }
+                        })
+                    }
+                }
+                else if attachmentFlag == "25" {
+                    let data = textChat
+                    if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                        Database().database?.inTransaction({ fmdb, rollback in
+                            var stringLS = ""
+                            let title = json["title"] as? String ?? ""
+                            let blog = json["blog"] as? String ?? ""
+                            let by = json["by"] as? String ?? ""
+                            let start = json["time"] as? Int64 ?? 0
+                            let textVCR = "Video Conference Room".localized()
+                            var type = "*\(textVCR)*"
+                            if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || last_name from BUDDY where f_pin = '\(by)'"), c.next() {
+                                let name = c.string(forColumnIndex: 0)!
+                                stringLS = "\(type) \nTitle: \(title) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm")) \nInitiator: \(name) \n\n*^Room ID: ^*\n*^\(blog)^*"
+                            }
+                            messageText.attributedText = stringLS.richText()
                         })
                     }
                 }
