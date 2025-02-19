@@ -742,10 +742,8 @@ extension String {
         let finalText = NSMutableAttributedString(string: textUTF8, attributes: [.font: font])
         
         let formattingRules: [(String, [NSAttributedString.Key: Any])] = [
-            ("*_", [.font: boldItalicFont]), // Bold + Italic
-            ("_*", [.font: boldItalicFont]), // Bold + Italic
-            ("*", [.font: boldFont]), // Bold
             ("_", [.font: italicFont]), // Italic
+            ("*", [.font: boldFont]), // Bold
             ("~", [.strikethroughStyle: NSUnderlineStyle.single.rawValue]),
             ("^", [.underlineStyle: NSUnderlineStyle.single.rawValue]),
             ("$", [.font: italicFont, .foregroundColor: UIColor.darkGray]) // Italic + Gray for $
