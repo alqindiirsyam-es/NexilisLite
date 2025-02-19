@@ -80,5 +80,13 @@
 		<string>fonts/Poppins-SemiBold.ttf</string>
 		<string>fonts/Poppins-SemiBoldItalic.ttf</string>
 	</array>
+    <key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+		<string>video-camera</string>
+		<string>front-facing-camera</string>
+		<string>microphone</string>
+		<string>still-camera</string>
+	</array>
 </dict>
 </plist>

@@ -68,6 +68,7 @@ class VideoConferenceViewController: UIViewController {
     var isAddCall = ""
     var ticketId = ""
     var roomId = ""
+    var isCalled = false
     private var frontCamera = true
     var users: [User] = []
     let poweredByView: UIStackView = {
@@ -159,21 +160,29 @@ class VideoConferenceViewController: UIViewController {
         if fPin != ""{
             getDataProfile(fPin: fPin)
         }
-        
         addZoomView()
         addCameraView()
         addListRemoteView()
         addTimerVC()
         didTapAcceptCallButton()
-        if isInisiator {
-            API.initiateCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-            Nexilis.write(message: CoreMessage_TMessageBank.startVCallConference(blog_id: roomId, time: "\(Date().currentTimeMillis())"))
+        print("Room id: \(roomId)")
+        print("is initiatior \(isInisiator)")
+        print(listRemoteViewFix)
+        print(cameraView)
+        print(zoomView)
+        do {
+            if isInisiator && !isCalled {
+                API.initiateCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+                Nexilis.write(message: CoreMessage_TMessageBank.startVCallConference(blog_id: roomId, time: "\(Date().currentTimeMillis())"))
+            }
+            else if !isCalled {
+                API.joinCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+                Nexilis.write(message: CoreMessage_TMessageBank.joinVCallConference(blog_id: roomId))
+            }
+            isCalled = true
+        } catch {
+            print(error)
         }
-        else {
-            API.joinCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-            Nexilis.write(message: CoreMessage_TMessageBank.joinVCallConference(blog_id: roomId))
-        }
-        
 //        API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
 //        addBackgroundIncoming()
 //        addProfileNameCalling()
@@ -273,7 +282,7 @@ class VideoConferenceViewController: UIViewController {
             zoomView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             zoomView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
-        zoomView.backgroundColor = .secondaryColor
+        zoomView.backgroundColor = .black
         zoomView.isUserInteractionEnabled = true
         zoomView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(hideToolbar)))
     }

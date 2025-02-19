@@ -242,7 +242,7 @@ public class CreateSeminarViewController: UITableViewController {
                     return
                 }
                 
-                let id = "CR\(Date().currentTimeMillis().toHex())"
+                let id = User.getMyPin()! +  CoreMessage_TMessageUtil.getTID()
                 
                 data["title"] = conferenceTitle
 //         TODO:        data["start"]
