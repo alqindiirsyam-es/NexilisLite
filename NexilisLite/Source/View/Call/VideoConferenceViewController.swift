@@ -28,9 +28,15 @@ class VideoConferenceViewController: UIViewController {
         UIImageView(),
         UIImageView(),
         UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
         UIImageView()
     ]
     var containerLabelName: [UIView] = [
+        UIView(),
+        UIView(),
+        UIView(),
         UIView(),
         UIView(),
         UIView(),
@@ -70,6 +76,7 @@ class VideoConferenceViewController: UIViewController {
     var roomId = ""
     var isCalled = false
     private var frontCamera = true
+    var timerCR : Timer?
     var users: [User] = []
     let poweredByView: UIStackView = {
         let stackView = UIStackView()
@@ -117,7 +124,7 @@ class VideoConferenceViewController: UIViewController {
         navigationController?.navigationBar.setBackgroundImage(nil, for: .default)
         navigationController?.navigationBar.shadowImage = nil
         navigationController?.navigationBar.isTranslucent = false
-//        navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
         let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
         navigationController?.navigationBar.titleTextAttributes = textAttributes
         navigationController?.navigationBar.topItem?.backBarButtonItem = nil
@@ -130,7 +137,7 @@ class VideoConferenceViewController: UIViewController {
             navigationController?.navigationBar.setBackgroundImage(nil, for: .default)
             navigationController?.navigationBar.shadowImage = nil
             navigationController?.navigationBar.isTranslucent = false
-//            navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+            navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
             navigationController?.navigationBar.titleTextAttributes = textAttributes
             navigationController?.navigationBar.topItem?.backBarButtonItem = nil
@@ -165,19 +172,13 @@ class VideoConferenceViewController: UIViewController {
         addListRemoteView()
         addTimerVC()
         didTapAcceptCallButton()
-        print("Room id: \(roomId)")
-        print("is initiatior \(isInisiator)")
-        print(listRemoteViewFix)
-        print(cameraView)
-        print(zoomView)
         do {
             if isInisiator && !isCalled {
-                API.initiateCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-                Nexilis.write(message: CoreMessage_TMessageBank.startVCallConference(blog_id: roomId, time: "\(Date().currentTimeMillis())"))
+                
+                _ = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(initiateConfRoom), userInfo: nil, repeats: false)
             }
             else if !isCalled {
-                API.joinCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-                Nexilis.write(message: CoreMessage_TMessageBank.joinVCallConference(blog_id: roomId))
+                _ = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(joinConfRoom), userInfo: nil, repeats: false)
             }
             isCalled = true
         } catch {
@@ -193,6 +194,16 @@ class VideoConferenceViewController: UIViewController {
 //            didTapAcceptCallButton()
 //        }
         
+    }
+    
+    @objc func initiateConfRoom(){
+        API.initiateCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 0, nVQuality: 0, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+        Nexilis.write(message: CoreMessage_TMessageBank.startVCallConference(blog_id: roomId, time: "\(Date().currentTimeMillis())"))
+    }
+    
+    @objc func joinConfRoom(){
+        API.joinCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 0, nVQuality: 0, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+        Nexilis.write(message: CoreMessage_TMessageBank.joinVCallConference(blog_id: roomId))
     }
     
     func getDataProfile(fPin: String) {
@@ -282,7 +293,7 @@ class VideoConferenceViewController: UIViewController {
             zoomView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             zoomView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
-        zoomView.backgroundColor = .black
+        zoomView.backgroundColor = .secondaryColor
         zoomView.isUserInteractionEnabled = true
         zoomView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(hideToolbar)))
     }
@@ -915,6 +926,7 @@ class VideoConferenceViewController: UIViewController {
 //            }
 //        }
         _ = Nexilis.write(message: CoreMessage_TMessageBank.endVCallConference(blog_id: roomId))
+        API.terminateCall(sParty: nil)
         cameraView.image = nil
         zoomView.image = nil
         listRemoteViewFix.removeAll()
@@ -957,7 +969,7 @@ class VideoConferenceViewController: UIViewController {
                 } else {
                     DispatchQueue.main.async {
                         self.dataPerson.append(data)
-                        API.initiateCCall(sParty: data["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.inviteVCallConference(f_pin: data["f_pin"]!!, blog_id: self.roomId))
                     }
                 }
             }
@@ -967,10 +979,10 @@ class VideoConferenceViewController: UIViewController {
     
     @objc func camera(sender: Any?) {
         if frontCamera {
-            API.changeCameraParam(nCameraIdx: 0, nResolutionIndex: 2, nQuality: 4)
+            API.changeCameraParam(nCameraIdx: 0, nResolutionIndex: 0, nQuality: 0)
             frontCamera = false
         } else {
-            API.changeCameraParam(nCameraIdx: 1, nResolutionIndex: 2, nQuality: 4)
+            API.changeCameraParam(nCameraIdx: 1, nResolutionIndex: 0, nQuality: 0)
             frontCamera = true
         }
     }
@@ -1002,6 +1014,16 @@ class VideoConferenceViewController: UIViewController {
         var remoteChannel = [String:String]()
         let arrayMessage = message.split(separator: ",")
         print(state)
+        if (state == Nexilis.VIDEO_CALL_END) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.endAllCall()
+                if self.isInisiator && !self.isPresent {
+                    self.navigationController?.popViewController(animated: true)
+                } else {
+                    self.dismiss(animated: true, completion: nil)
+                }
+            }
+        }
     }
     
     @objc func onStatusCall2(_ notification: NSNotification) {

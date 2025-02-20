@@ -330,7 +330,16 @@ public class CreateSeminarViewController: UITableViewController {
             controller.roomId = data["blog"] as! String
         }
 //       TODO: navigationController?.show(controller, sender: nil)
-        navigationController?.show(controller, sender: nil)
+        if !controller.isInisiator {
+            var stack = navigationController?.viewControllers
+            stack!.remove(at: (stack!.count) - 1)
+            stack!.insert(controller, at: stack!.count)
+            navigationController?.setViewControllers(stack!, animated: true)
+        }
+        else {
+            navigationController?.show(controller, sender: nil)
+        }
+//        navigationController?.show(controller, sender: nil)
 //        navigationController?.dismiss(animated: true, completion: nil)
     }
     
