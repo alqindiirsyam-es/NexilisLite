@@ -1248,7 +1248,7 @@ public class APIS: NSObject {
                     var id = Utils.getConnectionID()
                     try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
                 }
-                listIdentifierNotif.removeAll()
+//                listIdentifierNotif.removeAll()
                 Nexilis.afterConnect = false
             } catch {
             }

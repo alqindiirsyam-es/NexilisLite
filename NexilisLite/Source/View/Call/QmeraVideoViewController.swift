@@ -447,8 +447,6 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else {
-            let systemSoundID: SystemSoundID = 1254
-            AudioServicesPlaySystemSound(systemSoundID)
             labelIncomingOutgoing.text = "Incoming video call".localized() + "..."
         }
         labelIncomingOutgoing.font = UIFont.systemFont(ofSize: 12)
