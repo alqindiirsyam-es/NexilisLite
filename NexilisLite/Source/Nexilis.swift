@@ -1108,7 +1108,9 @@ public class Nexilis: NSObject {
             APIS.openSecureFolder()
         } else if index == IDX_SECURE_BROWSER {
             APIS.openSecureBrowser()
-        } else {
+        } else if index == IDX_CONFERENCE_ROOM_FORM {
+            APIS.openConference()
+        } else if index == IDX_SELF_ACT {
             openApp(id: id)
         }
     }
