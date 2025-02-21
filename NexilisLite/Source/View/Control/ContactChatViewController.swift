@@ -1152,9 +1152,9 @@ extension ContactChatViewController {
                 if isFilltering {
                     data = fillteredData[indexPath.row] as! Chat
                 } else {
-                    if chats.count == 0 {
+                    if chats.count == 0 || (indexPath.row > (chats.count - 1)) {
                         let labelNochat = UILabel()
-                        labelNochat.text = "There are no conversations".localized()
+                        labelNochat.text = loadingData ? "Loading Data...".localized() : "There are no conversations".localized()
                         labelNochat.font = .systemFont(ofSize: 13)
                         labelNochat.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                         content.addSubview(labelNochat)

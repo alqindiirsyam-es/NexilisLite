@@ -379,6 +379,11 @@ class IncomingThread {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             let channelCC: String = SecureUserDefaults.shared.value(forKey: "channelCC") ?? ""
+            if !onGoingCC.isEmpty && onGoingCC.components(separatedBy: ",").count < 3 {
+                SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
+                SecureUserDefaults.shared.removeValue(forKey: "channelCC")
+                return
+            }
             let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
             let fPinCC = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
             if fPinCC == User.getMyPin() || fPinCC.isEmpty || complaintId.isEmpty {
