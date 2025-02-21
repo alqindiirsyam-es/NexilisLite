@@ -1258,7 +1258,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mPIN = me
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
         tmessage.mBodies[CoreMessage_TMessageKey.F_PIN] = me
-        tmessage.mBodies[CoreMessage_TMessageKey.BROADCAST_ID] = blog_id
+        tmessage.mBodies[CoreMessage_TMessageKey.BROADCAST_ID] = me +  CoreMessage_TMessageUtil.getTID()
         tmessage.mBodies[CoreMessage_TMessageKey.START_DATE] = time
         return tmessage
     }
@@ -1280,6 +1280,16 @@ public class CoreMessage_TMessageBank {
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
         tmessage.mBodies[CoreMessage_TMessageKey.F_PIN] = me
         tmessage.mBodies[CoreMessage_TMessageKey.BROADCAST_ID] = blog_id
+        return tmessage
+    }
+    public static func inviteVCallConference(f_pin: String, blog_id:String) -> TMessage {
+        let me = User.getMyPin()!
+        let tmessage = TMessage()
+        tmessage.mCode = CoreMessage_TMessageCode.VC_ROOM_INVITE;
+        tmessage.mPIN = me
+        tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tmessage.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
+        tmessage.mBodies[CoreMessage_TMessageKey.BLOG_ID] = blog_id
         return tmessage
     }
     public static func getVersionCheck() -> TMessage {

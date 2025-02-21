@@ -639,6 +639,9 @@ public class CoreMessage_TMessageCode {
     public static let VC_ROOM_END = "VCR2";
     public static let VC_ROOM_WHITEBOARD_IMAGE = "VCR3";
     public static let VC_ROOM_DRAW = "VCR4";
+    public static let VC_ROOM_INVITE = "VCR5";
+    public static let VC_ROOM_GET_MEMBERS = "VCR6";
+    public static let VC_ROOM_FACE_DETECTION = "VCR11";
     
     //Signup-Signin MSISDN dan OTP
     public static let VERIFY_OTP = "VOTP";

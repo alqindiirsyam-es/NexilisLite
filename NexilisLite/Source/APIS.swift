@@ -251,20 +251,20 @@ public class APIS: NSObject {
         }
     }
     
-//    public static func openSeminar() {
-//        let isChangeProfile = Utils.getSetProfile()
-//        if !isChangeProfile {
-//            APIS.showChangeProfile()
-//            return
-//        }
-//        let navigationController = CustomNavigationController(rootViewController: CreateSeminarViewController())
-//        navigationController.defaultStyle()
-//        if UIApplication.shared.visibleViewController?.navigationController != nil {
-//            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-//        } else {
-//            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-//        }
-//    }
+    public static func openConference() {
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        let navigationController = CustomNavigationController(rootViewController: CreateSeminarViewController())
+        navigationController.defaultStyle()
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+        }
+    }
     
     public static func openAudioCall() {
         let isChangeProfile = Utils.getSetProfile()

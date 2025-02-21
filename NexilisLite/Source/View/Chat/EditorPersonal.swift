@@ -5165,6 +5165,34 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                 streamingNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
                 streamingNav.navigationBar.isTranslucent = false
                 navigationController?.present(streamingNav, animated: true, completion: nil)
+            } else if attachmentFlag == "25" {
+                let conferenceController = CreateSeminarViewController()
+                if let messageText = message["message_text"],
+                   let messageText = messageText as? String,
+                   var json = try! JSONSerialization.jsonObject(with: messageText.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                    if json["blog"] == nil {
+                        json["blog"] = message["blog"] ?? nil
+                    }
+                    json["participant"] = message["members"]
+                    let start = json["time"] as? Int64 ?? 0
+                    json["start"] = String(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm"))
+                    conferenceController.data = json
+                    conferenceController.isJoin = true
+                }
+                let conferenceNav = CustomNavigationController(rootViewController: conferenceController)
+                conferenceNav.modalPresentationStyle = .custom
+                conferenceNav.navigationBar.tintColor = .white
+                conferenceNav.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                conferenceNav.navigationBar.isTranslucent = false
+                conferenceNav.navigationBar.overrideUserInterfaceStyle = .dark
+                conferenceNav.navigationBar.barStyle = .black
+                let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+                let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+                conferenceNav.navigationBar.titleTextAttributes = textAttributes
+                conferenceNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                conferenceNav.navigationBar.isTranslucent = false
+                navigationController?.present(conferenceNav, animated: true, completion: nil)
             } else if  message["message_scope_id"] as? String == "18" {
                 let formView = FormEditor()
                 let messageText =  message["message_text"]  as? String ?? ""
@@ -5747,7 +5775,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         messageText.font = .systemFont(ofSize: 12)
-        if dataMessages[indexPath.row]["attachment_flag"] as? String == "27" || dataMessages[indexPath.row]["attachment_flag"] as? String == "26" || dataMessages[indexPath.row]["message_scope_id"] as? String == "18" {
+        if dataMessages[indexPath.row]["attachment_flag"] as? String == "27" || dataMessages[indexPath.row]["attachment_flag"] as? String == "26" ||
+            dataMessages[indexPath.row]["attachment_flag"] as? String == "25" || dataMessages[indexPath.row]["message_scope_id"] as? String == "18" {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
             let imageLS = UIImageView()
             containerMessage.addSubview(imageLS)
@@ -5762,6 +5791,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                 imageLS.image = UIImage(named: "pb_seminar_wpr", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             } else if dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "27" {
                 imageLS.image = UIImage(named: "pb_live_tv", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+            } else if dataMessages[indexPath.row]["attachment_flag"] as! String == "25" {
+                imageLS.image = UIImage(named: "pb_vroom", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             } else if dataMessages[indexPath.row]["message_scope_id"] as? String == "18" {
                 imageLS.image = UIImage(systemName: "doc.richtext.fill")
                 imageLS.tintColor = .mainColor
@@ -5826,6 +5857,23 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                         stringLS = "\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm")) \nBroadcaster: \(name)"
                     } else {
                         stringLS = ("\(type) \nTitle: \(title) \nDescription: \(description) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm"))")
+                    }
+                    messageText.attributedText = stringLS.richText()
+                    messageText.isUserInteractionEnabled = false
+                }
+            }
+            else if attachmentFlag == "25" {
+                let data = textChat
+                if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                    let title = json["title"] as? String ?? ""
+                    let blog = json["blog"] as? String ?? ""
+                    let by = json["by"] as? String ?? ""
+                    let start = json["time"] as? Int64 ?? 0
+                    let textVCR = "Video Conference Room".localized()
+                    var type = "*\(textVCR)*"
+                    if let c = User.getData(pin: by) {
+                        let name = c.fullName
+                        stringLS = "\(type) \nTitle: \(title) \nStart: \(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm")) \nInitiator: \(name) \n\n*^Room ID: ^*\n*^\(blog)^*"
                     }
                     messageText.attributedText = stringLS.richText()
                     messageText.isUserInteractionEnabled = false

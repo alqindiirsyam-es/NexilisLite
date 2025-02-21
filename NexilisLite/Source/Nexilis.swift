@@ -2320,7 +2320,7 @@ extension Nexilis: CallDelegate {
                     isShowAlert = 0
                 }
             }
-            if (state == Nexilis.AUDIO_CALL_INCOMING && message.split(separator: ",")[1] != "joining Ac.room on channel 0") {
+            if (state == Nexilis.AUDIO_CALL_INCOMING && message.split(separator: ",")[1] != "joining Ac.room on channel 0" && message.split(separator: ",")[1] != "joining Vc.room on channel 0") {
                 if Nexilis.callAPNActivated || APIS.checkAppStateisBackground() {
                     return
                 }
@@ -2357,10 +2357,11 @@ extension Nexilis: CallDelegate {
                     UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
                 }
 //                    API.receiveCCall(sParty: String(deviceId))
-            } else if state == Nexilis.VIDEO_CALL_INCOMING {
+            } else if (state == Nexilis.VIDEO_CALL_INCOMING && message.split(separator: ",")[1] != "joining Ac.room on channel 0" && message.split(separator: ",")[1] != "joining Vc.room on channel 0") {
                 if Nexilis.callAPNActivated || APIS.checkAppStateisBackground() {
                     return
                 }
+                print("DATA: \(message)")
                 let dataUser = User.getDataCanNil(pin: String(deviceId))
                 if dataUser == nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {

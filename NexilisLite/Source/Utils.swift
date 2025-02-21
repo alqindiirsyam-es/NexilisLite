@@ -417,6 +417,8 @@ public final class Utils {
             return showNSMutableAttributedString(("📄 " + "Live Streaming".localized()))
         } else if chat.attachmentFlag == "26" {
             return showNSMutableAttributedString(("📄 " + "Seminar".localized()))
+        } else if chat.attachmentFlag == "25" {
+            return showNSMutableAttributedString("📄 " + "Video Conference Room".localized())
         } else if !chat.audio.isEmpty {
             return showNSMutableAttributedString(("♫ " + "Audio".localized()))
         } else if !chat.image.isEmpty {
