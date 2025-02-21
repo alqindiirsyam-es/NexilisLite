@@ -852,7 +852,6 @@ public class APIS: NSObject {
     
     public static var uuidCall: UUID?
     public static var fpinCall: String?
-    public static var listIdentifierNotif: [String] = []
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
 //        let center = UNUserNotificationCenter.current()
 //        let content = UNMutableNotificationContent()
@@ -873,31 +872,27 @@ public class APIS: NSObject {
                     if let messagePayload = payload["message"] as? [String: Any] {
                         if let data = messagePayload["data"] as? [String: Any] {
                             let code = data["nx_code"] as? String ?? ""
-//                            if API.nGetCLXConnState() == 0 {
-//                                do {
-//                                    let id = Utils.getConnectionID()
-//                                    try API.initConnection(bSwitchIP: false, sAPIK: Nexilis.sAPIKey, aAppMain: nil, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-//                                } catch {
-//
-//                                }
-//                                while (!API.bnuSDKServiceReady() || API.nGetCLXConnState() == 0) {
-//                                    Thread.sleep(forTimeInterval: 1)
-//                                }
-//                            }
                             while (!API.bnuSDKServiceReady() || API.nGetCLXConnState() == 0) {
                             }
                             if code == "CL01" {
                                 if let message = data["bodies"] as? [String: String] {
+                                    var messageExist = false
+                                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")'"), cursor.next() {
+                                            messageExist = true
+                                            cursor.close()
+                                        }
+                                    })
+                                    if messageExist {
+                                        return
+                                    }
                                     let messageToSave = TMessage()
                                     messageToSave.mBodies = message
                                     Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
                                     DispatchQueue.global().async {
                                         _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""))
                                     }
-                                    if !listIdentifierNotif.contains(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""){
-                                        listIdentifierNotif.append(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")
-                                        APIS.addNotificationNexilis(messageToSave)
-                                    }
+                                    APIS.addNotificationNexilis(messageToSave)
                                 }
                             } else if code == "CL03" {
                                 let callFromName = data["call-from-name"] as? String ?? ""

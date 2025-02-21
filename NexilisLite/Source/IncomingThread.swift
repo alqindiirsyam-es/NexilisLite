@@ -1272,6 +1272,13 @@ class IncomingThread {
             ack(message: message)
             return
         }
+        var messageExist = false
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))'"), cursor.next() {
+                messageExist = true
+                cursor.close()
+            }
+        })
         let media = message.getMedia()
         //print("MEDIA \(media)");
         let thumb_id = message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)
@@ -1281,12 +1288,7 @@ class IncomingThread {
             let url = documentDir.appendingPathComponent(thumb_id)
             //print("write thumb \(url.path)")
             try data.write(to: url, options: .atomic)
-//                let image = UIImage(data: data)
-//                if save {
-//                    UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-//                }
         } catch {
-            //print(error)
         }
         if (!thumb_id.isEmpty) {
             Download().startHTTP(forKey: thumb_id) { (file, progress) in
@@ -1301,8 +1303,7 @@ class IncomingThread {
         }
         DispatchQueue.main.async {
             if APIS.checkAppStateisBackground() {
-                if !APIS.listIdentifierNotif.contains(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)){
-                    APIS.listIdentifierNotif.append(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))
+                if !messageExist {
                     APIS.addNotificationNexilis(message)
                 }
             }
