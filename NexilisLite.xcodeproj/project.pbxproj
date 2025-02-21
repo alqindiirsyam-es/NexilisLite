@@ -125,6 +125,8 @@
 		CD2B01212D43945500C11B20 /* pb_gpt_bot.gif in Resources */ = {isa = PBXBuildFile; fileRef = CD2B01202D43945500C11B20 /* pb_gpt_bot.gif */; };
 		CD2B01242D43961E00C11B20 /* QRProfileController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2B01222D43961E00C11B20 /* QRProfileController.swift */; };
 		CD2B01252D43961E00C11B20 /* QRScannerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2B01232D43961E00C11B20 /* QRScannerController.swift */; };
+		CD43C80C2D687DBF00297C6E /* CreateConferenceCallController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD43C80A2D687DBF00297C6E /* CreateConferenceCallController.swift */; };
+		CD43C80D2D687DBF00297C6E /* VideoConferenceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD43C80B2D687DBF00297C6E /* VideoConferenceViewController.swift */; };
 		CD46A06B2A0CE307009E4C87 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = CD469FC82A0CE2DE009E4C87 /* Localizable.strings */; };
 		CD46A06C2A0CE307009E4C87 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CD46A0172A0CE2DE009E4C87 /* Assets.xcassets */; };
 		CD46A06D2A0CE307009E4C87 /* PreviewAttachmentImageVideo.xib in Resources */ = {isa = PBXBuildFile; fileRef = CD46A0182A0CE2DE009E4C87 /* PreviewAttachmentImageVideo.xib */; };
@@ -399,6 +401,8 @@
 		CD2B01202D43945500C11B20 /* pb_gpt_bot.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = pb_gpt_bot.gif; sourceTree = "<group>"; };
 		CD2B01222D43961E00C11B20 /* QRProfileController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRProfileController.swift; sourceTree = "<group>"; };
 		CD2B01232D43961E00C11B20 /* QRScannerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerController.swift; sourceTree = "<group>"; };
+		CD43C80A2D687DBF00297C6E /* CreateConferenceCallController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateConferenceCallController.swift; sourceTree = "<group>"; };
+		CD43C80B2D687DBF00297C6E /* VideoConferenceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoConferenceViewController.swift; sourceTree = "<group>"; };
 		CD469F502A0CC862009E4C87 /* NexilisLiteResources.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NexilisLiteResources.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD469FC92A0CE2DE009E4C87 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		CD469FCB2A0CE2DE009E4C87 /* sticker_10000000_5.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = sticker_10000000_5.png; sourceTree = "<group>"; };
@@ -743,6 +747,7 @@
 				CD1E71872A0BA86100BF871F /* Call.swift */,
 				CD1E717D2A0BA86100BF871F /* CallManager.swift */,
 				CD1E71812A0BA86100BF871F /* CallProviderDelegate.swift */,
+				CD43C80A2D687DBF00297C6E /* CreateConferenceCallController.swift */,
 				CD1E71882A0BA86100BF871F /* GroupView.swift */,
 				CD1E71802A0BA86100BF871F /* ProfileView.swift */,
 				CD1E717E2A0BA86100BF871F /* QmeraAudioConference.swift */,
@@ -750,6 +755,7 @@
 				CD1E71832A0BA86100BF871F /* QmeraCallContactViewController.swift */,
 				CD1E71852A0BA86100BF871F /* QmeraVideoViewController.swift */,
 				CDDF46792A2EF0A700049A19 /* ScreenSharingViewController.swift */,
+				CD43C80B2D687DBF00297C6E /* VideoConferenceViewController.swift */,
 				CD1E71862A0BA86100BF871F /* VideoViewController.swift */,
 				CD1E71842A0BA86100BF871F /* WhiteboardViewController.swift */,
 			);
@@ -1403,6 +1409,8 @@
 				CD1E6E6D2A0B7C3600BF871F /* NexilisLite.docc in Sources */,
 				CD1E72542A0BA86100BF871F /* ProfileViewController.swift in Sources */,
 				CD1E720B2A0BA86100BF871F /* FloatingButton.swift in Sources */,
+				CD43C80C2D687DBF00297C6E /* CreateConferenceCallController.swift in Sources */,
+				CD43C80D2D687DBF00297C6E /* VideoConferenceViewController.swift in Sources */,
 				CD1E72412A0BA86100BF871F /* ContactChatViewController.swift in Sources */,
 				CD1E72082A0BA86100BF871F /* Units.swift in Sources */,
 				CD1E720C2A0BA86100BF871F /* Whiteboard.swift in Sources */,
