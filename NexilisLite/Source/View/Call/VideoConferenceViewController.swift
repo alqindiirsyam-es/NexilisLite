@@ -64,6 +64,7 @@ class VideoConferenceViewController: UIViewController {
     let buttonAddParticipant = UIButton()
     let buttonSpeaker = UIButton()
     let buttonRotate = UIButton()
+    let buttonZoom = UIButton()
     var showStackViewToolbar = true
     let scrollRemoteView = UIScrollView()
     var isAutoAccept = false
@@ -75,6 +76,7 @@ class VideoConferenceViewController: UIViewController {
     var ticketId = ""
     var roomId = ""
     var isCalled = false
+    var isZoomIn = true
     private var frontCamera = true
     var timerCR : Timer?
     var users: [User] = []
@@ -197,12 +199,12 @@ class VideoConferenceViewController: UIViewController {
     }
     
     @objc func initiateConfRoom(){
-        API.initiateCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 0, nVQuality: 0, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+        API.initiateCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
         Nexilis.write(message: CoreMessage_TMessageBank.startVCallConference(blog_id: roomId, time: "\(Date().currentTimeMillis())"))
     }
     
     @objc func joinConfRoom(){
-        API.joinCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 0, nVQuality: 0, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+        API.joinCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
         Nexilis.write(message: CoreMessage_TMessageBank.joinVCallConference(blog_id: roomId))
     }
     
@@ -295,7 +297,10 @@ class VideoConferenceViewController: UIViewController {
         ])
         zoomView.backgroundColor = .secondaryColor
         zoomView.isUserInteractionEnabled = true
-        zoomView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(hideToolbar)))
+//        zoomView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(hideToolbar)))
+        let scaleX = self.view.bounds.height / self.view.bounds.width
+        let scaleY = self.view.bounds.width / self.view.bounds.height
+        self.zoomView.transform   = CGAffineTransform.init(scaleX: -scaleY, y: scaleX).rotated(by: -(CGFloat.pi * 3)/2)
     }
     
     func addCameraView() {
@@ -319,13 +324,19 @@ class VideoConferenceViewController: UIViewController {
             scrollRemoteView.topAnchor.constraint(equalTo: cameraView.bottomAnchor, constant: 10),
             scrollRemoteView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
             scrollRemoteView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
-            scrollRemoteView.widthAnchor.constraint(equalToConstant: 120.0)
+            scrollRemoteView.widthAnchor.constraint(equalToConstant: 130.0)
         ])
         
         scrollRemoteView.showsHorizontalScrollIndicator = false
         scrollRemoteView.showsVerticalScrollIndicator = false
         scrollRemoteView.contentSize.width = 120.0
         scrollRemoteView.backgroundColor = .clear
+        for i in 0...7 {
+            self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
+            self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
+            self.listRemoteViewFix[i].backgroundColor = .clear
+            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
+        }
     }
     
     func addBackgroundIncoming() {
@@ -602,6 +613,118 @@ class VideoConferenceViewController: UIViewController {
             } else if goVideoCall == -1 {
                 return
             }
+        }
+        
+        let spacing = 20.0
+        let size = 50.0
+        
+        self.view.addSubview(self.stackViewToolbar)
+        self.stackViewToolbar.axis = .horizontal
+        self.stackViewToolbar.distribution = .fillEqually // Distribute buttons equally
+        self.stackViewToolbar.spacing = 10 // Add spacing between buttons
+        self.stackViewToolbar.translatesAutoresizingMaskIntoConstraints = false
+        
+        self.buttonRotate.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.buttonRotate.widthAnchor.constraint(equalToConstant: size),
+            self.buttonRotate.heightAnchor.constraint(equalToConstant: size)
+        ])
+        self.buttonRotate.backgroundColor = .secondaryColor
+        self.buttonRotate.tintColor = .mainColor
+        self.buttonRotate.circle()
+        self.buttonRotate.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
+        self.buttonRotate.addTarget(self, action: #selector(camera(sender:)), for: .touchUpInside)
+        
+        self.buttonAddParticipant.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.buttonAddParticipant.widthAnchor.constraint(equalToConstant: size),
+            self.buttonAddParticipant.heightAnchor.constraint(equalToConstant: size)
+        ])
+        self.buttonAddParticipant.backgroundColor = .secondaryColor
+        self.buttonAddParticipant.tintColor = .mainColor
+        self.buttonAddParticipant.circle()
+        self.buttonAddParticipant.setImage(UIImage(systemName: "person.badge.plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
+        self.buttonAddParticipant.addTarget(self, action: #selector(didTapAddParticipantButton(sender:)), for: .touchUpInside)
+        
+        self.buttonSpeaker.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.buttonSpeaker.widthAnchor.constraint(equalToConstant: size),
+            self.buttonSpeaker.heightAnchor.constraint(equalToConstant: size)
+        ])
+        self.buttonSpeaker.backgroundColor = .lightGray
+        self.buttonSpeaker.tintColor = .mainColor
+        self.buttonSpeaker.circle()
+        self.buttonSpeaker.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
+        self.buttonSpeaker.addTarget(self, action: #selector(didTapSpeakerButton(sender:)), for: .touchUpInside)
+        
+        self.buttonZoom.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.buttonZoom.widthAnchor.constraint(equalToConstant: size),
+            self.buttonZoom.heightAnchor.constraint(equalToConstant: size)
+        ])
+        self.buttonZoom.backgroundColor = .secondaryColor
+        self.buttonZoom.tintColor = .mainColor
+        self.buttonZoom.circle()
+        self.buttonZoom.setImage(UIImage(systemName: "minus.magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
+        self.buttonZoom.addTarget(self, action: #selector(didTapZoomButton(sender:)), for: .touchUpInside)
+        
+        self.buttonDecline.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.buttonDecline.widthAnchor.constraint(equalToConstant: size),
+            self.buttonDecline.heightAnchor.constraint(equalToConstant: size)
+        ])
+        self.buttonDecline.backgroundColor = .red
+        self.buttonDecline.tintColor = .white
+        self.buttonDecline.circle()
+        self.buttonDecline.setImage(UIImage(systemName: "phone.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
+        self.buttonDecline.addTarget(self, action: #selector(didTapDeclineCallButton(sender:)), for: .touchUpInside)
+        
+        if isInisiator{
+            self.stackViewToolbar.addArrangedSubview(buttonAddParticipant)
+        }
+        self.stackViewToolbar.addArrangedSubview(buttonRotate)
+        self.stackViewToolbar.addArrangedSubview(buttonSpeaker)
+        self.stackViewToolbar.addArrangedSubview(buttonZoom)
+        self.stackViewToolbar.addArrangedSubview(buttonDecline)
+        
+        NSLayoutConstraint.activate([
+            self.stackViewToolbar.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            self.stackViewToolbar.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -60),
+            self.stackViewToolbar.heightAnchor.constraint(equalToConstant: 50),
+            self.stackViewToolbar.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.7)
+        ])
+        
+        self.view.addSubview(poweredByView)
+        self.poweredByView.translatesAutoresizingMaskIntoConstraints = false
+        let constraintRightPowered =  self.poweredByView.rightAnchor.constraint(equalTo: self.view.rightAnchor, constant: -10.0)
+        let constraintBottomPowered = self.poweredByView.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: -10.0)
+        NSLayoutConstraint.activate([
+            constraintRightPowered,
+            constraintBottomPowered,
+            nexilisLogo.widthAnchor.constraint(equalToConstant: 30.0),
+            nexilisLogo.heightAnchor.constraint(equalToConstant: 30.0)
+        ])
+        
+        poweredByView.addArrangedSubview(poweredByLabel)
+        poweredByView.addArrangedSubview(nexilisLogo)
+    }
+    
+    @objc func didTapAcceptCallButton2() {
+        if !isInisiator{
+            let goAudioCall = Nexilis.checkMicPermission()
+            let goVideoCall = Nexilis.checkCameraPermission()
+            if goVideoCall == 0 {
+                let alert = LibAlertController(title: "Attention!".localized(), message: !goAudioCall && goVideoCall == 0 ? "Please allow microphone & camera permission in your settings".localized() : !goAudioCall ? "Please allow microphone permission in your settings".localized() : "Please allow camera permission in your settings", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {_ in
+                    if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
+                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                    }
+                }))
+                self.navigationController?.present(alert, animated: true, completion: nil)
+                return
+            } else if goVideoCall == -1 {
+                return
+            }
 //            Nexilis.startAudio()
 //            if ticketId.isEmpty {
 //                API.receiveCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView,ivRemoteZ: zoomView)
@@ -620,9 +743,11 @@ class VideoConferenceViewController: UIViewController {
 //                self.constraintLeadingButtonDecline,
 //                self.constraintBottomButtonDecline
 //            ])
+            let spacing = 20.0
+            let size = 40.0
             self.view.addSubview(self.buttonDecline)
             self.buttonDecline.translatesAutoresizingMaskIntoConstraints = false
-            self.buttonDecline.frame.size = CGSize(width: 70.0, height: 70.0)
+            self.buttonDecline.frame.size = CGSize(width: size, height: size)
             if self.isInisiator {
                 self.constraintLeadingButtonDecline = self.buttonDecline.centerXAnchor.constraint(equalTo: self.view.centerXAnchor)
             } else {
@@ -632,16 +757,16 @@ class VideoConferenceViewController: UIViewController {
             NSLayoutConstraint.activate([
                 self.constraintBottomButtonDecline,
                 self.constraintLeadingButtonDecline,
-                self.buttonDecline.widthAnchor.constraint(equalToConstant: 70.0),
-                self.buttonDecline.heightAnchor.constraint(equalToConstant: 70.0)
+                self.buttonDecline.widthAnchor.constraint(equalToConstant: size),
+                self.buttonDecline.heightAnchor.constraint(equalToConstant: size)
             ])
             self.buttonDecline.backgroundColor = .red
             self.buttonDecline.circle()
-            self.buttonDecline.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            self.buttonDecline.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
             self.buttonDecline.tintColor = .white
             self.buttonDecline.addTarget(self, action: #selector(self.didTapDeclineCallButton(sender:)), for: .touchUpInside)
             self.addToolbarAfterAccept()
-            self.buttonDecline.setImage(UIImage(systemName: "phone.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            self.buttonDecline.setImage(UIImage(systemName: "phone.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
 //            UIView.animate(withDuration: 1.0, animations: {
 //                self.view.layoutIfNeeded()
 //            })
@@ -657,6 +782,7 @@ class VideoConferenceViewController: UIViewController {
                 self.buttonSpeaker.isHidden = false
                 self.buttonWB.isHidden = false
                 self.buttonChat.isHidden = false
+                self.buttonZoom.isHidden = false
                 self.poweredByView.isHidden = false
                 let connectDate = Date()
                 self.vcTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
@@ -740,6 +866,7 @@ class VideoConferenceViewController: UIViewController {
                 self.buttonSpeaker.isHidden = false
                 self.buttonAddParticipant.isHidden = false
                 self.buttonRotate.isHidden = false
+                self.buttonZoom.isHidden = false
 //                if(!self.wbRoomId.isEmpty){
 //                    DispatchQueue.main.async {
 //                        self.wbTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(self.runTimer), userInfo: nil, repeats: true)
@@ -751,6 +878,7 @@ class VideoConferenceViewController: UIViewController {
         self.buttonSpeaker.isHidden = true
         self.buttonAddParticipant.isHidden = true
         self.buttonRotate.isHidden = true
+        self.buttonZoom.isHidden = true
         addChild(wbVC!)
         wbVC!.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(wbVC!.view)
@@ -777,22 +905,24 @@ class VideoConferenceViewController: UIViewController {
             self.stackViewToolbar.centerXAnchor.constraint(equalTo: self.view.centerXAnchor),
             constraintBottomStackViewToolbar
         ])
+        let spacing = 20.0
+        let size = 40.0
         self.stackViewToolbar.axis = .horizontal
         self.stackViewToolbar.distribution = .equalSpacing
         self.stackViewToolbar.alignment = .center
-        self.stackViewToolbar.spacing = 30
+        self.stackViewToolbar.spacing = spacing
         
         self.view.addSubview(buttonRotate)
         buttonRotate.translatesAutoresizingMaskIntoConstraints = false
-        buttonRotate.frame.size = CGSize(width: 70.0, height: 70.0)
+        buttonRotate.frame.size = CGSize(width: size, height: size)
         NSLayoutConstraint.activate([
-            buttonRotate.widthAnchor.constraint(equalToConstant: 70.0),
-            buttonRotate.heightAnchor.constraint(equalToConstant: 70.0),
+            buttonRotate.widthAnchor.constraint(equalToConstant: size),
+            buttonRotate.heightAnchor.constraint(equalToConstant: size),
             buttonRotate.centerXAnchor.constraint(equalTo: self.view.centerXAnchor),
             buttonRotate.bottomAnchor.constraint(equalTo: self.stackViewToolbar.topAnchor, constant: -10.0)
         ])
         buttonRotate.backgroundColor = .secondaryColor
-        buttonRotate.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+        buttonRotate.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
         buttonRotate.tintColor = .mainColor
         buttonRotate.circle()
         buttonRotate.isHidden = true
@@ -801,13 +931,13 @@ class VideoConferenceViewController: UIViewController {
         if isInisiator {
             view.addSubview(buttonAddParticipant)
             buttonAddParticipant.translatesAutoresizingMaskIntoConstraints = false
-            buttonAddParticipant.frame.size = CGSize(width: 70.0, height: 70.0)
+            buttonAddParticipant.frame.size = CGSize(width: size, height: size)
             NSLayoutConstraint.activate([
-                buttonAddParticipant.widthAnchor.constraint(equalToConstant: 70.0),
-                buttonAddParticipant.heightAnchor.constraint(equalToConstant: 70.0)
+                buttonAddParticipant.widthAnchor.constraint(equalToConstant: size),
+                buttonAddParticipant.heightAnchor.constraint(equalToConstant: size)
             ])
             buttonAddParticipant.backgroundColor = .secondaryColor
-            buttonAddParticipant.setImage(UIImage(systemName: "person.badge.plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            buttonAddParticipant.setImage(UIImage(systemName: "person.badge.plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
             buttonAddParticipant.tintColor = .mainColor
             buttonAddParticipant.circle()
             buttonAddParticipant.isHidden = true
@@ -816,17 +946,31 @@ class VideoConferenceViewController: UIViewController {
         
         view.addSubview(buttonSpeaker)
         buttonSpeaker.translatesAutoresizingMaskIntoConstraints = false
-        buttonSpeaker.frame.size = CGSize(width: 70.0, height: 70.0)
+        buttonSpeaker.frame.size = CGSize(width: size, height: size)
         NSLayoutConstraint.activate([
-            buttonSpeaker.widthAnchor.constraint(equalToConstant: 70.0),
-            buttonSpeaker.heightAnchor.constraint(equalToConstant: 70.0)
+            buttonSpeaker.widthAnchor.constraint(equalToConstant: size),
+            buttonSpeaker.heightAnchor.constraint(equalToConstant: size)
         ])
-        buttonSpeaker.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+        buttonSpeaker.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
         self.buttonSpeaker.backgroundColor = .lightGray
         self.buttonSpeaker.tintColor = .mainColor
         buttonSpeaker.circle()
         buttonSpeaker.isHidden = true
         buttonSpeaker.addTarget(self, action: #selector(didTapSpeakerButton(sender:)), for: .touchUpInside)
+        
+        view.addSubview(buttonZoom)
+        buttonZoom.translatesAutoresizingMaskIntoConstraints = false
+        buttonZoom.frame.size = CGSize(width: size, height: size)
+        NSLayoutConstraint.activate([
+            buttonZoom.widthAnchor.constraint(equalToConstant: size),
+            buttonZoom.heightAnchor.constraint(equalToConstant: size)
+        ])
+        buttonZoom.setImage(UIImage(systemName: "minus.magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
+        self.buttonZoom.backgroundColor = .lightGray
+        self.buttonZoom.tintColor = .mainColor
+        buttonZoom.circle()
+        buttonZoom.isHidden = true
+        buttonZoom.addTarget(self, action: #selector(didTapZoomButton(sender:)), for: .touchUpInside)
         
         self.view.addSubview(self.stackViewToolbar2)
         self.stackViewToolbar2.translatesAutoresizingMaskIntoConstraints = false
@@ -867,11 +1011,11 @@ class VideoConferenceViewController: UIViewController {
         
         poweredByView.addArrangedSubview(poweredByLabel)
         poweredByView.addArrangedSubview(nexilisLogo)
-        poweredByView.isHidden = true
         
         stackViewToolbar.addArrangedSubview(buttonAddParticipant)
         stackViewToolbar.addArrangedSubview(buttonDecline)
         stackViewToolbar.addArrangedSubview(buttonSpeaker)
+        stackViewToolbar.addArrangedSubview(buttonZoom)
         stackViewToolbar2.addArrangedSubview(buttonWB)
         stackViewToolbar2.addArrangedSubview(buttonChat)
 //        startFaceTimer()
@@ -951,6 +1095,28 @@ class VideoConferenceViewController: UIViewController {
     
     @objc func didTapSpeakerButton(sender: AnyObject){
         setSpeaker(isSpeaker: !(self.isSpeaker))
+    }
+    
+    @objc func didTapZoomButton(sender: AnyObject){
+        let scaleX = self.view.bounds.height / self.view.bounds.width
+        let scaleY = self.view.bounds.width / self.view.bounds.height
+        if isZoomIn {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        UIView.animate(withDuration: 0.5, animations: {
+                            self.zoomView.transform = CGAffineTransform(scaleX: -0.5 * scaleY, y: 0.5 * scaleX).rotated(by: -(CGFloat.pi * 3)/2)
+                        })
+                    }
+            buttonZoom.setImage(UIImage(systemName: "plus.magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+        }
+        else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        UIView.animate(withDuration: 0.5, animations: {
+                            self.zoomView.transform = CGAffineTransform(scaleX: -scaleY, y: scaleX).rotated(by: -(CGFloat.pi * 3)/2)
+                        })
+                    }
+            buttonZoom.setImage(UIImage(systemName: "minus.magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+        }
+        isZoomIn = !isZoomIn
     }
     
     @objc func didTapAddParticipantButton(sender: AnyObject){
