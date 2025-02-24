@@ -572,21 +572,25 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     DispatchQueue.main.async {
                         let section = self.dataDates.firstIndex(of: self.referenceChatDate)
                         let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.referenceChatDate}).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
-                        let indexPath = IndexPath(row: row!, section: section!)
-                        self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: false)
-                        self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                            self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
-                        })
+                        if row != nil && section != nil {
+                            let indexPath = IndexPath(row: row!, section: section!)
+                            self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: false)
+                            self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                                self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
+                            })
+                        }
                     }
                 }
             } else if counter != 0 && dataMessages.count >= counter {
                 if dataMessages.firstIndex(where: {$0["message_id"] as? String == markerCounter} ) != 0 {
                     DispatchQueue.main.async {
                         let data = self.dataMessages.filter({ $0["message_id"] as? String == self.markerCounter })
-                        let section = self.dataDates.firstIndex(of: data[0]["chat_date"]  as? String ?? "")
-                        let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == data[0]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.markerCounter})
-                        self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .bottom, animated: false)
+                        if data.count > 0 {
+                            let section = self.dataDates.firstIndex(of: data[0]["chat_date"]  as? String ?? "")
+                            let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == data[0]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.markerCounter})
+                            self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .bottom, animated: false)
+                        }
                     }
                 } else {
                     tableChatView.scrollToTop()

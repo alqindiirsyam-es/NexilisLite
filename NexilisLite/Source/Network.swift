@@ -184,15 +184,15 @@ public class Network {
         }
     }
     
-    public func uploadHTTP(name: String, completion: @escaping (Bool, Double, [String:Any]?)->()) {
+    public func uploadHTTP(name: String, completion: @escaping (Bool, Double)->()) {
         _ = uploadHTTP(UPLOAD_URL, filename: [name], completion: completion)
     }
     
-    public func uploadHTTP(fileUrl: URL, completion: @escaping (Bool, Double, [String:Any]?)->()) {
+    public func uploadHTTP(fileUrl: URL, completion: @escaping (Bool, Double)->()) {
         _ = uploadHTTP(UPLOAD_URL, files: [fileUrl], completion: completion)
     }
     
-    public func uploadHTTP(_ endUrl: String, files: [URL] = [], filename: [String] = [], parameters: [String : Any] = [:], completion: @escaping (Bool, Double, [String:Any]?)->()) -> UploadRequest {
+    public func uploadHTTP(_ endUrl: String, files: [URL] = [], filename: [String] = [], parameters: [String : Any] = [:], completion: @escaping (Bool, Double)->()) -> UploadRequest {
         
         var filesIn = [URL]()
         var filesTempServer = [URL]()
@@ -218,6 +218,7 @@ public class Network {
                         let fileDirServer = tempDir.appendingPathComponent(filenameServer)
                         let fileURLServer = URL(fileURLWithPath: fileDirServer.path)
                         try FileEncryption.shared.encryptFile(fileURL, fileURLServer, MasterKeyUtil.shared.getServerKey())
+                        print("ADA KAN? \(fileURL) <><> \(fileURLServer)")
 //                        let dataSecure = try FileEncryption.shared.encryptFile(fileURL)
 //                        dataSecure?.write(to: fileURLSecure)
                         filesIn.append(fileURL)
@@ -260,25 +261,25 @@ public class Network {
             
         }, to: endUrl, headers: headers)
         .responseJSON { result in
-            if let response = result.response, response.statusCode == 200, let successResponse = result.value as? [String:Any] {
+            if let response = result.response, response.statusCode == 200 {
                 //print("Response success")
                 for url in filesTempServer {
                     Nexilis.removeUploadFile(forKey: url.lastPathComponent)
                 }
-                completion(true,100,successResponse)
+                completion(true,100)
                 
             }
             else {
                 let statusCode = result.response?.statusCode
-                //print("Response fail: \(statusCode)")
-                completion(false,0,nil)
+                print("Response fail: \(statusCode) <><> \(result)")
+                completion(false,0)
             }
         }
         .uploadProgress { progress in
             //print("Response progress: \(progress.fractionCompleted*100)")
             let frac = progress.fractionCompleted*100
             if frac != 100.0 {
-                completion(!progress.isCancelled,frac,nil)
+                completion(!progress.isCancelled,frac)
             }
         }
         

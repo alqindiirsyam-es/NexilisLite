@@ -876,21 +876,25 @@ public class APIS: NSObject {
                             }
                             if code == "CL01" {
                                 if let message = data["bodies"] as? [String: String] {
-                                    var messageExist = false
-                                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")'"), cursor.next() {
-                                            messageExist = true
-                                            cursor.close()
-                                        }
-                                    })
-                                    if messageExist {
-                                        return
-                                    }
                                     let messageToSave = TMessage()
                                     messageToSave.mBodies = message
-                                    Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
-                                    DispatchQueue.global().async {
-                                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""))
+                                    do {
+                                        var messageExist = false
+                                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")'"), cursor.next() {
+                                                messageExist = true
+                                                cursor.close()
+                                            }
+                                        })
+                                        if messageExist {
+                                            return
+                                        }
+                                        Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
+                                        DispatchQueue.global().async {
+                                            _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""))
+                                        }
+                                    } catch {
+                                        print("error saving message: \(error)")
                                     }
                                     APIS.addNotificationNexilis(messageToSave)
                                 }
@@ -1257,7 +1261,7 @@ public class APIS: NSObject {
         Nexilis.destroyAll()
     }
     
-    private static func checkDataForShareExtension() {
+    public static func checkDataForShareExtension() {
         DispatchQueue.global().async {
             if let userDefaults = UserDefaults(suiteName: "group.nexilis.share") {
                 if let value = userDefaults.string(forKey: "sharedItem") {

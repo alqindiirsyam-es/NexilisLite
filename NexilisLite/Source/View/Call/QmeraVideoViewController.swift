@@ -1004,12 +1004,14 @@ class QmeraVideoViewController: UIViewController {
     }
     
     @objc func camera(sender: Any?) {
-        if frontCamera {
-            API.changeCameraParam(nCameraIdx: 0, nResolutionIndex: 2, nQuality: 4)
-            frontCamera = false
-        } else {
-            API.changeCameraParam(nCameraIdx: 1, nResolutionIndex: 2, nQuality: 4)
-            frontCamera = true
+        DispatchQueue.global().async { [self] in
+            if frontCamera {
+                API.changeCameraParam(nCameraIdx: 0, nResolutionIndex: 2, nQuality: 4)
+                frontCamera = false
+            } else {
+                API.changeCameraParam(nCameraIdx: 1, nResolutionIndex: 2, nQuality: 4)
+                frontCamera = true
+            }
         }
     }
     
@@ -1066,21 +1068,11 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         }
-        else if(state == Nexilis.VIDEO_CALL_ZOOM){
-            DispatchQueue.main.async {
-                if self.dataPerson.count > 1 {
-                    if !self.transformZoomAfterNewUserMore2 {
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi * 3)/2)
-                        self.transformZoomAfterNewUserMore2 = true
-                    }
-                }
-            }
-        }
         else if (state == Nexilis.VIDEO_CAMERA_PARAMS_CHANED){
             if(arrayMessage[3] == "0"){
                 DispatchQueue.main.async {
                     if self.dataPerson.count == 1 && arrayMessage[2] == "1" && arrayMessage[4] == "1" {
-                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi * 3)/2)
+                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
                     } else {
                         self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
                     }
@@ -1106,13 +1098,13 @@ class QmeraVideoViewController: UIViewController {
                             if self.dataPerson[0]["user_type"] == "2" {
                                 self.listRemoteViewFix[0].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
                             } else {
-                                self.listRemoteViewFix[0].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi * 3 )/2)
+                                self.listRemoteViewFix[0].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
                             }
                         } else {
                             if arrayMessage[5] == "2" {
                                 self.listRemoteViewFix[1].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
                             } else {
-                                self.listRemoteViewFix[1].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi * 3 )/2)
+                                self.listRemoteViewFix[1].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
                             }
                         }
                         let pictureImage = self.dataPerson[i]["picture"] ?? ""
@@ -1148,66 +1140,70 @@ class QmeraVideoViewController: UIViewController {
                         }
                     }
                 } else if self.dataPerson.count > 1 {
-                    if self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[1]}) != nil {
-                        return
-                    }
-                    self.getDataProfile(fPin: String(arrayMessage[1]))
-                    let i = self.dataPerson.count - 1
-                    self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
-                    self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
-                    self.listRemoteViewFix[i].backgroundColor = .clear
-                    self.listRemoteViewFix[i].makeRoundedView(radius: 8.0)
-                    self.scrollRemoteView.addSubview(self.containerLabelName[i])
-                    self.containerLabelName[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 30)
-                    self.containerLabelName[i].backgroundColor = .orangeBNI.withAlphaComponent(0.5)
-                    self.containerLabelName[i].makeRoundedView(radius: 8.0)
-                    if arrayMessage[5] == "2" {
-                        self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
-                    } else {
-                        self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi * 3 )/2)
-                    }
-                    let pictureImage = self.dataPerson[self.dataPerson.count - 1]["picture"] ?? ""
-                    let namePerson = self.dataPerson[self.dataPerson.count - 1]["name"] ?? ""
-                    if (!pictureImage!.isEmpty) {
-                        self.listRemoteViewFix[i].setImage(name: pictureImage!)
-                        self.listRemoteViewFix[i].contentMode = .scaleAspectFill
-                    } else {
-                        self.listRemoteViewFix[i].image = UIImage(systemName: "person")
-                        self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
-                        self.listRemoteViewFix[i].contentMode = .scaleAspectFit
-                    }
-                    self.scrollRemoteView.contentSize.height = CGFloat(170 * (i + 1))
-                    let labelName = UILabel()
-                    self.containerLabelName[i].addSubview(labelName)
-                    labelName.anchor(left: self.containerLabelName[i].leftAnchor, right: self.containerLabelName[i].rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: self.containerLabelName[i].centerXAnchor, centerY: self.containerLabelName[i].centerYAnchor)
-                    labelName.text = namePerson
-                    labelName.textAlignment = .center
-                    labelName.textColor = .white
-                }
-            }
-            if users.count >= 1, let user = User.getData(pin: String(arrayMessage[1])), !users.contains(user) {
-                self.users.append(user)
-            }
-            if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
-                DispatchQueue.main.async {
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
-                    self.zoomView.contentMode = .scaleAspectFit
-                }
-            }
-            else if self.dataPerson.count == 1 {
-                DispatchQueue.main.async {
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi * 3)/2)
-                    self.zoomView.contentMode = .scaleAspectFit
-                }
-            } else if self.dataPerson.count > 1 {
-                DispatchQueue.main.async {
-                    for i in 0..<self.dataPerson.count {
-//                        self.listRemoteViewFix[i].image = self.listRemoteViewFix[i].image?.rotate(radians: (CGFloat.pi * 3 )/2)
-                        self.listRemoteViewFix[i].image = nil
-                        if self.dataPerson[i]["user_type"] == "2" || arrayMessage[5] == "2" {
+                    if self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[1]}) == nil {
+                        self.getDataProfile(fPin: String(arrayMessage[1]))
+                        let i = self.dataPerson.count - 1
+                        self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
+                        self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
+                        self.listRemoteViewFix[i].backgroundColor = .clear
+                        self.listRemoteViewFix[i].makeRoundedView(radius: 8.0)
+                        self.scrollRemoteView.addSubview(self.containerLabelName[i])
+                        self.containerLabelName[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 30)
+                        self.containerLabelName[i].backgroundColor = .orangeBNI.withAlphaComponent(0.5)
+                        self.containerLabelName[i].makeRoundedView(radius: 8.0)
+                        if arrayMessage[5] == "2" {
                             self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
                         } else {
-                            self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi * 3 )/2)
+                            self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
+                        }
+                        let pictureImage = self.dataPerson[self.dataPerson.count - 1]["picture"] ?? ""
+                        let namePerson = self.dataPerson[self.dataPerson.count - 1]["name"] ?? ""
+                        if (!pictureImage!.isEmpty) {
+                            self.listRemoteViewFix[i].setImage(name: pictureImage!)
+                            self.listRemoteViewFix[i].contentMode = .scaleAspectFill
+                        } else {
+                            self.listRemoteViewFix[i].image = UIImage(systemName: "person")
+                            self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
+                            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
+                        }
+                        self.scrollRemoteView.contentSize.height = CGFloat(170 * (i + 1))
+                        let labelName = UILabel()
+                        self.containerLabelName[i].addSubview(labelName)
+                        labelName.anchor(left: self.containerLabelName[i].leftAnchor, right: self.containerLabelName[i].rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: self.containerLabelName[i].centerXAnchor, centerY: self.containerLabelName[i].centerYAnchor)
+                        labelName.text = namePerson
+                        labelName.textAlignment = .center
+                        labelName.textColor = .white
+                    }
+                }
+                
+                if self.users.count >= 1, let user = User.getData(pin: String(arrayMessage[1])), !self.users.contains(user) {
+                    self.users.append(user)
+                }
+                if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
+                    print("masuk 1")
+                    DispatchQueue.main.async {
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
+                        self.zoomView.contentMode = .scaleAspectFit
+                    }
+                }
+                else if self.dataPerson.count == 1 {
+                    print("masuk 2")
+                    DispatchQueue.main.async {
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
+                        self.zoomView.contentMode = .scaleAspectFit
+                    }
+                } else if self.dataPerson.count > 1 {
+                    print("masuk 3")
+                    DispatchQueue.main.async {
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
+                        self.zoomView.contentMode = .scaleAspectFit
+                        for i in 0..<self.dataPerson.count {
+                            self.listRemoteViewFix[i].image = nil
+                            if self.dataPerson[i]["user_type"] == "2" || arrayMessage[5] == "2" {
+                                self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
+                            } else {
+                                self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
+                            }
                         }
                     }
                 }

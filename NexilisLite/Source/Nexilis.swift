@@ -3704,9 +3704,9 @@ extension Nexilis: MessageDelegate {
                 if !onGoingCC.isEmpty {
                     return
                 }
-                if Utils.inTabChats{
-                    return
-                }
+//                if Utils.inTabChats{
+//                    return
+//                }
                 if message.getBody(key: messageScopeId) == "3" || message.getBody(key: messageScopeId) == "18" || message.getBody(key: messageScopeId) == "5" {
                     if inEditorPersonal == sender || (inEditorPersonal != nil && inEditorPersonal!.contains(",")) {
                         return
@@ -3917,7 +3917,6 @@ extension Nexilis: MessageDelegate {
                             profileImage.tintColor = .white
                         }
                         
-                        print("SHOW KAH?0")
                         floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
     //                    let vibrateMode: Bool = SecureUserDefaults.shared.value(forKey: "vibrateMode") ?? false
                         var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"

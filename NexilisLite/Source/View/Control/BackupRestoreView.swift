@@ -886,7 +886,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         //print("Adding entry to ZIP archive failed with error:\(error)")
                     }
                     self.labelPreparing.text = "Uploading...".localized()
-                    Network().uploadHTTP(fileUrl: zipFiles, completion: { result,progress,response in
+                    Network().uploadHTTP(fileUrl: zipFiles, completion: { result,progress in
                         if result {
                             DispatchQueue.main.async { [self] in
                                 labelPreparing.text = "Uploading...".localized() + " \(progress)%"

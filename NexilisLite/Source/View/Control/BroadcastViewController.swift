@@ -409,10 +409,10 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
             clearAttachment()
         }
         if !thumbId.isEmpty {
-            Network().uploadHTTP(name: String(thumbId)) { (result1, progress, response1) in
+            Network().uploadHTTP(name: String(thumbId)) { (result1, progress) in
                 if result1 {
                     if progress == 100 {
-                        Network().uploadHTTP(name: String(self.fileId)) { (result2, progress, response2) in
+                        Network().uploadHTTP(name: String(self.fileId)) { (result2, progress) in
                             if result2 {
                                 if progress == 100 {
                                     self.sendMsg(startTime: startTime, endTime: endTime)
@@ -428,7 +428,7 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
                 }
             }
         } else if !fileId.isEmpty {
-            Network().uploadHTTP(name: String(fileId)) { (result2, progress, response2) in
+            Network().uploadHTTP(name: String(fileId)) { (result2, progress) in
                 if result2 {
                     if progress == 100 {
                         self.sendMsg(startTime: startTime, endTime: endTime)

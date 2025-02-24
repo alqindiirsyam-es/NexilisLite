@@ -31,6 +31,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     var imageVideoPicker: ImageVideoPicker!
     var blockedCertificate = ""
     var allowedURLs = Set<String>()
+    var loadingURL = false
     
     public override var preferredStatusBarStyle: UIStatusBarStyle {
         return .default
@@ -473,6 +474,9 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                   let param1 = dict["param1"] as? String else {
                 return
             }
+            if loadingURL {
+                return
+            }
             let activityViewController = UIActivityViewController(activityItems: [param1], applicationActivities: nil)
             self.present(activityViewController, animated: true, completion: nil)
         }  else if message.name == "openGalleryiOS" {
@@ -752,6 +756,11 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
             decisionHandler(.cancel)
             return
         }
+        if loadingURL {
+            decisionHandler(.cancel)
+            return
+        }
+        loadingURL = true
         if allowedURLs.contains(url.absoluteString) {
             print("✅ URL already allowed: \(url)")
             decisionHandler(.allow)

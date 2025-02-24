@@ -871,7 +871,7 @@ extension ProfileViewController: ImageVideoPickerDelegate {
                 let fileDir = documentDir.appendingPathComponent("THUMB_\(me)\(Date().currentTimeMillis().toHex()).jpg")
                 if !FileManager.default.fileExists(atPath: fileDir.path) {
                     try! data.write(to: fileDir)
-                    Network().uploadHTTP(name: fileDir.lastPathComponent) { result, progress , response in
+                    Network().uploadHTTP(name: fileDir.lastPathComponent) { result, progress in
                         guard result else {
                             DispatchQueue.main.async {
                                 Nexilis.hideLoader(completion: { [self] in

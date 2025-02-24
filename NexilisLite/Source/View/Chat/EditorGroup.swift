@@ -116,17 +116,22 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
-            SecureUserDefaults.shared.removeValue(forKey: "inEditorGroup")
-            NotificationCenter.default.removeObserver(self)
-            super.viewDidDisappear(true)
-            self.removeFromParent()
-            self.dismiss(animated: true, completion: nil)
-            var l_pin = self.dataGroup["group_id"]  as? String ?? ""
-            if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
-                l_pin = self.dataTopic["chat_id"]  as? String ?? ""
-            }
-            SecureUserDefaults.shared.set("\(textFieldSend.textColor != UIColor.lightGray ? textFieldSend.text! : ""),\(reffId ?? "")", forKey: "saved_\(l_pin)")
+            removeAllObjectBeforeDismissVC()
         }
+    }
+    
+    private func removeAllObjectBeforeDismissVC() {
+        for timer in self.timerCredential.values {
+            timer.invalidate()
+        }
+        SecureUserDefaults.shared.removeValue(forKey: "inEditorGroup")
+        NotificationCenter.default.removeObserver(self)
+        self.removeFromParent()
+        var l_pin = self.dataGroup["group_id"]  as? String ?? ""
+        if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
+            l_pin = self.dataTopic["chat_id"]  as? String ?? ""
+        }
+        SecureUserDefaults.shared.set("\(textFieldSend.textColor != UIColor.lightGray ? textFieldSend.text! : ""),\(reffId ?? "")", forKey: "saved_\(l_pin)")
     }
     
     public override func viewDidAppear(_ animated: Bool) {
@@ -429,21 +434,25 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 DispatchQueue.main.async {
                     let section = self.dataDates.firstIndex(of: self.referenceChatDate)
                     let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.referenceChatDate}).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
-                    let indexPath = IndexPath(row: row!, section: section!)
-                    self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: false)
-                    self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                        self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
-                    })
+                    if row != nil && section != nil {
+                        let indexPath = IndexPath(row: row!, section: section!)
+                        self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: false)
+                        self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                            self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
+                        })
+                    }
                 }
             }
         } else if counter != 0 {
             if dataMessages.firstIndex(where: {$0["message_id"] as? String == markerCounter} ) != 0 {
                 DispatchQueue.main.async {
                     let data = self.dataMessages.filter({ $0["message_id"] as? String == self.markerCounter })
-                    let section = self.dataDates.firstIndex(of: data[0]["chat_date"]  as? String ?? "")
-                    let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == data[0]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.markerCounter})
-                    self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .bottom, animated: false)
+                    if data.count > 0 {
+                        let section = self.dataDates.firstIndex(of: data[0]["chat_date"]  as? String ?? "")
+                        let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == data[0]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.markerCounter})
+                        self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .bottom, animated: false)
+                    }
                 }
             } else {
                 tableChatView.scrollToTop()
@@ -1530,9 +1539,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     @objc func didTapExit() {
-        SecureUserDefaults.shared.removeValue(forKey: "inEditorGroup")
-        NotificationCenter.default.removeObserver(self)
-        self.dismiss(animated: true, completion: nil)
+        removeAllObjectBeforeDismissVC()
     }
     
     @objc func profilePersonTapped(_ sender: ObjectGesture) {

@@ -1059,7 +1059,7 @@ extension GroupDetailViewController: ImageVideoPickerDelegate {
                     DispatchQueue.main.async {
                         Nexilis.showLoader()
                     }
-                    Network().uploadHTTP(name: fileDir.lastPathComponent) { result, progress , response in
+                    Network().uploadHTTP(name: fileDir.lastPathComponent) { result, progress in
                         guard result, progress == 100 else {
                             return
                         }

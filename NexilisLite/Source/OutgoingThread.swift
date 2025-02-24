@@ -163,7 +163,7 @@ class OutgoingThread {
                 maxRetryUploadTime[message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)] = Date().currentTimeMillis()
             }
             if (!message.getBody(key: CoreMessage_TMessageKey.THUMB_ID).isEmpty) {
-                Network().uploadHTTP(name: message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)) { (result, progress, response) in
+                Network().uploadHTTP(name: message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)) { (result, progress) in
                     if result, progress == 100 {
                         do {
                             let fileManager = FileManager.default
@@ -175,12 +175,11 @@ class OutgoingThread {
                                 message.setMedia(media: [UInt8] (data))
                             }
                         } catch {}
-                        Network().uploadHTTP(name: fileName) { (result, progress, response) in
+                        Network().uploadHTTP(name: fileName) { (result, progress) in
                             if result {
                                 if let delegate = Nexilis.shared.messageDelegate {
                                     delegate.onUpload(name: fileName, progress: progress)
                                 }
-                                print("progress upload", progress)
                                 if progress == 100 {
                                     if let response = Nexilis.writeSync(message: message) {
                                         print("sendChat", response.toLogString())
@@ -202,21 +201,24 @@ class OutgoingThread {
                                             
                                         }
                                     } else {
+                                        print("masuk 1")
                                         self.retryUpload(message: message, fileName: fileName)
                                     }
                                 }
                             } else {
+                                print("masuk 2")
                                 self.retryUpload(message: message, fileName: fileName)
                             }
                         }
                     } else {
+                        print("masuk 3")
                         if !result {
                             self.retryUpload(message: message, fileName: fileName)
                         }
                     }
                 }
             } else {
-                Network().uploadHTTP(name: fileName) { (result, progress, response) in
+                Network().uploadHTTP(name: fileName) { (result, progress) in
                     if result {
                         if let delegate = Nexilis.shared.messageDelegate {
                             delegate.onUpload(name: fileName, progress: progress)
@@ -346,7 +348,16 @@ class OutgoingThread {
                     }
                 }
                 //print("retry sukses")
-                sendChat(message: message)
+                var messageExist = false
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))'"), cursor.next() {
+                        messageExist = true
+                        cursor.close()
+                    }
+                })
+                if messageExist {
+                    sendChat(message: message)
+                }
             })
         }
     }

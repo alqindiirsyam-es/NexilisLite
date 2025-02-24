@@ -379,14 +379,14 @@ class IncomingThread {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             let channelCC: String = SecureUserDefaults.shared.value(forKey: "channelCC") ?? ""
-            if !onGoingCC.isEmpty && onGoingCC.components(separatedBy: ",").count < 3 {
+            if onGoingCC.isEmpty || channelCC.isEmpty || (!onGoingCC.isEmpty && onGoingCC.components(separatedBy: ",").count < 3) {
                 SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
                 SecureUserDefaults.shared.removeValue(forKey: "channelCC")
                 return
             }
-            let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
-            let fPinCC = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-            if fPinCC == User.getMyPin() || fPinCC.isEmpty || complaintId.isEmpty {
+            let complaintId = onGoingCC.components(separatedBy: ",")[2]
+            let fPinCC = onGoingCC.components(separatedBy: ",")[1]
+            if fPinCC == User.getMyPin() {
                 return
             }
             if channelCC == "1" {
@@ -1284,6 +1284,17 @@ class IncomingThread {
                 cursor.close()
             }
         })
+        DispatchQueue.main.async {
+            if APIS.checkAppStateisBackground() {
+                if !messageExist {
+                    let message_id = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
+                    DispatchQueue.global().async {
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message_id))
+                    }
+                    APIS.addNotificationNexilis(message)
+                }
+            }
+        }
         let media = message.getMedia()
         //print("MEDIA \(media)");
         let thumb_id = message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)
@@ -1306,19 +1317,11 @@ class IncomingThread {
         } else {
             Nexilis.saveMessage(message: message, withStatus: false)
         }
-        DispatchQueue.main.async {
-            if APIS.checkAppStateisBackground() {
-                if !messageExist {
-                    APIS.addNotificationNexilis(message)
-                }
-            }
-        }
         //print("save message incoming")
         ack(message: message)
     }
     
     private func receiveMessageStatus(message: TMessage) -> Void {
-        let message_id = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
         guard let _: String = SecureUserDefaults.shared.value(forKey: "status") else {
             //print("App not ready!!! skip receive message \(message_id)")
             return
