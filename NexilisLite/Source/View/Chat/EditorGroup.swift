@@ -1539,7 +1539,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     @objc func didTapExit() {
-        removeAllObjectBeforeDismissVC()
+        self.dismiss(animated: true, completion: {
+            self.removeAllObjectBeforeDismissVC()
+        })
     }
     
     @objc func profilePersonTapped(_ sender: ObjectGesture) {
