@@ -3836,6 +3836,22 @@ extension Nexilis: MessageDelegate {
                         return
                     }
                     
+                    if UIApplication.shared.visibleViewController is UINavigationController {
+                        let nc = UIApplication.shared.visibleViewController as! UINavigationController
+                        if nc.visibleViewController is QmeraStreamingViewController {
+                            return
+                        } else if nc.visibleViewController is SeminarViewController {
+                            return
+                        }
+                        if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
+                            if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
+                                navigationC.popViewController(animated: true)
+                            }
+                        }
+                    } else if UIApplication.shared.visibleViewController is UIAlertController {
+                        return
+                    }
+                    
                     displayNotif()
                     
                     func displayNotif() {
@@ -4011,197 +4027,57 @@ extension Nexilis: MessageDelegate {
                             }
                         })
                         if message.getBody(key: messageScopeId) == "3" || message.getBody(key: messageScopeId) == "18" || message.getBody(key: messageScopeId) == "5" {
-                            func openEditor() {
-                                let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
-                                editorPersonalVC.hidesBottomBarWhenPushed = true
-                                editorPersonalVC.unique_l_pin = threadIdentifier
-                                editorPersonalVC.fromNotification = true
-                                if !onGoingCC.isEmpty {
-                                    let compalintId = onGoingCC.components(separatedBy: ",")[2]
-                                    let fPinCC = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-                                    editorPersonalVC.isContactCenter = true
-                                    editorPersonalVC.fPinContacCenter = fPinCC
-                                    editorPersonalVC.complaintId = compalintId
-                                    editorPersonalVC.onGoingCC = true
-                                    editorPersonalVC.isRequestContactCenter = false
-                                }
-                                let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
-                                navigationController.modalPresentationStyle = .fullScreen
-                                navigationController.navigationBar.tintColor = .white
-                                navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-                                navigationController.navigationBar.isTranslucent = false
-                                navigationController.navigationBar.overrideUserInterfaceStyle = .dark
-                                navigationController.navigationBar.barStyle = .black
-                                let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-                                let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-                                navigationController.navigationBar.titleTextAttributes = textAttributes
-                                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                                } else {
-                                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                                }
+                            let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+                            editorPersonalVC.hidesBottomBarWhenPushed = true
+                            editorPersonalVC.unique_l_pin = threadIdentifier
+                            editorPersonalVC.fromNotification = true
+                            if !onGoingCC.isEmpty {
+                                let compalintId = onGoingCC.components(separatedBy: ",")[2]
+                                let fPinCC = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                                editorPersonalVC.isContactCenter = true
+                                editorPersonalVC.fPinContacCenter = fPinCC
+                                editorPersonalVC.complaintId = compalintId
+                                editorPersonalVC.onGoingCC = true
+                                editorPersonalVC.isRequestContactCenter = false
                             }
-                            if UIApplication.shared.visibleViewController is UINavigationController {
-                                let nc = UIApplication.shared.visibleViewController as! UINavigationController
-                                if nc.visibleViewController is QmeraStreamingViewController {
-                                    let vc = nc.visibleViewController as! QmeraStreamingViewController
-                                    var alert = LibAlertController(title: "", message: "Are you sure you want to end Live Streaming, and open notification?".localized(), preferredStyle: .alert)
-                                    if !vc.isLive {
-                                        alert = LibAlertController(title: "", message: "Are you sure you want to leave Live Streaming, and open notification?".localized(), preferredStyle: .alert)
-                                    }
-                                    alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
-                                    alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                        DispatchQueue.global().async {
-                                            API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
-                                            vc.sendLeft()
-                                        }
-                                        vc.dismiss(animated: true, completion: {
-                                            openEditor()
-                                        })
-                                    }))
-                                    nc.present(alert, animated: true, completion: nil)
-//                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "isRunningStreaming"), object: nil, userInfo: dataMessage)
-                                } else if nc.visibleViewController is SeminarViewController {
-                                    let vc = nc.visibleViewController as! SeminarViewController
-                                    var alert = LibAlertController(title: "", message: "Are you sure you want to end Seminar, and open notification?".localized(), preferredStyle: .alert)
-                                    if !vc.isLive {
-                                        alert = LibAlertController(title: "", message: "Are you sure you want to leave Seminar, and open notification?".localized(), preferredStyle: .alert)
-                                    }
-                                    alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
-                                    alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                        DispatchQueue.global().async {
-                                            API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
-                                            vc.sendLeft()
-                                        }
-                                        vc.dismiss(animated: true, completion: {
-                                            openEditor()
-                                        })
-                                    }))
-                                    nc.present(alert, animated: true, completion: nil)
-//                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "isRunningStreaming"), object: nil, userInfo: dataMessage)
-                                } else if nc.visibleViewController is EditorPersonal {
-                                    let vc = nc.visibleViewController as! EditorPersonal
-                                    if vc.fromNotification {
-                                        vc.dismiss(animated: true, completion: {
-                                            openEditor()
-                                        })
-                                    } else {
-                                        vc.navigationController?.popViewController(animated: true)
-                                        openEditor()
-                                    }
-                                } else {
-                                    openEditor()
-                                }
-                            } else if UIApplication.shared.visibleViewController is EditorPersonal {
-                                let vc = UIApplication.shared.visibleViewController as! EditorPersonal
-                                if vc.fromNotification{
-                                    vc.dismiss(animated: true, completion: {
-                                        openEditor()
-                                    })
-                                } else {
-                                    vc.navigationController?.popViewController(animated: true)
-                                    openEditor()
-                                }
-                            } else if UIApplication.shared.visibleViewController is UIAlertController {
-                                let vc = UIApplication.shared.visibleViewController as! UIAlertController
-                                vc.dismiss(animated: true, completion: {
-                                    openEditor()
-                                })
+                            let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
+                            navigationController.modalPresentationStyle = .fullScreen
+                            navigationController.navigationBar.tintColor = .white
+                            navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                            navigationController.navigationBar.isTranslucent = false
+                            navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+                            navigationController.navigationBar.barStyle = .black
+                            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+                            let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+                            navigationController.navigationBar.titleTextAttributes = textAttributes
+                            if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
+                                editorPersonalVC.fromNotification = false
+                                UIApplication.shared.visibleViewController?.show(editorPersonalVC, sender: nil)
                             } else {
-                                openEditor()
+                                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
                             }
                         } else {
-                            func openEditor() {
-                                let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "editorGroupVC") as! EditorGroup
-                                editorGroupVC.hidesBottomBarWhenPushed = true
-                                editorGroupVC.unique_l_pin = threadIdentifier
-                                editorGroupVC.fromNotification = true
-                                let navigationController = CustomNavigationController(rootViewController: editorGroupVC)
-                                navigationController.modalPresentationStyle = .fullScreen
-                                navigationController.navigationBar.tintColor = .white
-                                navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-                                navigationController.navigationBar.isTranslucent = false
-                                navigationController.navigationBar.overrideUserInterfaceStyle = .dark
-                                navigationController.navigationBar.barStyle = .black
-                                let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-                                let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-                                navigationController.navigationBar.titleTextAttributes = textAttributes
-                                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                                } else {
-                                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                                }
-                            }
-                            if UIApplication.shared.visibleViewController is UINavigationController {
-                                let nc = UIApplication.shared.visibleViewController as! UINavigationController
-                                if nc.visibleViewController is QmeraStreamingViewController {
-                                    let vc = nc.visibleViewController as! QmeraStreamingViewController
-                                    var alert = LibAlertController(title: "", message: "Are you sure you want to end Live Streaming, and open notification?".localized(), preferredStyle: .alert)
-                                    if !vc.isLive {
-                                        alert = LibAlertController(title: "", message: "Are you sure you want to leave Live Streaming, and open notification?".localized(), preferredStyle: .alert)
-                                    }
-                                    alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
-                                    alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                        DispatchQueue.global().async {
-                                            API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
-                                            vc.sendLeft()
-                                        }
-                                        vc.dismiss(animated: true, completion: {
-                                            openEditor()
-                                        })
-                                    }))
-                                    nc.present(alert, animated: true, completion: nil)
-//                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "isRunningStreaming"), object: nil, userInfo: dataMessage)
-                                } else if nc.visibleViewController is SeminarViewController {
-                                    let vc = nc.visibleViewController as! SeminarViewController
-                                    var alert = LibAlertController(title: "", message: "Are you sure you want to end Seminar, and open notification?".localized(), preferredStyle: .alert)
-                                    if !vc.isLive {
-                                        alert = LibAlertController(title: "", message: "Are you sure you want to leave Seminar, and open notification?".localized(), preferredStyle: .alert)
-                                    }
-                                    alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
-                                    alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                        DispatchQueue.global().async {
-                                            API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
-                                            vc.sendLeft()
-                                        }
-                                        vc.dismiss(animated: true, completion: {
-                                            openEditor()
-                                        })
-                                    }))
-                                    nc.present(alert, animated: true, completion: nil)
-//                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "isRunningStreaming"), object: nil, userInfo: dataMessage)
-                                } else if nc.visibleViewController is EditorGroup {
-                                    let vc = nc.visibleViewController as! EditorGroup
-                                    if vc.fromNotification {
-                                        vc.dismiss(animated: true, completion: {
-                                            openEditor()
-                                        })
-                                    } else {
-                                        vc.navigationController?.popViewController(animated: true)
-                                        openEditor()
-                                    }
-                                } else {
-                                    openEditor()
-                                }
-                            } else if UIApplication.shared.visibleViewController is EditorGroup {
-                                let vc = UIApplication.shared.visibleViewController as! EditorGroup
-                                if vc.fromNotification {
-                                    vc.dismiss(animated: true, completion: {
-                                        openEditor()
-                                    })
-                                } else {
-                                    vc.navigationController?.popViewController(animated: true)
-                                    openEditor()
-                                }
-                            } else if UIApplication.shared.visibleViewController is UIAlertController {
-                                let vc = UIApplication.shared.visibleViewController as! UIAlertController
-                                vc.dismiss(animated: true, completion: {
-                                    openEditor()
-                                })
+                            let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "editorGroupVC") as! EditorGroup
+                            editorGroupVC.hidesBottomBarWhenPushed = true
+                            editorGroupVC.unique_l_pin = threadIdentifier
+                            editorGroupVC.fromNotification = true
+                            let navigationController = CustomNavigationController(rootViewController: editorGroupVC)
+                            navigationController.modalPresentationStyle = .fullScreen
+                            navigationController.navigationBar.tintColor = .white
+                            navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                            navigationController.navigationBar.isTranslucent = false
+                            navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+                            navigationController.navigationBar.barStyle = .black
+                            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+                            let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+                            navigationController.navigationBar.titleTextAttributes = textAttributes
+                            if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
+                                editorGroupVC.fromNotification = false
+                                UIApplication.shared.visibleViewController?.show(editorGroupVC, sender: nil)
                             } else {
-                                openEditor()
+                                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
                             }
                         }
                     }

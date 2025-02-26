@@ -1116,8 +1116,9 @@ public class APIS: NSObject {
                     UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
                     let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
                     navigationController.navigationBar.titleTextAttributes = textAttributes
-                    if UIApplication.shared.visibleViewController?.navigationController != nil {
-                        UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                    if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
+                        editorPersonalVC.fromNotification = false
+                        UIApplication.shared.visibleViewController?.show(editorPersonalVC, sender: nil)
                     } else {
                         UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
                     }
@@ -1156,8 +1157,9 @@ public class APIS: NSObject {
                     UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
                     let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
                     navigationController.navigationBar.titleTextAttributes = textAttributes
-                    if UIApplication.shared.visibleViewController?.navigationController != nil {
-                        UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                    if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
+                        editorGroupVC.fromNotification = false
+                        UIApplication.shared.visibleViewController?.show(editorGroupVC, sender: nil)
                     } else {
                         UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
                     }
