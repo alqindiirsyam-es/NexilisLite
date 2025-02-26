@@ -1263,7 +1263,7 @@ public class APIS: NSObject {
     
     public static func checkDataForShareExtension() {
         DispatchQueue.global().async {
-            if let userDefaults = UserDefaults(suiteName: "group.nexilis.share") {
+            if let userDefaults = UserDefaults(suiteName: nameGroupShared) {
                 if let value = userDefaults.string(forKey: "sharedItem") {
                     if !value.isEmpty {
                         if let jsonData = value.data(using: .utf8) {
@@ -1298,7 +1298,7 @@ public class APIS: NSObject {
                                         })
                                     }
                                     if typeShare == typeImage {
-                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
                                             let sharedImageURL = appGroupURL.appendingPathComponent(imageId)
                                             let sharedThumbURL = appGroupURL.appendingPathComponent(thumb)
                                             let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
@@ -1317,7 +1317,7 @@ public class APIS: NSObject {
                                         }
                                         attachmentFlag = "1"
                                     } else if typeShare == typeVideo {
-                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
                                             let sharedVideoURL = appGroupURL.appendingPathComponent(videoId)
                                             let sharedThumbURL = appGroupURL.appendingPathComponent(thumb)
                                             let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
@@ -1336,7 +1336,7 @@ public class APIS: NSObject {
                                         }
                                         attachmentFlag = "2"
                                     } else if typeShare == typeFile {
-                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
                                             renamedFileId = "Nexilis_\(Date().currentTimeMillis())_" + fileId
                                             let sharedFileURL = appGroupURL.appendingPathComponent(fileId)
                                             let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
@@ -1370,7 +1370,7 @@ public class APIS: NSObject {
     
     public static func setDataForShareExtension() {
         DispatchQueue.global().async {
-            if let userDefaults = UserDefaults(suiteName: "group.nexilis.share") {
+            if let userDefaults = UserDefaults(suiteName: nameGroupShared) {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     var dataShared: [[String: Any]] = []
                     if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin id, image_id image, first_name || ' ' || ifnull(last_name, '') name FROM BUDDY WHERE f_pin != '\(User.getMyPin() ?? "")' AND f_pin != '-997' AND official_account != '1'") {
@@ -1386,7 +1386,7 @@ public class APIS: NSObject {
                                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                                                    let file = documentDir.appendingPathComponent(imageString)
                                                    if FileManager().fileExists(atPath: file.path) {
-                                                       if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                                       if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
                                                            let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
                                                            if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
                                                                try? FileManager.default.copyItem(at: file, to: sharedFileURL)
@@ -1423,7 +1423,7 @@ public class APIS: NSObject {
                                                     let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                                                     let file = documentDir.appendingPathComponent(imageString)
                                                     if FileManager().fileExists(atPath: file.path) {
-                                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
                                                             let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
                                                             if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
                                                                 try? FileManager.default.copyItem(at: file, to: sharedFileURL)
@@ -1460,7 +1460,7 @@ public class APIS: NSObject {
                                                             let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                                                             let file = documentDir.appendingPathComponent(imageString)
                                                             if FileManager().fileExists(atPath: file.path) {
-                                                                if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.nexilis.share") {
+                                                                if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
                                                                     let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
                                                                     if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
                                                                         try? FileManager.default.copyItem(at: file, to: sharedFileURL)
@@ -1511,6 +1511,10 @@ public class APIS: NSObject {
 //        Utils.bPreventScreenCapture = isActive
     }
     
+    public static func setNameGroupShare(_ name: String) {
+        nameGroupShared = name
+    }
+    
     public static func openImageNexilis(image: UIImage, data: Data? = nil, isGIF: Bool = false) {
         let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
         previewImageVC.image = image
@@ -1541,6 +1545,11 @@ public class APIS: NSObject {
     private static var appNm = "";
     public static func getAppNm() -> String {
         return appNm
+    }
+    
+    private static var nameGroupShared = "group.nexilis.share";
+    public static func getnameGroupShared() -> String {
+        return nameGroupShared
     }
 }
 
