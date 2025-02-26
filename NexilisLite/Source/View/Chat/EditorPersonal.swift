@@ -24,7 +24,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     @IBOutlet var buttonSendPhoto: UIButton!
     @IBOutlet var buttonSendSticker: UIButton!
     @IBOutlet var buttonSendFile: UIButton!
-    @IBOutlet var textFieldSend: UITextView!
+    @IBOutlet var textFieldSend: CustomTextView!
     @IBOutlet var heightTextFieldSend: NSLayoutConstraint!
     @IBOutlet var buttonSendChat: UIButton!
     @IBOutlet var tableChatView: UITableView!
@@ -114,7 +114,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var lastY: CGFloat = 0
     var audioPlayer: AVAudioPlayer?
     var editVC = UIViewController()
-    var editTextView = UITextView()
+    var editTextView = CustomTextView()
     var isEditingMessage = false
     var constraintBottomeditTextView: NSLayoutConstraint!
     var constraintHeighteditTextView: NSLayoutConstraint!
@@ -203,6 +203,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         textFieldSend.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.5).cgColor
         textFieldSend.font = UIFont.systemFont(ofSize: 12)
         textFieldSend.delegate = self
+        textFieldSend.customDelegate = self
         textFieldSend.allowsEditingTextAttributes = true
         
         navigationItem.rightBarButtonItem?.tintColor = UIColor.secondaryColor
@@ -346,7 +347,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE", _where: "(f_pin='\(self.dataPerson["f_pin"]!!)' or l_pin='\(self.dataPerson["f_pin"]!!)') and (message_scope_id='3' or message_scope_id='18') and is_call_center = 0")
                             _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", _where: "l_pin='\(self.dataPerson["f_pin"]!!)'")
                             let l_pin = self.dataPerson["f_pin"]!!
-                            SecureUserDefaults.shared.removeValue(forKey: "saved_\(l_pin)")
+                            SecureUserDefaults.shared.removeValue(forKey: "new_saved_\(l_pin)")
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                             if self.fromNotification {
                                 self.didTapExit()
@@ -611,16 +612,20 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 }
             } else {
                 let l_pin = self.dataPerson["f_pin"] as? String ?? ""
-                if let dataSaved: String = SecureUserDefaults.shared.value(forKey: "saved_\(l_pin)") {
-                    let last_m = dataSaved.components(separatedBy: ",")[0]
-                    let last_r = dataSaved.components(separatedBy: ",")[1]
-                    if !last_m.isEmpty {
-                        textFieldSend.text = last_m
-                        textFieldSend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black
-                    }
-                    
-                    if !last_r.isEmpty {
-                        handleReply(indexPath: IndexPath(row: 0, section: 0), reffId: last_r)
+                if let dataSaved: String = SecureUserDefaults.shared.value(forKey: "new_saved_\(l_pin)") {
+                    let data = dataSaved
+                    if let jsonData = data.data(using: .utf8),
+                       let dataJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
+                        let last_m = dataJson["text"] ?? ""
+                        let last_r = dataJson["reffId"] ?? ""
+                        if !last_m.isEmpty {
+                            textFieldSend.attributedText = last_m.richText(isEditing: true)
+                            textFieldSend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black
+                        }
+                        
+                        if !last_r.isEmpty {
+                            handleReply(indexPath: IndexPath(row: 0, section: 0), reffId: last_r)
+                        }
                     }
                 }
                 tableChatView.scrollToBottom(isAnimated: false)
@@ -2423,7 +2428,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         self.removeFromParent()
         if !self.isContactCenter {
             let l_pin = self.dataPerson["f_pin"]!!
-            SecureUserDefaults.shared.set("\(self.textFieldSend.textColor != UIColor.lightGray ? self.textFieldSend.text! : ""),\(self.reffId ?? "")", forKey: "saved_\(l_pin)")
+            let data: [String: String] = ["text": self.textFieldSend.textColor != UIColor.lightGray ? self.textFieldSend.text! : "", "reffId": self.reffId ?? ""]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: data, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                SecureUserDefaults.shared.set(jsonString, forKey: "new_saved_\(l_pin)")
+            }
         }
     }
     
@@ -3638,7 +3647,21 @@ extension EditorPersonal: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPr
 }
 
 //ETV
-extension EditorPersonal: UITextViewDelegate {
+extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
+    func customTextViewDidPasteText(image: UIImage?, dataGIF: Data?) {
+        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+        previewImageVC.image = image
+        previewImageVC.isGIF = image == nil
+        previewImageVC.fromCopy = true
+        previewImageVC.dataGIF = dataGIF
+        previewImageVC.currentTextTextField = textFieldSend.text
+        previewImageVC.modalPresentationStyle = .custom
+        previewImageVC.delegate = self
+        previewImageVC.isAck = self.isAck
+        previewImageVC.isConfidential = self.isConfidential
+        self.present(previewImageVC, animated: true, completion: nil)
+    }
+    
     public func textViewDidChangeSelection(_ textView: UITextView) {
         var nowTextFieldSend = self.textFieldSend
         if isEditingMessage {
@@ -3905,24 +3928,6 @@ extension EditorPersonal: UITextViewDelegate {
     }
     
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-        if let pasteboardItems = UIPasteboard.general.items.first {
-            if pasteboardItems["public.jpeg"] != nil || pasteboardItems["public.png"] != nil || pasteboardItems["public.gif"] != nil || (pasteboardItems.keys.first != nil && pasteboardItems.keys.first!.contains(".gif")) {
-                let dataGif = UIPasteboard.general.data(forPasteboardType: "com.compuserve.gif")
-                let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                previewImageVC.image = pasteboardItems["public.png"] as? UIImage ?? pasteboardItems["public.jpeg"] as? UIImage
-                previewImageVC.isGIF = (pasteboardItems["public.png"] == nil && pasteboardItems["public.jpeg"] == nil)
-                previewImageVC.fromCopy = true
-                previewImageVC.dataGIF = dataGif
-                previewImageVC.currentTextTextField = textFieldSend.text
-                previewImageVC.modalPresentationStyle = .custom
-                previewImageVC.delegate = self
-                previewImageVC.isAck = self.isAck
-                previewImageVC.isConfidential = self.isConfidential
-                previewImageVC.isCC = self.isContactCenter
-                self.present(previewImageVC, animated: true, completion: nil)
-                return false
-            }
-        }
         if (self.textFieldSend.text.count == 0) {
             return text != "\n"
         }
@@ -4360,7 +4365,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             tapGesture.cancelsTouchesInView = false
             view.addGestureRecognizer(tapGesture)
             
-            editTextView = UITextView()
+            editTextView = CustomTextView()
             editTextView.layer.cornerRadius = textFieldSend.maxCornerRadius()
             editTextView.layer.borderWidth = 1.0
             editTextView.textColor = UIColor.black
@@ -4681,10 +4686,11 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 formatterTime.dateFormat = "HH:mm"
                 formatterTime.locale = NSLocale(localeIdentifier: "id") as Locale?
                 let dataProfile = getDataProfile(message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                let textCopied = (dataMessages[i]["message_text"]  as? String ?? "").richText(isEditing: true)
                 if text.isEmpty {
-                    text = "*[\(formatterDate.string(from: date as Date)) \(formatterTime.string(from: date as Date))] \(dataProfile["name"]!):*\n\(dataMessages[i]["message_text"]  as? String ?? "")"
+                    text = "*[\(formatterDate.string(from: date as Date)) \(formatterTime.string(from: date as Date))] \(dataProfile["name"]!):*\n\(textCopied.string)"
                 } else {
-                    text = text + "\n\n*[\(formatterDate.string(from: date as Date)) \(formatterTime.string(from: date as Date))] \(dataProfile["name"]!):*\n\(dataMessages[i]["message_text"]  as? String ?? "")"
+                    text = text + "\n\n*[\(formatterDate.string(from: date as Date)) \(formatterTime.string(from: date as Date))] \(dataProfile["name"]!):*\n\(textCopied.string)"
                 }
             }
             text = text + "\n\n\nchat " + "Powered by Nexilis".localized()
@@ -7438,6 +7444,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         } else {
             dataMessages = self.dataMessages.filter({ $0["message_id"]  as? String ?? "" == reffId })
             self.reffId = reffId
+        }
+        if dataMessages.count == 0  {
+            self.deleteReplyView()
+            return
         }
         UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
             self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50

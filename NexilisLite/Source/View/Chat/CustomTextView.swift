@@ -7,6 +7,10 @@
 
 import UIKit
 
+protocol CustomTextViewPasteDelegate : AnyObject {
+    func customTextViewDidPasteText(image: UIImage?, dataGIF: Data?)
+}
+
 class CustomTextView: UITextView {
     
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
@@ -71,5 +75,16 @@ class CustomTextView: UITextView {
         return char == " " || char == "\n"
     }
     
+    weak var customDelegate: CustomTextViewPasteDelegate?
+    override func paste(_ sender: Any?) {
+        if let pasteboardItems = UIPasteboard.general.items.first {
+            if pasteboardItems["public.jpeg"] != nil || pasteboardItems["public.png"] != nil || pasteboardItems["public.gif"] != nil || (pasteboardItems.keys.first != nil && pasteboardItems.keys.first!.contains(".gif")) {
+                let dataGif = UIPasteboard.general.data(forPasteboardType: "com.compuserve.gif")
+                customDelegate?.customTextViewDidPasteText(image: pasteboardItems["public.png"] as? UIImage ?? pasteboardItems["public.jpeg"] as? UIImage, dataGIF: dataGif)
+                return
+            }
+        }
+        super.paste(sender)
+    }
 
 }

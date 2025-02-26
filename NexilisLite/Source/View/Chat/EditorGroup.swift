@@ -24,7 +24,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     @IBOutlet var buttonSendPhoto: UIButton!
     @IBOutlet var buttonSendSticker: UIButton!
     @IBOutlet var buttonSendFile: UIButton!
-    @IBOutlet var textFieldSend: UITextView!
+    @IBOutlet var textFieldSend: CustomTextView!
     @IBOutlet var heightTextFieldSend: NSLayoutConstraint!
     @IBOutlet var buttonSendChat: UIButton!
     @IBOutlet var tableChatView: UITableView!
@@ -103,7 +103,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var timerCredential: [String: Timer] = [:]
     var audioPlayer: AVAudioPlayer?
     var editVC = UIViewController()
-    var editTextView = UITextView()
+    var editTextView = CustomTextView()
     var isEditingMessage = false
     var constraintBottomeditTextView: NSLayoutConstraint!
     var constraintHeighteditTextView: NSLayoutConstraint!
@@ -131,7 +131,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
             l_pin = self.dataTopic["chat_id"]  as? String ?? ""
         }
-        SecureUserDefaults.shared.set("\(textFieldSend.textColor != UIColor.lightGray ? textFieldSend.text! : ""),\(reffId ?? "")", forKey: "saved_\(l_pin)")
+        let data: [String: String] = ["text": self.textFieldSend.textColor != UIColor.lightGray ? self.textFieldSend.text! : "", "reffId": self.reffId ?? ""]
+        if let jsonData = try? JSONSerialization.data(withJSONObject: data, options: []),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            SecureUserDefaults.shared.set(jsonString, forKey: "new_saved_\(l_pin)")
+        }
     }
     
     public override func viewDidAppear(_ animated: Bool) {
@@ -199,6 +203,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         textFieldSend.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.5).cgColor
         textFieldSend.font = UIFont.systemFont(ofSize: 12)
         textFieldSend.delegate = self
+        textFieldSend.customDelegate = self
         textFieldSend.allowsEditingTextAttributes = true
         
         navigationItem.rightBarButtonItem?.tintColor = UIColor.secondaryColor
@@ -306,7 +311,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             }
                             _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE", _where: "(l_pin='\(self.dataGroup["group_id"]!!)' and chat_id='\(self.dataTopic["chat_id"]!!)') and message_scope_id='4'")
                             _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", _where: "l_pin='\(l_pin)'")
-                            SecureUserDefaults.shared.removeValue(forKey: "saved_\(l_pin)")
+                            SecureUserDefaults.shared.removeValue(forKey: "new_saved_\(l_pin)")
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                             if self.fromNotification {
                                 self.didTapExit()
@@ -476,16 +481,20 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
                 l_pin = self.dataTopic["chat_id"]  as? String ?? ""
             }
-            if let dataSaved: String = SecureUserDefaults.shared.value(forKey: "saved_\(l_pin)") {
-                let last_m = dataSaved.components(separatedBy: ",")[0]
-                let last_r = dataSaved.components(separatedBy: ",")[1]
-                if !last_m.isEmpty {
-                    textFieldSend.text = last_m
-                    textFieldSend.textColor = UIColor.black
-                }
-                
-                if !last_r.isEmpty {
-                    handleReply(indexPath: IndexPath(row: 0, section: 0), reffId: last_r)
+            if let dataSaved: String = SecureUserDefaults.shared.value(forKey: "new_saved_\(l_pin)") {
+                let data = dataSaved
+                if let jsonData = data.data(using: .utf8),
+                   let dataJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
+                    let last_m = dataJson["text"] ?? ""
+                    let last_r = dataJson["reffId"] ?? ""
+                    if !last_m.isEmpty {
+                        textFieldSend.attributedText = last_m.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
+                        textFieldSend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black
+                    }
+                    
+                    if !last_r.isEmpty {
+                        handleReply(indexPath: IndexPath(row: 0, section: 0), reffId: last_r)
+                    }
                 }
             }
             tableChatView.scrollToBottom(isAnimated: false)
@@ -2418,63 +2427,95 @@ extension EditorGroup: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPrevi
     }
 }
 
-extension EditorGroup: UITextViewDelegate {
+extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
+    func customTextViewDidPasteText(image: UIImage?, dataGIF: Data?) {
+        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+        previewImageVC.image = image
+        previewImageVC.isGIF = image == nil
+        previewImageVC.fromCopy = true
+        previewImageVC.dataGIF = dataGIF
+        previewImageVC.currentTextTextField = textFieldSend.text
+        previewImageVC.modalPresentationStyle = .custom
+        previewImageVC.delegate = self
+        previewImageVC.isAck = self.isAck
+        previewImageVC.isConfidential = self.isConfidential
+        self.present(previewImageVC, animated: true, completion: nil)
+    }
+    
     public func textViewDidChangeSelection(_ textView: UITextView) {
         lastPositionCursorMention = textView.selectedRange.location
-        let fulltextForMention = textView.text.substring(from: 0, to: lastPositionCursorMention - 1)
+        guard lastPositionCursorMention > 0 else {
+            hideMention()
+            return
+        }
+
+        let fulltextForMention = textView.text.prefix(lastPositionCursorMention)
         var isShowMention = false
-        if lastPositionCursorMention > 0 {
-            var listHaveToRemoved: [User] = []
-            var continueCheckMention = true
-            if listMentionInTextField.count > 0 {
-                for i in 0..<listMentionInTextField.count {
-                    if listMentionInTextField[i].ex_block != nil && !listMentionInTextField[i].ex_block!.isEmpty {
-                        let nameWithMention = ("@" + listMentionInTextField[i].firstName + " " + listMentionInTextField[i].lastName).trimmingCharacters(in: .whitespaces)
-                        var rangeLower = Int(listMentionInTextField[i].ex_block!)! - nameWithMention.count
-                        var rangeUpper = Int(listMentionInTextField[i].ex_block!)!
-                        if textView.text.substring(from: rangeLower, to: rangeUpper - 1) == nameWithMention {
-                            if lastPositionCursorMention >= rangeLower + 1 && lastPositionCursorMention <= rangeUpper {
-                                continueCheckMention = false
-                            }
-                        } else {
-                            if listMentionInTextField[i].ex_offmp!.isEmpty {
-                                rangeLower = rangeLower + listMentionWithText.count
-                                rangeUpper = rangeUpper + listMentionWithText.count
-                            } else {
-                                rangeLower = rangeLower + (listMentionWithText.count - Int(listMentionInTextField[i].ex_offmp!)!)
-                                rangeUpper = rangeUpper + (listMentionWithText.count - Int(listMentionInTextField[i].ex_offmp!)!)
-                            }
-                            if textView.text.substring(from: rangeLower, to: rangeUpper - 1) == nameWithMention {
-                                if lastPositionCursorMention >= rangeLower + 1 && lastPositionCursorMention <= rangeUpper {
-                                    continueCheckMention = false
-                                }
-                                listMentionInTextField[i].ex_block! = "\(rangeUpper)"
-                                listMentionInTextField[i].ex_offmp! = "\(textView.text.count)"
-                            } else {
-                                listHaveToRemoved.append(listMentionInTextField[i])
-                            }
+        var listHaveToRemoved: [User] = []
+        var continueCheckMention = true
+
+        for mention in listMentionInTextField where mention.ex_block?.isEmpty == false {
+            let nameWithMention = "@\(mention.firstName) \(mention.lastName)".trimmingCharacters(in: .whitespaces)
+            guard let blockPosition = Int(mention.ex_block!) else { continue }
+            
+            let lowerBound = textView.text.index(textView.text.startIndex, offsetBy: blockPosition - nameWithMention.count)
+            let upperBound = textView.text.index(textView.text.startIndex, offsetBy: blockPosition)
+            let range = lowerBound..<upperBound
+            
+            if textView.text[range] == nameWithMention {
+                if lastPositionCursorMention >= textView.text.distance(from: textView.text.startIndex, to: lowerBound) + 1,
+                   lastPositionCursorMention <= textView.text.distance(from: textView.text.startIndex, to: upperBound) {
+                    continueCheckMention = false
+                    break
+                }
+            } else {
+                let offset = mention.ex_offmp?.isEmpty == false ? listMentionWithText.count - Int(mention.ex_offmp!)! : listMentionWithText.count
+                let adjustedLowerBound = textView.text.index(lowerBound, offsetBy: offset)
+                let adjustedUpperBound = textView.text.index(upperBound, offsetBy: offset)
+                let adjustedRange = adjustedLowerBound..<adjustedUpperBound
+                
+                if textView.text[adjustedRange] == nameWithMention {
+                    if lastPositionCursorMention >= textView.text.distance(from: textView.text.startIndex, to: adjustedLowerBound) + 1,
+                       lastPositionCursorMention <= textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound) {
+                        continueCheckMention = false
+                        break
+                    }
+                    mention.ex_block = "\(textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound))"
+                    mention.ex_offmp = "\(textView.text.count)"
+                } else {
+                    listHaveToRemoved.append(mention)
+                }
+            }
+        }
+
+        if continueCheckMention {
+            if let indexLastBreak = fulltextForMention.split(separator: "\n").lastIndex(where: { $0.contains("@") }) {
+                let splitSpace = fulltextForMention.split(separator: "\n")[indexLastBreak].split(separator: " ")
+                if let indexLastMention = splitSpace.lastIndex(where: { $0.hasPrefix("@") }),
+                   let lastChar = fulltextForMention.last,
+                   lastChar != " " && lastChar != "\n" {
+                    showMention(text: String(splitSpace[indexLastMention].dropFirst()))
+                    isShowMention = true
+                }
+            } else if fulltextForMention.count >= 3 && self.textFieldSend.textColor != UIColor.lightGray {
+                if let indexLastBreak = fulltextForMention.split(separator: "\n").lastIndex(where: { $0.count >= 3 }) {
+                    let splitSpace = fulltextForMention.split(separator: "\n")[indexLastBreak].split(separator: " ")
+                    if let indexLastMention = splitSpace.lastIndex(of: splitSpace.last ?? ""),
+                       let lastChar = fulltextForMention.last,
+                       lastChar != " " && lastChar != "\n" {
+                        if String(splitSpace[indexLastMention]).count >= 3 {
+                            showMention(text: String(splitSpace[indexLastMention]))
+                            isShowMention = true
                         }
                     }
                 }
             }
-//            listMentionInTextField.removeAll(where: { listHaveToRemoved.contains($0) })
-            if continueCheckMention {
-                let splitBreak = fulltextForMention.components(separatedBy: "\n")
-                let indexLastBreak = splitBreak.lastIndex(where: { $0.contains("@") })
-                if indexLastBreak != nil {
-                    let splitSpace = splitBreak[indexLastBreak!].components(separatedBy: " ")
-                    let indexLastMention = splitSpace.lastIndex(where: { $0.substring(from: 0, to: 0) == "@" })
-                    if indexLastMention != nil && fulltextForMention.substring(from: lastPositionCursorMention - 1, to: lastPositionCursorMention - 1) != " " && fulltextForMention.substring(from: lastPositionCursorMention - 1, to: lastPositionCursorMention - 1) != "\n" {
-                        let fullTextMention = splitSpace[indexLastMention!]
-                        showMention(text: fullTextMention.substring(from: 1, to: fullTextMention.count))
-                        isShowMention = true
-                    }
-                }
-            }
         }
+
         if !isShowMention {
             hideMention()
         }
+
         var nowTextFieldSend = self.textFieldSend
         if isEditingMessage {
             nowTextFieldSend = editTextView
@@ -2608,6 +2649,8 @@ extension EditorGroup: UITextViewDelegate {
     
     private func hideMention() {
         if self.contraintBottomMention.constant > 0 {
+            listMentionWithText.removeAll()
+            tableMention.reloadData()
             self.contraintBottomMention.constant = 0 - self.heightTableMention.constant
             UIView.animate(withDuration: 0.5, animations: {
                 self.view.layoutIfNeeded()
@@ -2810,29 +2853,12 @@ extension EditorGroup: UITextViewDelegate {
     
     public func textViewDidEndEditing(_ textView: UITextView) {
         if textView.text.isEmpty && textView != editTextView {
-            textView.text = "Send message".localized()
             textView.textColor = UIColor.lightGray
+            textView.text = "Send message".localized()
         }
     }
     
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-        if let pasteboardItems = UIPasteboard.general.items.first {
-            if pasteboardItems["public.jpeg"] != nil || pasteboardItems["public.png"] != nil || pasteboardItems["public.gif"] != nil || (pasteboardItems.keys.first != nil && pasteboardItems.keys.first!.contains(".gif")) {
-                let dataGif = UIPasteboard.general.data(forPasteboardType: "com.compuserve.gif")
-                let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                previewImageVC.image = pasteboardItems["public.png"] as? UIImage ?? pasteboardItems["public.jpeg"] as? UIImage
-                previewImageVC.isGIF = (pasteboardItems["public.png"] == nil && pasteboardItems["public.jpeg"] == nil)
-                previewImageVC.fromCopy = true
-                previewImageVC.dataGIF = dataGif
-                previewImageVC.currentTextTextField = textFieldSend.text
-                previewImageVC.modalPresentationStyle = .custom
-                previewImageVC.delegate = self
-                previewImageVC.isAck = self.isAck
-                previewImageVC.isConfidential = self.isConfidential
-                self.present(previewImageVC, animated: true, completion: nil)
-                return false
-            }
-        }
         if text.isEmpty {
             if listMentionInTextField.count > 0 {
                 for i in 0..<listMentionInTextField.count {
@@ -3282,7 +3308,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             tapGesture.cancelsTouchesInView = false
             view.addGestureRecognizer(tapGesture)
             
-            editTextView = UITextView()
+            editTextView = CustomTextView()
             editTextView.layer.cornerRadius = textFieldSend.maxCornerRadius()
             editTextView.layer.borderWidth = 1.0
             editTextView.textColor = UIColor.black
@@ -3603,7 +3629,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 formatterTime.dateFormat = "HH:mm"
                 formatterTime.locale = NSLocale(localeIdentifier: "id") as Locale?
                 let dataProfile = getDataProfile(f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "")
-                text = text + "\n\n*[\(formatterDate.string(from: date as Date)) \(formatterTime.string(from: date as Date))] \(dataProfile["name"]!):*\n\(dataMessages[i]["message_text"]  as? String ?? "")"
+                let textCopied = (dataMessages[i]["message_text"]  as? String ?? "").richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
+                text = text + "\n\n*[\(formatterDate.string(from: date as Date)) \(formatterTime.string(from: date as Date))] \(dataProfile["name"]!):*\n\(textCopied.string)"
             }
             text = text + "\n\n\nchat " + "Powered by Nexilis".localized()
             DispatchQueue.main.async {
@@ -4048,7 +4075,17 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
             tableView.deselectRow(at: indexPath, animated: true)
             let fulltextForMention = textFieldSend.text.substring(from: 0, to: lastPositionCursorMention - 1)
             let diff = textFieldSend.text.count - fulltextForMention.count
-            if let indexLastMention = fulltextForMention.lastIndex(of: "@") {
+            var indexLastMention = fulltextForMention.lastIndex(of: "@")
+            if indexLastMention == nil {
+                if let spaceIndex = fulltextForMention.lastIndex(of: " ") {
+                    indexLastMention = fulltextForMention.index(after: spaceIndex)
+                } else if let breakIndex = fulltextForMention.lastIndex(of: "\n") {
+                    indexLastMention = fulltextForMention.index(after: breakIndex)
+                } else {
+                    indexLastMention = fulltextForMention.firstIndex(of: fulltextForMention.first!)
+                }
+            }
+            if let indexLastMention = indexLastMention {
                 listMentionInTextField.append(listMentionWithText[indexPath.row])
                 let indexIntMention = fulltextForMention.distance(from: fulltextForMention.startIndex, to: indexLastMention)
                 let rangeReplacement = NSRange(location: indexIntMention, length: lastPositionCursorMention - indexIntMention)
@@ -6095,6 +6132,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource {
         } else {
             dataMessages = self.dataMessages.filter({ $0["message_id"]  as? String ?? "" == reffId })
             self.reffId = reffId
+        }
+        if dataMessages.count == 0  {
+            self.deleteReplyView()
+            return
         }
         UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
             self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50

@@ -159,12 +159,12 @@ class NetworkMonitor {
                 OutgoingThread.default.set(wait: !connected)
                 if !connected {
                     fromDisconnect = true
-//                    DispatchQueue.main.async {
-//                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-//                        imageView.tintColor = .white
-//                        let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-//                        banner.show()
-//                    }
+                    DispatchQueue.main.async {
+                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                        imageView.tintColor = .white
+                        let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                        banner.show()
+                    }
                 }
                 if connected && fromDisconnect {
                     fromDisconnect = false
