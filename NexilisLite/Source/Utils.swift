@@ -803,6 +803,15 @@ public final class Utils {
                     if Array(json.keys)[i] == "gptbot_url" {
                         Utils.setGPTBotUrl(value: Array(json.values)[i] as? String ?? "")
                     }
+                    if Array(json.keys)[i] == "default_sound_incmsg" {
+                        Utils.setDefaultIncomingMsg(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "default_sound_inccall" {
+                        Utils.setDefaultIncomingCall(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "default_sound_rbt" {
+                        Utils.setDefaultIncomingRBT(value: Array(json.values)[i] as? String ?? "")
+                    }
                 }
                 Utils.setFinishInitPrefs(value: true)
                 DispatchQueue.main.async {
@@ -1323,6 +1332,36 @@ public final class Utils {
             return value
         }
         return 0
+    }
+    
+    public static func setDefaultIncomingMsg(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "default_sound_incmsg")
+    }
+    public static func getDefaultIncomingMsg() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "default_sound_incmsg") {
+            return value
+        }
+        return ""
+    }
+    
+    public static func setDefaultIncomingCall(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "default_sound_inccall")
+    }
+    public static func getDefaultIncomingCall() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "default_sound_inccall") {
+            return value
+        }
+        return ""
+    }
+    
+    public static func setDefaultIncomingRBT(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "default_sound_rbt")
+    }
+    public static func getDefaultIncomingRBT() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "default_sound_rbt") {
+            return value
+        }
+        return ""
     }
     
     static func getPasswordDB() -> String? {

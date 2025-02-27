@@ -112,7 +112,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var groupImages: [String:[ImageGrouping]] = [:]
     var titleText: String!
     var lastY: CGFloat = 0
-    var audioPlayer: AVAudioPlayer?
     var editVC = UIViewController()
     var editTextView = CustomTextView()
     var isEditingMessage = false
@@ -124,6 +123,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var latitude = ""
     var isBlackCancelButton = false
     let buttonSendEdit = UIButton(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+    
+    var audioPlayers: [IndexPath: AVAudioPlayer] = [:]
+    var timers: [IndexPath: Timer] = [:]
+    var playingIndexPath: IndexPath?
     
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
@@ -5074,7 +5077,7 @@ extension EditorPersonal: UICollectionViewDelegate, UICollectionViewDataSource {
 }
 
 //ETB
-extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
+extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPlayerDelegate {
 //    public func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
 //        checkNewMessage(tableView: tableView)
 //    }
@@ -6001,17 +6004,41 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         let imageGif = SDAnimatedImageView()
         
         if !audioChat.isEmpty {
+            messageText.isHidden = true
             let imageAudio = UIImageView()
             imageAudio.image = UIImage(systemName: "music.note", withConfiguration: UIImage.SymbolConfiguration(pointSize: 35))
             containerMessage.addSubview(imageAudio)
             imageAudio.anchor(left: containerMessage.leftAnchor, paddingLeft: 15, centerY: containerMessage.centerYAnchor)
-            imageAudio.tintColor = .black
+            imageAudio.tintColor = .mainColor
+            
+            let playButtonAudio = UIButton(type: .system)
+            playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
+            playButtonAudio.tintColor = .gray
+            containerMessage.addSubview(playButtonAudio)
+            playButtonAudio.anchor(left: containerMessage.leftAnchor, paddingLeft: 60, centerY: containerMessage.centerYAnchor, width: 20, height: 20)
+            
+            let progressSliderAudio = UISlider()
+            progressSliderAudio.minimumValue = 0
+            progressSliderAudio.maximumValue = 1
+            let thumbImage = UIImage(systemName: "circle.fill")?.withTintColor(UIColor.mainColor)
+                .resize(target: CGSize(width: 15, height: 15))
+            progressSliderAudio.setThumbImage(thumbImage, for: .normal)
+            containerMessage.addSubview(progressSliderAudio)
+            progressSliderAudio.anchor(top: containerMessage.topAnchor, left: playButtonAudio.rightAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: 15, paddingLeft: 10, paddingBottom: 15, paddingRight: 15)
+            
+            let timeLabelAudio = UILabel()
+            timeLabelAudio.text = "0:00"
+            timeLabelAudio.font = .systemFont(ofSize: 10)
+            timeLabelAudio.textColor = .gray
+            containerMessage.addSubview(timeLabelAudio)
+            timeLabelAudio.anchor(top: playButtonAudio.bottomAnchor, left: playButtonAudio.rightAnchor, paddingLeft: 10, width: 100, height: 12)
             
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
             if let dirPath = paths.first {
                 let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(audioChat)
+                var url = audioURL
                 if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: audioChat) {
                     Download().startHTTP(forKey: audioChat, isImage: false) { (name, progress) in
                         guard progress == 100 else {
@@ -6019,11 +6046,47 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                         }
                         tableView.reloadRows(at: [indexPath], with: .none)
                     }
+                } else {
+                    if !FileManager.default.fileExists(atPath: audioURL.path) {
+                        do {
+                            if let audioData = try FileEncryption.shared.readSecure(filename: audioChat) {
+                                let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                let tempPath = cachesDirectory.appendingPathComponent(audioChat)
+                                try audioData.write(to: tempPath)
+                                url = tempPath
+                            }
+                        } catch {
+                            
+                        }
+                    }
                 }
+                if audioPlayers[indexPath] == nil {
+                    do {
+                        let audioPlayer = try AVAudioPlayer(contentsOf: url)
+                        audioPlayers[indexPath] = audioPlayer
+                        audioPlayer.delegate = self
+                        progressSliderAudio.maximumValue = Float(audioPlayer.duration)
+                        timeLabelAudio.text = formatTime(audioPlayer.duration)
+                    } catch {
+                        print("Error loading audio: \(error)")
+                    }
+                }
+                let audioPlayer = audioPlayers[indexPath]
+                if playingIndexPath == indexPath, let player = audioPlayer, player.isPlaying {
+                    playButtonAudio.setImage(UIImage(systemName: "pause.fill"), for: .normal)
+                } else {
+                    playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
+                }
+
+                // Play/Pause Button Action
+                playButtonAudio.addAction(UIAction { _ in
+                    self.playPauseAudio(indexPath: indexPath, playButton: playButtonAudio, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+                }, for: .touchUpInside)
+                
+                progressSliderAudio.addAction(UIAction { _ in
+                    self.sliderChanged(indexPath: indexPath, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+                }, for: .valueChanged)
             }
-            let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
-            containerMessage.addGestureRecognizer(objectTap)
-            objectTap.audio_id = audioChat
         }
         
         if (!thumbChat.isEmpty && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") && (dataMessages[indexPath.row]["lock"] as? String != "2")) {
@@ -6805,6 +6868,61 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         return cell
     }
     
+    func playPauseAudio(indexPath: IndexPath, playButton: UIButton, progressSlider: UISlider, timeLabel: UILabel) {
+        guard let audioPlayer = audioPlayers[indexPath] else { return }
+
+        if audioPlayer.isPlaying {
+            // Pause Audio
+            audioPlayer.pause()
+            playButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+            timers[indexPath]?.invalidate()
+        } else {
+            // Stop other players if one is already playing
+            if let currentPlayingIndexPath = playingIndexPath, let currentAudioPlayer = audioPlayers[currentPlayingIndexPath] {
+                currentAudioPlayer.pause()
+                timers[currentPlayingIndexPath]?.invalidate()
+                timers[currentPlayingIndexPath] = nil
+                tableChatView.reloadRows(at: [currentPlayingIndexPath], with: .none)
+            }
+
+            // Play new audio
+            audioPlayer.play()
+            playButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
+            playingIndexPath = indexPath
+
+            // Start timer to update progress
+            timers[indexPath] = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                progressSlider.value = Float(audioPlayer.currentTime)
+                timeLabel.text = self.formatTime(audioPlayer.currentTime)
+            }
+        }
+    }
+    
+    func sliderChanged(indexPath: IndexPath, progressSlider: UISlider, timeLabel: UILabel) {
+        guard let audioPlayer = audioPlayers[indexPath] else { return }
+        audioPlayer.currentTime = TimeInterval(progressSlider.value)
+        timeLabel.text = formatTime(audioPlayer.currentTime)
+    }
+    
+    func formatTime(_ time: TimeInterval) -> String {
+        let roundedTime = time.rounded(.up)
+        let minutes = Int(roundedTime) / 60
+        let seconds = Int(roundedTime) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        if let finishedIndexPath = audioPlayers.first(where: { $0.value == player })?.key {
+           DispatchQueue.main.async {
+               self.timers[finishedIndexPath]?.invalidate()
+               self.timers[finishedIndexPath] = nil
+               self.playingIndexPath = nil
+               self.audioPlayers[finishedIndexPath] = nil
+               self.tableChatView.reloadRows(at: [finishedIndexPath], with: .none)
+           }
+        }
+    }
+    
     @objc func imageGroupingTapped(_ sender: ObjectGesture) {
         let listGroupingImages = ListGroupImages()
         listGroupingImages.imageTapped = sender.indexImageTapped
@@ -7209,7 +7327,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
         } else if (sender.file_id != "") {
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.file_id)
-                print("MASUK SINI KAH? \(fileURL)")
                 if FileManager.default.fileExists(atPath: fileURL.path) {
                     self.previewItem = fileURL as NSURL
                     let previewController = QLPreviewController()
@@ -7290,44 +7407,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource {
                                 self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
                             }
                         }
-                    }
-                }
-            }
-        } else if !sender.audio_id.isEmpty {
-            if let dirPath = paths.first {
-                let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.audio_id)
-                if FileManager.default.fileExists(atPath: audioURL.path) {
-                    do {
-                        if audioPlayer == nil || audioPlayer?.url != audioURL {
-                            audioPlayer = try AVAudioPlayer(contentsOf: audioURL)
-                            audioPlayer?.prepareToPlay()
-                            audioPlayer?.play()
-                        } else if audioPlayer!.isPlaying {
-                            audioPlayer?.pause()
-                        } else {
-                            audioPlayer?.play()
-                        }
-                    } catch {
-                        
-                    }
-                } else if FileEncryption.shared.isSecureExists(filename: sender.audio_id) {
-                    do {
-                        if let audioData = try FileEncryption.shared.readSecure(filename: sender.audio_id) {
-                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                            let tempPath = cachesDirectory.appendingPathComponent(sender.audio_id)
-                            try audioData.write(to: tempPath)
-                            if audioPlayer == nil || audioPlayer?.url != tempPath {
-                                audioPlayer = try AVAudioPlayer(contentsOf: tempPath)
-                                audioPlayer?.prepareToPlay()
-                                audioPlayer?.play()
-                            } else if audioPlayer!.isPlaying {
-                                audioPlayer?.pause()
-                            } else {
-                                audioPlayer?.play()
-                            }
-                        }
-                    } catch {
-                        
                     }
                 }
             }

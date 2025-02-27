@@ -1274,6 +1274,7 @@ public class APIS: NSObject {
                                     let typeImage = 2
                                     let typeVideo = 3
                                     let typeFile = 4
+                                    let typeAudio = 5
                                     let typeContact = json["typeContact"] as? String ?? "0"
                                     var data = json["data"] as? String ?? ""
                                     let idContact = json["idContact"] as? String ?? ""
@@ -1286,7 +1287,9 @@ public class APIS: NSObject {
                                     let imageId = json["image"] as? String ?? ""
                                     let videoId = json["video"] as? String ?? ""
                                     let fileId = json["file"] as? String ?? ""
+                                    let audioId = json["audio"] as? String ?? ""
                                     var renamedFileId = ""
+                                    var renamedAudioId = ""
                                     var attachmentFlag = ""
                                     if scopeId == "4" {
                                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -1351,8 +1354,22 @@ public class APIS: NSObject {
                                             data = "\(fileId)|\(data)"
                                         }
                                         attachmentFlag = "6"
+                                    } else if typeShare == typeAudio {
+                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
+                                            renamedAudioId = "Nexilis_\(Date().currentTimeMillis())_" + audioId
+                                            let sharedFileURL = appGroupURL.appendingPathComponent(audioId)
+                                            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                            if FileManager.default.fileExists(atPath: sharedFileURL.path) {
+                                                let file = documentDir.appendingPathComponent(renamedAudioId)
+                                                if !FileManager().fileExists(atPath: file.path) {
+                                                    try? FileManager.default.copyItem(at: sharedFileURL, to: file)
+                                                }
+                                            }
+                                            data = "\(audioId)|\(data)"
+                                        }
+                                        attachmentFlag = "5"
                                     }
-                                    message = CoreMessage_TMessageBank.sendMessage(l_pin: groupId.isEmpty ? idContact : groupId, message_scope_id: scopeId, status: scopeId == "3" ? "1" : "2", message_text: data, credential: "0", attachment_flag: attachmentFlag, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageId, audio_id: "", video_id: videoId, file_id: renamedFileId, thumb_id: thumb, reff_id: "", read_receipts: "4", chat_id: chatId, is_call_center: "0", call_center_id: "", opposite_pin: scopeId == "3" ? (User.getMyPin() ?? "") : idContact, gif_id: "", isForwarded: "0", isSecret: "0")
+                                    message = CoreMessage_TMessageBank.sendMessage(l_pin: groupId.isEmpty ? idContact : groupId, message_scope_id: scopeId, status: scopeId == "3" ? "1" : "2", message_text: data, credential: "0", attachment_flag: attachmentFlag, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageId, audio_id: renamedAudioId, video_id: videoId, file_id: renamedFileId, thumb_id: thumb, reff_id: "", read_receipts: "4", chat_id: chatId, is_call_center: "0", call_center_id: "", opposite_pin: scopeId == "3" ? (User.getMyPin() ?? "") : idContact, gif_id: "", isForwarded: "0", isSecret: "0")
                                     Nexilis.addQueueMessage(message: message)
                                     userDefaults.set("", forKey: "sharedItem")
                                     userDefaults.synchronize()

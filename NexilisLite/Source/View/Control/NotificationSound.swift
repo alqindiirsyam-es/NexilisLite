@@ -15,7 +15,6 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
     var data: [NotifSound] = []
     var isSelectedSound = 0
     var lastSelectedSound = 0
-    var audioPlayer: AVAudioPlayer?
 
     public override func viewDidLoad() {
         super.viewDidLoad()
@@ -92,8 +91,8 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
             SecureUserDefaults.shared.set("\(data[idx!].id):\(data[idx!].name)", forKey: "newNotifSoundGroup")
         }
         //stopSound
-        if audioPlayer != nil && audioPlayer!.isPlaying {
-            audioPlayer?.stop()
+        if Nexilis.sharedAudioPlayer != nil && Nexilis.sharedAudioPlayer!.isPlaying {
+            Nexilis.sharedAudioPlayer?.stop()
         }
         navigationController?.dismiss(animated: true, completion: nil)
     }
@@ -108,7 +107,7 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
         data[idxNew!].isSelected = true
         if lastSelectedSound != 0 {
             //stopSound
-            audioPlayer?.stop()
+            Nexilis.sharedAudioPlayer?.stop()
         }
         lastSelectedSound = data[indexPath.row].id
         isSelectedSound = data[indexPath.row].id
@@ -122,9 +121,9 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
             soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
         }
         do {
-            audioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
-            audioPlayer?.prepareToPlay()
-            audioPlayer?.play()
+            Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
+            Nexilis.sharedAudioPlayer?.prepareToPlay()
+            Nexilis.sharedAudioPlayer?.play()
         } catch {
             
         }

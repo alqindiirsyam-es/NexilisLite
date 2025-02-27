@@ -218,7 +218,6 @@ public class Network {
                         let fileDirServer = tempDir.appendingPathComponent(filenameServer)
                         let fileURLServer = URL(fileURLWithPath: fileDirServer.path)
                         try FileEncryption.shared.encryptFile(fileURL, fileURLServer, MasterKeyUtil.shared.getServerKey())
-                        print("ADA KAN? \(fileURL) <><> \(fileURLServer)")
 //                        let dataSecure = try FileEncryption.shared.encryptFile(fileURL)
 //                        dataSecure?.write(to: fileURLSecure)
                         filesIn.append(fileURL)

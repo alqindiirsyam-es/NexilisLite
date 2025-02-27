@@ -53,7 +53,7 @@ public class FileEncryption {
         do {
             try encryptedData?.write(to: outputURL)
             try fileManager.removeItem(at: inputURL)
-            print("File deleted successfully")
+//            print("File deleted successfully")
         } catch {
             print("Error deleting file: \(error)")
         }

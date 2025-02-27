@@ -801,4 +801,6 @@ public class CoreMessage_TMessageCode {
     public static let ACCEPT_REJECT_MEETING = "MTG";
     public static let GET_CHATBOT_SCHEDULE = "CHS";
     public static let GPT_SERVICE = "GPTS";
+    
+    public static let GET_PUSH_PREFS = "GPR";
 }

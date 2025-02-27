@@ -2655,4 +2655,15 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func getPref(key: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.GET_PUSH_PREFS
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.F_PIN] = me
+        tMessage.mBodies[CoreMessage_TMessageKey.KEY] = key
+        return tMessage
+    }
+    
 }
