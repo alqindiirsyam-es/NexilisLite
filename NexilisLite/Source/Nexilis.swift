@@ -3899,16 +3899,75 @@ extension Nexilis: MessageDelegate {
                                             }
                                             do {
                                                 var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+                                                var fromPref = false
                                                 if nameSound.contains("_(Default)") {
-                                                    nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+                                                    if !Utils.getDefaultIncomingMsg().isEmpty {
+                                                        nameSound = Utils.getDefaultIncomingMsg()
+                                                        fromPref = true
+                                                    } else {
+                                                        nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+                                                    }
                                                 }
-                                                var soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
-                                                if soundURL == nil {
-                                                    soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                                                var soundURL: URL?
+                                                if fromPref {
+                                                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                                                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                                                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                                                    if let dirPath = paths.first {
+                                                        let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(nameSound)
+                                                        if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: nameSound) {
+                                                            Download().startHTTP(forKey: nameSound,downloadUrl: Utils.getURLBase() + "filepalio/ringtone/") { (name, progress) in
+                                                                guard progress == 100 else {
+                                                                    return
+                                                                }
+                                                                playAudio()
+                                                            }
+                                                        } else {
+                                                            playAudio()
+                                                        }
+                                                        
+                                                        func playAudio() {
+                                                            if FileManager.default.fileExists(atPath: audioURL.path) {
+                                                                do {
+                                                                    Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: audioURL)
+                                                                    Nexilis.sharedAudioPlayer?.prepareToPlay()
+                                                                    Nexilis.sharedAudioPlayer?.play()
+                                                                } catch {
+                                                                    
+                                                                }
+                                                            } else if FileEncryption.shared.isSecureExists(filename: nameSound) {
+                                                                do {
+                                                                    if let audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                                                                        let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                                                        let tempPath = cachesDirectory.appendingPathComponent(nameSound)
+                                                                        try audioData.write(to: tempPath)
+                                                                        do {
+                                                                            Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: tempPath)
+                                                                            Nexilis.sharedAudioPlayer?.prepareToPlay()
+                                                                            Nexilis.sharedAudioPlayer?.play()
+                                                                        } catch {
+                                                                            
+                                                                        }
+                                                                    }
+                                                                } catch {
+                                                                    
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                                                    if soundURL == nil {
+                                                        soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                                                    }
+                                                    do {
+                                                        Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
+                                                        Nexilis.sharedAudioPlayer?.prepareToPlay()
+                                                        Nexilis.sharedAudioPlayer?.play()
+                                                    } catch {
+                                                        
+                                                    }
                                                 }
-                                                Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
-                                                Nexilis.sharedAudioPlayer?.prepareToPlay()
-                                                Nexilis.sharedAudioPlayer?.play()
                                                 DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: {
                                                     self.floating = nil
                                                 })
@@ -3941,16 +4000,75 @@ extension Nexilis: MessageDelegate {
                         }
                         do {
                             var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+                            var fromPref = false
                             if nameSound.contains("_(Default)") {
-                                nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+                                if !Utils.getDefaultIncomingMsg().isEmpty {
+                                    nameSound = Utils.getDefaultIncomingMsg()
+                                    fromPref = true
+                                } else {
+                                    nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+                                }
                             }
-                            var soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
-                            if soundURL == nil {
-                                soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                            var soundURL: URL?
+                            if fromPref {
+                                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                                if let dirPath = paths.first {
+                                    let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(nameSound)
+                                    if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: nameSound) {
+                                        Download().startHTTP(forKey: nameSound,downloadUrl: Utils.getURLBase() + "filepalio/ringtone/") { (name, progress) in
+                                            guard progress == 100 else {
+                                                return
+                                            }
+                                            playAudio()
+                                        }
+                                    } else {
+                                        playAudio()
+                                    }
+                                    
+                                    func playAudio() {
+                                        if FileManager.default.fileExists(atPath: audioURL.path) {
+                                            do {
+                                                Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: audioURL)
+                                                Nexilis.sharedAudioPlayer?.prepareToPlay()
+                                                Nexilis.sharedAudioPlayer?.play()
+                                            } catch {
+                                                
+                                            }
+                                        } else if FileEncryption.shared.isSecureExists(filename: nameSound) {
+                                            do {
+                                                if let audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                                                    let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                                    let tempPath = cachesDirectory.appendingPathComponent(nameSound)
+                                                    try audioData.write(to: tempPath)
+                                                    do {
+                                                        Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: tempPath)
+                                                        Nexilis.sharedAudioPlayer?.prepareToPlay()
+                                                        Nexilis.sharedAudioPlayer?.play()
+                                                    } catch {
+                                                        
+                                                    }
+                                                }
+                                            } catch {
+                                                
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                                if soundURL == nil {
+                                    soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                                }
+                                do {
+                                    Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
+                                    Nexilis.sharedAudioPlayer?.prepareToPlay()
+                                    Nexilis.sharedAudioPlayer?.play()
+                                } catch {
+                                    
+                                }
                             }
-                            Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
-                            Nexilis.sharedAudioPlayer?.prepareToPlay()
-                            Nexilis.sharedAudioPlayer?.play()
                         } catch {
                             
                         }

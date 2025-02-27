@@ -912,7 +912,7 @@ public class APIS: NSObject {
     //                                            print("Incoming call reported successfully")
     //                                        }
     //                                    }
-                                copySoundToLocalPath("pb_call_in")
+                                copySoundToLocalPath("pb_call_in", false)
                                 let center = UNUserNotificationCenter.current()
                                 let content = UNMutableNotificationContent()
                                 content.title = callFromName
@@ -1035,10 +1035,16 @@ public class APIS: NSObject {
             }
         }
         var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+        var fromPref = false
         if nameSound.contains("_(Default)") {
-            nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+            if !Utils.getDefaultIncomingMsg().isEmpty {
+                nameSound = Utils.getDefaultIncomingMsg()
+                fromPref = true
+            } else {
+                nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+            }
         }
-        copySoundToLocalPath(nameSound)
+        copySoundToLocalPath(nameSound, fromPref)
         let center = UNUserNotificationCenter.current()
         let content = UNMutableNotificationContent()
         content.title = nameUser
@@ -1062,10 +1068,34 @@ public class APIS: NSObject {
         }
     }
     
-    private static func copySoundToLocalPath(_ nameSound: String) {
-        var sourceURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
-        if sourceURL == nil {
-            sourceURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+    private static func copySoundToLocalPath(_ nameSound: String, _ fromPref: Bool) {
+        var sourceURL: URL?
+        if fromPref {
+            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+            if let dirPath = paths.first {
+                let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(nameSound)
+                if FileManager.default.fileExists(atPath: audioURL.path) {
+                    sourceURL = audioURL
+                } else if FileEncryption.shared.isSecureExists(filename: nameSound) {
+                    do {
+                        if let audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                            let tempPath = cachesDirectory.appendingPathComponent(nameSound)
+                            try audioData.write(to: tempPath)
+                            sourceURL = tempPath
+                        }
+                    } catch {
+                        
+                    }
+                }
+            }
+        } else {
+            sourceURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+            if sourceURL == nil {
+                sourceURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+            }
         }
         let fileManager = FileManager.default
         let soundDirectory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!.appendingPathComponent("Sounds", isDirectory: true)

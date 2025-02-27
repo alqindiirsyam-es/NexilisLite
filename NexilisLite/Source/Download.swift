@@ -45,6 +45,10 @@ public class Download {
         _ = Nexilis.write(message: CoreMessage_TMessageBank.getImageDownload(p_image_id: forKey))
     }
     
+    public func startHTTP(forKey: String, downloadUrl: String, completion: @escaping (String, Double)->()) {
+        _ = startHTTP(filename: forKey, isImage: false, baseURL: downloadUrl, completion: completion)
+    }
+    
     public func startHTTP(forKey: String, isImage: Bool = false, completion: @escaping (String, Double)->()) {
         _ = startHTTP(filename: forKey, isImage: isImage, baseURL: DOWNLOAD_URL, completion: completion)
     }
