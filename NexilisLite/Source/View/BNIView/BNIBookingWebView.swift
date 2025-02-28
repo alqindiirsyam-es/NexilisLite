@@ -176,116 +176,32 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         let contentRules = """
         [
             {
-                "trigger": {
-                    "url-filter": ".*ads.*"
+                "trigger": { 
+                    "url-filter": ".*(ads|adserver|advert|doubleclick|popads|popcash|onclickads|adfly|shorte).*", 
+                    "resource-type": ["script", "image", "stylesheet", "document", "subdocument", "media"]
                 },
-                "action": {
-                    "type": "block"
-                }
+                "action": { "type": "block" }
             },
             {
-                "trigger": {
-                    "url-filter": ".*doubleclick.*"
+                "trigger": { 
+                    "url-filter": ".*(taboola|outbrain|scorecardresearch|googlesyndication|tracking|track|pixel).*", 
+                    "resource-type": ["script", "iframe", "xmlhttprequest"]
                 },
-                "action": {
-                    "type": "block"
-                }
+                "action": { "type": "block" }
             },
             {
-                "trigger": {
-                    "url-filter": ".*popads.*"
+                "trigger": { 
+                    "url-filter": ".*(google-analytics|facebook.com/tr|analytics|gtag|data-collect|collect).*", 
+                    "resource-type": ["script", "xmlhttprequest"]
                 },
-                "action": {
-                    "type": "block"
-                }
+                "action": { "type": "block" }
             },
             {
-                "trigger": {
-                    "url-filter": ".*popcash.*"
+                "trigger": { 
+                    "url-filter": ".*(banner|sponsored|clicktrack|beacon|stats|metrics).*", 
+                    "resource-type": ["script", "image", "iframe"]
                 },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*onclickads.*"
-                },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*adfly.*"
-                },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*shorte.*"
-                },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*taboola.*"
-                },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*outbrain.*"
-                },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*scorecardresearch.*"
-                },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*google-analytics.*"
-                },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*facebook.com/tr.*"
-                },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*pixel.*"
-                },
-                "action": {
-                    "type": "block"
-                }
-            },
-            {
-                "trigger": {
-                    "url-filter": ".*analytics.*"
-                },
-                "action": {
-                    "type": "block"
-                }
+                "action": { "type": "block" }
             }
         ]
         """
