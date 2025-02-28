@@ -234,14 +234,14 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
             if !text.starts(with: "www.") && !text.starts(with: "https://") {
                 urlString = "https://www.google.com/search?q=\(text)"
             }
-            if let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: " ", with: "+")
+            if let url = URL(string: urlString) {
                 loadURLWithCookie(url: url)
             }
         }
     }
     
     func loadURLWithCookie(url: URL) {
-        print("KACAU \(url)")
         var urlRequest = URLRequest(url: url)
         let customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1 \(Utils.getUserAgent())"
         urlRequest.setValue(customUserAgent, forHTTPHeaderField: "User-Agent")
