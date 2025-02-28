@@ -177,29 +177,36 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         [
             {
                 "trigger": { 
-                    "url-filter": ".*(ads|adserver|advert|doubleclick|popads|popcash|onclickads|adfly|shorte).*", 
-                    "resource-type": ["script", "image", "stylesheet", "document", "subdocument", "media"]
+                    "url-filter": ".*(ads|adserver|advert|doubleclick|popads|popcash|onclickads|adfly|shorte|media.net|buysellads|revcontent).*", 
+                    "resource-type": ["script", "iframe", "xmlhttprequest", "media"]
                 },
                 "action": { "type": "block" }
             },
             {
                 "trigger": { 
-                    "url-filter": ".*(taboola|outbrain|scorecardresearch|googlesyndication|tracking|track|pixel).*", 
+                    "url-filter": ".*(taboola|outbrain|scorecardresearch|googlesyndication|tracking|track|pixel|cpxinteractive|zedo|rubiconproject).*", 
                     "resource-type": ["script", "iframe", "xmlhttprequest"]
                 },
                 "action": { "type": "block" }
             },
             {
                 "trigger": { 
-                    "url-filter": ".*(google-analytics|facebook.com/tr|analytics|gtag|data-collect|collect).*", 
+                    "url-filter": ".*(google-analytics|facebook.com/tr|analytics|gtag|data-collect|collect|hotjar|mixpanel|segment|mouseflow).*", 
                     "resource-type": ["script", "xmlhttprequest"]
                 },
                 "action": { "type": "block" }
             },
             {
                 "trigger": { 
-                    "url-filter": ".*(banner|sponsored|clicktrack|beacon|stats|metrics).*", 
+                    "url-filter": ".*(banner|sponsored|clicktrack|beacon|stats|metrics|impression|affiliate|clksite).*", 
                     "resource-type": ["script", "image", "iframe"]
+                },
+                "action": { "type": "block" }
+            },
+            {
+                "trigger": { 
+                    "url-filter": ".*(interstitial|popunder|redirect|clickunder|popup|overlayad).*", 
+                    "resource-type": ["script", "document", "subdocument"]
                 },
                 "action": { "type": "block" }
             }
