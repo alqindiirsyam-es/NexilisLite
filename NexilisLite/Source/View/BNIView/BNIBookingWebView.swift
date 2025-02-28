@@ -12,7 +12,7 @@ import Speech
 import CommonCrypto
 
 public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScrollViewDelegate, UIGestureRecognizerDelegate, WKScriptMessageHandler, SFSpeechRecognizerDelegate, ImageVideoPickerDelegate {
-    var webView = WKWebView()
+    var webView: WKWebView!
     let closeButton = UIButton()
     public var customUrl = ""
     public var isSecureBrowser = false
@@ -42,6 +42,14 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
+        loadContentBlocker(into: configuration) { [self] in
+            DispatchQueue.main.async {
+                self.initializeWebView(with: configuration)
+            }
+        }
+    }
+    
+    func initializeWebView(with configuration: WKWebViewConfiguration) {
         let customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1 \(Utils.getUserAgent())"
         let finalUserAgent = "\(customUserAgent)"
         configuration.applicationNameForUserAgent = finalUserAgent
@@ -153,10 +161,142 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         if lang == "id" {
             intLang = 1
         }
-        stringQMS = stringQMS + "&lang=\(intLang)&theme=\(self.traitCollection.userInterfaceStyle == .dark ? "0" : "1")"
-        let url = URL(string: "\(stringQMS)")!
-        if !isSecureBrowser {
-            loadURLWithCookie(url: url)
+        if stringQMS.starts(with: Utils.getURLBase()) {
+            stringQMS = stringQMS + "&lang=\(intLang)&theme=\(self.traitCollection.userInterfaceStyle == .dark ? "0" : "1")"
+        }
+        if let url = URL(string: "\(stringQMS)") {
+            if !isSecureBrowser {
+                loadURLWithCookie(url: url)
+            }
+        }
+    }
+    
+    func loadContentBlocker(into config: WKWebViewConfiguration, completion: @escaping () -> Void) {
+        // Define ad-blocking rules directly in Swift as a string
+        let contentRules = """
+        [
+            {
+                "trigger": {
+                    "url-filter": ".*ads.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*doubleclick.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*popads.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*popcash.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*onclickads.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*adfly.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*shorte.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*taboola.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*outbrain.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*scorecardresearch.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*google-analytics.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*facebook.com/tr.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*pixel.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            },
+            {
+                "trigger": {
+                    "url-filter": ".*analytics.*"
+                },
+                "action": {
+                    "type": "block"
+                }
+            }
+        ]
+        """
+
+        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "AdBlocker", encodedContentRuleList: contentRules) { ruleList, error in
+            if let ruleList = ruleList {
+                config.userContentController.add(ruleList)
+            } else {
+                print("Failed to compile content rule list: \(error?.localizedDescription ?? "Unknown error")")
+            }
+            completion()
         }
     }
     
@@ -166,12 +306,14 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
             if !text.starts(with: "www.") && !text.starts(with: "https://") {
                 urlString = "https://www.google.com/search?q=\(text)"
             }
-            let url = URL(string: urlString)!
-            loadURLWithCookie(url: url)
+            if let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                loadURLWithCookie(url: url)
+            }
         }
     }
     
     func loadURLWithCookie(url: URL) {
+        print("KACAU \(url)")
         var urlRequest = URLRequest(url: url)
         let customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1 \(Utils.getUserAgent())"
         urlRequest.setValue(customUserAgent, forHTTPHeaderField: "User-Agent")
@@ -762,14 +904,14 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         }
         loadingURL = true
         if allowedURLs.contains(url.absoluteString) {
-            print("✅ URL already allowed: \(url)")
+            loadingURL = false
             decisionHandler(.allow)
             return
         }
         validateSSLCertificate(url: url) { isValid in
-            print("is VALID? : \(isValid)")
             if isValid {
                 self.allowedURLs.insert(url.absoluteString)
+                self.loadingURL = false
                 decisionHandler(.allow)
             } else {
                 let host = url.host ?? ""
@@ -792,9 +934,11 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                             }
                         }
                         self.allowedURLs.insert(url.absoluteString)
+                        self.loadingURL = false
                         decisionHandler(.allow)
                     }
                     let noAction = UIAlertAction(title: "No", style: .cancel) { _ in
+                        self.loadingURL = false
                         decisionHandler(.cancel)
                     }
                     alert.addAction(yesAction)
@@ -811,7 +955,6 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
 
         let task = session.dataTask(with: request) { _, response, error in
             if let error = error {
-                print("SSL Validation Error: \(error.localizedDescription)")
                 completion(false)
                 return
             }
@@ -833,10 +976,8 @@ extension BNIBookingWebView: URLSessionDelegate {
             if let jsonData = storedCertificate.data(using: .utf8),
                let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
                 if publicKeyHash == certJson[domain] {
-                    print("✅ Certificate Matched. Allowing Navigation.")
                     completionHandler(.useCredential, URLCredential(trust: serverTrust))
                 } else {
-                    print("❌ Certificate Mismatch! Blocking Navigation.")
                     blockedCertificate = publicKeyHash
                     completionHandler(.cancelAuthenticationChallenge, nil)
                 }
@@ -852,7 +993,6 @@ extension BNIBookingWebView: URLSessionDelegate {
         
         var error: Unmanaged<CFError>?
         guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            print("❌ Failed to extract public key")
             return nil
         }
         

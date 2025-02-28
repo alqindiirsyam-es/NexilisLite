@@ -1079,7 +1079,11 @@ public class Nexilis: NSObject {
     public static func buttonClicked(index: Int, id: String = "") {
         //print("BTNCLICK \(index) \(id)")
         if index == IDX_QUEUE_SYSTEM || index == IDX_NEWS || index == IDX_SOCIAL_COMMERCE {
-            openUrl(url: id)
+            if id == "fb\(index)"{
+                openUrl(url: "https://google.com/")
+            } else {
+                openUrl(url: id)
+            }
         } else if index == IDX_NOTIF_CENTER {
             APIS.openNotificationCenter()
         } else if index == IDX_CHAT {
