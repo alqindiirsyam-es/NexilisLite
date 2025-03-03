@@ -435,10 +435,12 @@ public class APIS: NSObject {
         }
         let controller = BNIBookingWebView()
         controller.isSecureBrowser = true
+        let navigationController = CustomNavigationController(rootViewController: controller)
+        navigationController.defaultStyle()
         if UIApplication.shared.visibleViewController?.navigationController != nil {
-            UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
+            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
         } else {
-            UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
+            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
         }
     }
     

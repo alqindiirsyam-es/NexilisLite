@@ -3840,22 +3840,6 @@ extension Nexilis: MessageDelegate {
                         return
                     }
                     
-                    if UIApplication.shared.visibleViewController is UINavigationController {
-                        let nc = UIApplication.shared.visibleViewController as! UINavigationController
-                        if nc.visibleViewController is QmeraStreamingViewController {
-                            return
-                        } else if nc.visibleViewController is SeminarViewController {
-                            return
-                        }
-                        if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
-                            if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
-                                navigationC.popViewController(animated: true)
-                            }
-                        }
-                    } else if UIApplication.shared.visibleViewController is UIAlertController {
-                        return
-                    }
-                    
                     displayNotif()
                     
                     func displayNotif() {
@@ -4088,6 +4072,21 @@ extension Nexilis: MessageDelegate {
                         }
                     }
                     func showNotif() {
+                        if UIApplication.shared.visibleViewController is UINavigationController {
+                            let nc = UIApplication.shared.visibleViewController as! UINavigationController
+                            if nc.visibleViewController is QmeraStreamingViewController {
+                                return
+                            } else if nc.visibleViewController is SeminarViewController {
+                                return
+                            }
+                            if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
+                                if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
+                                    navigationC.popViewController(animated: true)
+                                }
+                            }
+                        } else if UIApplication.shared.visibleViewController is UIAlertController {
+                            return
+                        }
                         if message.getBody(key: attachmentFlag) == "59" {
                             let date = Date(milliseconds: Int64(message.getBody(key: CoreMessage_TMessageKey.LOCAL_TIMESTAMP))!)
                             let formatter = DateFormatter()

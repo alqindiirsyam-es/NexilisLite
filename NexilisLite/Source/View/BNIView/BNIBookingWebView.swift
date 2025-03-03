@@ -40,6 +40,19 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     public override func viewDidLoad() {
         super.viewDidLoad()
         
+        title = "Secure Browser".localized()
+        
+        let attributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
+        let navBarAppearance = UINavigationBarAppearance()
+        navBarAppearance.configureWithOpaqueBackground()
+        navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
+        navBarAppearance.titleTextAttributes = attributes
+        navigationController?.navigationBar.standardAppearance = navBarAppearance
+        navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
+        
+        let backButton = UIBarButtonItem(image: UIImage(systemName: "chevron.backward"), style: .plain, target: self, action: #selector(self.didTapExit))
+        self.navigationItem.leftBarButtonItem = backButton
+        
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
         loadContentBlocker(into: configuration) { [self] in
@@ -47,6 +60,10 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                 self.initializeWebView(with: configuration)
             }
         }
+    }
+    
+    @objc func didTapExit(sender: Any) {
+        self.dismiss(animated: true, completion: nil)
     }
     
     func initializeWebView(with configuration: WKWebViewConfiguration) {
@@ -167,6 +184,10 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         if let url = URL(string: "\(stringQMS)") {
             if !isSecureBrowser {
                 loadURLWithCookie(url: url)
+            } else {
+                if let url = URL(string: "https://google.com/") {
+                    loadURLWithCookie(url: url)
+                }
             }
         }
     }
@@ -249,6 +270,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
             for cookie in cookies {
                 webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
             }
+            textField.text = url.absoluteString
             webView.load(urlRequest)
         }
     }
