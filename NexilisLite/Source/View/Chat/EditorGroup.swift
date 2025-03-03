@@ -2459,10 +2459,19 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
 
         for mention in listMentionInTextField where mention.ex_block?.isEmpty == false {
             let nameWithMention = "@\(mention.firstName) \(mention.lastName)".trimmingCharacters(in: .whitespaces)
-            guard let blockPosition = Int(mention.ex_block!) else { continue }
-            
-            let lowerBound = textView.text.index(textView.text.startIndex, offsetBy: blockPosition - nameWithMention.count)
-            let upperBound = textView.text.index(textView.text.startIndex, offsetBy: blockPosition)
+
+            guard let blockPosition = Int(mention.ex_block ?? ""), blockPosition >= 0 else { continue }
+
+            guard !textView.text.isEmpty else { continue }
+
+            let textCount = textView.text.count
+            let lowerOffset = max(0, blockPosition - nameWithMention.count)
+            let upperOffset = min(textCount, blockPosition)
+
+            guard lowerOffset < textCount, upperOffset <= textCount else { continue }
+
+            let lowerBound = textView.text.index(textView.text.startIndex, offsetBy: lowerOffset)
+            let upperBound = textView.text.index(textView.text.startIndex, offsetBy: upperOffset)
             let range = lowerBound..<upperBound
             
             if textView.text[range] == nameWithMention {
@@ -2472,21 +2481,29 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                     break
                 }
             } else {
-                let offset = mention.ex_offmp?.isEmpty == false ? listMentionWithText.count - Int(mention.ex_offmp!)! : listMentionWithText.count
-                let adjustedLowerBound = textView.text.index(lowerBound, offsetBy: offset)
-                let adjustedUpperBound = textView.text.index(upperBound, offsetBy: offset)
-                let adjustedRange = adjustedLowerBound..<adjustedUpperBound
-                
-                if textView.text[adjustedRange] == nameWithMention {
-                    if lastPositionCursorMention >= textView.text.distance(from: textView.text.startIndex, to: adjustedLowerBound) + 1,
-                       lastPositionCursorMention <= textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound) {
-                        continueCheckMention = false
-                        break
+                let exOffmpValue = Int(mention.ex_offmp ?? "") ?? 0
+
+                let offset = mention.ex_offmp?.isEmpty == false ? listMentionWithText.count - exOffmpValue : listMentionWithText.count
+
+                let safeOffset = max(-textView.text.distance(from: lowerBound, to: textView.text.endIndex),
+                                     min(offset, textView.text.distance(from: upperBound, to: textView.text.endIndex)))
+
+                if let adjustedLowerBound = textView.text.index(lowerBound, offsetBy: safeOffset, limitedBy: textView.text.endIndex),
+                   let adjustedUpperBound = textView.text.index(upperBound, offsetBy: safeOffset, limitedBy: textView.text.endIndex) {
+                    
+                    let adjustedRange = adjustedLowerBound..<adjustedUpperBound
+                    
+                    if textView.text[adjustedRange] == nameWithMention {
+                        if lastPositionCursorMention >= textView.text.distance(from: textView.text.startIndex, to: adjustedLowerBound) + 1,
+                           lastPositionCursorMention <= textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound) {
+                            continueCheckMention = false
+                            break
+                        }
+                        mention.ex_block = "\(textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound))"
+                        mention.ex_offmp = "\(textView.text.count)"
+                    } else {
+                        listHaveToRemoved.append(mention)
                     }
-                    mention.ex_block = "\(textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound))"
-                    mention.ex_offmp = "\(textView.text.count)"
-                } else {
-                    listHaveToRemoved.append(mention)
                 }
             }
         }
@@ -4208,7 +4225,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 getImage(name: listMentionWithText[indexPath.row].thumb, placeholderImage: UIImage(systemName: "person"), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                     content.image = image
                 })
-                content.text = listMentionWithText[indexPath.row].firstName
+                content.text = listMentionWithText[indexPath.row].firstName + " " + listMentionWithText[indexPath.row].lastName
             }
             cellMention.contentConfiguration = content
             return cellMention

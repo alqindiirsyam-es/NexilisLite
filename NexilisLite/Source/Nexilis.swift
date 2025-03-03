@@ -3840,6 +3840,18 @@ extension Nexilis: MessageDelegate {
                         return
                     }
                     
+                    if UIApplication.shared.visibleViewController is UINavigationController {
+                        let nc = UIApplication.shared.visibleViewController as! UINavigationController
+                        if nc.visibleViewController is QmeraStreamingViewController {
+                            return
+                        } else if nc.visibleViewController is SeminarViewController {
+                            return
+                        }
+                    }
+                    if UIApplication.shared.visibleViewController is UIAlertController {
+                        return
+                    }
+                    
                     displayNotif()
                     
                     func displayNotif() {
