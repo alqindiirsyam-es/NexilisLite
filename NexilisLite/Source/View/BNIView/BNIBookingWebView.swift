@@ -189,6 +189,10 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                     loadURLWithCookie(url: url)
                 }
             }
+        } else if isSecureBrowser {
+            if let url = URL(string: "https://google.com/") {
+                loadURLWithCookie(url: url)
+            }
         }
     }
     
