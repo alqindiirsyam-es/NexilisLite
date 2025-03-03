@@ -1080,9 +1080,9 @@ public class Nexilis: NSObject {
         //print("BTNCLICK \(index) \(id)")
         if index == IDX_QUEUE_SYSTEM || index == IDX_NEWS || index == IDX_SOCIAL_COMMERCE {
             if id == "fb\(index)"{
-                openUrl(url: "https://google.com/")
+                APIS.openUrl(url: "https://google.com/")
             } else {
-                openUrl(url: id)
+                APIS.openUrl(url: id)
             }
         } else if index == IDX_NOTIF_CENTER {
             APIS.openNotificationCenter()
@@ -1116,48 +1116,6 @@ public class Nexilis: NSObject {
             APIS.openConference()
         } else if index == IDX_SELF_ACT {
             openApp(id: id)
-        }
-    }
-    
-    public static func openUrl(isBNI: Bool = false, url: String = "") {
-        let isChangeProfile = Utils.getSetProfile()
-        if !isChangeProfile {
-            let alert = LibAlertController(title: "Change Profile".localized(), message: "You must change your name to use this feature".localized(), preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {(_) in
-                let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
-                controller.forceLogin = true
-                let navigationController = CustomNavigationController(rootViewController: controller)
-                navigationController.modalPresentationStyle = .fullScreen
-                navigationController.navigationBar.tintColor = .white
-                navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-                navigationController.navigationBar.isTranslucent = false
-                navigationController.navigationBar.overrideUserInterfaceStyle = .dark
-                navigationController.navigationBar.barStyle = .black
-                let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-                let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-                navigationController.navigationBar.titleTextAttributes = textAttributes
-                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                } else {
-                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                }
-            }))
-            if UIApplication.shared.visibleViewController?.navigationController != nil {
-                UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-            } else {
-                UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-            }
-            return
-        }
-        let controller = BNIBookingWebView()
-        if !isBNI {
-            controller.customUrl = url
-        }
-        if UIApplication.shared.visibleViewController?.navigationController != nil {
-            UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
-        } else {
-            UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
         }
     }
     

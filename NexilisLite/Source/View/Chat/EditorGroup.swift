@@ -6185,8 +6185,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if stringURl.lowercased().starts(with: "www.") {
             stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
         }
-        guard let url = URL(string: stringURl) else { return }
-        UIApplication.shared.open(url)
+        if Nexilis.checkingAccess(key: "secure_browser") {
+            APIS.openUrl(url: stringURl)
+        } else {
+            guard let url = URL(string: stringURl) else { return }
+            UIApplication.shared.open(url)
+        }
     }
     
     //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {

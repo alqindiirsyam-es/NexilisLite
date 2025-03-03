@@ -939,22 +939,22 @@ extension ContactChatViewController {
                 APIS.openContactCenter();
                 return true;
             case "18d1c6d9f330215af7b49": //bpkh haji
-                Nexilis.openUrl(url: Utils.decrypt(str: "6]tov!l_opgn=hgz?ykmgv?yoro3kt?uo>yoro3kt??@yvzzn"))
+                APIS.openUrl(url: Utils.decrypt(str: "6]tov!l_opgn=hgz?ykmgv?yoro3kt?uo>yoro3kt??@yvzzn"))
                 return true;
             case "18d1c6eefd40215af7b49": //bpkh bpjs
-                Nexilis.openUrl(url: Utils.decrypt(str: "1>ojq`g@tkqc.cbu:tfhbq:tjmjyfo:pj/tjmjyfo::;tquui"))
+                APIS.openUrl(url: Utils.decrypt(str: "1>ojq`g@tkqc.cbu:tfhbq:tjmjyfo:pj/tjmjyfo::;tquui"))
                 return true;
             case "18d30e711c20230d00c15": //ina bpjs
-                Nexilis.openUrl(url: Utils.decrypt(str: "6]tov!l_ypvh=hgz?ykmgv?yoro3kt?sui>ykrgyomojrkyz??@yvzzn"))
+                APIS.openUrl(url: Utils.decrypt(str: "6]tov!l_ypvh=hgz?ykmgv?yoro3kt?sui>ykrgyomojrkyz??@yvzzn"))
                 return true;
             case "18d30e47ae60230d00c15": //ina KTP, KK, SKL
-                Nexilis.openUrl(url: Utils.decrypt(str: "1>ojq`g@qul.cbu:tfhbq:tjmjyfo:npd/tfmbtjhjemftu::;tquui"))
+                APIS.openUrl(url: Utils.decrypt(str: "1>ojq`g@qul.cbu:tfhbq:tjmjyfo:npd/tfmbtjhjemftu::;tquui"))
                 return true;
             case "18d30eb2e910230d00c15": //SIM, SKKB, SKBN
-                Nexilis.openUrl(url: Utils.decrypt(str: "4[rmt}j]qmw;fex=wiket=wmpm1ir=qsg<wipewmkmhpiwx==>wtxxl"))
+                APIS.openUrl(url: Utils.decrypt(str: "4[rmt}j]qmw;fex=wiket=wmpm1ir=qsg<wipewmkmhpiwx==>wtxxl"))
                 return true;
             case "18da1c0200f0215af7b49": //BPKH index BMI
-                Nexilis.openUrl(url: Utils.decrypt(str: "4[rmt}j]mqf}1ihrm=mqf=wmpm1ir=sm<wmpm1ir==>wtxxl"))
+                APIS.openUrl(url: Utils.decrypt(str: "4[rmt}j]mqf}1ihrm=mqf=wmpm1ir=sm<wmpm1ir==>wtxxl"))
                 return true;
             default:
                 break;
