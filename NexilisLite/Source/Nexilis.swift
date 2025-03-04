@@ -2325,7 +2325,6 @@ extension Nexilis: CallDelegate {
                 if Nexilis.callAPNActivated || APIS.checkAppStateisBackground() {
                     return
                 }
-                print("DATA: \(message)")
                 let dataUser = User.getDataCanNil(pin: String(deviceId))
                 if dataUser == nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {

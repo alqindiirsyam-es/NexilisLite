@@ -1067,8 +1067,17 @@ class QmeraVideoViewController: UIViewController {
                     }
                 }
             }
-        }
-        else if (state == Nexilis.VIDEO_CAMERA_PARAMS_CHANED){
+        } else if (state == Nexilis.VIDEO_CALL_ZOOM) && self.dataPerson.count > 1 {
+            DispatchQueue.main.async {
+                if arrayMessage[0] == arrayMessage[3] {
+                    self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
+                    self.zoomView.contentMode = .scaleAspectFit
+                } else {
+                    self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
+                    self.zoomView.contentMode = .scaleAspectFit
+                }
+            }
+        } else if (state == Nexilis.VIDEO_CAMERA_PARAMS_CHANED){
             if(arrayMessage[3] == "0"){
                 DispatchQueue.main.async {
                     if self.dataPerson.count == 1 && arrayMessage[2] == "1" && arrayMessage[4] == "1" {
@@ -1180,20 +1189,17 @@ class QmeraVideoViewController: UIViewController {
                     self.users.append(user)
                 }
                 if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
-                    print("masuk 1")
                     DispatchQueue.main.async {
                         self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
                         self.zoomView.contentMode = .scaleAspectFit
                     }
                 }
                 else if self.dataPerson.count == 1 {
-                    print("masuk 2")
                     DispatchQueue.main.async {
                         self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
                         self.zoomView.contentMode = .scaleAspectFit
                     }
                 } else if self.dataPerson.count > 1 {
-                    print("masuk 3")
                     DispatchQueue.main.async {
                         self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
                         self.zoomView.contentMode = .scaleAspectFit

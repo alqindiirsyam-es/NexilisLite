@@ -618,7 +618,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
     
     @objc func checkCounter() {
         DispatchQueue.global().async { [self] in
-            let counter = queryCountCounter()
+            let counter = APIS.getTotalCounter()
             if counter > 0 {
                 DispatchQueue.main.async { [self] in
                     if button_fb2 != nil && !indicatorCounterFB.isDescendant(of: button_fb2) {
@@ -651,22 +651,6 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 }
             }
         }
-    }
-    
-    private func queryCountCounter() -> Int32 {
-        var counter: Int32?
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT SUM(counter) FROM MESSAGE_SUMMARY"), cursor.next() {
-                    counter = cursor.int(forColumnIndex: 0)
-                    cursor.close()
-                }
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
-            }
-        })
-        return counter ?? 0
     }
     
     @objc func qmeraTap() {

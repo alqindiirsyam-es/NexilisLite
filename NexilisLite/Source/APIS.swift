@@ -25,7 +25,26 @@ public class APIS: NSObject {
         var counter: Int32?
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT SUM(counter) FROM MESSAGE_SUMMARY"), cursor.next() {
+                let query = """
+                            select SUM(counter) as total_counter 
+                            from (
+                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b 
+                                where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0
+                                union all
+                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m 
+                                where ms.l_pin = '-999' and ms.message_id = m.message_id
+                                union all
+                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m 
+                                where ms.l_pin = '-997' and ms.message_id = m.message_id
+                                union all
+                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b 
+                                where ms.l_pin = b.group_id and ms.message_id = m.message_id and m.is_call_center = 0
+                                union all
+                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c 
+                                where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id and m.is_call_center = 0
+                            ) as subquery
+                            """
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query), cursor.next() {
                     counter = cursor.int(forColumnIndex: 0)
                     cursor.close()
                 }

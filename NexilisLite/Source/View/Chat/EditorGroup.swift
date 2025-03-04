@@ -4770,7 +4770,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let imageAudio = UIImageView()
             imageAudio.image = UIImage(systemName: "music.note", withConfiguration: UIImage.SymbolConfiguration(pointSize: 35))
             containerMessage.addSubview(imageAudio)
-            imageAudio.anchor(left: containerMessage.leftAnchor, paddingLeft: 15, centerY: containerMessage.centerYAnchor)
+            imageAudio.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingTop: 15, paddingLeft: 15, paddingBottom: 15, centerY: containerMessage.centerYAnchor)
             imageAudio.tintColor = .mainColor
             
             let playButtonAudio = UIButton(type: .system)
@@ -4786,7 +4786,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 .resize(target: CGSize(width: 15, height: 15))
             progressSliderAudio.setThumbImage(thumbImage, for: .normal)
             containerMessage.addSubview(progressSliderAudio)
-            progressSliderAudio.anchor(top: containerMessage.topAnchor, left: playButtonAudio.rightAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: 15, paddingLeft: 10, paddingBottom: 15, paddingRight: 15)
+            progressSliderAudio.anchor(left: playButtonAudio.rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 10, paddingRight: 15, centerY: containerMessage.centerYAnchor, height: 15)
             
             let timeLabelAudio = UILabel()
             timeLabelAudio.text = "0:00"
@@ -4802,6 +4802,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(audioChat)
                 var url = audioURL
                 if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: audioChat) {
+                    let activityIndicator = UIActivityIndicatorView(style: .medium)
+                    activityIndicator.translatesAutoresizingMaskIntoConstraints = false
+                    activityIndicator.startAnimating()
+                    playButtonAudio.setImage(nil, for: .normal)
+                    playButtonAudio.addSubview(activityIndicator)
+                    NSLayoutConstraint.activate([
+                        activityIndicator.centerXAnchor.constraint(equalTo: playButtonAudio.centerXAnchor),
+                        activityIndicator.centerYAnchor.constraint(equalTo: playButtonAudio.centerYAnchor)
+                    ])
                     Download().startHTTP(forKey: audioChat, isImage: false) { (name, progress) in
                         guard progress == 100 else {
                             return
@@ -4821,33 +4830,33 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             
                         }
                     }
-                }
-                if audioPlayers[indexPath] == nil {
-                    do {
-                        let audioPlayer = try AVAudioPlayer(contentsOf: url)
-                        audioPlayers[indexPath] = audioPlayer
-                        audioPlayer.delegate = self
-                        progressSliderAudio.maximumValue = Float(audioPlayer.duration)
-                        timeLabelAudio.text = formatTime(audioPlayer.duration)
-                    } catch {
-                        print("Error loading audio: \(error)")
+                    if audioPlayers[indexPath] == nil {
+                        do {
+                            let audioPlayer = try AVAudioPlayer(contentsOf: url)
+                            audioPlayers[indexPath] = audioPlayer
+                            audioPlayer.delegate = self
+                            progressSliderAudio.maximumValue = Float(audioPlayer.duration)
+                            timeLabelAudio.text = formatTime(audioPlayer.duration)
+                        } catch {
+                            print("Error loading audio: \(error)")
+                        }
                     }
-                }
-                let audioPlayer = audioPlayers[indexPath]
-                if playingIndexPath == indexPath, let player = audioPlayer, player.isPlaying {
-                    playButtonAudio.setImage(UIImage(systemName: "pause.fill"), for: .normal)
-                } else {
-                    playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
-                }
+                    let audioPlayer = audioPlayers[indexPath]
+                    if playingIndexPath == indexPath, let player = audioPlayer, player.isPlaying {
+                        playButtonAudio.setImage(UIImage(systemName: "pause.fill"), for: .normal)
+                    } else {
+                        playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
+                    }
 
-                // Play/Pause Button Action
-                playButtonAudio.addAction(UIAction { _ in
-                    self.playPauseAudio(indexPath: indexPath, playButton: playButtonAudio, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
-                }, for: .touchUpInside)
-                
-                progressSliderAudio.addAction(UIAction { _ in
-                    self.sliderChanged(indexPath: indexPath, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
-                }, for: .valueChanged)
+                    // Play/Pause Button Action
+                    playButtonAudio.addAction(UIAction { _ in
+                        self.playPauseAudio(indexPath: indexPath, playButton: playButtonAudio, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+                    }, for: .touchUpInside)
+                    
+                    progressSliderAudio.addAction(UIAction { _ in
+                        self.sliderChanged(indexPath: indexPath, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+                    }, for: .valueChanged)
+                }
             }
         }
         
@@ -5653,10 +5662,20 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         } else {
             // Stop other players if one is already playing
             if let currentPlayingIndexPath = playingIndexPath, let currentAudioPlayer = audioPlayers[currentPlayingIndexPath] {
-                currentAudioPlayer.pause()
-                timers[currentPlayingIndexPath]?.invalidate()
-                timers[currentPlayingIndexPath] = nil
-                tableChatView.reloadRows(at: [currentPlayingIndexPath], with: .none)
+                if currentPlayingIndexPath != indexPath {
+                    currentAudioPlayer.pause()
+                    timers[currentPlayingIndexPath]?.invalidate()
+                    timers[currentPlayingIndexPath] = nil
+                    audioPlayers[currentPlayingIndexPath] = nil
+                    tableChatView.reloadRows(at: [currentPlayingIndexPath], with: .none)
+                }
+            }
+            
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                
             }
 
             // Play new audio
