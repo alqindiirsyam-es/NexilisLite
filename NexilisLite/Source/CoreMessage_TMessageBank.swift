@@ -208,7 +208,7 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
-    public static func editMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String, last_edit: Int64 = 0) -> TMessage {
+    public static func editMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String, server_date: String, local_time_stamp: String, last_edit: Int64 = 0) -> TMessage {
         let me = User.getMyPin()!
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.EDIT_MESSAGE
@@ -218,8 +218,8 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = message_id.isEmpty ? me + CoreMessage_TMessageUtil.getTID() : message_id
         tmessage.mBodies[CoreMessage_TMessageKey.F_PIN] = me
         tmessage.mBodies[CoreMessage_TMessageKey.L_PIN] = l_pin
-        tmessage.mBodies[CoreMessage_TMessageKey.SERVER_DATE] = String(Date().currentTimeMillis())
-        tmessage.mBodies[CoreMessage_TMessageKey.LOCAL_TIMESTAMP] = String(Date().currentTimeMillis())
+        tmessage.mBodies[CoreMessage_TMessageKey.SERVER_DATE] = server_date
+        tmessage.mBodies[CoreMessage_TMessageKey.LOCAL_TIMESTAMP] = local_time_stamp
         tmessage.mBodies[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] = message_scope_id
         tmessage.mBodies[CoreMessage_TMessageKey.STATUS] = status
         tmessage.mBodies[CoreMessage_TMessageKey.MESSAGE_TEXT] = message_text.toStupidString()

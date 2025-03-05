@@ -46,10 +46,10 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
     let defaultWidthHeightMenuFB = (UIScreen.main.bounds.height * 0.45) / 7.5
     let widthFBAnim = (UIScreen.main.bounds.height * 0.8) / 7.5
     let heightFBAnim = (UIScreen.main.bounds.height * 1) / 7.5
-    let heightFBSideTab = (UIScreen.main.bounds.height * 1.05) / 7.5
-    let widthFBSideTab: CGFloat = 18
-    let widthVerticalSideTab: CGFloat = 50
-    let heightVerticalSideTab: CGFloat = 220
+    let heightFBSideTab = (UIScreen.main.bounds.height * 1.05) / 6.5
+    let widthFBSideTab: CGFloat = 20
+    let widthVerticalSideTab: CGFloat = 60
+    let heightVerticalSideTab: CGFloat = 250
     
     final let MODE_VERTICAL_FLOATING_BUTTON = "1"
     final let MODE_VERTICAL_ANIMATION = "2"
@@ -129,7 +129,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         }
         
         backgroundColor = .clear
-        frame = CGRect(x: UIScreen.main.bounds.width - defaultWidthFB, y: (UIScreen.main.bounds.height / 2) - defaultHeightFB, width: configModeFB == MODE_VERTICAL_SIDE_TAB ? 50 + defaultWidthFB : configModeFB == MODE_HORIZONTAL_SIDE_TAB ? UIScreen.main.bounds.width - defaultWidthFB : defaultWidthFB, height: configModeFB == MODE_VERTICAL_SIDE_TAB ? heightVerticalSideTab : defaultHeightFB)
+        frame = CGRect(x: UIScreen.main.bounds.width - defaultWidthFB, y: (UIScreen.main.bounds.height / 2) - defaultHeightFB, width: configModeFB == MODE_VERTICAL_SIDE_TAB ? widthVerticalSideTab + defaultWidthFB : configModeFB == MODE_HORIZONTAL_SIDE_TAB ? UIScreen.main.bounds.width - defaultWidthFB : defaultWidthFB, height: configModeFB == MODE_VERTICAL_SIDE_TAB ? heightVerticalSideTab : defaultHeightFB)
         
         if configModeFB == MODE_VERTICAL_ANIMATION || configModeFB == MODE_HORIZONTAL_ANIMATION {
             if configAnim == 0 { //left to right
@@ -425,9 +425,9 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                                     newButton.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                     newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                 } else if mode == MODE_VERTICAL_SIDE_TAB {
-                                    newButton.frame = CGRect(x: 0, y: 0, width: 25, height: 25)
-                                    newButton.widthAnchor.constraint(equalToConstant: 25).isActive = true
-                                    newButton.heightAnchor.constraint(equalToConstant: 25).isActive = true
+                                    newButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
+                                    newButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+                                    newButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
                                     newButton.contentMode = .scaleAspectFill
                                     newButton.clipsToBounds = true
                                 } else {
@@ -520,9 +520,9 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 newButton.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                 newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
             } else if mode == MODE_VERTICAL_SIDE_TAB {
-                newButton.frame = CGRect(x: 0, y: 0, width: 25, height: 25)
-                newButton.widthAnchor.constraint(equalToConstant: 25).isActive = true
-                newButton.heightAnchor.constraint(equalToConstant: 25).isActive = true
+                newButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
+                newButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+                newButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
                 newButton.contentMode = .scaleAspectFill
                 newButton.clipsToBounds = true
             } else {
@@ -716,7 +716,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 scrollView.isHidden = false
             } else if configModeFB == MODE_HORIZONTAL_ANIMATION {
                 height = defaultHeightFB + defaultWidthHeightMenuFB
-                width = defaultWidthHeightMenuFB * (countMenuFB - 1)
+                width = defaultWidthHeightMenuFB * countMenuFB
                 if xPosition > UIScreen.main.bounds.width - width {
                     xPosition = UIScreen.main.bounds.width - width
                 }

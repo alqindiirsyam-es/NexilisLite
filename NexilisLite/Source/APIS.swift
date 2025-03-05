@@ -16,6 +16,7 @@ import AVKit
 import Intents
 
 public class APIS: NSObject {
+    private static var isAlertPresented = false
     public static func connect(appName: String, apiKey: String, delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         Nexilis.connect(apiKey: apiKey, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
@@ -57,8 +58,11 @@ public class APIS: NSObject {
     }
     
     private static func showChangeProfile() {
-        let alert = LibAlertController(title: "Change Profile".localized(), message: "You must change your name to use this feature".localized(), preferredStyle: .alert)
+        guard !isAlertPresented else { return }
+        isAlertPresented = true
+        let alert = LibAlertController(title: "Set Profile".localized(), message: "You must set your profile to use this feature".localized(), preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {(_) in
+            isAlertPresented = false
             let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
             controller.forceLogin = true
             let navigationController = CustomNavigationController(rootViewController: controller)
@@ -1296,6 +1300,13 @@ public class APIS: NSObject {
     }
     
     public static func enterForeground() {
+        APIS.checkNotificationPermission(completion: { isAllowed in
+            if !isAllowed {
+                showEnableNotificationsAlert()
+            } else {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        })
         DispatchQueue.global().async {
             do {
                 if !Nexilis.afterConnect {
@@ -1310,6 +1321,57 @@ public class APIS: NSObject {
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
+    
+    private static func checkNotificationPermission(completion: @escaping (Bool) -> Void) {
+        let center = UNUserNotificationCenter.current()
+        
+        center.getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                switch settings.authorizationStatus {
+                case .authorized, .provisional, .notDetermined:
+                    completion(true) // Notifications are allowed
+                case .denied, .ephemeral:
+                    completion(false) // Notifications are disabled or not requested
+                @unknown default:
+                    completion(false)
+                }
+            }
+        }
+    }
+    
+    private static func showEnableNotificationsAlert() {
+        guard !isAlertPresented else { return }
+        isAlertPresented = true
+        let alertController = LibAlertController(
+            title: "Enable Notification".localized(),
+            message: "To stay updated, please enable notification in the Settings.".localized(),
+            preferredStyle: .alert
+        )
+        
+        alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { _ in
+            isAlertPresented = false
+            showEnableNotificationsAlert()
+        }))
+        
+        alertController.addAction(UIAlertAction(title: "Go to Settings".localized(), style: .default, handler: { _ in
+            isAlertPresented = false
+            openAppSettings()
+        }))
+        
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(alertController, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(alertController, animated: true, completion: nil)
+        }
+    }
+    
+    private static func openAppSettings() {
+        if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+            if UIApplication.shared.canOpenURL(settingsURL) {
+                UIApplication.shared.open(settingsURL, options: [:], completionHandler: nil)
+            }
+        }
     }
     
     public static func willTerminate() {

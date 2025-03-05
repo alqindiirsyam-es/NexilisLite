@@ -86,7 +86,7 @@
 "Powered by Qmera" = "Dipersembahkan oleh Qmera";
 "Powered by Nexilis" = "Dipersembahkan oleh Nexilis";
 "Sign-Up (Change profile)" = "Daftar (Ubah Profil)";
-"Change Profile" = "Ubah Profil";
+"Set Profile" = "Atur Profil";
 "Sign-In (Change Device)" = "Masuk (Ubah Perangkat)";
 "Successfully Sign-Out" = "Berhasil Keluar";
 "Successfully Sign-In" = "Berhasil masuk";
@@ -105,7 +105,7 @@
 "To use Gaspol Web, go to gaspol.co.id on your computer." = "Untuk dapat menggunakan Gaspol Web, pergi ke halaman gaspol.co.id pada komputer kamu.";
 "Select" = "Pilih";
 "Select Language" = "Pilih Bahasa";
-"You must change your name to use this feature" = "Kamu harus mengubah nama kamu agar dapat meggunakan fitur ini";
+"You must set your profile to use this feature" = "Kamu harus mengatur profil Anda untuk menggunakan fitur ini";
 "Create Group" = "Buat Grup";
 "Add Friends" = "Tambah Teman";
 "Favorite Messages" = "Pesan Favorit";
@@ -391,3 +391,6 @@
 "Friend is invalid or not found" = "Teman tidak valid atau tidak ditemukan";
 "Warning Unknown Url!" = "Peringatan Url Tidak Dikenal!";
 "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability" = "Anda akan mengakses situs web yang saat ini tidak dipercaya oleh Nexilis Browser Anda. Sertifikat keamanan situs web ini tidak dikenali.\n\nApakah Anda ingin melanjutkan ke <<domain>> dan mempercayai sertifikat keamanan situs web tersebut?\n\nCatatan: Menambahkan situs web ke daftar tepercaya dapat meningkatkan risiko kerentanan keamanan Anda";
+"Enable Notification" = "Aktifkan Notifikasi";
+"Go to Settings" = "Buka Pengaturan";
+"To stay updated, please enable notification in the Settings." = "Untuk tetap mendapatkan informasi terbaru, harap aktifkan notifikasi di Pengaturan.";

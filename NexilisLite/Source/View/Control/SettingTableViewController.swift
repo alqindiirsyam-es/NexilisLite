@@ -188,9 +188,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                            Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                         ]
-                        if Nexilis.showButtonFB {
-                            Item.menus["Personal"]?.append(Item(icon: UIImage(systemName: "gearshape.circle"), title: "Configure Floating Button".localized()))
-                        }
                         Item.menus["Personal"]?.append(Item(icon: UIImage(systemName: "arrow.up.and.person.rectangle.portrait"), title: "Sign-Up/Sign-In".localized()))
                         if !imageSignIn.isEmpty {
                             do {
@@ -229,7 +226,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         
         Item.menus["Config"] = [
             Item(icon: UIImage(systemName: "iphone"), title: "Create Your Own App".localized()),
-            Item(icon: UIImage(systemName: "gearshape.circle"), title: "Configure Floating Button".localized())
+//            Item(icon: UIImage(systemName: "gearshape.circle"), title: "Configure Floating Button".localized())
         ]
         if !isChangeProfile || Utils.getEnableMobileBuilder() != "1" {
             if Item.menus["Config"]!.count > 1 {
@@ -238,13 +235,13 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 Item.menus["Config"]!.removeAll()
             }
         }
-        if !Nexilis.showButtonFB {
-            if Item.menus["Config"]!.count > 1 {
-                Item.menus["Config"]!.remove(at: 1)
-            } else {
-                Item.menus["Config"]!.removeAll()
-            }
-        }
+//        if !Nexilis.showButtonFB {
+//            if Item.menus["Config"]!.count > 1 {
+//                Item.menus["Config"]!.remove(at: 1)
+//            } else {
+//                Item.menus["Config"]!.removeAll()
+//            }
+//        }
         if Utils.getIsLoadThemeFromOther() {
             Item.menus["Config"]?.insert(Item(icon: UIImage(systemName: "iphone"), title: "Back to Company App".localized()), at: 1)
         }

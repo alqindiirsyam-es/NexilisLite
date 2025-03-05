@@ -1123,7 +1123,7 @@ public class Nexilis: NSObject {
         //print("openApp itms-apps://apple.com/app/\(id)")
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
-            let alert = LibAlertController(title: "Change Profile".localized(), message: "You must change your name to use this feature".localized(), preferredStyle: .alert)
+            let alert = LibAlertController(title: "Set Profile".localized(), message: "You must set your profile to use this feature".localized(), preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {(_) in
                 let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
                 controller.forceLogin = true
@@ -1192,7 +1192,7 @@ public class Nexilis: NSObject {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             alertChangeProfile.dismiss(animated: false)
-            alertChangeProfile = LibAlertController(title: "Change Profile".localized(), message: "You must change your name to use this feature".localized().localized(), preferredStyle: .alert)
+            alertChangeProfile = LibAlertController(title: "Set Profile".localized(), message: "You must set your profile to use this feature".localized(), preferredStyle: .alert)
             alertChangeProfile.addAction(UIAlertAction(title: "Cancel".localized(), style: .destructive, handler: nil))
             alertChangeProfile.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {(_) in
                 let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
@@ -3012,6 +3012,7 @@ extension Nexilis: MessageDelegate {
                                     let idMe = User.getMyPin()!
                                     SecureUserDefaults.shared.set("\(message.getBody(key: CoreMessage_TMessageKey.L_PIN)),\(idMe),\(complaintId)", forKey: "onGoingCC")
                                     SecureUserDefaults.shared.set("\(message.getBody(key: CoreMessage_TMessageKey.L_PIN))", forKey: "membersCC")
+                                    SecureUserDefaults.shared.set("\(message.getBody(key: CoreMessage_TMessageKey.CHANNEL))", forKey: "channelCC")
                                     if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "0" {
                                         let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
                                         editorPersonalVC.isContactCenter = true
@@ -4081,7 +4082,7 @@ extension Nexilis: MessageDelegate {
                             do {
                                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT first_name, last_name FROM BUDDY where f_pin = '\(User.getMyPin()!)'"), cursorData.next() {
                                     if (cursorData.string(forColumnIndex: 0)! + " " + cursorData.string(forColumnIndex: 1)!).trimmingCharacters(in: .whitespaces) == "USR\(User.getMyPin()!)" {
-                                        let alert = LibAlertController(title: "Change Profile".localized(), message: "You must change your name to use this feature".localized(), preferredStyle: .alert)
+                                        let alert = LibAlertController(title: "Set Profile".localized(), message: "You must set your profile to use this feature".localized(), preferredStyle: .alert)
                                         alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {(_) in
                                             let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
                                             controller.forceLogin = true

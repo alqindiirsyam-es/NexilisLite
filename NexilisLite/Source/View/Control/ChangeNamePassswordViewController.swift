@@ -25,7 +25,7 @@ public class ChangeNamePassswordViewController: UIViewController {
         
         self.view.backgroundColor = .white
 
-        self.title = "Change Profile".localized()
+        self.title = "Set Profile".localized()
         if !fromSetting {
             let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
             self.navigationController?.navigationBar.titleTextAttributes = attributes

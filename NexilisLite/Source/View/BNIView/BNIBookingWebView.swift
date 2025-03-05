@@ -40,8 +40,6 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     public override func viewDidLoad() {
         super.viewDidLoad()
         
-        title = "Secure Browser".localized()
-        
         let attributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
         let navBarAppearance = UINavigationBarAppearance()
         navBarAppearance.configureWithOpaqueBackground()
@@ -75,6 +73,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         let containerView = UIView()
         containerView.backgroundColor = .white
         if isSecureBrowser {
+            title = "Secure Browser".localized()
             view.addSubview(containerView)
             containerView.translatesAutoresizingMaskIntoConstraints = false
             containerView.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
@@ -848,58 +847,62 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     }
     
     public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url else {
-            decisionHandler(.cancel)
-            return
-        }
-        if loadingURL {
-            decisionHandler(.cancel)
-            return
-        }
-        loadingURL = true
-        if allowedURLs.contains(url.absoluteString) {
-            loadingURL = false
-            decisionHandler(.allow)
-            return
-        }
-        validateSSLCertificate(url: url) { isValid in
-            if isValid {
-                self.allowedURLs.insert(url.absoluteString)
-                self.loadingURL = false
+        if navigationAction.targetFrame?.isMainFrame == true {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.cancel)
+                return
+            }
+            if loadingURL {
+                decisionHandler(.cancel)
+                return
+            }
+            loadingURL = true
+            if allowedURLs.contains(url.absoluteString) {
+                loadingURL = false
                 decisionHandler(.allow)
-            } else {
-                let host = url.host ?? ""
-                DispatchQueue.main.async {
-                    var messageText = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability".localized()
-                    messageText = messageText.replacingOccurrences(of: "<<domain>>", with: host)
-                    let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
-                                                  message: messageText,
-                                                  preferredStyle: .alert)
+                return
+            }
+            validateSSLCertificate(url: url) { isValid in
+                if isValid {
+                    self.allowedURLs.insert(url.absoluteString)
+                    self.loadingURL = false
+                    decisionHandler(.allow)
+                } else {
+                    let host = url.host ?? ""
+                    DispatchQueue.main.async {
+                        var messageText = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability".localized()
+                        messageText = messageText.replacingOccurrences(of: "<<domain>>", with: host)
+                        let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
+                                                      message: messageText,
+                                                      preferredStyle: .alert)
 
-                    let yesAction = UIAlertAction(title: "Yes", style: .default) { _ in
-                        let storedCertificate = Utils.getCertificatePinningWebview()
-                        if let jsonData = storedCertificate.data(using: .utf8),
-                           let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
-                            var certJson = certJson
-                            certJson[host] = self.blockedCertificate
-                            if let jsonData = try? JSONSerialization.data(withJSONObject: certJson, options: []),
-                               let jsonString = String(data: jsonData, encoding: .utf8) {
-                                Utils.setCertificatePinningWebview(value: jsonString)
+                        let yesAction = UIAlertAction(title: "Yes", style: .default) { _ in
+                            let storedCertificate = Utils.getCertificatePinningWebview()
+                            if let jsonData = storedCertificate.data(using: .utf8),
+                               let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
+                                var certJson = certJson
+                                certJson[host] = self.blockedCertificate
+                                if let jsonData = try? JSONSerialization.data(withJSONObject: certJson, options: []),
+                                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                                    Utils.setCertificatePinningWebview(value: jsonString)
+                                }
                             }
+                            self.allowedURLs.insert(url.absoluteString)
+                            self.loadingURL = false
+                            decisionHandler(.allow)
                         }
-                        self.allowedURLs.insert(url.absoluteString)
-                        self.loadingURL = false
-                        decisionHandler(.allow)
+                        let noAction = UIAlertAction(title: "No", style: .cancel) { _ in
+                            self.loadingURL = false
+                            decisionHandler(.cancel)
+                        }
+                        alert.addAction(yesAction)
+                        alert.addAction(noAction)
+                        self.present(alert, animated: true, completion: nil)
                     }
-                    let noAction = UIAlertAction(title: "No", style: .cancel) { _ in
-                        self.loadingURL = false
-                        decisionHandler(.cancel)
-                    }
-                    alert.addAction(yesAction)
-                    alert.addAction(noAction)
-                    self.present(alert, animated: true, completion: nil)
                 }
             }
+        } else {
+            decisionHandler(.cancel)
         }
     }
     
