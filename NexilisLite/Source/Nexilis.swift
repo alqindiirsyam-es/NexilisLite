@@ -510,7 +510,7 @@ public class Nexilis: NSObject {
     public static func checkingAccess(key: String) -> Bool {
         let dataAccess = Utils.getFeatureAccess()
         if dataAccess.isEmpty {
-            if key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" {
+            if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" {
                 return false
             } else {
                 return true
@@ -519,7 +519,7 @@ public class Nexilis: NSObject {
             if jsonArray[key] != nil {
                 return jsonArray[key] as! String == "1"
             } else {
-                if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" {
+                if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" {
                     return false
                 } else {
                     return true

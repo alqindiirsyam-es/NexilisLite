@@ -7806,17 +7806,17 @@ extension UITableView {
     
     func scrollToBottom(isAnimated:Bool = true){
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + (isAnimated ? 0 : 0.6), execute: {
-            if self.numberOfSections == 0 {
-                return
-            }
-            let indexPath = IndexPath(
-                row: self.numberOfRows(inSection:  self.numberOfSections-1) - 1,
-                section: self.numberOfSections - 1)
-            if indexPath.row != -1 {
-                self.scrollToRow(at: indexPath, at: .bottom, animated: isAnimated)
-            }
-        })
+        DispatchQueue.main.asyncAfter(deadline: .now() + (isAnimated ? 0 : 0.6)) { [weak self] in
+            guard let self = self, self.numberOfSections > 0 else { return }
+            
+            let lastSection = self.numberOfSections - 1
+            let numberOfRows = self.numberOfRows(inSection: lastSection)
+            
+            guard numberOfRows > 0 else { return }
+            
+            let indexPath = IndexPath(row: numberOfRows - 1, section: lastSection)
+            self.scrollToRow(at: indexPath, at: .bottom, animated: isAnimated)
+        }
     }
     
     func scrollToTop(isAnimated:Bool = true) {
