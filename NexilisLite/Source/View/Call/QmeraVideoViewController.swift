@@ -1201,8 +1201,6 @@ class QmeraVideoViewController: UIViewController {
                     }
                 } else if self.dataPerson.count > 1 {
                     DispatchQueue.main.async {
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
-                        self.zoomView.contentMode = .scaleAspectFit
                         for i in 0..<self.dataPerson.count {
                             self.listRemoteViewFix[i].image = nil
                             if self.dataPerson[i]["user_type"] == "2" || arrayMessage[5] == "2" {
