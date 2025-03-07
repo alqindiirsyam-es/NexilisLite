@@ -1349,10 +1349,7 @@ public class APIS: NSObject {
             preferredStyle: .alert
         )
         
-        alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { _ in
-            isAlertPresented = false
-            showEnableNotificationsAlert()
-        }))
+        alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
         
         alertController.addAction(UIAlertAction(title: "Go to Settings".localized(), style: .default, handler: { _ in
             isAlertPresented = false
