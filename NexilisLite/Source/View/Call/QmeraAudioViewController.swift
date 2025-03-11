@@ -1079,7 +1079,11 @@ class QmeraAudioViewController: UIViewController {
                     DispatchQueue.main.async {
                         self.status.text = "Busy..."
                         self.end.isEnabled = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        if self.isOutgoing {
+                            Nexilis.playBusyCall()   
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            Nexilis.stopBusyCall()
                             self.didEnd(sender: false)
                         }
                     }

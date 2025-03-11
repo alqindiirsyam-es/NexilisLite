@@ -1527,7 +1527,11 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
             if (self.dataPerson.count == 1) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                DispatchQueue.main.async {
+                    Nexilis.playBusyCall()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    Nexilis.stopBusyCall()
                     self.endAllCall()
                     if self.isInisiator && onGoingCC.isEmpty && !self.isPresent {
                         self.navigationController?.popViewController(animated: true)

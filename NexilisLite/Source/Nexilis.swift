@@ -127,6 +127,7 @@ public class Nexilis: NSObject {
     
     static var ringtonePlayer: AVAudioPlayer?
     static var ringbacktonePlayer: AVAudioPlayer?
+    static var busyPlayer: AVAudioPlayer?
     static var sharedAudioPlayer: AVAudioPlayer?
     
     private func createDelegate() {
@@ -339,6 +340,25 @@ public class Nexilis: NSObject {
     
     public static func stopRingbacktoneCall() {
         ringbacktonePlayer?.stop()
+    }
+    
+    public static func playBusyCall() {
+        var busyPath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_busy", withExtension: "mp3")
+        if busyPath == nil {
+            busyPath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_busy", withExtension: "mp3")
+        }
+        do {
+            busyPlayer = try AVAudioPlayer(contentsOf:busyPath!)
+            busyPlayer?.numberOfLoops = 1
+            busyPlayer?.prepareToPlay()
+            busyPlayer?.play()
+        } catch {
+            
+        }
+    }
+    
+    public static func stopBusyCall() {
+        busyPlayer?.stop()
     }
     
     public static func addFB(viewController: UIViewController, fromMAB: Bool) {
