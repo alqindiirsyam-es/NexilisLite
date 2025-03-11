@@ -22,6 +22,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     var showMenuContext = false
     var touchedSubview = UIView()
     var lastTouchPoint: CGPoint = .zero
+    
+    func offset() -> CGFloat{
+        guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
+        return CGFloat(fontSize)
+    }
 
     public override func viewDidLoad() {
         super.viewDidLoad()
@@ -120,7 +125,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         ])
         labelDate.textAlignment = .center
         labelDate.textColor = .secondaryColor
-        labelDate.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        labelDate.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
         labelDate.text = dataDates[section]
         return containerView
     }
@@ -234,7 +239,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             nameSender.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
             nameSender.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
             nameSender.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            nameSender.font = UIFont.systemFont(ofSize: 12).bold
+            nameSender.font = UIFont.systemFont(ofSize: 12 + offset()).bold
             nameSender.text = dataProfile["name"]
             nameSender.textAlignment = .right
             if (dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "") {
@@ -296,7 +301,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             nameSender.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
             nameSender.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
             nameSender.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            nameSender.font = UIFont.systemFont(ofSize: 12).bold
+            nameSender.font = UIFont.systemFont(ofSize: 12 + offset()).bold
             nameSender.text = dataProfile["name"]
             nameSender.textAlignment = .left
             nameSender.textColor = .mainColor
@@ -395,7 +400,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         } else {
             modifyText()
         }
-        messageText.font = UIFont.systemFont(ofSize: 12)
+        messageText.font = UIFont.systemFont(ofSize: 12 + offset())
         
         func modifyText() {
             if !textChat!.isEmpty {
@@ -436,7 +441,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         formatter.dateFormat = "HH:mm"
         formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
         timeMessage.text = formatter.string(from: date as Date)
-        timeMessage.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+        timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
         timeMessage.textColor = .lightGray
         
         let thumbChat = dataMessages[indexPath.row]["thumb_id"] as! String
@@ -620,7 +625,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             nameFile.translatesAutoresizingMaskIntoConstraints = false
             nameFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
             nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
-            nameFile.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+            nameFile.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
             nameFile.textColor = .white
             nameFile.text = textChat?.components(separatedBy: "|")[0]
             
@@ -725,7 +730,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         titlePreview.topAnchor.constraint(equalTo: containerLinkMessage.topAnchor, constant: 25.0).isActive = true
                         titlePreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -80.0).isActive = true
                         titlePreview.text = title
-                        titlePreview.font = UIFont.systemFont(ofSize: 14.0, weight: .bold)
+                        titlePreview.font = UIFont.systemFont(ofSize: 14.0 + offset(), weight: .bold)
                         titlePreview.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                         
                         let descPreview = UILabel()
@@ -739,7 +744,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         descPreview.topAnchor.constraint(equalTo: titlePreview.bottomAnchor).isActive = true
                         descPreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -80.0).isActive = true
                         descPreview.text = description
-                        descPreview.font = UIFont.systemFont(ofSize: 12.0)
+                        descPreview.font = UIFont.systemFont(ofSize: 12.0 + offset())
                         descPreview.textColor = .gray
                         descPreview.numberOfLines = 1
                         
@@ -754,7 +759,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         linkPreview.topAnchor.constraint(equalTo: descPreview.bottomAnchor, constant: 8.0).isActive = true
                         linkPreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -80.0).isActive = true
                         linkPreview.text = link
-                        linkPreview.font = UIFont.systemFont(ofSize: 10.0)
+                        linkPreview.font = UIFont.systemFont(ofSize: 10.0 + offset())
                         linkPreview.textColor = .gray
                         linkPreview.numberOfLines = 1
                         

@@ -13,8 +13,11 @@ import Photos
 public class SettingTableViewController: UITableViewController, UIGestureRecognizerDelegate {
     
     var language: [[String: String]] = [["Indonesia": "id"],["English": "en"]]
+    var fontSizeSelection: [[String: String]] = [["Small": "0"],["Medium": "2"],["Large": "4"]]
     var alert: UIAlertController?
     var textFields = [UITextField]()
+    var languagePickerView = UIPickerView()
+    var fontSizePickerView = UIPickerView()
     
     var switchVibrateMode = UISwitch()
     var switchSaveToGallery = UISwitch()
@@ -103,6 +106,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             Item.menus["Personal"] = [
                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
                 Item(icon: UIImage(systemName: "arrow.up.and.person.rectangle.portrait"), title: "Sign-Up/Sign-In".localized()),
             ]
         } else {
@@ -114,6 +118,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item.menus["Personal"] = [
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                                Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                                Item(icon: UIImage(systemName: "person.crop.rectangle"), title: "Change Admin / Internal Password".localized()),
                                 Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
@@ -124,6 +129,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item.menus["Personal"] = [
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                                Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
                                 Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
                             ]
@@ -131,6 +137,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item.menus["Personal"] = [
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                     Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                                Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                                Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                             ]
@@ -185,6 +192,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                         Item.menus["Personal"] = [
                             Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                            Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
                             Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                            Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                         ]
@@ -344,6 +352,8 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 cell.accessoryType = .disclosureIndicator
             case "Change Language".localized():
                 cell.accessoryType = .disclosureIndicator
+            case "Change Font Size".localized():
+                cell.accessoryType = .disclosureIndicator
             case "Set Internal Account".localized():
                 cell.accessoryType = .disclosureIndicator
             case "Set CS Account".localized():
@@ -468,21 +478,21 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         } else if item.title == "Change Language".localized() {
             let vc = UIViewController()
             vc.preferredContentSize = CGSize(width: UIScreen.main.bounds.width - 10, height: 150)
-            let pickerView = UIPickerView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width - 10, height: 150))
-            pickerView.dataSource = self
-            pickerView.delegate = self
+            languagePickerView = UIPickerView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width - 10, height: 150))
+            languagePickerView.dataSource = self
+            languagePickerView.delegate = self
             
             let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
             var index = 1
             if lang == "id" {
                 index = 0
             }
-            pickerView.selectRow(index, inComponent: 0, animated: false)
+            languagePickerView.selectRow(index, inComponent: 0, animated: false)
             
-            vc.view.addSubview(pickerView)
-            pickerView.translatesAutoresizingMaskIntoConstraints = false
-            pickerView.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor).isActive = true
-            pickerView.centerYAnchor.constraint(equalTo: vc.view.centerYAnchor).isActive = true
+            vc.view.addSubview(languagePickerView)
+            languagePickerView.translatesAutoresizingMaskIntoConstraints = false
+            languagePickerView.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor).isActive = true
+            languagePickerView.centerYAnchor.constraint(equalTo: vc.view.centerYAnchor).isActive = true
             
             let alert = LibAlertController(title: "Select Language".localized(), message: "", preferredStyle: .actionSheet)
             
@@ -491,9 +501,47 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             }))
             
             alert.addAction(UIAlertAction(title: "Select".localized(), style: .default, handler: { (UIAlertAction) in
-                let selectedIndex = pickerView.selectedRow(inComponent: 0)
+                let selectedIndex = self.languagePickerView.selectedRow(inComponent: 0)
                 let lang = self.language[selectedIndex].values.first
                 SecureUserDefaults.shared.set(lang, forKey: "i18n_language")
+                self.navigationController?.navigationBar.topItem?.title = "Settings".localized();
+                self.navigationController?.navigationBar.setNeedsLayout()
+                self.makeMenu()
+                self.tableView.reloadData()
+            }))
+            self.present(alert, animated: true, completion: nil)
+        } else if item.title == "Change Font Size".localized() {
+            let vc = UIViewController()
+            vc.preferredContentSize = CGSize(width: UIScreen.main.bounds.width - 10, height: 150)
+            fontSizePickerView = UIPickerView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width - 10, height: 150))
+            fontSizePickerView.dataSource = self
+            fontSizePickerView.delegate = self
+            
+            let fontSize: String = SecureUserDefaults.shared.value(forKey: "font_size") ?? "0"
+            var index = 0
+            if fontSize == "2" {
+                index = 1
+            }
+            else if fontSize == "4"{
+                index = 2
+            }
+            fontSizePickerView.selectRow(index, inComponent: 0, animated: false)
+            
+            vc.view.addSubview(fontSizePickerView)
+            fontSizePickerView.translatesAutoresizingMaskIntoConstraints = false
+            fontSizePickerView.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor).isActive = true
+            fontSizePickerView.centerYAnchor.constraint(equalTo: vc.view.centerYAnchor).isActive = true
+            
+            let alert = LibAlertController(title: "Select Font Size".localized(), message: "", preferredStyle: .actionSheet)
+            
+            alert.setValue(vc, forKey: "contentViewController")
+            alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { (UIAlertAction) in
+            }))
+            
+            alert.addAction(UIAlertAction(title: "Select".localized(), style: .default, handler: { (UIAlertAction) in
+                let selectedIndex = self.fontSizePickerView.selectedRow(inComponent: 0)
+                let lang = self.fontSizeSelection[selectedIndex].values.first
+                SecureUserDefaults.shared.set(lang, forKey: "font_size")
                 self.navigationController?.navigationBar.topItem?.title = "Settings".localized();
                 self.navigationController?.navigationBar.setNeedsLayout()
                 self.makeMenu()
@@ -1104,7 +1152,12 @@ extension SettingTableViewController: UIPickerViewDelegate, UIPickerViewDataSour
     }
     
     public func pickerView(_ pickerView: UIPickerView, numberOfRowsInComponent component: Int) -> Int {
-        return language.count
+        if pickerView == languagePickerView {
+            return language.count
+        }
+        else {
+            return fontSizeSelection.count
+        }
     }
     
     public func pickerView(_ pickerView: UIPickerView, rowHeightForComponent component: Int) -> CGFloat {
@@ -1113,7 +1166,12 @@ extension SettingTableViewController: UIPickerViewDelegate, UIPickerViewDataSour
     
     public func pickerView(_ pickerView: UIPickerView, viewForRow row: Int, forComponent component: Int, reusing view: UIView?) -> UIView {
         let label = UILabel(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width - 10, height: 30))
-        label.text = (language[row]).keys.first
+        if pickerView == languagePickerView {
+            label.text = (language[row]).keys.first
+        }
+        else {
+            label.text = (fontSizeSelection[row]).keys.first
+        }
         label.sizeToFit()
         return label
     }

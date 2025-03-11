@@ -8,7 +8,7 @@
 
 Pod::Spec.new do |spec|
   spec.name         = "NexilisLite"
-  spec.version      = "5.0.6"
+  spec.version      = "5.0.7"
   spec.summary      = "NexilisLite Framework"
   spec.description  = <<-DESC
   NexilisLite Framework, embed Contact Center, Live Streaming, Push Notifications, Instant Messaging, Video and VoIP Calling features into your mobile apps within minutes...

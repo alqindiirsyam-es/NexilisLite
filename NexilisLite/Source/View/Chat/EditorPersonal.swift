@@ -128,6 +128,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var timers: [IndexPath: Timer] = [:]
     var playingIndexPath: IndexPath?
     
+    func offset() -> CGFloat{
+        guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
+        return CGFloat(fontSize)
+    }
+    
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
             removeAllObjectBeforeDismissVC()
@@ -204,7 +209,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         textFieldSend.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         textFieldSend.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 11, right: 40)
         textFieldSend.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.5).cgColor
-        textFieldSend.font = UIFont.systemFont(ofSize: 12)
+        textFieldSend.font = UIFont.systemFont(ofSize: 12 + offset())
         textFieldSend.delegate = self
         textFieldSend.customDelegate = self
         textFieldSend.allowsEditingTextAttributes = true
@@ -715,7 +720,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             labelChatbot.centerXAnchor.constraint(equalTo: containerChatbot.centerXAnchor),
         ])
         labelChatbot.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        labelChatbot.font = UIFont.systemFont(ofSize: 12).bold
+        labelChatbot.font = UIFont.systemFont(ofSize: 12 + offset()).bold
         labelChatbot.text = "Interactive chatbot. Coming soon".localized()
     }
     
@@ -852,7 +857,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 }
             }
             titleNavigation.textColor = .white
-            titleNavigation.font = UIFont.systemFont(ofSize: 12).bold
+            titleNavigation.font = UIFont.systemFont(ofSize: 12 + offset()).bold
             navigationItem.titleView = viewAppBar
             titleText = titleNavigation.text
         } else {
@@ -1789,7 +1794,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             labelDisable.centerXAnchor.constraint(equalTo: containerAction.centerXAnchor),
         ])
         labelDisable.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        labelDisable.font = UIFont.systemFont(ofSize: 12).bold
+        labelDisable.font = UIFont.systemFont(ofSize: 12 + offset()).bold
         labelDisable.text = "Call center session is over".localized()
     }
     
@@ -1983,7 +1988,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         labelUnfriend.centerXAnchor.constraint(equalTo: containerAction.centerXAnchor),
                     ])
                     labelUnfriend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-                    labelUnfriend.font = UIFont.systemFont(ofSize: 12).bold
+                    labelUnfriend.font = UIFont.systemFont(ofSize: 12 + offset()).bold
                     labelUnfriend.text = "You have unfriended this user".localized()
                     NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                     if contactChatNav.viewIfLoaded?.window != nil {
@@ -2036,7 +2041,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             labelBlocked.centerXAnchor.constraint(equalTo: containerAction.centerXAnchor),
         ])
         labelBlocked.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        labelBlocked.font = UIFont.systemFont(ofSize: 12).bold
+        labelBlocked.font = UIFont.systemFont(ofSize: 12 + offset()).bold
         if blocked == "1" {
             labelBlocked.text = "You blocked this user".localized()
         } else {
@@ -3872,7 +3877,7 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         titlePreview.topAnchor.constraint(equalTo: self.containerLink.topAnchor, constant: 25.0).isActive = true
         titlePreview.trailingAnchor.constraint(equalTo: self.containerLink.trailingAnchor, constant: -80.0).isActive = true
         titlePreview.text = title
-        titlePreview.font = UIFont.systemFont(ofSize: 14.0, weight: .bold)
+        titlePreview.font = UIFont.systemFont(ofSize: 14.0 + offset(), weight: .bold)
         titlePreview.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         
         let descPreview = UILabel()
@@ -3886,7 +3891,7 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         descPreview.topAnchor.constraint(equalTo: titlePreview.bottomAnchor).isActive = true
         descPreview.trailingAnchor.constraint(equalTo: self.containerLink.trailingAnchor, constant: -80.0).isActive = true
         descPreview.text = description
-        descPreview.font = UIFont.systemFont(ofSize: 12.0)
+        descPreview.font = UIFont.systemFont(ofSize: 12.0 + offset())
         descPreview.textColor = .gray
         descPreview.numberOfLines = 1
         
@@ -3901,7 +3906,7 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         linkPreview.topAnchor.constraint(equalTo: descPreview.bottomAnchor, constant: 8.0).isActive = true
         linkPreview.trailingAnchor.constraint(equalTo: self.containerLink.trailingAnchor, constant: -80.0).isActive = true
         linkPreview.text = stringURl
-        linkPreview.font = UIFont.systemFont(ofSize: 10.0)
+        linkPreview.font = UIFont.systemFont(ofSize: 10.0 + offset())
         linkPreview.textColor = .gray
         linkPreview.numberOfLines = 1
         
@@ -4375,7 +4380,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             editTextView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
             editTextView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 11, right: 40)
             editTextView.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.5).cgColor
-            editTextView.font = UIFont.systemFont(ofSize: 12)
+            editTextView.font = UIFont.systemFont(ofSize: 12 + offset())
             editTextView.delegate = self
             editTextView.allowsEditingTextAttributes = true
             editTextView.backgroundColor = .clear
@@ -4456,7 +4461,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             messageText.bottomAnchor.constraint(equalTo: viewMessage.bottomAnchor, constant: -15).isActive = true
             messageText.trailingAnchor.constraint(equalTo: viewMessage.trailingAnchor, constant: -15).isActive = true
             messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-            messageText.font = .systemFont(ofSize: 12)
+            messageText.font = .systemFont(ofSize: 12 + offset())
             messageText.text = oldText
         }
         editVC.modalTransitionStyle = .crossDissolve
@@ -5251,7 +5256,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         ])
         labelDate.textAlignment = .center
         labelDate.textColor = .secondaryColor
-        labelDate.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        labelDate.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
         labelDate.text = dataDates[section]
         if listViewOnSection.count == 0 || listViewOnSection.count - 1 < section {
             listViewOnSection.append(containerView)
@@ -5337,7 +5342,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 } else {
                     messageText.text = "Sorry, currently all our representatives are busy helping other customers. Do you want us to get back to you as soon as one of them is available?".localized()
                 }
-                messageText.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+                messageText.font = UIFont.systemFont(ofSize: 14 + offset(), weight: .medium)
                 messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                 
 //                let date = Date()
@@ -5450,7 +5455,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 messageWait.rightAnchor.constraint(equalTo: cell.contentView.rightAnchor, constant: -10).isActive = true
                 messageWait.text = dataMessages[indexPath.row]["category_cc"] as? String ?? dataMessages[indexPath.row]["message_text"] as? String ?? ""
                 messageWait.numberOfLines = 0
-                messageWait.font = UIFont.systemFont(ofSize: 12)
+                messageWait.font = UIFont.systemFont(ofSize: 12 + offset())
                 messageWait.textColor = .gray
                 messageWait.textAlignment = .center
             }
@@ -5507,7 +5512,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             } else {
                 nameSender.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 5).isActive = true
             }
-            nameSender.font = UIFont.systemFont(ofSize: 12, weight: UIFont.Weight(800))
+            nameSender.font = UIFont.systemFont(ofSize: 12 + offset(), weight: UIFont.Weight(800))
             nameSender.text = user?.fullName ?? ""
             nameSender.textAlignment = .right
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
@@ -5662,7 +5667,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 ])
                 labelNewMessages.textAlignment = .center
                 labelNewMessages.textColor = .secondaryColor
-                labelNewMessages.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+                labelNewMessages.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
                 labelNewMessages.text = "Unread Messages".localized()
                 
             } else {
@@ -5762,7 +5767,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
             let editedText = UILabel()
             editedText.text = "Edited".localized()
-            editedText.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+            editedText.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
             editedText.textColor = .lightGray
             cell.contentView.addSubview(editedText)
             editedText.translatesAutoresizingMaskIntoConstraints = false
@@ -5787,7 +5792,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         messageText.translatesAutoresizingMaskIntoConstraints = false
         let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        messageText.font = .systemFont(ofSize: 12)
+        messageText.font = .systemFont(ofSize: 12 + offset())
         if dataMessages[indexPath.row]["attachment_flag"] as? String == "27" || dataMessages[indexPath.row]["attachment_flag"] as? String == "26" ||
             dataMessages[indexPath.row]["attachment_flag"] as? String == "25" || dataMessages[indexPath.row]["message_scope_id"] as? String == "18" {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
@@ -5993,7 +5998,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 timeMessage.text = formatter.string(from: date as Date)
                 timeMessage.textColor = .lightGray
             }
-            timeMessage.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+            timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
         }
         
         let imageThumb = UIImageView()
@@ -6025,7 +6030,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             
             let timeLabelAudio = UILabel()
             timeLabelAudio.text = "0:00"
-            timeLabelAudio.font = .systemFont(ofSize: 10)
+            timeLabelAudio.font = .systemFont(ofSize: 10 + offset())
             timeLabelAudio.textColor = .gray
             containerMessage.addSubview(timeLabelAudio)
             timeLabelAudio.anchor(top: playButtonAudio.bottomAnchor, left: playButtonAudio.rightAnchor, paddingLeft: 10, width: 100, height: 12)
@@ -6163,7 +6168,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
                     timeInImage.text = formatter.string(from: date as Date)
                     timeInImage.textColor = .white
-                    timeInImage.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+                    timeInImage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
                     
                     if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
                         let statusInImage = UIImageView()
@@ -6449,7 +6454,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             nameFile.translatesAutoresizingMaskIntoConstraints = false
             nameFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
             nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
-            nameFile.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+            nameFile.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
             nameFile.textColor = .white
             nameFile.text = originalMessageText.components(separatedBy: "|")[0]
             
@@ -6554,7 +6559,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         titlePreview.topAnchor.constraint(equalTo: containerLinkMessage.topAnchor, constant: 10.0).isActive = true
                         titlePreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -5.0).isActive = true
                         titlePreview.text = title
-                        titlePreview.font = UIFont.systemFont(ofSize: 14.0, weight: .bold)
+                        titlePreview.font = UIFont.systemFont(ofSize: 14.0 + offset(), weight: .bold)
                         titlePreview.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                         
                         let descPreview = UILabel()
@@ -6568,7 +6573,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         descPreview.topAnchor.constraint(equalTo: titlePreview.bottomAnchor).isActive = true
                         descPreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -5.0).isActive = true
                         descPreview.text = description
-                        descPreview.font = UIFont.systemFont(ofSize: 12.0)
+                        descPreview.font = UIFont.systemFont(ofSize: 12.0 + offset())
                         descPreview.textColor = .gray
                         descPreview.numberOfLines = 1
                         
@@ -6583,7 +6588,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         linkPreview.topAnchor.constraint(equalTo: descPreview.bottomAnchor, constant: 8.0).isActive = true
                         linkPreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -5.0).isActive = true
                         linkPreview.text = link
-                        linkPreview.font = UIFont.systemFont(ofSize: 10.0)
+                        linkPreview.font = UIFont.systemFont(ofSize: 10.0 + offset())
                         linkPreview.textColor = .gray
                         linkPreview.numberOfLines = 1
                         
@@ -6703,7 +6708,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 titleReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                 titleReply.topAnchor.constraint(equalTo: containerReply.topAnchor, constant: 10).isActive = true
                 titleReply.trailingAnchor.constraint(lessThanOrEqualTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                titleReply.font = UIFont.systemFont(ofSize: 12).bold
+                titleReply.font = UIFont.systemFont(ofSize: 12 + offset()).bold
                 if (data["f_pin"] as? String == idMe) {
                     titleReply.text = "You".localized()
                     if dataMessages[indexPath.row]["f_pin"] as? String == idMe {
@@ -6734,7 +6739,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 contentReply.translatesAutoresizingMaskIntoConstraints = false
                 contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                 contentReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor, constant: -10).isActive = true
-                contentReply.font = UIFont.systemFont(ofSize: 10)
+                contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
                 let message_text = data["message_text"]  as? String ?? ""
                 let attachment_flag = data["attachment_flag"]  as? String ?? ""
                 let thumb_chat = data["thumb_id"]  as? String ?? ""
@@ -7586,7 +7591,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         titleReply.translatesAutoresizingMaskIntoConstraints = false
         titleReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
         titleReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor, constant: 10).isActive = true
-        titleReply.font = UIFont.systemFont(ofSize: 12).bold
+        titleReply.font = UIFont.systemFont(ofSize: 12 + offset()).bold
         let idMe = User.getMyPin() as String?
         if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
             titleReply.text = "You".localized()
@@ -7605,7 +7610,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         contentReply.translatesAutoresizingMaskIntoConstraints = false
         contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
         contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
-        contentReply.font = UIFont.systemFont(ofSize: 10)
+        contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
         let message_text = dataMessages[indexPath.row]["message_text"]  as? String ?? ""
         let attachment_flag = dataMessages[indexPath.row]["attachment_flag"]  as? String ?? ""
         let thumb_chat = dataMessages[indexPath.row]["thumb_id"]  as? String ?? ""

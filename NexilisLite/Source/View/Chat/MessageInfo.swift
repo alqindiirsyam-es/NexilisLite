@@ -18,6 +18,11 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     var dataGroup: [String: Any?] = [:]
     var isPersonal = true
     let geocoder = CLGeocoder()
+    
+    func offset() -> CGFloat{
+        guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
+        return CGFloat(fontSize)
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -157,7 +162,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         imageStatus.anchor(left: viewStatus.leftAnchor, bottom: viewStatus.bottomAnchor, paddingLeft: 15, paddingBottom: 5, width: 15, height: 15)
         
         let textStatus = UILabel()
-        textStatus.font = .systemFont(ofSize: 12)
+        textStatus.font = .systemFont(ofSize: 12 + offset())
         textStatus.textColor = .white
         viewStatus.addSubview(textStatus)
         textStatus.anchor(left: imageStatus.rightAnchor, bottom: viewStatus.bottomAnchor, paddingLeft: 5.0, paddingBottom: 5.0)
@@ -195,7 +200,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             ])
             labelDate.textAlignment = .center
             labelDate.textColor = .secondaryColor
-            labelDate.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+            labelDate.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
             labelDate.text = dateMessage
             return containerView
         } else if section == 1 {
@@ -311,7 +316,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             let titleTime = UILabel()
                             viewTimeStatus.addSubview(titleTime)
                             titleTime.anchor(centerX: viewTimeStatus.centerXAnchor, centerY: viewTimeStatus.centerYAnchor)
-                            titleTime.font = .systemFont(ofSize: 12)
+                            titleTime.font = .systemFont(ofSize: 12 + offset())
                             titleTime.text = "\(chatDate(stringDate: dataStatusAck[indexPath.row]["time_ack"] as! String)) \(time)"
                             
                             cell.accessoryView = viewTimeStatus
@@ -342,7 +347,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             let titleTime = UILabel()
                             viewTimeStatus.addSubview(titleTime)
                             titleTime.anchor(centerX: viewTimeStatus.centerXAnchor, centerY: viewTimeStatus.centerYAnchor)
-                            titleTime.font = .systemFont(ofSize: 12)
+                            titleTime.font = .systemFont(ofSize: 12 + offset())
                             titleTime.text = "\(chatDate(stringDate: dataStatusRead[indexPath.row]["time_read"] as! String)) \(time)"
                             
                             cell.accessoryView = viewTimeStatus
@@ -374,7 +379,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         let titleTime = UILabel()
                         viewTimeStatus.addSubview(titleTime)
                         titleTime.anchor(centerX: viewTimeStatus.centerXAnchor, centerY: viewTimeStatus.centerYAnchor)
-                        titleTime.font = .systemFont(ofSize: 12)
+                        titleTime.font = .systemFont(ofSize: 12 + offset())
                         titleTime.text = "\(chatDate(stringDate: dataStatusRead[indexPath.row]["time_read"] as! String)) \(time)"
                         
                         cell.accessoryView = viewTimeStatus
@@ -405,7 +410,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         let titleTime = UILabel()
                         viewTimeStatus.addSubview(titleTime)
                         titleTime.anchor(centerX: viewTimeStatus.centerXAnchor, centerY: viewTimeStatus.centerYAnchor)
-                        titleTime.font = .systemFont(ofSize: 12)
+                        titleTime.font = .systemFont(ofSize: 12 + offset())
                         titleTime.text = "\(chatDate(stringDate: dataStatusDelivered[indexPath.row]["time_delivered"] as! String)) \(time)"
                         
                         cell.accessoryView = viewTimeStatus
@@ -419,7 +424,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         if indexPath.row != 0 {
             cell.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
             var content = cell.defaultContentConfiguration()
-            content.textProperties.font = UIFont.systemFont(ofSize: 14)
+            content.textProperties.font = UIFont.systemFont(ofSize: 14 + offset())
             content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
             
             let noStatus = UIImageView(frame: CGRect(x: 0, y: cell.frame.height / 2, width: 50, height: 20))
@@ -450,7 +455,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             let titleTime = UILabel()
                             viewTimeStatus.addSubview(titleTime)
                             titleTime.anchor(centerX: viewTimeStatus.centerXAnchor, centerY: viewTimeStatus.centerYAnchor)
-                            titleTime.font = .systemFont(ofSize: 12)
+                            titleTime.font = .systemFont(ofSize: 12 + offset())
                             titleTime.text = "\(chatDate(stringDate: dataStatus[0]["time_ack"] as! String)) \(time)"
                             
                             cell.accessoryView = viewTimeStatus
@@ -475,7 +480,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             let titleTime = UILabel()
                             viewTimeStatus.addSubview(titleTime)
                             titleTime.anchor(centerX: viewTimeStatus.centerXAnchor, centerY: viewTimeStatus.centerYAnchor)
-                            titleTime.font = .systemFont(ofSize: 12)
+                            titleTime.font = .systemFont(ofSize: 12 + offset())
                             titleTime.text = "\(chatDate(stringDate: dataStatus[0]["time_read"] as! String)) \(time)"
                             
                             cell.accessoryView = viewTimeStatus
@@ -501,7 +506,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         let titleTime = UILabel()
                         viewTimeStatus.addSubview(titleTime)
                         titleTime.anchor(centerX: viewTimeStatus.centerXAnchor, centerY: viewTimeStatus.centerYAnchor)
-                        titleTime.font = .systemFont(ofSize: 12)
+                        titleTime.font = .systemFont(ofSize: 12 + offset())
                         titleTime.text = "\(chatDate(stringDate: dataStatus[0]["time_read"] as! String)) \(time)"
                         
                         cell.accessoryView = viewTimeStatus
@@ -525,7 +530,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     let titleTime = UILabel()
                     viewTimeStatus.addSubview(titleTime)
                     titleTime.anchor(centerX: viewTimeStatus.centerXAnchor, centerY: viewTimeStatus.centerYAnchor)
-                    titleTime.font = .systemFont(ofSize: 12)
+                    titleTime.font = .systemFont(ofSize: 12 + offset())
                     titleTime.text = "\(chatDate(stringDate: dataStatus[0]["time_delivered"] as! String)) \(time)"
                     
                     cell.accessoryView = viewTimeStatus
@@ -762,7 +767,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 formatter.dateFormat = "HH:mm"
                 formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
                 timeMessage.text = formatter.string(from: date as Date)
-                timeMessage.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+                timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
                 timeMessage.textColor = .lightGray
             }
             
@@ -946,7 +951,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 nameFile.translatesAutoresizingMaskIntoConstraints = false
                 nameFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
                 nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
-                nameFile.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+                nameFile.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
                 nameFile.textColor = .white
                 nameFile.text = textChat.components(separatedBy: "|")[0]
                 
@@ -1030,7 +1035,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     titleReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                     titleReply.topAnchor.constraint(equalTo: containerReply.topAnchor, constant: 10).isActive = true
                     titleReply.trailingAnchor.constraint(lessThanOrEqualTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                    titleReply.font = UIFont.systemFont(ofSize: 12).bold
+                    titleReply.font = UIFont.systemFont(ofSize: 12 + offset()).bold
                     if (data["f_pin"] as? String == idMe) {
                         titleReply.text = "You".localized()
                         if data["f_pin"] as? String == idMe {
@@ -1053,7 +1058,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     contentReply.translatesAutoresizingMaskIntoConstraints = false
                     contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                     contentReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor, constant: -10).isActive = true
-                    contentReply.font = UIFont.systemFont(ofSize: 10)
+                    contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
                     let message_text = data["message_text"] as! String
                     let attachment_flag = data["attachment_flag"] as! String
                     let thumb_chat = data["thumb_id"] as! String

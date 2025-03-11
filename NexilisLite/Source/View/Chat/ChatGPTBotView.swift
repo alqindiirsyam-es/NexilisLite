@@ -74,6 +74,11 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         let payload : [[String: String]]
     }
     
+    func offset() -> CGFloat{
+        guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
+        return CGFloat(fontSize)
+    }
+    
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
             SecureUserDefaults.shared.removeValue(forKey: "inEditorPersonal")
@@ -129,7 +134,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         textFieldSend.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         textFieldSend.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 11, right: 40)
         textFieldSend.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.5).cgColor
-        textFieldSend.font = UIFont.systemFont(ofSize: 12)
+        textFieldSend.font = UIFont.systemFont(ofSize: 12 + offset())
         textFieldSend.delegate = self
         textFieldSend.allowsEditingTextAttributes = true
         
@@ -564,7 +569,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             viewAppBar.addSubview(titleNavigation)
             titleNavigation.text = "GPT SmartBot"
             titleNavigation.textColor = .white
-            titleNavigation.font = UIFont.systemFont(ofSize: 12).bold
+            titleNavigation.font = UIFont.systemFont(ofSize: 12 + offset()).bold
             
             navigationItem.titleView = viewAppBar
             titleText = titleNavigation.text
@@ -1114,7 +1119,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             labelCounter.trailingAnchor.constraint(equalTo: indicatorCounterBSTB.trailingAnchor, constant: -2),
             labelCounter.centerXAnchor.constraint(equalTo: indicatorCounterBSTB.centerXAnchor),
         ])
-        labelCounter.font = UIFont.systemFont(ofSize: 11)
+        labelCounter.font = UIFont.systemFont(ofSize: 11 + offset())
         labelCounter.text = "\(counter)"
         labelCounter.textColor = .secondaryColor
         labelCounter.textAlignment = .center
@@ -1756,7 +1761,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
         ])
         labelDate.textAlignment = .center
         labelDate.textColor = .secondaryColor
-        labelDate.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        labelDate.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
         labelDate.text = dataDates[section]
         if listViewOnSection.count == 0 || listViewOnSection.count - 1 < section {
             listViewOnSection.append(containerView)
@@ -1861,7 +1866,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
                 ])
                 labelNewMessages.textAlignment = .center
                 labelNewMessages.textColor = .secondaryColor
-                labelNewMessages.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+                labelNewMessages.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
                 labelNewMessages.text = "Unread Messages".localized()
                 
             } else {
@@ -1920,7 +1925,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
             topMarginText.isActive = true
             messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-            messageText.font = .systemFont(ofSize: 12)
+            messageText.font = .systemFont(ofSize: 12 + offset())
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
             messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15).isActive = true
             messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
@@ -1978,7 +1983,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
             timeMessage.text = formatter.string(from: date as Date)
             timeMessage.textColor = .lightGray
-            timeMessage.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+            timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
         }
         return cell
     }

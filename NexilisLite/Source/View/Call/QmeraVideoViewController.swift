@@ -406,6 +406,7 @@ class QmeraVideoViewController: UIViewController {
             labelIncomingOutgoing.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         ])
         if isInisiator {
+            Nexilis.playRingbacktoneCall()
             labelIncomingOutgoing.text = "Connecting".localized()
             if ticketId.isEmpty {
                 if callFCM {
@@ -447,6 +448,7 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else {
+            Nexilis.playRingtoneCall()
             labelIncomingOutgoing.text = "Incoming video call".localized() + "..."
         }
         labelIncomingOutgoing.font = UIFont.systemFont(ofSize: 12)
@@ -551,6 +553,8 @@ class QmeraVideoViewController: UIViewController {
                         _ = Nexilis.getWhiteboardDelegate()?.terminate()
                     }
                 }
+                Nexilis.stopRingtoneCall()
+                Nexilis.stopRingbacktoneCall()
                 self.endAllCall()
                 self.dismiss(animated: true, completion: nil)
             }))
@@ -559,6 +563,8 @@ class QmeraVideoViewController: UIViewController {
             let alert = LibAlertController(title: "End Video Call".localized(), message: "Are you sure you want to end video call?".localized(), preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
             alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {(_) in
+                Nexilis.stopRingtoneCall()
+                Nexilis.stopRingbacktoneCall()
                 if self.labelIncomingOutgoing.isDescendant(of: self.view) {
                     self.labelIncomingOutgoing.text = "Video call is over".localized()
                 }
@@ -1089,6 +1095,10 @@ class QmeraVideoViewController: UIViewController {
             }
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
+            DispatchQueue.main.async {
+                Nexilis.stopRingtoneCall()
+                Nexilis.stopRingbacktoneCall()
+            }
             let channel = arrayMessage[3]
             remoteChannel[String(channel)] = String(arrayMessage[5])
             DispatchQueue.main.async {
@@ -1222,6 +1232,10 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else if (state == Nexilis.VIDEO_CALL_END || state == Nexilis.AUDIO_CALL_END) {
+            DispatchQueue.main.async {
+                Nexilis.stopRingtoneCall()
+                Nexilis.stopRingbacktoneCall()
+            }
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             if !onGoingCC.isEmpty {
                 let requester = onGoingCC.components(separatedBy: ",")[0]
@@ -1371,6 +1385,10 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else if (state == Nexilis.OFFLINE) {
+            DispatchQueue.main.async {
+                Nexilis.stopRingtoneCall()
+                Nexilis.stopRingbacktoneCall()
+            }
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             DispatchQueue.main.async {
                 if (self.dataPerson.count == 1) {
@@ -1443,6 +1461,10 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else if (state == Nexilis.BUSY) {
+            DispatchQueue.main.async {
+                Nexilis.stopRingtoneCall()
+                Nexilis.stopRingbacktoneCall()
+            }
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             DispatchQueue.main.async { [self] in
                 if (self.dataPerson.count == 1) {

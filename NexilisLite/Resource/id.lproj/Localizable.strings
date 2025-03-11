@@ -77,6 +77,7 @@
 "Change Admin / Internal Password" = "Ubah Sandi Admin / Internal";
 "Change Device" = "Ubah Perangkat";
 "Change Language" = "Ubah Bahasa";
+"Change Font Size" = "Ubah Ukuran Font";
 "Notification Message(s)" = "Pesan Notifikasi";
 "Notification Message(s) Group" = "Grup Pesan Notifikasi";
 "Vibrate Mode" = "Mode Getar";
@@ -394,3 +395,4 @@
 "Enable Notification" = "Aktifkan Notifikasi";
 "Go to Settings" = "Buka Pengaturan";
 "To stay updated, please enable notification in the Settings." = "Untuk tetap mendapatkan informasi terbaru, harap aktifkan notifikasi di Pengaturan.";
+"Change Font Size" = "Ubah Ukuran Font";
