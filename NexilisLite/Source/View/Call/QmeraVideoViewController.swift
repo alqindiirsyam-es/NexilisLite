@@ -142,9 +142,9 @@ class QmeraVideoViewController: UIViewController {
         bSpeakerPhone = bSpeakerOn
         var volume:Float! = 0
         if (bSpeakerPhone) {
-            volume = 50
+            volume = lastVolume * 100
         } else {
-            volume = 3
+            volume = lastVolume * 10
         }
         API.adjustVolume(fValue: volume)
     }
@@ -175,6 +175,8 @@ class QmeraVideoViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        QmeraVideoViewController.volumeView = MPVolumeView(frame: .zero)
+        QmeraVideoViewController.volumeView.isHidden = true
         Nexilis.setWhiteboardReceiver(receiver: self)
         Nexilis.floatingButton.isHidden = true
         self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
@@ -215,6 +217,21 @@ class QmeraVideoViewController: UIViewController {
         }
         
     }
+    
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+            if (keyPath! == "outputVolume") {
+                if let newKey = change?[NSKeyValueChangeKey.newKey] as? NSNumber {
+                    QmeraVideoViewController.lastVolume = newKey.floatValue
+                    if (QmeraVideoViewController.bSpeakerPhone) {
+                        let volume = QmeraVideoViewController.lastVolume * 100
+                        API.adjustVolume(fValue: volume)
+                    } else {
+                        let volume = QmeraVideoViewController.lastVolume * 10
+                        API.adjustVolume(fValue: volume)
+                    }
+                }
+            }
+        }
     
     func getDataProfile(fPin: String) {
         let query = "SELECT f_pin, first_name, last_name, official_account, image_id, device_id, offline_mode, user_type FROM BUDDY where f_pin = '\(fPin)'"

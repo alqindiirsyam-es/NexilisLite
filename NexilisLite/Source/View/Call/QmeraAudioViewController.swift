@@ -262,9 +262,9 @@ class QmeraAudioViewController: UIViewController {
         bSpeakerPhone = bSpeakerOn
         var volume:Float! = 0
         if (bSpeakerPhone) {
-            volume = 50
+            volume = lastVolume * 100
         } else {
-            volume = 3
+            volume = lastVolume * 10
         }
         API.adjustVolume(fValue: volume)
     }
@@ -289,6 +289,10 @@ class QmeraAudioViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        QmeraAudioViewController.volumeView = MPVolumeView(frame: .zero)
+        QmeraAudioViewController.volumeView.isHidden = true
+
+        AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: NSKeyValueObservingOptions.new, context: nil)
         
         Nexilis.floatingButton.isHidden = true
         
@@ -375,6 +379,21 @@ class QmeraAudioViewController: UIViewController {
             }
         }
     }
+    
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+            if (keyPath! == "outputVolume") {
+                if let newKey = change?[NSKeyValueChangeKey.newKey] as? NSNumber {
+                    QmeraAudioViewController.lastVolume = newKey.floatValue
+                    if (QmeraAudioViewController.bSpeakerPhone) {
+                        let volume = QmeraAudioViewController.lastVolume * 100
+                        API.adjustVolume(fValue: volume)
+                    } else {
+                        let volume = QmeraAudioViewController.lastVolume * 10
+                        API.adjustVolume(fValue: volume)
+                    }
+                }
+            }
+        }
     
     @objc func onCallFCM(notification: NSNotification) {
         DispatchQueue.main.async {
