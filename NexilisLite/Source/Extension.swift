@@ -725,6 +725,11 @@ extension String {
         return String(self[startIndex ..< endIndex])
     }
     
+    static public func offset() -> CGFloat{
+        guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
+        return CGFloat(fontSize)
+    }
+    
     public func richText(
         isEditing: Bool = false,
         isSearching: Bool = false,
@@ -733,10 +738,10 @@ extension String {
         listMentionInTextField: [User] = []
     ) -> NSMutableAttributedString {
         
-        let font = UIFont.systemFont(ofSize: 12)
-        let boldFont = UIFont.boldSystemFont(ofSize: 12)
-        let italicFont = UIFont.italicSystemFont(ofSize: 12)
-        let boldItalicFont = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        let font = UIFont.systemFont(ofSize: 12 + String.offset())
+        let boldFont = UIFont.boldSystemFont(ofSize: 12 + String.offset())
+        let italicFont = UIFont.italicSystemFont(ofSize: 12 + String.offset())
+        let boldItalicFont = UIFont.systemFont(ofSize: 12 + String.offset(), weight: .semibold)
         
         let textUTF8 = self
         let finalText = NSMutableAttributedString(string: textUTF8, attributes: [.font: font])

@@ -13,7 +13,7 @@ import Photos
 public class SettingTableViewController: UITableViewController, UIGestureRecognizerDelegate {
     
     var language: [[String: String]] = [["Indonesia": "id"],["English": "en"]]
-    var fontSizeSelection: [[String: String]] = [["Small": "0"],["Medium": "2"],["Large": "4"]]
+    var fontSizeSelection: [[String: String]] = [["Small": "0"],["Medium": "4"],["Large": "6"]]
     var alert: UIAlertController?
     var textFields = [UITextField]()
     var languagePickerView = UIPickerView()
@@ -519,10 +519,10 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             
             let fontSize: String = SecureUserDefaults.shared.value(forKey: "font_size") ?? "0"
             var index = 0
-            if fontSize == "2" {
+            if fontSize == "4" {
                 index = 1
             }
-            else if fontSize == "4"{
+            else if fontSize == "6"{
                 index = 2
             }
             fontSizePickerView.selectRow(index, inComponent: 0, animated: false)

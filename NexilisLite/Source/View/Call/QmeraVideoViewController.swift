@@ -14,8 +14,15 @@ import UIKit
 import nuSDKService
 import AVFoundation
 import NotificationBannerSwift
+import MediaPlayer
 
 class QmeraVideoViewController: UIViewController {
+    
+    static private var volumeView: MPVolumeView!
+    static private var bSpeakerPhone: Bool! = false
+    static private var lastVolume: Float! = AVAudioSession.sharedInstance().outputVolume
+    
+    
     var dataPerson: [[String: String?]] = []
     var fPin = ""
     var wbRoomId = ""
@@ -130,6 +137,17 @@ class QmeraVideoViewController: UIViewController {
 //        button.frame.size.height = 30
         return button
     }()
+    
+    static func turnSpeakerOn(bSpeakerOn: Bool!) {
+        bSpeakerPhone = bSpeakerOn
+        var volume:Float! = 0
+        if (bSpeakerPhone) {
+            volume = 50
+        } else {
+            volume = 3
+        }
+        API.adjustVolume(fValue: volume)
+    }
     
     deinit {
         navigationController?.changeAppearance(clear: false)
@@ -966,7 +984,7 @@ class QmeraVideoViewController: UIViewController {
     }
     
     func setSpeaker(isSpeaker: Bool) {
-        Nexilis.setSpeaker(isSpeaker, isVideo: true)
+        QmeraVideoViewController.turnSpeakerOn(bSpeakerOn: isSpeaker)
         DispatchQueue.main.async {
             if (isSpeaker) {
                 self.buttonSpeaker.backgroundColor = .lightGray

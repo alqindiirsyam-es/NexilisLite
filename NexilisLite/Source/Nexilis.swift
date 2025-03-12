@@ -305,9 +305,9 @@ public class Nexilis: NSObject {
     }
     
     public static func playRingtoneCall() {
-        var ringtonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_in", withExtension: "mp3")
+        var ringtonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_in_long", withExtension: "mp3")
         if ringtonePath == nil {
-            ringtonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_in", withExtension: "mp3")
+            ringtonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_in_long", withExtension: "mp3")
         }
         do {
             ringtonePlayer = try AVAudioPlayer(contentsOf:ringtonePath!)
@@ -1093,6 +1093,24 @@ public class Nexilis: NSObject {
             }
         }catch{
             //print(error)
+        }
+    }
+    
+    public static func setSpeakerphoneOn(_ isOn: Bool){
+        let audioSession = AVAudioSession.sharedInstance()
+        
+        do {
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [])
+            
+            try audioSession.setActive(true)
+            
+            if isOn {
+                try audioSession.overrideOutputAudioPort(.speaker)
+            } else {
+                try audioSession.overrideOutputAudioPort(.none)
+            }
+        } catch {
+            print("Error setting up audio session: \(error.localizedDescription)")
         }
     }
 

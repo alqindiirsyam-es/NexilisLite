@@ -9,8 +9,13 @@ import UIKit
 import AVFoundation
 import nuSDKService
 import NotificationBannerSwift
+import MediaPlayer
 
 class QmeraAudioViewController: UIViewController {
+    
+    static private var volumeView: MPVolumeView!
+    static private var bSpeakerPhone: Bool! = false
+    static private var lastVolume: Float! = AVAudioSession.sharedInstance().outputVolume
     
     let stackViewToolbar2 = UIStackView()
     var onScreenConstraintWB = [NSLayoutConstraint]()
@@ -22,6 +27,7 @@ class QmeraAudioViewController: UIViewController {
     var wbRoomId = ""
     var callFCM = true
     var autoAcceptAPN = false
+    
     
     let buttonSize: CGFloat = 70
     
@@ -75,7 +81,7 @@ class QmeraAudioViewController: UIViewController {
     
     private var firstCall: Bool = true
     
-    private var isSpeaker: Bool = false
+    private var isSpeaker: Bool = true
     
     private var isMuted: Bool = false
     
@@ -252,6 +258,17 @@ class QmeraAudioViewController: UIViewController {
         return button
     }()
     
+    static func turnSpeakerOn(bSpeakerOn: Bool!) {
+        bSpeakerPhone = bSpeakerOn
+        var volume:Float! = 0
+        if (bSpeakerPhone) {
+            volume = 50
+        } else {
+            volume = 3
+        }
+        API.adjustVolume(fValue: volume)
+    }
+    
     override func viewWillDisappear(_ animated: Bool) {
         UIDevice.current.isProximityMonitoringEnabled = false
         NotificationCenter.default.removeObserver(self)
@@ -408,6 +425,7 @@ class QmeraAudioViewController: UIViewController {
     }
     
     private func outgoingView() {
+//        Nexilis.setSpeakerphoneOn(isSpeaker)
         Nexilis.playRingbacktoneCall()
         status.text = "Connecting..."
         view.addSubview(end)
@@ -417,6 +435,7 @@ class QmeraAudioViewController: UIViewController {
     }
     
     private func incomingView() {
+//        Nexilis.setSpeakerphoneOn(isSpeaker)
         Nexilis.playRingtoneCall()
         status.text = "Incoming..."
         
@@ -621,12 +640,7 @@ class QmeraAudioViewController: UIViewController {
     @objc func didSpeaker(sender: Any?) {
         isSpeaker = !isSpeaker
         speaker.isSelected = isSpeaker
-        if isSpeaker {
-            UIDevice.current.isProximityMonitoringEnabled = false
-        } else {
-            UIDevice.current.isProximityMonitoringEnabled = true
-        }
-        Nexilis.setSpeaker(isSpeaker)
+        QmeraAudioViewController.turnSpeakerOn(bSpeakerOn: isSpeaker)
     }
     
     @objc func didMute(sender: Any?) {

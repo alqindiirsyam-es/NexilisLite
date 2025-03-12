@@ -8,8 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		0B4630FFBC4EE87A6634E056 /* Pods_NexilisLite_NexilisLiteTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10B08C755C0859F1ECA5CEBC /* Pods_NexilisLite_NexilisLiteTests.framework */; };
+		1236B6852D81465800A97809 /* pb_call_in_long.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 1236B6842D81465800A97809 /* pb_call_in_long.mp3 */; };
 		1241AEBC2D017E8C0088175A /* MasterKeyUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1241AEBB2D017E8C0088175A /* MasterKeyUtil.swift */; };
 		1241AEBD2D017E8C0088175A /* FileEncryption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1241AEBA2D017E8C0088175A /* FileEncryption.swift */; };
+		125363982D8031C30006C3D2 /* pb_call_busy.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 125363972D8031C30006C3D2 /* pb_call_busy.mp3 */; };
 		12C36CEB2D0299630095BEC1 /* SecureFolderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */; };
 		B71100C03F3EE76CC1FFC618 /* Pods_NexilisLite.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 56F0A46991FE6BE0FDE74132 /* Pods_NexilisLite.framework */; };
 		CD1E6E6D2A0B7C3600BF871F /* NexilisLite.docc in Sources */ = {isa = PBXBuildFile; fileRef = CD1E6E6C2A0B7C3600BF871F /* NexilisLite.docc */; };
@@ -274,8 +276,10 @@
 
 /* Begin PBXFileReference section */
 		10B08C755C0859F1ECA5CEBC /* Pods_NexilisLite_NexilisLiteTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_NexilisLite_NexilisLiteTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		1236B6842D81465800A97809 /* pb_call_in_long.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = pb_call_in_long.mp3; sourceTree = "<group>"; };
 		1241AEBA2D017E8C0088175A /* FileEncryption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEncryption.swift; sourceTree = "<group>"; };
 		1241AEBB2D017E8C0088175A /* MasterKeyUtil.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MasterKeyUtil.swift; sourceTree = "<group>"; };
+		125363972D8031C30006C3D2 /* pb_call_busy.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = pb_call_busy.mp3; sourceTree = "<group>"; };
 		12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureFolderView.swift; sourceTree = "<group>"; };
 		56F0A46991FE6BE0FDE74132 /* Pods_NexilisLite.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_NexilisLite.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		5AFDB202A2CA7FE864B0B1C2 /* Pods-NexilisLite-NexilisLiteTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NexilisLite-NexilisLiteTests.debug.xcconfig"; path = "Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests.debug.xcconfig"; sourceTree = "<group>"; };
@@ -945,6 +949,8 @@
 		CDE3BED82C86E3A000B0BF36 /* Sound */ = {
 			isa = PBXGroup;
 			children = (
+				1236B6842D81465800A97809 /* pb_call_in_long.mp3 */,
+				125363972D8031C30006C3D2 /* pb_call_busy.mp3 */,
 				CD2585B72D59DA60002AB416 /* Dutifully.mp3 */,
 				CD2585B82D59DA60002AB416 /* Elegant.mp3 */,
 				CD2585B92D59DA60002AB416 /* Eventually.mp3 */,
@@ -1117,6 +1123,7 @@
 				CD2585CA2D59DA60002AB416 /* Relax.mp3 in Resources */,
 				CD2585CB2D59DA60002AB416 /* Eventually.mp3 in Resources */,
 				CD2585CC2D59DA60002AB416 /* Upset.mp3 in Resources */,
+				125363982D8031C30006C3D2 /* pb_call_busy.mp3 in Resources */,
 				CD2585CD2D59DA60002AB416 /* Elegant.mp3 in Resources */,
 				CD2585CE2D59DA60002AB416 /* Strong_Minded.mp3 in Resources */,
 				CD2585CF2D59DA60002AB416 /* Magic.mp3 in Resources */,
@@ -1207,6 +1214,7 @@
 				CD46A0B12A0CE320009E4C87 /* sticker_20000000_1.png in Resources */,
 				CD46A0B22A0CE320009E4C87 /* sticker_20000000_12.png in Resources */,
 				CD46A0B32A0CE320009E4C87 /* sticker_30000000_20.png in Resources */,
+				1236B6852D81465800A97809 /* pb_call_in_long.mp3 in Resources */,
 				CD9551602A664BDB00AF6476 /* Poppins-ExtraBoldItalic.otf in Resources */,
 				CD46A0B42A0CE320009E4C87 /* sticker_30000000_34.png in Resources */,
 				CDB21B2E2BA9998400EC5280 /* pb_def_icon_mode2.gif in Resources */,
@@ -1611,7 +1619,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
-				DEVELOPMENT_TEAM = FR2C2CZUYZ;
+				DEVELOPMENT_TEAM = 4R36B4D29V;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
@@ -1651,7 +1659,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
-				DEVELOPMENT_TEAM = FR2C2CZUYZ;
+				DEVELOPMENT_TEAM = 4R36B4D29V;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
@@ -1690,7 +1698,7 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = "$(inherited)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = FR2C2CZUYZ;
+				DEVELOPMENT_TEAM = 4R36B4D29V;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.nexilis.NexilisLiteTests;
@@ -1708,7 +1716,7 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = "$(inherited)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = FR2C2CZUYZ;
+				DEVELOPMENT_TEAM = 4R36B4D29V;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.nexilis.NexilisLiteTests;
@@ -1725,7 +1733,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = FR2C2CZUYZ;
+				DEVELOPMENT_TEAM = 4R36B4D29V;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = "";
@@ -1747,7 +1755,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = FR2C2CZUYZ;
+				DEVELOPMENT_TEAM = 4R36B4D29V;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = "";
