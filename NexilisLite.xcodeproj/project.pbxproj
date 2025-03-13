@@ -12,6 +12,7 @@
 		1241AEBC2D017E8C0088175A /* MasterKeyUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1241AEBB2D017E8C0088175A /* MasterKeyUtil.swift */; };
 		1241AEBD2D017E8C0088175A /* FileEncryption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1241AEBA2D017E8C0088175A /* FileEncryption.swift */; };
 		125363982D8031C30006C3D2 /* pb_call_busy.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 125363972D8031C30006C3D2 /* pb_call_busy.mp3 */; };
+		1258BCB62D82D71200EFF5BD /* ChatWallpaperViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1258BCB52D82D71200EFF5BD /* ChatWallpaperViewController.swift */; };
 		12C36CEB2D0299630095BEC1 /* SecureFolderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */; };
 		B71100C03F3EE76CC1FFC618 /* Pods_NexilisLite.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 56F0A46991FE6BE0FDE74132 /* Pods_NexilisLite.framework */; };
 		CD1E6E6D2A0B7C3600BF871F /* NexilisLite.docc in Sources */ = {isa = PBXBuildFile; fileRef = CD1E6E6C2A0B7C3600BF871F /* NexilisLite.docc */; };
@@ -280,6 +281,7 @@
 		1241AEBA2D017E8C0088175A /* FileEncryption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEncryption.swift; sourceTree = "<group>"; };
 		1241AEBB2D017E8C0088175A /* MasterKeyUtil.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MasterKeyUtil.swift; sourceTree = "<group>"; };
 		125363972D8031C30006C3D2 /* pb_call_busy.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = pb_call_busy.mp3; sourceTree = "<group>"; };
+		1258BCB52D82D71200EFF5BD /* ChatWallpaperViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatWallpaperViewController.swift; sourceTree = "<group>"; };
 		12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureFolderView.swift; sourceTree = "<group>"; };
 		56F0A46991FE6BE0FDE74132 /* Pods_NexilisLite.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_NexilisLite.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		5AFDB202A2CA7FE864B0B1C2 /* Pods-NexilisLite-NexilisLiteTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-NexilisLite-NexilisLiteTests.debug.xcconfig"; path = "Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests.debug.xcconfig"; sourceTree = "<group>"; };
@@ -769,6 +771,7 @@
 		CD1E71892A0BA86100BF871F /* Control */ = {
 			isa = PBXGroup;
 			children = (
+				1258BCB52D82D71200EFF5BD /* ChatWallpaperViewController.swift */,
 				CD1E71AB2A0BA86100BF871F /* AddFriendTableViewController.swift */,
 				CD1E71AD2A0BA86100BF871F /* AudienceViewController.swift */,
 				CD1E719B2A0BA86100BF871F /* BackupRestoreOption.swift */,
@@ -1350,6 +1353,7 @@
 				CD1E72232A0BA86100BF871F /* EditorGroup.swift in Sources */,
 				CD1E72452A0BA86100BF871F /* GroupNameViewController.swift in Sources */,
 				CD9829B72A3C07CB009F6743 /* SeminarListViewController.swift in Sources */,
+				1258BCB62D82D71200EFF5BD /* ChatWallpaperViewController.swift in Sources */,
 				CD1E72572A0BA86100BF871F /* GroupMemberViewController.swift in Sources */,
 				CD1E72582A0BA86100BF871F /* SetOfficerBNI.swift in Sources */,
 				CD1E72212A0BA86100BF871F /* EditorPersonal.swift in Sources */,
