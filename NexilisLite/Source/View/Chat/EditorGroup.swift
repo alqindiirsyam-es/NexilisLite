@@ -4060,10 +4060,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         containerView.addSubview(dateView)
         dateView.translatesAutoresizingMaskIntoConstraints = false
         var topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor)
-        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10.0)
+        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 20.0)
         NSLayoutConstraint.activate([
             topAnchor,
-            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20.0),
             dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
             dateView.heightAnchor.constraint(equalToConstant: 30),
             dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
@@ -4092,7 +4092,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if tableView == tableMention {
             return 0
         }
-        return 40
+        return 80
     }
     
     public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -4272,9 +4272,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         cellMessage.contentView.addSubview(timeMessage)
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
         if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
+            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40 - 20).isActive = true
         } else {
-            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
+            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
         }
         
         let messageText = UITextView()
@@ -4365,9 +4365,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cellMessage.contentView.leadingAnchor, constant: 60).isActive = true
             if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40 - 20).isActive = true
             } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
             }
             containerMessage.trailingAnchor.constraint(equalTo: profileMessage.leadingAnchor, constant: -5).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true

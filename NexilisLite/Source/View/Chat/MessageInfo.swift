@@ -555,17 +555,17 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             cell.contentView.addSubview(timeMessage)
             timeMessage.translatesAutoresizingMaskIntoConstraints = false
             if (data["read_receipts"] as? String) == "8" {
-                timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
+                timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
             } else {
-                timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
+                timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
             }
             
             let statusMessage = UIImageView()
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cell.contentView.leadingAnchor, constant: 60).isActive = true
             if (data["read_receipts"] as? String) == "8" {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
             } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
             }
             containerMessage.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -15).isActive = true

@@ -102,10 +102,10 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         containerView.addSubview(dateView)
         dateView.translatesAutoresizingMaskIntoConstraints = false
         var topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor)
-        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10.0)
+        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 20.0)
         NSLayoutConstraint.activate([
             topAnchor,
-            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20.0),
             dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
             dateView.heightAnchor.constraint(equalToConstant: 30),
             dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
@@ -131,7 +131,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     }
     
     public func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return 40
+        return 80
     }
     
     public func numberOfSections(in tableView: UITableView) -> Int {
@@ -166,7 +166,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         let timeMessage = UILabel()
         cellMessage.contentView.addSubview(timeMessage)
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
-        timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
+        timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
         
         let messageText = UITextView()
         messageText.isEditable = false
@@ -205,7 +205,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             
             containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cellMessage.contentView.leadingAnchor, constant: 80).isActive = true
-            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
+            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
             containerMessage.trailingAnchor.constraint(equalTo: profileMessage.leadingAnchor, constant: -5).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
             if (dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "") {
@@ -281,7 +281,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             
             containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.leadingAnchor.constraint(equalTo: profileMessage.trailingAnchor, constant: 5).isActive = true
-            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
+            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
             containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cellMessage.contentView.trailingAnchor, constant: -80).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
             if (dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "") {

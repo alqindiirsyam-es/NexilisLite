@@ -13,9 +13,12 @@ import MediaPlayer
 
 class QmeraAudioViewController: UIViewController {
     
+    static private let nMaxSPOn: Float! = 100.0
+    static private let nMaxSPOff: Float! = 5.0
     static private var volumeView: MPVolumeView!
     static private var bSpeakerPhone: Bool! = false
     static private var lastVolume: Float! = AVAudioSession.sharedInstance().outputVolume
+    
     
     let stackViewToolbar2 = UIStackView()
     var onScreenConstraintWB = [NSLayoutConstraint]()
@@ -262,9 +265,9 @@ class QmeraAudioViewController: UIViewController {
         bSpeakerPhone = bSpeakerOn
         var volume:Float! = 0
         if (bSpeakerPhone) {
-            volume = lastVolume * 100
+            volume = lastVolume * nMaxSPOn
         } else {
-            volume = lastVolume * 10
+            volume = lastVolume * nMaxSPOff
         }
         API.adjustVolume(fValue: volume)
     }
@@ -385,10 +388,10 @@ class QmeraAudioViewController: UIViewController {
                 if let newKey = change?[NSKeyValueChangeKey.newKey] as? NSNumber {
                     QmeraAudioViewController.lastVolume = newKey.floatValue
                     if (QmeraAudioViewController.bSpeakerPhone) {
-                        let volume = QmeraAudioViewController.lastVolume * 100
+                        let volume = QmeraAudioViewController.lastVolume * QmeraAudioViewController.nMaxSPOn
                         API.adjustVolume(fValue: volume)
                     } else {
-                        let volume = QmeraAudioViewController.lastVolume * 10
+                        let volume = QmeraAudioViewController.lastVolume * QmeraAudioViewController.nMaxSPOff
                         API.adjustVolume(fValue: volume)
                     }
                 }
