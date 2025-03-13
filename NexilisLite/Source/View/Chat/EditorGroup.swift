@@ -178,7 +178,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         super.viewDidLoad()
 //        navigationController?.navigationBar.topItem?.title = ""
         Utils.addBackground(view: contactChatNav.view)
-        wallpaperView.image = UIImage(data: UserDefaults.standard.data(forKey: "chatWallpaper")!)
+        if let dataWall = UserDefaults.standard.data(forKey: "chatWallpaper") {
+            wallpaperView.image = UIImage(data: UserDefaults.standard.data(forKey: "chatWallpaper")!)
+        }
+        else {
+            wallpaperView.isHidden = true
+        }
         if Nexilis.fromMAB {
             Nexilis.floatingButton.isHidden = true
         }

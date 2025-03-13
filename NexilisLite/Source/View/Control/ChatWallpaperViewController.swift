@@ -49,7 +49,7 @@ class ChatWallpaperViewController: UIViewController, UICollectionViewDataSource,
             collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            collectionView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -60)
+            collectionView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -120)
         ])
 
         // Add Custom Wallpaper Button
@@ -65,9 +65,28 @@ class ChatWallpaperViewController: UIViewController, UICollectionViewDataSource,
         NSLayoutConstraint.activate([
             customWallpaperButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             customWallpaperButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            customWallpaperButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            customWallpaperButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
             customWallpaperButton.heightAnchor.constraint(equalToConstant: 50)
         ])
+
+        // Add Clear Wallpaper Button
+        let clearWallpaperButton = UIButton(type: .system)
+        clearWallpaperButton.setTitle("Clear Wallpaper", for: .normal)
+        clearWallpaperButton.addTarget(self, action: #selector(clearWallpaper), for: .touchUpInside)
+        clearWallpaperButton.backgroundColor = .systemRed
+        clearWallpaperButton.setTitleColor(.white, for: .normal)
+        clearWallpaperButton.layer.cornerRadius = 8
+
+        view.addSubview(clearWallpaperButton)
+        clearWallpaperButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            clearWallpaperButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            clearWallpaperButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            clearWallpaperButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            clearWallpaperButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+        
+        
     }
 
     // MARK: - Collection View Data Source
@@ -110,6 +129,18 @@ class ChatWallpaperViewController: UIViewController, UICollectionViewDataSource,
                 }
             }
         }
+    }
+    
+    // MARK: - Clear Wallpaper
+    @objc private func clearWallpaper() {
+        // Clear the saved wallpaper
+        UserDefaults.standard.removeObject(forKey: "chatWallpaper")
+
+        // Notify the chat view to update the wallpaper
+        NotificationCenter.default.post(name: Notification.Name("WallpaperDidChange"), object: nil)
+
+        // Dismiss the view controller
+        dismiss(animated: true)
     }
 
     // MARK: - Save and Dismiss
