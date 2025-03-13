@@ -194,7 +194,7 @@ class ContactChatViewController: UITableViewController {
         segment.sizeToFit()
         segment.selectedSegmentIndex = 0
         segment.addTarget(self, action: #selector(segmentChanged(sender:)), for: .valueChanged)
-        segment.setTitleTextAttributes([NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 12.0)], for: .normal)
+        segment.setTitleTextAttributes([NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 12.0 + String.offset() * 0.5)], for: .normal)
         Utils.inTabChats = true
         
         NotificationCenter.default.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
@@ -1117,7 +1117,7 @@ extension ContactChatViewController {
                     titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 15.0),
                     titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor)
                 ])
-                titleView.font = UIFont.systemFont(ofSize: 14)
+                titleView.font = UIFont.systemFont(ofSize: 14 + String.offset())
                 if (User.isOfficial(official_account: data.official ?? "") || User.isOfficialRegular(official_account: data.official ?? "")) && data.pin != "-997" {
                     titleView.attributedText = self.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.officialColor)
 
@@ -1140,7 +1140,7 @@ extension ContactChatViewController {
                 if noData {
                     let labelNochat = UILabel()
                     labelNochat.text = "There are no conversations".localized()
-                    labelNochat.font = .systemFont(ofSize: 13)
+                    labelNochat.font = .systemFont(ofSize: 13 + String.offset())
                     labelNochat.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                     content.addSubview(labelNochat)
                     labelNochat.anchor(centerX: content.centerXAnchor, centerY: content.centerYAnchor)
@@ -1155,7 +1155,7 @@ extension ContactChatViewController {
                     if chats.count == 0 || (indexPath.row > (chats.count - 1)) {
                         let labelNochat = UILabel()
                         labelNochat.text = loadingData ? "Loading Data...".localized() : "There are no conversations".localized()
-                        labelNochat.font = .systemFont(ofSize: 13)
+                        labelNochat.font = .systemFont(ofSize: 13 + String.offset())
                         labelNochat.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                         content.addSubview(labelNochat)
                         labelNochat.anchor(centerX: content.centerXAnchor, centerY: content.centerYAnchor)
@@ -1244,7 +1244,7 @@ extension ContactChatViewController {
                     titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
                     titleView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40.0),
                 ])
-                titleView.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+                titleView.font = UIFont.systemFont(ofSize: 14 + String.offset(), weight: .medium)
                 
                 let timeView = UILabel()
                 let viewCounter = UIView()
@@ -1271,7 +1271,7 @@ extension ContactChatViewController {
                         labelCounter.leadingAnchor.constraint(equalTo: viewCounter.leadingAnchor, constant: 2),
                         labelCounter.trailingAnchor.constraint(equalTo: viewCounter.trailingAnchor, constant: -2),
                     ])
-                    labelCounter.font = UIFont.systemFont(ofSize: 11)
+                    labelCounter.font = UIFont.systemFont(ofSize: 11 + String.offset())
                     if Int(data.counter)! > 99 {
                         labelCounter.text = "99+"
                     } else {
@@ -1292,7 +1292,7 @@ extension ContactChatViewController {
                         timeView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20.0),
                     ])
                     timeView.textColor = .gray
-                    timeView.font = UIFont.systemFont(ofSize: 14)
+                    timeView.font = UIFont.systemFont(ofSize: 14 + String.offset())
                     
                     let date = Date(milliseconds: Int64(data.serverDate) ?? 0)
                     let calendar = Calendar.current
@@ -1348,7 +1348,7 @@ extension ContactChatViewController {
                         if data.fpin == idMe {
                             if data.lock == "1" {
                                 if data.messageScope == "4" {
-                                    stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
+                                    stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                                 }
                                 stringMessage.append(("🚫 _"+"You were deleted this message".localized()+"_").richText())
                             } else {
@@ -1372,7 +1372,7 @@ extension ContactChatViewController {
                                 stringMessage.append(imageStatusString)
                                 stringMessage.append(NSAttributedString(string: " "))
                                 if data.messageScope == "4" {
-                                    stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
+                                    stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                                 }
                                 stringMessage.append(attributeText)
                             }
@@ -1383,7 +1383,7 @@ extension ContactChatViewController {
                                 if components.count >= 2 {
                                     fullname = components.prefix(2).joined(separator: " ")
                                 }
-                                stringMessage.append(NSAttributedString(string: fullname + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12, weight: .medium)]))
+                                stringMessage.append(NSAttributedString(string: fullname + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                             }
                             if data.lock == "1" {
                                 stringMessage.append(("🚫 _"+"This message was deleted".localized()+"_").richText())
@@ -1425,7 +1425,7 @@ extension ContactChatViewController {
             if segment.numberOfSegments < 3 {
                 cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierGroup", for: indexPath)
                 var content = cell.defaultContentConfiguration()
-                content.textProperties.font = UIFont.systemFont(ofSize: 14)
+                content.textProperties.font = UIFont.systemFont(ofSize: 14 + String.offset())
                 let group: Group
                 if isFilltering {
                     if indexPath.row == 0 {
@@ -1545,7 +1545,7 @@ extension ContactChatViewController {
                     titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 15.0),
                     titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor)
                 ])
-                titleView.font = UIFont.systemFont(ofSize: 14)
+                titleView.font = UIFont.systemFont(ofSize: 14 + String.offset())
                 if (User.isOfficial(official_account: data.official ?? "") || User.isOfficialRegular(official_account: data.official ?? "")) && data.pin != "-997" {
                     titleView.attributedText = self.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(data.fullName)", size: 15, y: -4, colorText: UIColor.officialColor)
 
@@ -1563,7 +1563,7 @@ extension ContactChatViewController {
         case 2:
             cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierGroup", for: indexPath)
             var content = cell.defaultContentConfiguration()
-            content.textProperties.font = UIFont.systemFont(ofSize: 14)
+            content.textProperties.font = UIFont.systemFont(ofSize: 14 + String.offset())
             let group: Group
             if isFilltering {
                 if indexPath.row == 0 {
