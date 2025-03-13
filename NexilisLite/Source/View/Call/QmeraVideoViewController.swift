@@ -810,6 +810,7 @@ class QmeraVideoViewController: UIViewController {
     }
     
     func addToolbarAfterAccept() {
+        Nexilis.stopRingtoneCall()
         view.addSubview(self.stackViewToolbar)
         self.stackViewToolbar.translatesAutoresizingMaskIntoConstraints = false
         constraintBottomStackViewToolbar = self.stackViewToolbar.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: -60.0)
@@ -1133,7 +1134,6 @@ class QmeraVideoViewController: UIViewController {
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
             DispatchQueue.main.async {
-                Nexilis.stopRingtoneCall()
                 Nexilis.stopRingbacktoneCall()
             }
             let channel = arrayMessage[3]

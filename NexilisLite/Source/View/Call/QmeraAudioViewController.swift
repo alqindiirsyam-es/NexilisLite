@@ -855,6 +855,7 @@ class QmeraAudioViewController: UIViewController {
     }
     
     @objc func didAccept(sender: Any?) {
+        Nexilis.stopRingtoneCall()
         NSLayoutConstraint.deactivate(stack.constraints)
         stack.subviews.forEach { subview in
             subview.removeFromSuperview()
@@ -927,7 +928,6 @@ class QmeraAudioViewController: UIViewController {
                 }
             } else if state == Nexilis.AUDIO_CALL_OFFHOOK || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_OFFHOOK) {
                 DispatchQueue.main.async {
-                    Nexilis.stopRingtoneCall()
                     Nexilis.stopRingbacktoneCall()
                 }
                 if users.count == 1 && firstCall {

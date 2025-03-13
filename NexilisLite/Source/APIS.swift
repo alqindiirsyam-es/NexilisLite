@@ -573,6 +573,22 @@ public class APIS: NSObject {
         }
     }
     
+    public static func openChatWallpaper(){
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "chatWallpaper") as! ChatWallpaperViewController
+        let navigationController = CustomNavigationController(rootViewController: controller)
+        navigationController.defaultStyle()
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+        }
+    }
+    
     public static func openWhiteboard() {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {

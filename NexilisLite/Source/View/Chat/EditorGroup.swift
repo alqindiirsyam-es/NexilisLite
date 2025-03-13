@@ -17,6 +17,7 @@ import SDWebImage
 import PhotosUI
 
 public class EditorGroup: UIViewController, CLLocationManagerDelegate {
+    @IBOutlet var wallpaperView: UIImageView!
     @IBOutlet var viewButton: UIView!
     @IBOutlet var constraintViewTextField: NSLayoutConstraint!
     @IBOutlet var buttonVoice: UIButton!
@@ -177,6 +178,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         super.viewDidLoad()
 //        navigationController?.navigationBar.topItem?.title = ""
         Utils.addBackground(view: contactChatNav.view)
+        wallpaperView.image = UIImage(data: UserDefaults.standard.data(forKey: "chatWallpaper")!)
         if Nexilis.fromMAB {
             Nexilis.floatingButton.isHidden = true
         }
@@ -188,6 +190,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         viewButton.addTopBorder(with: UIColor.lightGray, andWidth: 1.0)
         
 //        buttonVoice.setImage(resizeImage(image: UIImage(named: "Voice-Record", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)), for: .normal)
+        viewAttachment.backgroundColor = .white
         buttonSendImage.setImage(resizeImage(image: UIImage(named: "Send-Image", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor), for: .normal)
         buttonSendPhoto.setImage(resizeImage(image: UIImage(named: "Camera", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor), for: .normal)
         buttonSendSticker.setImage(resizeImage(image: UIImage(named: "Sticker---Emoji", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor), for: .normal)
@@ -202,6 +205,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         buttonAckConfidential.addTarget(self, action: #selector(showChooserACKConfidential), for: .touchUpInside)
         buttonAckConfidential.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
         buttonAckConfidential.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+        textFieldSend.backgroundColor = .white
         textFieldSend.layer.cornerRadius = textFieldSend.maxCornerRadius()
         textFieldSend.layer.borderWidth = 1.0
         textFieldSend.text = "Send message".localized()

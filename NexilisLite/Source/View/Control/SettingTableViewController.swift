@@ -105,8 +105,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         if Database.shared.database == nil {
             Item.menus["Personal"] = [
                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
-                Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
-                Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
                 Item(icon: UIImage(systemName: "arrow.up.and.person.rectangle.portrait"), title: "Sign-Up/Sign-In".localized()),
             ]
         } else {
@@ -118,7 +116,9 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item.menus["Personal"] = [
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
-                                Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
+                                Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
+                                Item(icon: UIImage(systemName: "photo"),
+                                     title: "Chat Wallpaper".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                                Item(icon: UIImage(systemName: "person.crop.rectangle"), title: "Change Admin / Internal Password".localized()),
                                 Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
@@ -129,7 +129,9 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item.menus["Personal"] = [
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
-                                Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
+                                Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
+                                Item(icon: UIImage(systemName: "photo"),
+                                     title: "Chat Wallpaper".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
                                 Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
                             ]
@@ -137,7 +139,9 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item.menus["Personal"] = [
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                     Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
-                                Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
+                                Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
+                                Item(icon: UIImage(systemName: "photo"),
+                                     title: "Chat Wallpaper".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                                Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                             ]
@@ -192,7 +196,9 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                         Item.menus["Personal"] = [
                             Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
-                            Item(icon: UIImage(systemName: "textformat.size"), title: "Change Font Size".localized()),
+                            Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
+                            Item(icon: UIImage(systemName: "photo"),
+                                 title: "Chat Wallpaper".localized()),
                             Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                            Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                         ]
@@ -352,7 +358,9 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 cell.accessoryType = .disclosureIndicator
             case "Change Language".localized():
                 cell.accessoryType = .disclosureIndicator
-            case "Change Font Size".localized():
+            case "Chat Font Size".localized():
+                cell.accessoryType = .disclosureIndicator
+            case "Chat Wallpaper".localized():
                 cell.accessoryType = .disclosureIndicator
             case "Set Internal Account".localized():
                 cell.accessoryType = .disclosureIndicator
@@ -510,7 +518,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 self.tableView.reloadData()
             }))
             self.present(alert, animated: true, completion: nil)
-        } else if item.title == "Change Font Size".localized() {
+        } else if item.title == "Chat Font Size".localized() {
             let vc = UIViewController()
             vc.preferredContentSize = CGSize(width: UIScreen.main.bounds.width - 10, height: 150)
             fontSizePickerView = UIPickerView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width - 10, height: 150))
@@ -548,6 +556,8 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 self.tableView.reloadData()
             }))
             self.present(alert, animated: true, completion: nil)
+        } else if item.title == "Chat Wallpaper".localized() {
+            APIS.openChatWallpaper()
         } else if item.title == "Sign-In".localized() {
             let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "changeDevice") as! ChangeDeviceViewController
             controller.isDismiss = { newThumb in
