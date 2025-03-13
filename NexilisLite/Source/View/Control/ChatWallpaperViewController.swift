@@ -86,7 +86,14 @@ class ChatWallpaperViewController: UIViewController, UICollectionViewDataSource,
             clearWallpaperButton.heightAnchor.constraint(equalToConstant: 50)
         ])
         
+        // Add a back button
+        let backButton = UIBarButtonItem(title: "Back", style: .plain, target: self, action: #selector(backButtonTapped))
+        navigationItem.leftBarButtonItem = backButton
         
+    }
+    
+    @objc private func backButtonTapped() {
+        dismiss(animated: true)
     }
 
     // MARK: - Collection View Data Source
