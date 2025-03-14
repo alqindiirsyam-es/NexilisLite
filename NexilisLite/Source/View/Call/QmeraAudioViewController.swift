@@ -274,16 +274,17 @@ class QmeraAudioViewController: UIViewController {
     
     override func viewWillDisappear(_ animated: Bool) {
         UIDevice.current.isProximityMonitoringEnabled = false
-        NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
         Nexilis.callAPNActivated = false
     }
     
     deinit {
+        print("DEINIT.....!!!!!!")
         UIDevice.current.isProximityMonitoringEnabled = false
-        NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
         Nexilis.callAPNActivated = false
+        NotificationCenter.default.removeObserver(self)
+        AVAudioSession.sharedInstance().removeObserver(self, forKeyPath: "outputVolume")
     }
     
     override func viewDidAppear(_ animated: Bool) {

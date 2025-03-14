@@ -449,7 +449,7 @@ class VideoConferenceViewController: UIViewController {
                         }
                     }
                 } else {
-                    Nexilis.ringbacktonePlayer?.play()
+                    Nexilis.playRingbacktoneCall()
                     API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
                 }
             } else {
@@ -516,7 +516,7 @@ class VideoConferenceViewController: UIViewController {
         DispatchQueue.main.async { [self] in
             let data:[AnyHashable : Any] = notification.userInfo!
             if let l_pin = data["l_pin"] as? String {
-                Nexilis.ringtonePlayer?.play()
+                Nexilis.playRingtoneCall()
                 API.initiateCCall(sParty: l_pin, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
             }
         }
@@ -1023,9 +1023,9 @@ class VideoConferenceViewController: UIViewController {
     
     func endAllCall() {
         if isInisiator {
-            Nexilis.ringbacktonePlayer?.stop()
+            Nexilis.stopRingbacktoneCall()
         } else {
-            Nexilis.ringtonePlayer?.stop()
+            Nexilis.stopRingtoneCall()
         }
 //        let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
 //        if !onGoingCC.isEmpty {
@@ -1221,7 +1221,7 @@ class VideoConferenceViewController: UIViewController {
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
             if isInisiator {
-                Nexilis.ringbacktonePlayer?.stop()
+                Nexilis.stopRingbacktoneCall()
             }
             let channel = arrayMessage[3]
             remoteChannel[String(channel)] = String(arrayMessage[5])
@@ -1341,9 +1341,9 @@ class VideoConferenceViewController: UIViewController {
             }
         } else if (state == Nexilis.VIDEO_CALL_END || state == Nexilis.AUDIO_CALL_END) {
             if isInisiator {
-                Nexilis.ringbacktonePlayer?.stop()
+                Nexilis.stopRingbacktoneCall()
             } else {
-                Nexilis.ringtonePlayer?.stop()
+                Nexilis.stopRingtoneCall()
             }
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             if !onGoingCC.isEmpty {
@@ -1483,9 +1483,9 @@ class VideoConferenceViewController: UIViewController {
             }
         } else if (state == Nexilis.OFFLINE) {
             if isInisiator {
-                Nexilis.ringbacktonePlayer?.stop()
+                Nexilis.stopRingbacktoneCall()
             } else {
-                Nexilis.ringtonePlayer?.stop()
+                Nexilis.stopRingtoneCall()
             }
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             DispatchQueue.main.async {
@@ -1554,9 +1554,9 @@ class VideoConferenceViewController: UIViewController {
             }
         } else if (state == Nexilis.BUSY) {
             if isInisiator {
-                Nexilis.ringbacktonePlayer?.stop()
+                Nexilis.stopRingbacktoneCall()
             } else {
-                Nexilis.ringtonePlayer?.stop()
+                Nexilis.stopRingtoneCall()
             }
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             DispatchQueue.main.async { [self] in

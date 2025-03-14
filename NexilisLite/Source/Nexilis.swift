@@ -125,9 +125,9 @@ public class Nexilis: NSObject {
     
     public static var callAPNActivated = false
     
-    static var ringtonePlayer: AVAudioPlayer?
-    static var ringbacktonePlayer: AVAudioPlayer?
-    static var busyPlayer: AVAudioPlayer?
+    private static var ringtonePlayer: AVAudioPlayer?
+    private static var ringbacktonePlayer: AVAudioPlayer?
+    private static var busyPlayer: AVAudioPlayer?
     static var sharedAudioPlayer: AVAudioPlayer?
     
     private func createDelegate() {
@@ -304,61 +304,55 @@ public class Nexilis: NSObject {
         _ = LocationManager()
     }
     
+    private static var ringtoneID: SystemSoundID = 0
+    
     public static func playRingtoneCall() {
-        var ringtonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_in_long", withExtension: "mp3")
+        var ringtonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_in_ios", withExtension: "mp3")
         if ringtonePath == nil {
-            ringtonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_in_long", withExtension: "mp3")
+            ringtonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_in_ios", withExtension: "mp3")
         }
-        do {
-            ringtonePlayer = try AVAudioPlayer(contentsOf:ringtonePath!)
-            ringtonePlayer?.numberOfLoops = -1
-            ringtonePlayer?.prepareToPlay()
-            ringtonePlayer?.play()
-        } catch {
-            
+        if let a = ringtonePath {
+            AudioServicesCreateSystemSoundID(a as CFURL, &ringtoneID)
+            AudioServicesPlaySystemSound(ringtoneID)
         }
     }
     
     public static func stopRingtoneCall() {
-        ringtonePlayer?.stop()
+        AudioServicesDisposeSystemSoundID(ringtoneID)
     }
+    
+    private static var ringBackToneID: SystemSoundID = 0
     
     public static func playRingbacktoneCall() {
         var ringbacktonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_out", withExtension: "mp3")
         if ringbacktonePath == nil {
             ringbacktonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_out", withExtension: "mp3")
         }
-        do {
-            ringbacktonePlayer = try AVAudioPlayer(contentsOf:ringbacktonePath!)
-            ringbacktonePlayer?.numberOfLoops = -1
-            ringbacktonePlayer?.prepareToPlay()
-            ringbacktonePlayer?.play()
-        } catch {
-            
+        if let a = ringbacktonePath {
+            AudioServicesCreateSystemSoundID(a as CFURL, &ringBackToneID)
+            AudioServicesPlaySystemSound(ringBackToneID)
         }
     }
     
     public static func stopRingbacktoneCall() {
-        ringbacktonePlayer?.stop()
+        AudioServicesDisposeSystemSoundID(ringBackToneID)
     }
+    
+    private static var busyToneID: SystemSoundID = 0
     
     public static func playBusyCall() {
         var busyPath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_busy", withExtension: "mp3")
         if busyPath == nil {
             busyPath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_busy", withExtension: "mp3")
         }
-        do {
-            busyPlayer = try AVAudioPlayer(contentsOf:busyPath!)
-            busyPlayer?.numberOfLoops = 1
-            busyPlayer?.prepareToPlay()
-            busyPlayer?.play()
-        } catch {
-            
+        if let a = busyPath {
+            AudioServicesCreateSystemSoundID(a as CFURL, &busyToneID)
+            AudioServicesPlaySystemSound(busyToneID)
         }
     }
     
     public static func stopBusyCall() {
-        busyPlayer?.stop()
+        AudioServicesDisposeSystemSoundID(busyToneID)
     }
     
     public static func addFB(viewController: UIViewController, fromMAB: Bool) {
