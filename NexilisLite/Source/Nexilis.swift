@@ -324,9 +324,9 @@ public class Nexilis: NSObject {
     private static var ringBackToneID: SystemSoundID = 0
     
     public static func playRingbacktoneCall() {
-        var ringbacktonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_out", withExtension: "mp3")
+        var ringbacktonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_out_ios", withExtension: "mp3")
         if ringbacktonePath == nil {
-            ringbacktonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_out", withExtension: "mp3")
+            ringbacktonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_out_ios", withExtension: "mp3")
         }
         if let a = ringbacktonePath {
             AudioServicesCreateSystemSoundID(a as CFURL, &ringBackToneID)
