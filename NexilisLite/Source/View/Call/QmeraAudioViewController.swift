@@ -293,6 +293,15 @@ class QmeraAudioViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playAndRecord, mode: .default)
+            try audioSession.overrideOutputAudioPort(.speaker)
+            try audioSession.setPreferredSampleRate(48000.0)
+            try audioSession.setActive(true)
+        } catch {
+            print("Failed to configure audio session: \(error)")
+        }
         QmeraAudioViewController.volumeView = MPVolumeView(frame: .zero)
         QmeraAudioViewController.volumeView.isHidden = true
 
