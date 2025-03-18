@@ -2613,13 +2613,18 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
-    public static func getToken(token: String) -> TMessage {
+    public static func getToken(token: String, isCall: Bool = false) -> TMessage {
         let tMessage = NexilisLite.TMessage()
         let me = User.getMyPin() ?? ""
         tMessage.mPIN = me
         tMessage.mCode = CoreMessage_TMessageCode.APN_TOKEN
         tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
-        tMessage.mBodies[CoreMessage_TMessageKey.TOKEN] = token
+        if !isCall {
+            tMessage.mBodies[CoreMessage_TMessageKey.TOKEN] = token
+        }
+        else {
+            tMessage.mBodies[CoreMessage_TMessageKey.CALL_TOKEN] = token
+        }
         tMessage.mBodies[CoreMessage_TMessageKey.DEVICE_BRAND] = "iOS"
         tMessage.mBodies[CoreMessage_TMessageKey.ANDROID_ID] = Utils.M_USER_ANDROID_ID
         return tMessage

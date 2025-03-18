@@ -1324,6 +1324,16 @@ public final class Utils {
         return ""
     }
     
+    public static func setTokenCall(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "token_call")
+    }
+    public static func getTokenCall() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "token_call") {
+            return value
+        }
+        return ""
+    }
+    
     public static func setLastTabSelected(value: Int) {
         SecureUserDefaults.shared.set(value, forKey: "last_selected_tab")
     }

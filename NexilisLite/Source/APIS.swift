@@ -880,15 +880,26 @@ public class APIS: NSObject {
         Nexilis.openmailAction()
     }
     
-    public static func sendPushToken(_ token: String, isResend: Bool = false) {
+    public static func sendPushToken(_ token: String, isResend: Bool = false, isCall: Bool = false) {
         DispatchQueue.global().async{
             var isResend = isResend
-            if Utils.getTokenAPN().isEmpty || token != Utils.getTokenAPN() || isResend {
-                Utils.setTokenAPN(value: token)
-                isResend = true
+            if !isCall {
+                if Utils.getTokenAPN().isEmpty || token != Utils.getTokenAPN() || isResend {
+                    Utils.setTokenAPN(value: token)
+                    isResend = true
+                }
+                if isResend {
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token))
+                }
             }
-            if isResend {
-                _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token))
+            else {
+                if Utils.getTokenCall().isEmpty || token != Utils.getTokenCall() || isResend {
+                    Utils.setTokenCall(value: token)
+                    isResend = true
+                }
+                if isResend {
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token, isCall: true))
+                }
             }
         }
     }
