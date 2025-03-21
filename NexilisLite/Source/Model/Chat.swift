@@ -127,15 +127,37 @@ public class Chat: Model {
         return ""
     }
     
-    public static func getMessageFromSearch(text: String = "") -> [String] {
-        var messages: [String] = []
+    public static func getMessageFromSearch(text: String = "") -> [Chat] {
+        var messages: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                let query = "select message_id FROM MESSAGE where message_text LIKE '%\(text)%'"
+                let query = "m.f_pin, m.l_pin, m.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE m, BUDDY b where m.l_pin = b.f_pin and m.is_call_center = 0 and message_text LIKE '%\(text)%'"
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {
                         let data = cursorData.string(forColumnIndex: 0) ?? ""
-                        messages.append(data)
+                        let chat = Chat(fpin: cursorData.string(forColumnIndex: 0) ?? "",
+                                        pin: cursorData.string(forColumnIndex: 1) ?? "",
+                                        messageId: cursorData.string(forColumnIndex: 2) ?? "",
+                                        counter: cursorData.string(forColumnIndex: 3) ?? "",
+                                        messageText: cursorData.string(forColumnIndex: 4) ?? "",
+                                        serverDate: cursorData.string(forColumnIndex: 5) ?? "",
+                                        image: cursorData.string(forColumnIndex: 6) ?? "",
+                                        video: cursorData.string(forColumnIndex: 7) ?? "",
+                                        file: cursorData.string(forColumnIndex: 8) ?? "",
+                                        attachmentFlag: cursorData.string(forColumnIndex: 9) ?? "",
+                                        messageScope: cursorData.string(forColumnIndex: 10) ?? "",
+                                        name: cursorData.string(forColumnIndex: 11) ?? "",
+                                        profile: cursorData.string(forColumnIndex: 12) ?? "",
+                                        official: cursorData.string(forColumnIndex: 13) ?? "",
+                                        status: cursorData.string(forColumnIndex: 14) ?? "",
+                                        credential: cursorData.string(forColumnIndex: 15) ?? "",
+                                        lock: cursorData.string(forColumnIndex: 16) ?? "",
+                                        thumb: "",
+                                        audio: cursorData.string(forColumnIndex: 17) ?? "",
+                                        gif: cursorData.string(forColumnIndex: 18) ?? "",
+                                        groupId: cursorData.string(forColumnIndex: 19) ?? "",
+                                        groupName: cursorData.string(forColumnIndex: 20) ?? "")
+                        messages.append(chat)
                     }
                     cursorData.close()
                 }
@@ -159,7 +181,7 @@ public class Chat: Model {
 //        })
 //    }
     
-    public static func getData(messageId: String = "", isImage: Bool = false, isDoc: Bool = false, isVideo: Bool = false, isGIF: Bool = false, isLink: Bool = false, isAudio: Bool = false) -> [Chat] {
+    public static func getData(isImage: Bool = false, isDoc: Bool = false, isVideo: Bool = false, isGIF: Bool = false, isLink: Bool = false, isAudio: Bool = false) -> [Chat] {
         var chats: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
@@ -178,15 +200,15 @@ public class Chat: Model {
                     lastQuery = "m.audio_id IS NOT NULL AND m.audio_id != ''"
                 }
                 var query = """
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'") and m.is_call_center = 0
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and ms.message_id = m.message_id\(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and ms.message_id = m.message_id
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and ms.message_id = m.message_id\(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and ms.message_id = m.message_id
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'") and m.is_call_center = 0
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and ms.message_id = m.message_id and m.is_call_center = 0
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id \(messageId.isEmpty ? "" : " and m.message_id = '\(messageId)'") and m.is_call_center = 0
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id and m.is_call_center = 0
                             order by 6 desc
                             """
                 if !lastQuery.isEmpty {

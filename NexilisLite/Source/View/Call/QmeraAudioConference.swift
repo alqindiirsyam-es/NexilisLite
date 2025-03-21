@@ -279,12 +279,6 @@ class QmeraAudioConference: UIViewController {
     @objc func didSpeaker(sender: Any?) {
         isSpeaker = !isSpeaker
         speaker.isSelected = isSpeaker
-//        do {
-//            if "iPhone 6" == "\(UIDevice().type)" {
-//                try AVAudioSession.sharedInstance().overrideOutputAudioPort(isSpeaker ? .speaker : .none)
-//            }
-//        } catch {
-//        }
     }
     
     @objc func didInvite(sender: Any?) {

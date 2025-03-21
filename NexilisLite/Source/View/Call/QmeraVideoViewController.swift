@@ -18,18 +18,19 @@ import MediaPlayer
 
 class QmeraVideoViewController: UIViewController {
     
-    static private let nMaxSPOn: Float! = 100.0
-    static private let nMaxSPOff: Float! = 5.0
+    static private let nMaxSPOn: Float! = 10.0
+    static private let nMaxSPOff: Float! = 9.0
     static private var volumeView: MPVolumeView!
-    static private var bSpeakerPhone: Bool! = false
     static private var lastVolume: Float! = AVAudioSession.sharedInstance().outputVolume
+    static private var bSpeakerPhone: Bool! = false
+    static private var isLoop = false
     
     
     var dataPerson: [[String: String?]] = []
     var fPin = ""
     var wbRoomId = ""
     var isInisiator = true
-    var isSpeaker = true
+//    var isSpeaker = false
     var isMuted = false
     var isPresent = false
     var callFCM = true
@@ -140,8 +141,17 @@ class QmeraVideoViewController: UIViewController {
         return button
     }()
     
-    static func turnSpeakerOn(bSpeakerOn: Bool!) {
-        bSpeakerPhone = bSpeakerOn
+    static func turnSpeakerOn() {
+        bSpeakerPhone = !bSpeakerPhone
+        var bAudioEngineIsAvtive: Bool! = false
+        repeat {
+            API.turnSpeakerPhone(bSPon: bSpeakerPhone!)
+            bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
+            print("Audio Session State: \(bAudioEngineIsAvtive ? "Active" : "Inactive" )")
+            if (bAudioEngineIsAvtive) {
+                break
+            }
+        } while (!bAudioEngineIsAvtive)
         var volume:Float! = 0
         if (bSpeakerPhone) {
             volume = lastVolume * nMaxSPOn
@@ -150,6 +160,17 @@ class QmeraVideoViewController: UIViewController {
         }
         API.adjustVolume(fValue: volume)
     }
+
+//    static func toggleSpeakerPhone() {
+//        bSpeakerPhone = !bSpeakerPhone
+//        var volume:Float! = 0
+//        if (bSpeakerPhone) {
+//            volume = lastVolume * nMaxSPOn
+//        } else {
+//            volume = lastVolume * nMaxSPOff
+//        }
+//        API.adjustVolume(fValue: volume)
+//    }
     
     deinit {
         navigationController?.changeAppearance(clear: false)
@@ -160,6 +181,8 @@ class QmeraVideoViewController: UIViewController {
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
         Nexilis.callAPNActivated = false
+        QmeraVideoViewController.isLoop = false
+        backToDefaultAudioSession()
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -170,22 +193,24 @@ class QmeraVideoViewController: UIViewController {
             navigationController?.navigationBar.topItem?.backBarButtonItem = nil
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             NotificationCenter.default.removeObserver(self)
+            backToDefaultAudioSession()
         }
         Nexilis.floatingButton.isHidden = false
         Nexilis.callAPNActivated = false
     }
+    
+    private func backToDefaultAudioSession() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: .allowBluetooth)
+            try audioSession.overrideOutputAudioPort(.speaker)
+            try audioSession.setActive(true)
+        } catch {
+        }
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .default)
-            try audioSession.overrideOutputAudioPort(.speaker)
-            try audioSession.setPreferredSampleRate(48000.0)
-            try audioSession.setActive(true)
-        } catch {
-            print("Failed to configure audio session: \(error)")
-        }
         QmeraVideoViewController.volumeView = MPVolumeView(frame: .zero)
         QmeraVideoViewController.volumeView.isHidden = true
         Nexilis.setWhiteboardReceiver(receiver: self)
@@ -710,7 +735,7 @@ class QmeraVideoViewController: UIViewController {
                     self.labelTimerVC.text = format
                 }
                 self.vcTimer.fire()
-                API.adjustVolume(fValue: 10.0)
+//                self.setSpeaker()
             }
         }
     }
@@ -888,9 +913,9 @@ class QmeraVideoViewController: UIViewController {
             buttonSpeaker.widthAnchor.constraint(equalToConstant: 70.0),
             buttonSpeaker.heightAnchor.constraint(equalToConstant: 70.0)
         ])
-        buttonSpeaker.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
-        self.buttonSpeaker.backgroundColor = .lightGray
-        self.buttonSpeaker.tintColor = .mainColor
+        buttonSpeaker.backgroundColor = .secondaryColor
+        buttonSpeaker.tintColor = .mainColor
+        buttonSpeaker.setImage(UIImage(systemName: "speaker.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
         buttonSpeaker.circle()
         buttonSpeaker.isHidden = true
         buttonSpeaker.addTarget(self, action: #selector(didTapSpeakerButton(sender:)), for: .touchUpInside)
@@ -1012,10 +1037,10 @@ class QmeraVideoViewController: UIViewController {
         dataPerson.removeAll()
     }
     
-    func setSpeaker(isSpeaker: Bool) {
-        QmeraVideoViewController.turnSpeakerOn(bSpeakerOn: isSpeaker)
+    func setSpeaker() {
         DispatchQueue.main.async {
-            if (isSpeaker) {
+            QmeraVideoViewController.turnSpeakerOn()
+            if (QmeraVideoViewController.bSpeakerPhone) {
                 self.buttonSpeaker.backgroundColor = .lightGray
                 self.buttonSpeaker.tintColor = .mainColor
                 self.buttonSpeaker.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
@@ -1024,12 +1049,11 @@ class QmeraVideoViewController: UIViewController {
                 self.buttonSpeaker.tintColor = .mainColor
                 self.buttonSpeaker.setImage(UIImage(systemName: "speaker.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
             }
-            self.isSpeaker = isSpeaker
         }
     }
     
     @objc func didTapSpeakerButton(sender: AnyObject){
-        setSpeaker(isSpeaker: !(self.isSpeaker))
+        setSpeaker()
     }
     
     @objc func didTapAddParticipantButton(sender: AnyObject){
@@ -1140,6 +1164,32 @@ class QmeraVideoViewController: UIViewController {
                     }
                 }
             }
+        }
+        else if state == Nexilis.STREAMING_SEMINAR_ENDED { // always call turnspeaker
+            QmeraVideoViewController.isLoop = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                repeat {
+                    Thread.sleep(forTimeInterval : 1)
+                    if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
+                        API.turnSpeakerPhone(bSPon: QmeraVideoViewController.bSpeakerPhone!)
+                    }
+                } while (QmeraVideoViewController.isLoop)
+            }
+//                DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: {
+//                    API.turnSpeakerPhone(bSPon: QmeraAudioViewController.bSpeakerPhone!)
+//                })
+//                DispatchQueue.global().async {
+//                    var bAudioSessionIsAvtive: Bool! = false
+//                    repeat {
+//                        API.turnSpeakerPhone(bSPon: QmeraAudioViewController.bSpeakerPhone!)
+//                        let audioSession = AVAudioSession.sharedInstance()
+//                        bAudioSessionIsAvtive = !audioSession.secondaryAudioShouldBeSilencedHint
+//                        print("repeat turnSpeakerPhone >> \(bAudioSessionIsAvtive)")
+//                        if (bAudioSessionIsAvtive) {
+//                            break
+//                        }
+//                    } while (!bAudioSessionIsAvtive)
+//                }
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
             DispatchQueue.main.async {
@@ -1329,6 +1379,7 @@ class QmeraVideoViewController: UIViewController {
                         self.wbTimer.invalidate()
                         _ = Nexilis.getWhiteboardDelegate()?.terminate()
                     }
+                    QmeraVideoViewController.isLoop = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self.endAllCall()
                         self.dismiss(animated: true, completion: nil)
@@ -1376,6 +1427,7 @@ class QmeraVideoViewController: UIViewController {
                     if controller != nil {
                         controller!.dismiss(animated: true)
                     }
+                    QmeraVideoViewController.isLoop = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self.endAllCall()
                         if self.isInisiator && !self.isPresent {

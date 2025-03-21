@@ -437,6 +437,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
     }
     
     public override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
         let item = Item.menuFor(section: indexPath.section)[indexPath.row]
         if item.title == "Personal Information".localized() {
             if(Nexilis.checkIsChangePerson()){
@@ -799,6 +800,10 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     }
                 }
             }))
+            self.present(alert, animated: true, completion: nil)
+        } else if item.title == "Version".localized() {
+            let alert = LibAlertController(title: "Version".localized(), message: API.sGetVersion() ?? "Unknown".localized(), preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Dismiss".localized(), style: UIAlertAction.Style.default, handler: nil))
             self.present(alert, animated: true, completion: nil)
         }
     }

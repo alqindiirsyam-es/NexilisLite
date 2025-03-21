@@ -907,27 +907,12 @@ public class APIS: NSObject {
     public static var uuidCall: UUID?
     public static var fpinCall: String?
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
-//        let center = UNUserNotificationCenter.current()
-//        let content = UNMutableNotificationContent()
-//        content.title = "showNotificationNexilis"
-//        content.body = ""
-//        content.sound = .default
-//        content.userInfo = userInfo
-//        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-//        let request = UNNotificationRequest(identifier: "HJK", content: content, trigger: trigger)
-//        center.add(request) { error in
-//            if let error = error {
-//                print("Error scheduling notification: \(error.localizedDescription)")
-//            }
-//        }
         if checkAppStateisBackground() {
             DispatchQueue.main.async {
                 if let payload = userInfo["payload"] as? [String: Any] {
                     if let messagePayload = payload["message"] as? [String: Any] {
                         if let data = messagePayload["data"] as? [String: Any] {
                             let code = data["nx_code"] as? String ?? ""
-                            while (!API.bnuSDKServiceReady() || API.nGetCLXConnState() == 0) {
-                            }
                             if code == "CL01" {
                                 if let message = data["bodies"] as? [String: String] {
                                     let messageToSave = TMessage()
@@ -953,6 +938,7 @@ public class APIS: NSObject {
                                     APIS.addNotificationNexilis(messageToSave)
                                 }
                             } else if code == "CL03" {
+                                print("Print notif call")
                                 let callFromName = data["call-from-name"] as? String ?? ""
                                 let callFrom = data["call-from"] as? String ?? ""
                                 let callType = data["call-type"] as? String ?? ""
@@ -966,7 +952,7 @@ public class APIS: NSObject {
     //                                            print("Incoming call reported successfully")
     //                                        }
     //                                    }
-                                copySoundToLocalPath("pb_call_in", false)
+                                copySoundToLocalPath("pb_call_in_ios", false)
                                 let center = UNUserNotificationCenter.current()
                                 let content = UNMutableNotificationContent()
                                 content.title = callFromName
@@ -976,7 +962,7 @@ public class APIS: NSObject {
                                     content.body = "Incoming Video Call".localized()
                                 }
                                 content.userInfo = ["id" : callFrom, "type" : code, "callType": callType]
-                                content.sound = UNNotificationSound(named: UNNotificationSoundName("pb_call_in.mp3"))
+                                content.sound = UNNotificationSound(named: UNNotificationSoundName("pb_call_in_ios.mp3"))
                                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
                                 let request = UNNotificationRequest(identifier: callFrom, content: content, trigger: trigger)
                                 center.add(request) { error in
@@ -1142,6 +1128,11 @@ public class APIS: NSObject {
                         }
                     } catch {
                         
+                    }
+                } else {
+                    sourceURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
+                    if sourceURL == nil {
+                        sourceURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
                     }
                 }
             }
@@ -1323,7 +1314,9 @@ public class APIS: NSObject {
     }
     
     public static func enterBackground() {
-        UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
+        if !API.bAVisOngoing() {
+            API.deinitConnection()
+        }
     }
     
     public static func enterForeground() {
@@ -1334,10 +1327,10 @@ public class APIS: NSObject {
                 UIApplication.shared.registerForRemoteNotifications()
             }
         })
-        DispatchQueue.global().async {
+        DispatchQueue.main.async {
             do {
-                if !Nexilis.afterConnect {
-                    var id = Utils.getConnectionID()
+                if !Nexilis.afterConnect && API.nGetCLXConnState() == 0 {
+                    let id = Utils.getConnectionID()
                     try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
                 }
 //                listIdentifierNotif.removeAll()

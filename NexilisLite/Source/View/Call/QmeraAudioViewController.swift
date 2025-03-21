@@ -13,11 +13,12 @@ import MediaPlayer
 
 class QmeraAudioViewController: UIViewController {
     
-    static private let nMaxSPOn: Float! = 100.0
-    static private let nMaxSPOff: Float! = 5.0
+    static private let nMaxSPOn: Float! = 10.0
+    static private let nMaxSPOff: Float! = 9.0
     static private var volumeView: MPVolumeView!
-    static private var bSpeakerPhone: Bool! = false
     static private var lastVolume: Float! = AVAudioSession.sharedInstance().outputVolume
+    static private var bSpeakerPhone: Bool! = false
+    static private var isLoop = false
     
     
     let stackViewToolbar2 = UIStackView()
@@ -84,7 +85,7 @@ class QmeraAudioViewController: UIViewController {
     
     private var firstCall: Bool = true
     
-    private var isSpeaker: Bool = true
+//    private var isSpeaker: Bool = false
     
     private var isMuted: Bool = false
     
@@ -261,30 +262,64 @@ class QmeraAudioViewController: UIViewController {
         return button
     }()
     
-    static func turnSpeakerOn(bSpeakerOn: Bool!) {
-        bSpeakerPhone = bSpeakerOn
+    static func turnSpeakerOn() {
+        bSpeakerPhone = !bSpeakerPhone
+        var bAudioEngineIsAvtive: Bool! = false
+        repeat {
+            API.turnSpeakerPhone(bSPon: bSpeakerPhone!)
+            bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
+            print("Audio Session State: \(bAudioEngineIsAvtive ? "Active" : "Inactive" )")
+            if (bAudioEngineIsAvtive) {
+                break
+            }
+        } while (!bAudioEngineIsAvtive)
         var volume:Float! = 0
         if (bSpeakerPhone) {
+            UIDevice.current.isProximityMonitoringEnabled = false
             volume = lastVolume * nMaxSPOn
         } else {
+            UIDevice.current.isProximityMonitoringEnabled = true
             volume = lastVolume * nMaxSPOff
         }
         API.adjustVolume(fValue: volume)
     }
     
+//    static func toggleSpeakerPhone() {
+//        bSpeakerPhone = !bSpeakerPhone
+//        var volume:Float! = 0
+//        if (bSpeakerPhone) {
+//            volume = lastVolume * nMaxSPOn
+//        } else {
+//            volume = lastVolume * nMaxSPOff
+//        }
+//        API.adjustVolume(fValue: volume)
+//    }
+    
     override func viewWillDisappear(_ animated: Bool) {
         UIDevice.current.isProximityMonitoringEnabled = false
         Nexilis.floatingButton.isHidden = false
         Nexilis.callAPNActivated = false
+        backToDefaultAudioSession()
     }
     
     deinit {
-        print("DEINIT.....!!!!!!")
         UIDevice.current.isProximityMonitoringEnabled = false
         Nexilis.floatingButton.isHidden = false
         Nexilis.callAPNActivated = false
         NotificationCenter.default.removeObserver(self)
         AVAudioSession.sharedInstance().removeObserver(self, forKeyPath: "outputVolume")
+        QmeraAudioViewController.isLoop = false
+        backToDefaultAudioSession()
+    }
+    
+    private func backToDefaultAudioSession() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth])
+            try audioSession.overrideOutputAudioPort(.speaker)
+            try audioSession.setActive(true)
+        } catch {
+        }
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -293,15 +328,6 @@ class QmeraAudioViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .default)
-            try audioSession.overrideOutputAudioPort(.speaker)
-            try audioSession.setPreferredSampleRate(48000.0)
-            try audioSession.setActive(true)
-        } catch {
-            print("Failed to configure audio session: \(error)")
-        }
         QmeraAudioViewController.volumeView = MPVolumeView(frame: .zero)
         QmeraAudioViewController.volumeView.isHidden = true
 
@@ -467,7 +493,6 @@ class QmeraAudioViewController: UIViewController {
     }
     
     private func incomingView() {
-//        Nexilis.setSpeakerphoneOn(isSpeaker)
         Nexilis.playRingtoneCall()
         status.text = "Incoming..."
         
@@ -670,9 +695,8 @@ class QmeraAudioViewController: UIViewController {
     }
     
     @objc func didSpeaker(sender: Any?) {
-        isSpeaker = !isSpeaker
-        speaker.isSelected = isSpeaker
-        QmeraAudioViewController.turnSpeakerOn(bSpeakerOn: isSpeaker)
+        QmeraAudioViewController.turnSpeakerOn()
+        speaker.isSelected = QmeraAudioViewController.bSpeakerPhone
     }
     
     @objc func didMute(sender: Any?) {
@@ -846,9 +870,7 @@ class QmeraAudioViewController: UIViewController {
                     }
                 }
                 API.terminateCall(sParty: nil)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    self.dismiss(animated: false, completion: nil)
-                }
+                self.dismiss(animated: false, completion: nil)
             } else {
 //                if let user = self.user, let call = Nexilis.shared.callManager.call(with: user.pin) {
 //                    Nexilis.shared.callManager.end(call: call)
@@ -930,6 +952,31 @@ class QmeraAudioViewController: UIViewController {
                         }
                     }
                 }
+            } else if state == Nexilis.STREAMING_SEMINAR_ENDED { // always call turnspeaker
+                QmeraAudioViewController.isLoop = true
+                DispatchQueue.global(qos: .userInitiated).async {
+                    repeat {
+                        Thread.sleep(forTimeInterval : 1)
+                        if (QmeraAudioViewController.isLoop && !API.bAudioEngineIsRunning()) {
+                            API.turnSpeakerPhone(bSPon: QmeraAudioViewController.bSpeakerPhone!)
+                        }
+                    } while (QmeraAudioViewController.isLoop)
+                }
+//                DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: {
+//                    API.turnSpeakerPhone(bSPon: QmeraAudioViewController.bSpeakerPhone!)
+//                })
+//                DispatchQueue.global().async {
+//                    var bAudioSessionIsAvtive: Bool! = false
+//                    repeat {
+//                        API.turnSpeakerPhone(bSPon: QmeraAudioViewController.bSpeakerPhone!)
+//                        let audioSession = AVAudioSession.sharedInstance()
+//                        bAudioSessionIsAvtive = !audioSession.secondaryAudioShouldBeSilencedHint
+//                        print("repeat turnSpeakerPhone >> \(bAudioSessionIsAvtive)")
+//                        if (bAudioSessionIsAvtive) {
+//                            break
+//                        }
+//                    } while (!bAudioSessionIsAvtive)
+//                }
             } else if state == Nexilis.AUDIO_CALL_RINGING || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_RINGING) {
                 if users.count == 1 {
                     DispatchQueue.main.async {
@@ -997,6 +1044,7 @@ class QmeraAudioViewController: UIViewController {
                                 self.status.text = "Call Center Session has ended..."
                                 self.end.isEnabled = false
                             }
+                            QmeraAudioViewController.isLoop = false
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                                 self.didEnd(sender: true)
                             }
@@ -1024,6 +1072,7 @@ class QmeraAudioViewController: UIViewController {
                             self.status.text = "Call Center Session has ended..."
                             self.end.isEnabled = false
                         }
+                        QmeraAudioViewController.isLoop = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                             self.didEnd(sender: true)
                         }
@@ -1042,6 +1091,7 @@ class QmeraAudioViewController: UIViewController {
                                 controller!.dismiss(animated: true)
                             }
                         }
+                        QmeraAudioViewController.isLoop = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                             self.didEnd(sender: true)
                         }
@@ -1053,11 +1103,6 @@ class QmeraAudioViewController: UIViewController {
                         }
                     }
                 }
-//                if users.count == 0 {
-//                    DispatchQueue.main.async {
-//                        self.dismiss(animated: false, completion: nil)
-//                    }
-//                }
             } else if state == Nexilis.OFFLINE { // Offline
                 DispatchQueue.main.async {
                     Nexilis.stopRingtoneCall()

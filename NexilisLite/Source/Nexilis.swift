@@ -178,6 +178,7 @@ public class Nexilis: NSObject {
                 if address.isEmpty {
                     return
                 }
+                print("HUHU>> \(API.sGetVersion())")
                 var id = Utils.getConnectionID()
                 Nexilis.ADDRESS = address.components(separatedBy: ":")[0]
                 Nexilis.PORT = Int(address.components(separatedBy: ":")[1]) ?? 0
@@ -312,13 +313,21 @@ public class Nexilis: NSObject {
             ringtonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_in_ios", withExtension: "mp3")
         }
         if let a = ringtonePath {
-            AudioServicesCreateSystemSoundID(a as CFURL, &ringtoneID)
-            AudioServicesPlaySystemSound(ringtoneID)
+//            AudioServicesCreateSystemSoundID(a as CFURL, &ringtoneID)
+//            AudioServicesPlaySystemSound(ringtoneID)
+            do {
+                Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: a)
+                Nexilis.sharedAudioPlayer?.prepareToPlay()
+                Nexilis.sharedAudioPlayer?.play()
+            } catch {
+                
+            }
         }
     }
     
     public static func stopRingtoneCall() {
-        AudioServicesDisposeSystemSoundID(ringtoneID)
+//        AudioServicesDisposeSystemSoundID(ringtoneID)
+        Nexilis.sharedAudioPlayer?.stop()
     }
     
     private static var ringBackToneID: SystemSoundID = 0
@@ -329,13 +338,22 @@ public class Nexilis: NSObject {
             ringbacktonePath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_out_ios", withExtension: "mp3")
         }
         if let a = ringbacktonePath {
-            AudioServicesCreateSystemSoundID(a as CFURL, &ringBackToneID)
-            AudioServicesPlaySystemSound(ringBackToneID)
+//            AudioServicesCreateSystemSoundID(a as CFURL, &ringBackToneID)
+//            AudioServicesPlaySystemSound(ringBackToneID)
+            do {
+                Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: a)
+                Nexilis.sharedAudioPlayer?.prepareToPlay()
+                Nexilis.sharedAudioPlayer?.play()
+                Nexilis.sharedAudioPlayer?.numberOfLoops = -1
+            } catch {
+                
+            }
         }
     }
     
     public static func stopRingbacktoneCall() {
-        AudioServicesDisposeSystemSoundID(ringBackToneID)
+//        AudioServicesDisposeSystemSoundID(ringBackToneID)
+        Nexilis.sharedAudioPlayer?.stop()
     }
     
     private static var busyToneID: SystemSoundID = 0
@@ -346,13 +364,21 @@ public class Nexilis: NSObject {
             busyPath = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_call_busy", withExtension: "mp3")
         }
         if let a = busyPath {
-            AudioServicesCreateSystemSoundID(a as CFURL, &busyToneID)
-            AudioServicesPlaySystemSound(busyToneID)
+//            AudioServicesCreateSystemSoundID(a as CFURL, &busyToneID)
+//            AudioServicesPlaySystemSound(busyToneID)
+            do {
+                Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: a)
+                Nexilis.sharedAudioPlayer?.prepareToPlay()
+                Nexilis.sharedAudioPlayer?.play()
+            } catch {
+                
+            }
         }
     }
     
     public static func stopBusyCall() {
-        AudioServicesDisposeSystemSoundID(busyToneID)
+//        AudioServicesDisposeSystemSoundID(busyToneID)
+        Nexilis.sharedAudioPlayer?.stop()
     }
     
     public static func addFB(viewController: UIViewController, fromMAB: Bool) {
@@ -1046,65 +1072,6 @@ public class Nexilis: NSObject {
         do {
             API.adjustVolume(fValue: isEnabled ? 10.0: isVideo ? 0.0 : 3.0)
         } catch {
-        }
-    }
-
-    
-//    public static func initiateAudio() {
-//        do {
-//            try AVAudioSession.sharedInstance().setPreferredSampleRate(AVAudioSession.sharedInstance().sampleRate)
-//        } catch {
-//        }
-//    }
-    
-//    public static func startAudio(isVideo: Bool = true) {
-//        do {
-//            try AVAudioSession.sharedInstance().setCategory(.playAndRecord, options: .defaultToSpeaker)
-//            try AVAudioSession.sharedInstance().setMode(.voiceChat)
-//            try AVAudioSession.sharedInstance().overrideOutputAudioPort(isVideo ? .speaker : .none)
-//            try AVAudioSession.sharedInstance().setActive(true)
-//        } catch {
-//        }
-//    }
-//
-//    public static func stopAudio() {
-//        do {
-//            try AVAudioSession.sharedInstance().setCategory(.soloAmbient)
-//            try AVAudioSession.sharedInstance().setMode(.default)
-//            try AVAudioSession.sharedInstance().overrideOutputAudioPort(.none)
-//            try AVAudioSession.sharedInstance().setActive(true)
-//        } catch {
-//        }
-//    }
-    
-    public static func muteMicrophone(isMute: Bool!){
-        do {
-            if(isMute){
-                try AVAudioSession.sharedInstance().setCategory(.playback)
-            }
-            else{
-                try AVAudioSession.sharedInstance().setCategory(.playAndRecord)
-            }
-        }catch{
-            //print(error)
-        }
-    }
-    
-    public static func setSpeakerphoneOn(_ isOn: Bool){
-        let audioSession = AVAudioSession.sharedInstance()
-        
-        do {
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [])
-            
-            try audioSession.setActive(true)
-            
-            if isOn {
-                try audioSession.overrideOutputAudioPort(.speaker)
-            } else {
-                try audioSession.overrideOutputAudioPort(.none)
-            }
-        } catch {
-            print("Error setting up audio session: \(error.localizedDescription)")
         }
     }
 
