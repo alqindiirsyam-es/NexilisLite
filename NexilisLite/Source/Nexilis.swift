@@ -178,7 +178,7 @@ public class Nexilis: NSObject {
                 if address.isEmpty {
                     return
                 }
-                print("HUHU>> \(API.sGetVersion())")
+//                print("HUHU>> \(API.sGetVersion())")
                 var id = Utils.getConnectionID()
                 Nexilis.ADDRESS = address.components(separatedBy: ":")[0]
                 Nexilis.PORT = Int(address.components(separatedBy: ":")[1]) ?? 0
@@ -318,6 +318,7 @@ public class Nexilis: NSObject {
             do {
                 Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: a)
                 Nexilis.sharedAudioPlayer?.prepareToPlay()
+                Nexilis.sharedAudioPlayer?.numberOfLoops = -1
                 Nexilis.sharedAudioPlayer?.play()
             } catch {
                 
@@ -343,8 +344,8 @@ public class Nexilis: NSObject {
             do {
                 Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: a)
                 Nexilis.sharedAudioPlayer?.prepareToPlay()
-                Nexilis.sharedAudioPlayer?.play()
                 Nexilis.sharedAudioPlayer?.numberOfLoops = -1
+                Nexilis.sharedAudioPlayer?.play()
             } catch {
                 
             }
@@ -369,6 +370,7 @@ public class Nexilis: NSObject {
             do {
                 Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: a)
                 Nexilis.sharedAudioPlayer?.prepareToPlay()
+                Nexilis.sharedAudioPlayer?.numberOfLoops = -1
                 Nexilis.sharedAudioPlayer?.play()
             } catch {
                 
@@ -3886,6 +3888,12 @@ extension Nexilis: MessageDelegate {
                                                         func playAudio() {
                                                             if FileManager.default.fileExists(atPath: audioURL.path) {
                                                                 do {
+                                                                    do {
+                                                                        try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                                                                        try AVAudioSession.sharedInstance().setActive(true)
+                                                                    } catch {
+                                                                        
+                                                                    }
                                                                     Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: audioURL)
                                                                     Nexilis.sharedAudioPlayer?.prepareToPlay()
                                                                     Nexilis.sharedAudioPlayer?.play()
@@ -3899,6 +3907,12 @@ extension Nexilis: MessageDelegate {
                                                                         let tempPath = cachesDirectory.appendingPathComponent(nameSound)
                                                                         try audioData.write(to: tempPath)
                                                                         do {
+                                                                            do {
+                                                                                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                                                                                try AVAudioSession.sharedInstance().setActive(true)
+                                                                            } catch {
+                                                                                
+                                                                            }
                                                                             Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: tempPath)
                                                                             Nexilis.sharedAudioPlayer?.prepareToPlay()
                                                                             Nexilis.sharedAudioPlayer?.play()
@@ -3918,6 +3932,12 @@ extension Nexilis: MessageDelegate {
                                                         soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
                                                     }
                                                     do {
+                                                        do {
+                                                            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                                                            try AVAudioSession.sharedInstance().setActive(true)
+                                                        } catch {
+                                                            
+                                                        }
                                                         Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
                                                         Nexilis.sharedAudioPlayer?.prepareToPlay()
                                                         Nexilis.sharedAudioPlayer?.play()
@@ -3987,6 +4007,12 @@ extension Nexilis: MessageDelegate {
                                     func playAudio() {
                                         if FileManager.default.fileExists(atPath: audioURL.path) {
                                             do {
+                                                do {
+                                                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                                                    try AVAudioSession.sharedInstance().setActive(true)
+                                                } catch {
+                                                    
+                                                }
                                                 Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: audioURL)
                                                 Nexilis.sharedAudioPlayer?.prepareToPlay()
                                                 Nexilis.sharedAudioPlayer?.play()
@@ -4000,6 +4026,12 @@ extension Nexilis: MessageDelegate {
                                                     let tempPath = cachesDirectory.appendingPathComponent(nameSound)
                                                     try audioData.write(to: tempPath)
                                                     do {
+                                                        do {
+                                                            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                                                            try AVAudioSession.sharedInstance().setActive(true)
+                                                        } catch {
+                                                            
+                                                        }
                                                         Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: tempPath)
                                                         Nexilis.sharedAudioPlayer?.prepareToPlay()
                                                         Nexilis.sharedAudioPlayer?.play()
@@ -4019,6 +4051,12 @@ extension Nexilis: MessageDelegate {
                                     soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
                                 }
                                 do {
+                                    do {
+                                        try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                                        try AVAudioSession.sharedInstance().setActive(true)
+                                    } catch {
+                                        
+                                    }
                                     Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
                                     Nexilis.sharedAudioPlayer?.prepareToPlay()
                                     Nexilis.sharedAudioPlayer?.play()

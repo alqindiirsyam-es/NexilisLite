@@ -930,6 +930,17 @@ public class APIS: NSObject {
                                         }
                                         Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
                                         DispatchQueue.global().async {
+                                            if !Nexilis.afterConnect && API.nGetCLXConnState() == 0 {
+                                                let id = Utils.getConnectionID()
+                                                do {
+                                                    try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+                                                } catch {
+                                                    
+                                                }
+                                            }
+                                            while API.nGetCLXConnState() == 0 {
+                                                Thread.sleep(forTimeInterval: 1)
+                                            }
                                             _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""))
                                         }
                                     } catch {
@@ -938,7 +949,6 @@ public class APIS: NSObject {
                                     APIS.addNotificationNexilis(messageToSave)
                                 }
                             } else if code == "CL03" {
-                                print("Print notif call")
                                 let callFromName = data["call-from-name"] as? String ?? ""
                                 let callFrom = data["call-from"] as? String ?? ""
                                 let callType = data["call-type"] as? String ?? ""
@@ -952,7 +962,7 @@ public class APIS: NSObject {
     //                                            print("Incoming call reported successfully")
     //                                        }
     //                                    }
-                                copySoundToLocalPath("pb_call_in_ios", false)
+//                                copySoundToLocalPath("pb_call_in_ios", false)
                                 let center = UNUserNotificationCenter.current()
                                 let content = UNMutableNotificationContent()
                                 content.title = callFromName
@@ -962,7 +972,7 @@ public class APIS: NSObject {
                                     content.body = "Incoming Video Call".localized()
                                 }
                                 content.userInfo = ["id" : callFrom, "type" : code, "callType": callType]
-                                content.sound = UNNotificationSound(named: UNNotificationSoundName("pb_call_in_ios.mp3"))
+                                content.sound = nil
                                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
                                 let request = UNNotificationRequest(identifier: callFrom, content: content, trigger: trigger)
                                 center.add(request) { error in
@@ -970,9 +980,20 @@ public class APIS: NSObject {
                                         print("Error scheduling notification: \(error.localizedDescription)")
                                     }
                                 }
+                                let session = AVAudioSession.sharedInstance()
+                                do {
+                                    try session.setCategory(.playback, options: [.duckOthers])
+                                    try session.setActive(true)
+                                } catch {
+                                    print("Audio session error: \(error)")
+                                }
+                                Nexilis.playRingtoneCall()
                             } else if code == "CL02" {
-                                let callFrom = data["call-from"] as? String ?? ""
+                                let callFrom = data["call-cancel"] as? String ?? ""
 //                                if let uuidCall = uuidCall {
+                                    print("STOP RINGTONE CALL")
+                                    Nexilis.stopRingtoneCall()
+                                    print("removeDeliveredNotifications \(callFrom)")
                                     Nexilis.callAPNActivated = false
                                     let center = UNUserNotificationCenter.current()
                                     center.removeDeliveredNotifications(withIdentifiers: [callFrom])
@@ -1239,6 +1260,10 @@ public class APIS: NSObject {
                         UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
                     }
                 } else if type == "CL03" {
+                    Nexilis.stopRingtoneCall()
+                    if !Nexilis.callAPNActivated {
+                        return
+                    }
                     let callType = userInfo["callType"] ?? ""
                     if callType == "1" {
                         if let user = User.getData(pin: id), user.firstName == "User".localized() {

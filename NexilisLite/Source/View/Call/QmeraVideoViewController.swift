@@ -181,8 +181,6 @@ class QmeraVideoViewController: UIViewController {
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
         Nexilis.callAPNActivated = false
-        QmeraVideoViewController.isLoop = false
-        backToDefaultAudioSession()
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -193,7 +191,6 @@ class QmeraVideoViewController: UIViewController {
             navigationController?.navigationBar.topItem?.backBarButtonItem = nil
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             NotificationCenter.default.removeObserver(self)
-            backToDefaultAudioSession()
         }
         Nexilis.floatingButton.isHidden = false
         Nexilis.callAPNActivated = false
@@ -477,6 +474,7 @@ class QmeraVideoViewController: UIViewController {
             labelIncomingOutgoing.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         ])
         if isInisiator {
+            backToDefaultAudioSession()
             Nexilis.playRingbacktoneCall()
             labelIncomingOutgoing.text = "Connecting".localized()
             if ticketId.isEmpty {
@@ -519,6 +517,7 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else {
+            backToDefaultAudioSession()
             Nexilis.playRingtoneCall()
             labelIncomingOutgoing.text = "Incoming video call".localized() + "..."
         }
@@ -626,6 +625,7 @@ class QmeraVideoViewController: UIViewController {
                 }
                 Nexilis.stopRingtoneCall()
                 Nexilis.stopRingbacktoneCall()
+                QmeraVideoViewController.isLoop = false
                 self.endAllCall()
                 self.dismiss(animated: true, completion: nil)
             }))
@@ -669,6 +669,7 @@ class QmeraVideoViewController: UIViewController {
                 self.wbTimer.invalidate()
                 self.vcTimer.invalidate()
                 self.labelTimerVC.text = "Video call is over".localized()
+                QmeraVideoViewController.isLoop = false
                 self.endAllCall()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     if self.isInisiator && !self.isPresent {

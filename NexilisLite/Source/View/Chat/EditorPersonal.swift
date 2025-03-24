@@ -3789,7 +3789,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                         if self.showingLink != text {
                             self.showingLink = text
                             self.deleteLinkPreview()
-                            self.buildPreviewLink(imageUrl: imageUrl, title: title, description: description, stringURl: link)
+                            if !textFieldSend.text.isEmpty || textFieldSend.text.contains(text){
+                                self.buildPreviewLink(imageUrl: imageUrl, title: title, description: description, stringURl: text)
+                            }
                         }
                     }
                 } else {
@@ -3829,7 +3831,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                         if self.showingLink != text {
                             self.showingLink = text
                             self.deleteLinkPreview()
-                            self.buildPreviewLink(imageUrl: imageUrl, title: title, description: description, stringURl: text)
+                            if !self.textFieldSend.text.isEmpty || self.textFieldSend.text.contains(text){
+                                self.buildPreviewLink(imageUrl: imageUrl, title: title, description: description, stringURl: text)
+                            }
                         }
                     },
                                               onError: { error in
@@ -5953,7 +5957,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     textChat = textChat.components(separatedBy: "■")[0]
                     textChat = textChat.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                if !fileChat.isEmpty {
+                if !fileChat.isEmpty && dataMessages[indexPath.row]["lock"] as? String != "2" {
                     textChat = textChat.components(separatedBy: "|")[1]
                 }
                 let finalAtribute = textChat.richText()

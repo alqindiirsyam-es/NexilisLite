@@ -299,7 +299,6 @@ class QmeraAudioViewController: UIViewController {
         UIDevice.current.isProximityMonitoringEnabled = false
         Nexilis.floatingButton.isHidden = false
         Nexilis.callAPNActivated = false
-        backToDefaultAudioSession()
     }
     
     deinit {
@@ -308,8 +307,6 @@ class QmeraAudioViewController: UIViewController {
         Nexilis.callAPNActivated = false
         NotificationCenter.default.removeObserver(self)
         AVAudioSession.sharedInstance().removeObserver(self, forKeyPath: "outputVolume")
-        QmeraAudioViewController.isLoop = false
-        backToDefaultAudioSession()
     }
     
     private func backToDefaultAudioSession() {
@@ -484,6 +481,7 @@ class QmeraAudioViewController: UIViewController {
     
     private func outgoingView() {
 //        Nexilis.setSpeakerphoneOn(isSpeaker)
+        backToDefaultAudioSession()
         Nexilis.playRingbacktoneCall()
         status.text = "Connecting..."
         view.addSubview(end)
@@ -493,6 +491,7 @@ class QmeraAudioViewController: UIViewController {
     }
     
     private func incomingView() {
+        backToDefaultAudioSession()
         Nexilis.playRingtoneCall()
         status.text = "Incoming..."
         

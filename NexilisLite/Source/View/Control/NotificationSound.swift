@@ -143,6 +143,12 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
                 func playAudio() {
                     if FileManager.default.fileExists(atPath: audioURL.path) {
                         do {
+                            do {
+                                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                                try AVAudioSession.sharedInstance().setActive(true)
+                            } catch {
+                                
+                            }
                             Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: audioURL)
                             Nexilis.sharedAudioPlayer?.prepareToPlay()
                             Nexilis.sharedAudioPlayer?.play()
@@ -156,6 +162,12 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
                                 let tempPath = cachesDirectory.appendingPathComponent(nameSound)
                                 try audioData.write(to: tempPath)
                                 do {
+                                    do {
+                                        try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                                        try AVAudioSession.sharedInstance().setActive(true)
+                                    } catch {
+                                        
+                                    }
                                     Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: tempPath)
                                     Nexilis.sharedAudioPlayer?.prepareToPlay()
                                     Nexilis.sharedAudioPlayer?.play()
@@ -175,6 +187,12 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
                 soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
             }
             do {
+                do {
+                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                    try AVAudioSession.sharedInstance().setActive(true)
+                } catch {
+                    
+                }
                 Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
                 Nexilis.sharedAudioPlayer?.prepareToPlay()
                 Nexilis.sharedAudioPlayer?.play()
