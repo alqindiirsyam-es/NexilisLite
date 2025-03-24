@@ -459,6 +459,8 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                                     newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_post" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_post" : "pb_button_post", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
                                 } else if indexTap == Nexilis.IDX_NOTIF_CENTER {
                                     newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_notif_center" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_notif_center" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_notif_center" : "pb_button_notification", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
+                                } else if indexTap == Nexilis.IDX_SETTING {
+                                    newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_setting" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_setting" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_setting" : "pb_button_setting", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
                                 } else {
                                     newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_more" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_more" : "pb_button_others", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
                                 }
@@ -551,6 +553,8 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 if mode == MODE_VERTICAL_SIDE_TAB {
                     newButton.imageView?.contentMode = .scaleAspectFit
                 }
+            } else if indexTap == Nexilis.IDX_SETTING {
+                newButton.setImage(UIImage(named: mode == MODE_VERTICAL_SIDE_TAB ? "pb_button_vtcst_setting" : mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_setting" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_setting" : "pb_button_setting", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
             } else {
                 newButton.setImage(UIImage(named: mode == MODE_HORIZONTAL_SIDE_TAB ? "pb_button_hrz_more" : mode == MODE_HORIZONTAL_ANIMATION ? "pb_button_hrz_anim_more" : "pb_button_others", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), for: .normal)
             }

@@ -117,6 +117,7 @@ public class Nexilis: NSObject {
     public static let IDX_ADDFRIEND = 22
     public static let IDX_SIGNUP_OR_IN_PAGE = 23
     public static let IDX_SECURE_FOLDER = 29
+    public static let IDX_SETTING = 32
     public static let IDX_POST = 99
     public static let IDX_SELF_ACT = 100
     public static let IDX_SOCIAL_COMMERCE = 101
@@ -1115,6 +1116,12 @@ public class Nexilis: NSObject {
             APIS.openSecureBrowser()
         } else if index == IDX_CONFERENCE_ROOM_FORM {
             APIS.openConference()
+        } else if index == IDX_SETTING {
+            if Nexilis.floatingButton.mySettingDelegate != nil {
+                Nexilis.floatingButton.mySettingDelegate?.settingDelegate()
+            } else {
+                APIS.openSetting()
+            }
         } else if index == IDX_SELF_ACT {
             openApp(id: id)
         }
