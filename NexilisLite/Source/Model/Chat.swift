@@ -127,6 +127,24 @@ public class Chat: Model {
         return ""
     }
     
+    public static func getCountSearchMessage(key: String, pin: String, chatId:String = "", isPersonal: Bool) -> Int {
+        var query = ""
+        var count = 0
+        if isPersonal {
+            query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and (l_pin = '\(pin)' or f_pin = '\(pin)')"
+        } else {
+            query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and l_pin = '\(pin)' and chat_id = '\(chatId)'"
+        }
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
+                while cursorData.next() {
+                    count+=1
+                }
+            }
+        })
+        return count
+    }
+    
     public static func getMessageFromSearch(text: String = "") -> [Chat] {
         var messages: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in

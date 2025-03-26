@@ -117,6 +117,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var audioPlayers: [IndexPath: AVAudioPlayer] = [:]
     var timers: [IndexPath: Timer] = [:]
     var playingIndexPath: IndexPath?
+    var timerSearch: Timer?
     
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
@@ -1679,14 +1680,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 UIView.animate(withDuration: TimeInterval(duration), animations: {
                     self.view.layoutIfNeeded()
                 })
-                if isSearching {
-                    self.tableChatView.scrollToBottom()
+                if (self.currentIndexpath != nil) {
+                    self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
                 } else {
-                    if (self.currentIndexpath != nil) {
-                        self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
-                    } else {
-                        self.tableChatView.scrollToBottom()
-                    }
+                    self.tableChatView.scrollToBottom()
                 }
             }
         }  else if isEditingMessage {
@@ -1997,7 +1994,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     private func addButtonScrollToBottom() {
-        if tableChatView.alpha != 1 {
+        if tableChatView.alpha != 1 || isSearching {
             return
         }
         self.view.addSubview(buttonScrollToBottom)
@@ -2023,6 +2020,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     private func addCounterAtButttonScrollToBottom() {
+        if tableChatView.alpha != 1 || isSearching {
+            return
+        }
         self.view.addSubview(indicatorCounterBSTB)
         indicatorCounterBSTB.translatesAutoresizingMaskIntoConstraints = false
         indicatorCounterBSTB.backgroundColor = .systemRed
@@ -4899,9 +4899,6 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         
         if isSearching && textSearch.count > 1 {
             messageText.attributedText = textChat.richText(isSearching: true, textSearch: textSearch, group_id: self.dataGroup["group_id"]  as? String ?? "")
-            if textChat.lowercased().contains(textSearch) {
-                countMatchesSearch += 1
-            }
         }
         
         let stringDate = (dataMessages[indexPath.row]["server_date"]  as? String ?? "")
@@ -6684,11 +6681,16 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
 extension EditorGroup: UISearchBarDelegate {
     
     public func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        textSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        countMatchesSearch = 0
-        titleSearchMatches.isHidden = true
-        tableChatView.reloadData()
-        scrollToFirstSearchMessage()
+        timerSearch?.invalidate()
+        if searchText.count > 1 {
+            timerSearch = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {[self] _ in
+                textSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                titleSearchMatches.isHidden = true
+                countMatchesSearch = Chat.getCountSearchMessage(key: textSearch, pin: (self.dataGroup["group_id"] as? String) ?? "", chatId: (self.dataTopic["chat_id"] as? String) ?? "", isPersonal: false)
+                tableChatView.reloadData()
+                scrollToFirstSearchMessage()
+            })
+        }
     }
 }
     

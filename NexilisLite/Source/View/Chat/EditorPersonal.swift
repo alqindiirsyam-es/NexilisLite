@@ -128,6 +128,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var audioPlayers: [IndexPath: AVAudioPlayer] = [:]
     var timers: [IndexPath: Timer] = [:]
     var playingIndexPath: IndexPath?
+    var timerSearch: Timer?
     
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
@@ -3347,7 +3348,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func addButtonScrollToBottom() {
-        if tableChatView.alpha != 1 {
+        if tableChatView.alpha != 1 || isSearching {
             return
         }
         self.view.addSubview(buttonScrollToBottom)
@@ -3373,6 +3374,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func addCounterAtButttonScrollToBottom() {
+        if tableChatView.alpha != 1 || isSearching {
+            return
+        }
         self.view.addSubview(indicatorCounterBSTB)
         indicatorCounterBSTB.translatesAutoresizingMaskIntoConstraints = false
         indicatorCounterBSTB.backgroundColor = .systemRed
@@ -6133,9 +6137,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         
         if isSearching && textSearch.count > 1 {
             messageText.attributedText = stringLS.isEmpty ? textChat.richText(isSearching: true, textSearch: textSearch) : stringLS.richText(isSearching: true, textSearch: textSearch)
-            if textChat.lowercased().contains(textSearch) {
-                countMatchesSearch += 1
-            }
         }
         
         let stringDate = (dataMessages[indexPath.row]["server_date"] as? String) ?? ""
@@ -8011,11 +8012,16 @@ extension UIImage {
 extension EditorPersonal: UISearchBarDelegate {
     
     public func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        textSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        countMatchesSearch = 0
-        titleSearchMatches.isHidden = true
-        tableChatView.reloadData()
-        scrollToFirstSearchMessage()
+        timerSearch?.invalidate()
+        if searchText.count > 1 {
+            timerSearch = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {[self] _ in
+                textSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                titleSearchMatches.isHidden = true
+                countMatchesSearch = Chat.getCountSearchMessage(key: textSearch, pin: unique_l_pin, isPersonal: true)
+                tableChatView.reloadData()
+                scrollToFirstSearchMessage()
+            })
+        }
     }
 }
 

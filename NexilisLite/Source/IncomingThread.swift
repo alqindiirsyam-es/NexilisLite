@@ -1317,9 +1317,28 @@ class IncomingThread {
         } else {
             Nexilis.saveMessage(message: message, withStatus: false)
         }
+        if APIS.checkAppStateisBackground() {
+            APIS.addNotificationNexilis(message)
+            ackAPN(id: message.mStatus)
+        }
         //print("save message incoming")
         ack(message: message)
     }
+    
+    private func ackAPN(id: String) {
+        DispatchQueue.global().async {
+            Nexilis.sendStateToServer(s: "send ack from apn")
+            DispatchQueue.global().async {
+                let parameter: [String : Any] = [
+                    "pin": User.getMyPin() ?? "",
+                    "message_id": id
+                ]
+                Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "ack_message")!, parameter: parameter, isFormData: true) { data, response, error in
+                }
+            }
+        }
+    }
+
     
     private func receiveMessageStatus(message: TMessage) -> Void {
         guard let _: String = SecureUserDefaults.shared.value(forKey: "status") else {
