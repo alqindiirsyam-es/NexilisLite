@@ -1143,13 +1143,17 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         if !data.isEmpty && data["read_receipts"] as? String == "8" {
             if !isPersonal {
-                let latitude = CLLocationDegrees(dataStatus[indexPath.row]["latitude"] as? String ?? "")!
-                let longitude = CLLocationDegrees(dataStatus[indexPath.row]["longitude"] as? String ?? "")!
-                openMapApp(latitude: latitude, longitude: longitude)
+                if let latitude = CLLocationDegrees(dataStatus[indexPath.row]["latitude"] as? String ?? "") {
+                    if let longitude = CLLocationDegrees(dataStatus[indexPath.row]["longitude"] as? String ?? "") {
+                        openMapApp(latitude: latitude, longitude: longitude)
+                    }
+                }
             } else {
-                let latitude = CLLocationDegrees(dataStatus[0]["latitude"] as? String ?? "")!
-                let longitude = CLLocationDegrees(dataStatus[0]["longitude"] as? String ?? "")!
-                openMapApp(latitude: latitude, longitude: longitude)
+                if let latitude = CLLocationDegrees(dataStatus[0]["latitude"] as? String ?? "") {
+                    if let longitude = CLLocationDegrees(dataStatus[0]["longitude"] as? String ?? "") {
+                        openMapApp(latitude: latitude, longitude: longitude)
+                    }
+                }
             }
         }
     }

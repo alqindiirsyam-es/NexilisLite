@@ -619,7 +619,7 @@ public final class Utils {
         task.resume()
     }
     
-    public static func postDataWithCookiesAndUserAgent(from url: URL, parameter: [String: Any] = [:], parameters: [[String: Any]] = [], completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
+    public static func postDataWithCookiesAndUserAgent(from url: URL, parameter: [String: Any] = [:], parameters: [[String: Any]] = [], isFormData: Bool = false, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
         let apiKey: String = SecureUserDefaults.shared.value(forKey: "apiKey") ?? ""
         var defaultParameter: [String : Any] = [
             "app_id": APIS.getAppNm(),
@@ -634,16 +634,23 @@ public final class Utils {
         } else {
             jsonArray = parameters
         }
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: parameter.count == 0 ? jsonArray : parameter, options: []) else {
-            //print("Error: Unable to convert JSON array to data")
-            return
+        var jsonData: Data!
+        if !isFormData {
+            jsonData = try? JSONSerialization.data(withJSONObject: parameter.count == 0 ? jsonArray : parameter, options: [])
+        } else {
+            let formData = parameter.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
+            jsonData = formData.data(using: .utf8)
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(Utils.getUserAgent(), forHTTPHeaderField: "User-Agent")
         request.setValue(Utils.getCookiesMobile(), forHTTPHeaderField: "Cookie")
-        request.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if isFormData {
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        } else {
+            request.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+        }
         request.httpBody = jsonData
         //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
         let urlConfig = URLSessionConfiguration.default

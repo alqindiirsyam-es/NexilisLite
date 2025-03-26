@@ -481,8 +481,10 @@ class QmeraAudioViewController: UIViewController {
     
     private func outgoingView() {
 //        Nexilis.setSpeakerphoneOn(isSpeaker)
-        backToDefaultAudioSession()
-        Nexilis.playRingbacktoneCall()
+        if ticketId.isEmpty {
+            backToDefaultAudioSession()
+            Nexilis.playRingbacktoneCall()
+        }
         status.text = "Connecting..."
         view.addSubview(end)
         end.anchor(bottom: view.bottomAnchor, paddingBottom: 60, centerX: view.centerXAnchor, width: buttonSize, height: buttonSize)
@@ -491,8 +493,10 @@ class QmeraAudioViewController: UIViewController {
     }
     
     private func incomingView() {
-        backToDefaultAudioSession()
-        Nexilis.playRingtoneCall()
+        if ticketId.isEmpty {
+            backToDefaultAudioSession()
+            Nexilis.playRingtoneCall()
+        }
         status.text = "Incoming..."
         
         stack.spacing = buttonSize

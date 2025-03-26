@@ -888,18 +888,18 @@ public class APIS: NSObject {
                     Utils.setTokenAPN(value: token)
                     isResend = true
                 }
-                if isResend {
+//                if isResend {
                     _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token))
-                }
+//                }
             }
             else {
                 if Utils.getTokenCall().isEmpty || token != Utils.getTokenCall() || isResend {
                     Utils.setTokenCall(value: token)
                     isResend = true
                 }
-                if isResend {
+//                if isResend {
                     _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token, isCall: true))
-                }
+//                }
             }
         }
     }
@@ -908,6 +908,7 @@ public class APIS: NSObject {
     public static var fpinCall: String?
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
         if checkAppStateisBackground() {
+            Nexilis.sendStateToServer(s: "MASUK SHOW NOTIFICATION NEXILIS")
             DispatchQueue.main.async {
                 if let payload = userInfo["payload"] as? [String: Any] {
                     if let messagePayload = payload["message"] as? [String: Any] {
@@ -915,6 +916,7 @@ public class APIS: NSObject {
                             let code = data["nx_code"] as? String ?? ""
                             if code == "CL01" {
                                 if let message = data["bodies"] as? [String: String] {
+                                    let idAck = data["message_id"] as? String ?? ""
                                     let messageToSave = TMessage()
                                     messageToSave.mBodies = message
                                     do {
@@ -926,27 +928,15 @@ public class APIS: NSObject {
                                             }
                                         })
                                         if messageExist {
+                                            ackAPN(id: idAck)
                                             return
-                                        }
-                                        Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
-                                        DispatchQueue.global().async {
-                                            if !Nexilis.afterConnect && API.nGetCLXConnState() == 0 {
-                                                let id = Utils.getConnectionID()
-                                                do {
-                                                    try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-                                                } catch {
-                                                    
-                                                }
-                                            }
-                                            while API.nGetCLXConnState() == 0 {
-                                                Thread.sleep(forTimeInterval: 1)
-                                            }
-                                            _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""))
                                         }
                                     } catch {
                                         print("error saving message: \(error)")
                                     }
                                     APIS.addNotificationNexilis(messageToSave)
+                                    ackAPN(id: idAck)
+                                    Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
                                 }
                             } else if code == "CL03" {
                                 let callFromName = data["call-from-name"] as? String ?? ""
@@ -1002,6 +992,20 @@ public class APIS: NSObject {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+    
+    private static func ackAPN(id: String) {
+        DispatchQueue.global().async {
+            Nexilis.sendStateToServer(s: "send ack from apn")
+            DispatchQueue.global().async {
+                let parameter: [String : Any] = [
+                    "pin": User.getMyPin() ?? "",
+                    "message_id": id
+                ]
+                Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "ack_message")!, parameter: parameter, isFormData: true) { data, response, error in
                 }
             }
         }

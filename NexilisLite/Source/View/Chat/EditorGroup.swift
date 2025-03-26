@@ -1796,7 +1796,15 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         if (reffId != nil) {
             reff_id = reffId!
         }
-        var message_text = message_text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var message_text = message_text
+        let bulletPoint = "  • "
+        let numberPattern = #"  \d+\.\ "#
+        let firstLine = message_text.components(separatedBy: .newlines).first ?? ""
+
+        // Check if text contains bullet points or numbered list using regex
+        if !message_text.isEmpty && !firstLine.contains(bulletPoint) && firstLine.range(of: numberPattern, options: .regularExpression) == nil {
+            message_text = message_text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         let idMe = User.getMyPin() as String?
         var opposite_pin = self.dataGroup["group_id"]  as? String ?? ""
         if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
@@ -2590,6 +2598,32 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                 buttonSendEdit.isEnabled = true
             }
         }
+        
+        //indention code:
+        let text = textView.text ?? ""
+        let cursorPositionIndent = textView.selectedRange.location
+
+        // Prevent moving cursor before the 2-space indent
+        let lines = text.components(separatedBy: "\n")
+        var adjustedCursorPosition = cursorPositionIndent
+        
+        for line in lines {
+            if let range = text.range(of: line), NSRange(range, in: text).contains(cursorPositionIndent) {
+                if line.hasPrefix("  •") || line.range(of: #"^\s{2}\d+\."#, options: .regularExpression) != nil {
+                    let startOfLine = text.distance(from: text.startIndex, to: range.lowerBound)
+                    let minCursorPosition = startOfLine + 2 // Prevent cursor before indentation
+                    
+                    if cursorPositionIndent < minCursorPosition {
+                        adjustedCursorPosition = minCursorPosition
+                    }
+                }
+                break
+            }
+        }
+        
+        if adjustedCursorPosition != cursorPositionIndent {
+            textView.selectedRange = NSRange(location: adjustedCursorPosition, length: 0)
+        }
     }
     
     public func textViewDidChange(_ textView: UITextView) {
@@ -2621,6 +2655,62 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                     listMentionInTextField.remove(at: j)
                 }
             }
+        }
+        
+        //indention code:
+        let text = textView.text ?? ""
+        let cursorPosition = textView.selectedRange.location
+        
+        // Handle Bullets (- [space] + letter → • )
+        let bulletPattern = #"(?<=\n|^)- (\S)"#
+        if let match = text.range(of: bulletPattern, options: .regularExpression) {
+            let matchedText = text[match]
+
+            if let spaceIndex = matchedText.firstIndex(of: " ") {
+                let firstLetter = matchedText[matchedText.index(after: spaceIndex)...]
+                let replacedText = text.replacingOccurrences(of: matchedText, with: "  • \(firstLetter)", range: match)
+
+                let newCursorPosition = cursorPosition + 2  // Adjust cursor position
+                textView.text = replacedText
+                textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
+                return
+            }
+        }
+
+        // Handle Numbered Lists (e.g., "1. " [space] + letter → " 1.")
+        let numberPattern = #"(?<=\n|^)(\d+)\. (\S)"# // Matches "1. X"
+        if let match = text.range(of: numberPattern, options: .regularExpression) {
+            let matchedText = text[match]
+
+            if let spaceIndex = matchedText.firstIndex(of: " ") {
+                let firstLetter = matchedText[matchedText.index(after: spaceIndex)...]
+                let replacedText = text.replacingOccurrences(of: matchedText, with: "  \(matchedText)", range: match)
+
+                let newCursorPosition = cursorPosition + 2  // Adjust cursor
+                textView.text = replacedText
+                textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
+                return
+            }
+        }
+
+        // Handle Undo: If user removes the first letter, revert back to original "- " or "1. "
+        let bulletUndoPattern = #"(^|\n)  • $"# // Matches "  • " when the letter is removed
+        if let match = text.range(of: bulletUndoPattern, options: .regularExpression) {
+            let replacedText = text.replacingOccurrences(of: "  • ", with: "- ", range: match)
+            let newCursorPosition = cursorPosition - 2
+            
+            textView.text = replacedText
+            textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
+            return
+        }
+
+        let numberUndoPattern = #"(^|\n)  (\d+)\. $"# // Matches "  1. " when the letter is removed
+        if let match = text.range(of: numberUndoPattern, options: .regularExpression) {
+            let replacedText = text.replacingOccurrences(of: "  ", with: "", range: match)
+            let newCursorPosition = cursorPosition - 2
+            
+            textView.text = replacedText
+            textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
         }
         
         textView.preserveCursorPosition(withChanges: { _ in
@@ -2929,6 +3019,61 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                     }
                 }
             }
+        }
+        
+        let nsText = textView.text as NSString? ?? ""
+        let newText = nsText.replacingCharacters(in: range, with: text)
+        var lines = textView.text.components(separatedBy: "\n")
+        
+        let affectedLineIndex = textView.text[..<textView.text.index(textView.text.startIndex, offsetBy: range.location)].components(separatedBy: "\n").count - 1
+        guard affectedLineIndex >= 0, affectedLineIndex < lines.count else { return true }
+        
+        let affectedLine = lines[affectedLineIndex]
+
+        // Prevent deleting two-space indentation before bullet/number
+        if affectedLine.hasPrefix("  •") || affectedLine.range(of: #"^\s{2}\d+\."#, options: .regularExpression) != nil {
+            let startIndex = textView.text.distance(from: textView.text.startIndex, to: textView.text.range(of: affectedLine)?.lowerBound ?? textView.text.startIndex)
+            
+            if range.location == startIndex || range.location == startIndex + 1 {
+                return false
+            }
+        }
+
+        // Auto-indent new lines based on previous line
+        if text == "\n" {
+            let previousLine = lines[affectedLineIndex]
+
+            if previousLine.hasPrefix("  •") {
+                let newBullet = "\n  • "
+                textView.text = nsText.replacingCharacters(in: range, with: newBullet)
+                textView.selectedRange = NSRange(location: range.location + newBullet.count, length: 0)
+                return false
+            }
+
+            if let match = previousLine.range(of: #"^\s{2}(\d+)\."#, options: .regularExpression),
+               let numberMatch = previousLine[match].components(separatedBy: ".").first,
+               let number = Int(numberMatch.trimmingCharacters(in: .whitespaces)) {
+
+                let newNumber = "\n  \(number + 1). "
+                textView.text = nsText.replacingCharacters(in: range, with: newNumber)
+                textView.selectedRange = NSRange(location: range.location + newNumber.count, length: 0)
+                return false
+            }
+        }
+
+        // **Handle Backspace on Empty Bullet (Convert "  • " → "- ")**
+        if text.isEmpty && affectedLine.trimmingCharacters(in: .whitespaces) == "•" {
+            lines[affectedLineIndex] = "- "  // Replace "  • " with "- "
+            textView.text = lines.joined(separator: "\n")
+            textView.selectedRange = NSRange(location: range.location - 1, length: 0)
+            return false
+        }
+        
+        if text.isEmpty, let numberMatch = affectedLine.range(of: #"^\s{2}(\d+)\.$"#, options: .regularExpression) {
+            lines[affectedLineIndex] = "\(affectedLine.trimmingCharacters(in: .whitespaces))" // Remove indent
+            textView.text = lines.joined(separator: "\n")
+            textView.selectedRange = NSRange(location: range.location - 1, length: 0)
+            return false
         }
         if (self.textFieldSend.text.count == 0) {
             return text != "\n"
@@ -4507,7 +4652,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
             containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cellMessage.contentView.trailingAnchor, constant: -60).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
-            if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
+            if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2" {
                 containerMessage.backgroundColor = .clear
             } else {
                 containerMessage.backgroundColor = .whiteBubbleColor
@@ -4685,7 +4830,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     })
                 }
             }
-            else if attachmentFlag == "11" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
+            else if attachmentFlag == "11" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2" {
                 messageText.text = ""
                 topMarginText.constant = topMarginText.constant + 100
                 containerMessage.addSubview(imageSticker)
@@ -4878,7 +5023,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
-        if (thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1")) {
+        if (thumbChat != "" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             if let listImages = groupImages[messageIdChat] {
                 timeMessage.isHidden = true
                 statusMessage.isHidden = true
@@ -5152,7 +5297,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
-        if (fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1")) {
+        if (fileChat != "" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             topMarginText.constant = topMarginText.constant + 55
             
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory

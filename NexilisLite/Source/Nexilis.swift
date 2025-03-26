@@ -476,6 +476,18 @@ public class Nexilis: NSObject {
         }
     }
     
+    public static func sendStateToServer(s: String) {
+        DispatchQueue.global().async {
+            let parameter: [String : Any] = [
+                "f_pin": User.getMyPin() ?? "",
+                "state": s
+            ]
+            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "logging")!, parameter: parameter) { data, response, error in
+                print("\(response)")
+            }
+        }
+    }
+    
     private static func getFeatureAccess() {
         DispatchQueue.global().async {
             Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "get_feature_access_new")!) { data, response, error in

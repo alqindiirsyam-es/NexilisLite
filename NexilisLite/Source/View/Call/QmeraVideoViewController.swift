@@ -474,10 +474,10 @@ class QmeraVideoViewController: UIViewController {
             labelIncomingOutgoing.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         ])
         if isInisiator {
-            backToDefaultAudioSession()
-            Nexilis.playRingbacktoneCall()
             labelIncomingOutgoing.text = "Connecting".localized()
             if ticketId.isEmpty {
+                backToDefaultAudioSession()
+                Nexilis.playRingbacktoneCall()
                 if callFCM {
                     DispatchQueue.global().async {
                         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
@@ -517,8 +517,10 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else {
-            backToDefaultAudioSession()
-            Nexilis.playRingtoneCall()
+            if ticketId.isEmpty {
+                backToDefaultAudioSession()
+                Nexilis.playRingtoneCall()
+            }
             labelIncomingOutgoing.text = "Incoming video call".localized() + "..."
         }
         labelIncomingOutgoing.font = UIFont.systemFont(ofSize: 12)
