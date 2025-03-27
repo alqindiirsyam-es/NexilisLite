@@ -217,6 +217,7 @@
 		CD46A0C52A0D0D5D009E4C87 /* MyArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD46A0C42A0D0D5D009E4C87 /* MyArchive.swift */; };
 		CD5A73AE2A77642D000541A5 /* MessageInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD5A73AC2A77642D000541A5 /* MessageInfo.swift */; };
 		CD5A73AF2A77642D000541A5 /* ListGroupImages.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD5A73AD2A77642D000541A5 /* ListGroupImages.swift */; };
+		CD637E3D2D9534ED004780FB /* NexilisLite.podspec in Resources */ = {isa = PBXBuildFile; fileRef = CD46A0BE2A0CE4FD009E4C87 /* NexilisLite.podspec */; };
 		CD7054EA2AD39DE2003741BF /* ChatGPTBotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD7054E92AD39DE2003741BF /* ChatGPTBotView.swift */; };
 		CD9551592A664BDA00AF6476 /* Poppins-LightItalic.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD9551402A664BD400AF6476 /* Poppins-LightItalic.otf */; };
 		CD95515A2A664BDA00AF6476 /* Poppins-MediumItalic.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD95513F2A664BD400AF6476 /* Poppins-MediumItalic.otf */; };
@@ -1105,6 +1106,7 @@
 				CD46A06C2A0CE307009E4C87 /* Assets.xcassets in Resources */,
 				CD46A06D2A0CE307009E4C87 /* PreviewAttachmentImageVideo.xib in Resources */,
 				CD46A06E2A0CE307009E4C87 /* Palio.storyboard in Resources */,
+				CD637E3D2D9534ED004780FB /* NexilisLite.podspec in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
