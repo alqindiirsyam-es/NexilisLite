@@ -638,9 +638,9 @@ class QmeraVideoViewController: UIViewController {
             alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {(_) in
                 Nexilis.stopRingtoneCall()
                 Nexilis.stopRingbacktoneCall()
-                if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                    self.labelIncomingOutgoing.text = "Video call is over".localized()
-                }
+//                if self.labelIncomingOutgoing.isDescendant(of: self.view) {
+//                    self.labelIncomingOutgoing.text = "Video call is over".localized()
+//                }
                 if self.stackViewToolbar.isDescendant(of: self.view){
                     self.stackViewToolbar.removeFromSuperview()
                 }
@@ -670,7 +670,7 @@ class QmeraVideoViewController: UIViewController {
                 }
                 self.wbTimer.invalidate()
                 self.vcTimer.invalidate()
-                self.labelTimerVC.text = "Video call is over".localized()
+//                self.labelTimerVC.text = "Video call is over".localized()
                 QmeraVideoViewController.isLoop = false
                 self.endAllCall()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -1392,9 +1392,9 @@ class QmeraVideoViewController: UIViewController {
             }
             DispatchQueue.main.async {
                 if (self.dataPerson.count == 1) {
-                    if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                        self.labelIncomingOutgoing.text = "Video call is over".localized()
-                    }
+//                    if self.labelIncomingOutgoing.isDescendant(of: self.view) {
+//                        self.labelIncomingOutgoing.text = "Video call is over".localized()
+//                    }
                     if self.stackViewToolbar.isDescendant(of: self.view){
                         self.stackViewToolbar.removeFromSuperview()
                     }
@@ -1424,7 +1424,7 @@ class QmeraVideoViewController: UIViewController {
                     }
                     self.wbTimer.invalidate()
                     self.vcTimer.invalidate()
-                    self.labelTimerVC.text = "Video call is over".localized()
+//                    self.labelTimerVC.text = "Video call is over".localized()
                     _ = Nexilis.getWhiteboardDelegate()?.terminate()
                     let controller = self.presentedViewController
                     if controller != nil {

@@ -882,23 +882,27 @@ public class APIS: NSObject {
     
     public static func sendPushToken(_ token: String, isResend: Bool = false, isCall: Bool = false) {
         DispatchQueue.global().async{
-            var isResend = isResend
             if !isCall {
-                if Utils.getTokenAPN().isEmpty || token != Utils.getTokenAPN() || isResend {
+                if Utils.getTokenAPN().isEmpty || token != Utils.getTokenAPN() {
                     Utils.setTokenAPN(value: token)
-                    isResend = true
                 }
-//                if isResend {
-                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token))
-//                }
+                DispatchQueue.global().async {
+                    while API.nGetCLXConnState() == 0 {
+                        Thread.sleep(forTimeInterval: 1)
+                    }
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token, tokenCall: Utils.getTokenCall()))
+                }
             }
             else {
-                if Utils.getTokenCall().isEmpty || token != Utils.getTokenCall() || isResend {
+                if Utils.getTokenCall().isEmpty || token != Utils.getTokenCall() {
                     Utils.setTokenCall(value: token)
-                    isResend = true
                 }
-//                if isResend {
-                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token, isCall: true))
+//                DispatchQueue.global().async {
+//                    while API.nGetCLXConnState() == 0 {
+//                        Thread.sleep(forTimeInterval: 1)
+//                    }
+//                    print("SEND TOKEN CALL")
+//                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getToken(token: token, isCall: true))
 //                }
             }
         }
@@ -908,7 +912,7 @@ public class APIS: NSObject {
     public static var fpinCall: String?
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
         if checkAppStateisBackground() {
-            Nexilis.sendStateToServer(s: "MASUK SHOW NOTIFICATION NEXILIS")
+//            Nexilis.sendStateToServer(s: "MASUK SHOW NOTIFICATION NEXILIS")
             DispatchQueue.main.async {
                 if let payload = userInfo["payload"] as? [String: Any] {
                     if let messagePayload = payload["message"] as? [String: Any] {
@@ -999,7 +1003,7 @@ public class APIS: NSObject {
     
     private static func ackAPN(id: String) {
         DispatchQueue.global().async {
-            Nexilis.sendStateToServer(s: "send ack from apn")
+//            Nexilis.sendStateToServer(s: "send ack from apn")
             DispatchQueue.global().async {
                 let parameter: [String : Any] = [
                     "pin": User.getMyPin() ?? "",
@@ -1167,6 +1171,9 @@ public class APIS: NSObject {
                 sourceURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
             }
         }
+        if sourceURL == nil {
+            return
+        }
         let fileManager = FileManager.default
         let soundDirectory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first!.appendingPathComponent("Sounds", isDirectory: true)
         if !fileManager.fileExists(atPath: soundDirectory.path) {
@@ -1192,139 +1199,179 @@ public class APIS: NSObject {
             if let userInfo = response.notification.request.content.userInfo as? [String: String] {
                 let id = userInfo["id"] ?? ""
                 let type = userInfo["type"] ?? ""
+                let callType = userInfo["callType"] ?? ""
                 if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
                     if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
                         navigationC.popViewController(animated: true)
                     }
                 }
-                if type == "0" {
-                    if User.getDataCanNil(pin: id) == nil {
-                        return
-                    }
-                    let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
-                    editorPersonalVC.hidesBottomBarWhenPushed = true
-                    editorPersonalVC.unique_l_pin = id
-                    editorPersonalVC.fromNotification = true
-                    let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
-                    navigationController.modalPresentationStyle = .fullScreen
-                    navigationController.navigationBar.tintColor = .white
-                    navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-                    navigationController.navigationBar.isTranslucent = false
-                    navigationController.navigationBar.overrideUserInterfaceStyle = .dark
-                    navigationController.navigationBar.barStyle = .black
-                    let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                    UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-                    let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-                    navigationController.navigationBar.titleTextAttributes = textAttributes
-                    if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
-                        editorPersonalVC.fromNotification = false
-                        UIApplication.shared.visibleViewController?.show(editorPersonalVC, sender: nil)
-                    } else {
-                        UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                    }
-                } else if type == "1" {
-                    var groupExist = false
-                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                        var idGroup = ""
-                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT title, group_id FROM DISCUSSION_FORUM WHERE chat_id='\(id)'"), cursor.next() {
-                            groupExist = true
-                            cursor.close()
-                        } else {
-                            if idGroup.isEmpty {
-                                idGroup = id
-                            }
-                            if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id FROM GROUPZ WHERE group_id='\(idGroup)'"), cursorGroup.next() {
-                                groupExist = true
-                                cursorGroup.close()
-                            }
-                        }
-                    })
-                    if !groupExist {
-                        return
-                    }
-                    let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "editorGroupVC") as! EditorGroup
-                    editorGroupVC.hidesBottomBarWhenPushed = true
-                    editorGroupVC.unique_l_pin = id
-                    editorGroupVC.fromNotification = true
-                    let navigationController = CustomNavigationController(rootViewController: editorGroupVC)
-                    navigationController.modalPresentationStyle = .fullScreen
-                    navigationController.navigationBar.tintColor = .white
-                    navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-                    navigationController.navigationBar.isTranslucent = false
-                    navigationController.navigationBar.overrideUserInterfaceStyle = .dark
-                    navigationController.navigationBar.barStyle = .black
-                    let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                    UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-                    let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-                    navigationController.navigationBar.titleTextAttributes = textAttributes
-                    if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
-                        editorGroupVC.fromNotification = false
-                        UIApplication.shared.visibleViewController?.show(editorGroupVC, sender: nil)
-                    } else {
-                        UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                    }
-                } else if type == "CL03" {
-                    Nexilis.stopRingtoneCall()
-                    if !Nexilis.callAPNActivated {
-                        return
-                    }
-                    let callType = userInfo["callType"] ?? ""
-                    if callType == "1" {
-                        if let user = User.getData(pin: id), user.firstName == "User".localized() {
-                            return
-                        }
-                        let controller = QmeraAudioViewController()
-                        controller.isOutgoing = false
-                        controller.user = User.getData(pin: id)
-                        controller.autoAcceptAPN = true
-                        controller.modalPresentationStyle = .overCurrentContext
-                        if UIApplication.shared.visibleViewController is UIAlertController {
-                            let vc = UIApplication.shared.visibleViewController as! UIAlertController
-                            vc.dismiss(animated: true, completion: {
-                                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                    UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
-                                } else {
-                                    UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
+                showEditorOrCallFromAPN(id, type, callType)
+            } else {
+                let userInfo = response.notification.request.content.userInfo
+                DispatchQueue.main.async {
+                    if let payload = userInfo["payload"] as? [String: Any] {
+                        if let messagePayload = payload["message"] as? [String: Any] {
+                            if let data = messagePayload["data"] as? [String: Any] {
+                                let code = data["nx_code"] as? String ?? ""
+                                if code == "CL01" {
+                                    if let message = data["bodies"] as? [String: String] {
+                                        let idAck = data["message_id"] as? String ?? ""
+                                        let messageToSave = TMessage()
+                                        messageToSave.mBodies = message
+                                        do {
+                                            var messageExist = false
+                                            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")'"), cursor.next() {
+                                                    messageExist = true
+                                                    cursor.close()
+                                                }
+                                            })
+                                            if messageExist {
+                                                ackAPN(id: idAck)
+                                                return
+                                            }
+                                        } catch {
+                                            print("error saving message: \(error)")
+                                        }
+                                        ackAPN(id: idAck)
+                                        Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
+                                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                                    }
                                 }
-                            })
-                            return
-                        }
-                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                            UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
-                        } else {
-                            UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
-                        }
-                    } else {
-                        if let user = User.getData(pin: id), user.firstName == "User".localized() {
-                            return
-                        }
-                        let videoController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
-                        videoController.fPin = id
-                        videoController.isInisiator = false
-                        videoController.autoAcceptAPN = true
-                        let navigationController = CustomNavigationController(rootViewController: videoController)
-                        navigationController.modalPresentationStyle = .fullScreen
-                        if UIApplication.shared.visibleViewController is UIAlertController {
-                            let vc = UIApplication.shared.visibleViewController as! UIAlertController
-                            vc.dismiss(animated: true, completion: {
-                                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                                } else {
-                                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                                }
-                            })
-                            return
-                        }
-                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                        } else {
-                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                            }
                         }
                     }
                 }
             }
         }
 //        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
+    
+    private static func showEditorOrCallFromAPN(_ id: String, _ type: String, _ callType: String) {
+        if type == "0" {
+            if User.getDataCanNil(pin: id) == nil {
+                return
+            }
+            let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+            editorPersonalVC.hidesBottomBarWhenPushed = true
+            editorPersonalVC.unique_l_pin = id
+            editorPersonalVC.fromNotification = true
+            let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
+            navigationController.modalPresentationStyle = .fullScreen
+            navigationController.navigationBar.tintColor = .white
+            navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+            navigationController.navigationBar.isTranslucent = false
+            navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+            navigationController.navigationBar.barStyle = .black
+            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+            let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+            navigationController.navigationBar.titleTextAttributes = textAttributes
+            if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
+                editorPersonalVC.fromNotification = false
+                UIApplication.shared.visibleViewController?.show(editorPersonalVC, sender: nil)
+            } else {
+                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+            }
+        } else if type == "1" {
+            var groupExist = false
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                var idGroup = ""
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT title, group_id FROM DISCUSSION_FORUM WHERE chat_id='\(id)'"), cursor.next() {
+                    groupExist = true
+                    cursor.close()
+                } else {
+                    if idGroup.isEmpty {
+                        idGroup = id
+                    }
+                    if let cursorGroup = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name, image_id FROM GROUPZ WHERE group_id='\(idGroup)'"), cursorGroup.next() {
+                        groupExist = true
+                        cursorGroup.close()
+                    }
+                }
+            })
+            if !groupExist {
+                return
+            }
+            let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "editorGroupVC") as! EditorGroup
+            editorGroupVC.hidesBottomBarWhenPushed = true
+            editorGroupVC.unique_l_pin = id
+            editorGroupVC.fromNotification = true
+            let navigationController = CustomNavigationController(rootViewController: editorGroupVC)
+            navigationController.modalPresentationStyle = .fullScreen
+            navigationController.navigationBar.tintColor = .white
+            navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+            navigationController.navigationBar.isTranslucent = false
+            navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+            navigationController.navigationBar.barStyle = .black
+            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+            let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+            navigationController.navigationBar.titleTextAttributes = textAttributes
+            if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
+                editorGroupVC.fromNotification = false
+                UIApplication.shared.visibleViewController?.show(editorGroupVC, sender: nil)
+            } else {
+                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+            }
+        } else if type == "CL03" {
+            Nexilis.stopRingtoneCall()
+            if !Nexilis.callAPNActivated {
+                return
+            }
+            if callType == "1" {
+                if let user = User.getData(pin: id), user.firstName == "User".localized() {
+                    return
+                }
+                let controller = QmeraAudioViewController()
+                controller.isOutgoing = false
+                controller.user = User.getData(pin: id)
+                controller.autoAcceptAPN = true
+                controller.modalPresentationStyle = .overCurrentContext
+                if UIApplication.shared.visibleViewController is UIAlertController {
+                    let vc = UIApplication.shared.visibleViewController as! UIAlertController
+                    vc.dismiss(animated: true, completion: {
+                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                            UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
+                        } else {
+                            UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
+                        }
+                    })
+                    return
+                }
+                if UIApplication.shared.visibleViewController?.navigationController != nil {
+                    UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
+                } else {
+                    UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
+                }
+            } else {
+                if let user = User.getData(pin: id), user.firstName == "User".localized() {
+                    return
+                }
+                let videoController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
+                videoController.fPin = id
+                videoController.isInisiator = false
+                videoController.autoAcceptAPN = true
+                let navigationController = CustomNavigationController(rootViewController: videoController)
+                navigationController.modalPresentationStyle = .fullScreen
+                if UIApplication.shared.visibleViewController is UIAlertController {
+                    let vc = UIApplication.shared.visibleViewController as! UIAlertController
+                    vc.dismiss(animated: true, completion: {
+                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                        } else {
+                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                        }
+                    })
+                    return
+                }
+                if UIApplication.shared.visibleViewController?.navigationController != nil {
+                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                } else {
+                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                }
+            }
+        }
     }
     
     public static func checkAppStateisBackground() -> Bool {

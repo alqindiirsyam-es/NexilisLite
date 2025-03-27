@@ -1317,9 +1317,11 @@ class IncomingThread {
         } else {
             Nexilis.saveMessage(message: message, withStatus: false)
         }
-        if APIS.checkAppStateisBackground() {
-            APIS.addNotificationNexilis(message)
-            ackAPN(id: message.mStatus)
+        DispatchQueue.main.async { [self] in
+            if APIS.checkAppStateisBackground() {
+                APIS.addNotificationNexilis(message)
+                ackAPN(id: message.mStatus)
+            }
         }
         //print("save message incoming")
         ack(message: message)

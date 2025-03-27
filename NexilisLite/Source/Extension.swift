@@ -829,6 +829,10 @@ extension String {
         }
     }
     
+    func distance(of index: String.Index) -> Int? {
+        return utf16.distance(from: startIndex, to: index)
+    }
+    
 }
 
 extension UIFont {

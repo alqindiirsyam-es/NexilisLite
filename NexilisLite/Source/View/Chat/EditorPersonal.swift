@@ -2258,10 +2258,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     @objc func showChooserACKConfidential() {
+        dismissKeyboard()
         let alertController = LibAlertController(title: "Message Mode".localized(), message: "Select".localized() + " " + "Message Mode".localized(), preferredStyle: .actionSheet)
         let imageConfidential = resizeImage(image: UIImage(named: "pb_icon_conf_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
         let imageAck = resizeImage(image: UIImage(named: "pb_icon_ack_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
         let imageSecret = resizeImage(image: UIImage(named: "pb_icon_secret_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
+        let imageSticker = resizeImage(image: UIImage(named: "Sticker---Emoji", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
         let confidentialAction = UIAlertAction(title: "Confidential Message".localized(), style: .default, handler: { (UIAlertAction) in
             self.isConfidential = !self.isConfidential
             if self.isConfidential {
@@ -2304,12 +2306,18 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 self.isAck = false
             }
         })
+        let stickerAction = UIAlertAction(title: "Open Sticker".localized(), style: .default, handler: { (UIAlertAction) in
+            self.stickerTapped(UIButton())
+        })
         confidentialAction.setValue(imageConfidential, forKey: "image")
         ackAction.setValue(imageAck, forKey: "image")
         secretAction.setValue(imageSecret, forKey: "image")
+        secretAction.setValue(imageSecret, forKey: "image")
+        stickerAction.setValue(imageSticker, forKey: "image")
         alertController.addAction(confidentialAction)
         alertController.addAction(ackAction)
         alertController.addAction(secretAction)
+        alertController.addAction(stickerAction)
         alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { (UIAlertAction) in
             self.isConfidential = false
             self.isAck = false
@@ -4042,47 +4050,51 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-        let nsText = textView.text as NSString? ?? ""
+        guard let nsText = textView.text as NSString? else { return true }
         let newText = nsText.replacingCharacters(in: range, with: text)
-        var lines = textView.text.components(separatedBy: "\n")
+        var lines = newText.components(separatedBy: "\n")
         
-        let affectedLineIndex = textView.text[..<textView.text.index(textView.text.startIndex, offsetBy: range.location)].components(separatedBy: "\n").count - 1
+        // Ensure range location is valid, considering Unicode scalars
+        guard let textRange = Range(range, in: textView.text) else { return true }
+        let prefixText = textView.text[..<textRange.lowerBound]
+        let affectedLineIndex = prefixText.components(separatedBy: "\n").count - 1
         guard affectedLineIndex >= 0, affectedLineIndex < lines.count else { return true }
         
         let affectedLine = lines[affectedLineIndex]
-
+        
         // Prevent deleting two-space indentation before bullet/number
         if affectedLine.hasPrefix("  •") || affectedLine.range(of: #"^\s{2}\d+\."#, options: .regularExpression) != nil {
-            let startIndex = textView.text.distance(from: textView.text.startIndex, to: textView.text.range(of: affectedLine)?.lowerBound ?? textView.text.startIndex)
-            
-            if range.location == startIndex || range.location == startIndex + 1 {
-                return false
+            if let lineStart = textView.text.range(of: affectedLine)?.lowerBound,
+               let startIndex = textView.text.distance(of: lineStart) {
+                if range.location == startIndex || range.location == startIndex + 1 {
+                    return false
+                }
             }
         }
-
+        
         // Auto-indent new lines based on previous line
         if text == "\n" {
             let previousLine = lines[affectedLineIndex]
-
+            
             if previousLine.hasPrefix("  •") {
                 let newBullet = "\n  • "
                 textView.text = nsText.replacingCharacters(in: range, with: newBullet)
-                textView.selectedRange = NSRange(location: range.location + newBullet.count, length: 0)
+                textView.selectedRange = NSRange(location: range.location + newBullet.utf16.count, length: 0)
                 return false
             }
-
+            
             if let match = previousLine.range(of: #"^\s{2}(\d+)\."#, options: .regularExpression),
                let numberMatch = previousLine[match].components(separatedBy: ".").first,
                let number = Int(numberMatch.trimmingCharacters(in: .whitespaces)) {
-
+                
                 let newNumber = "\n  \(number + 1). "
                 textView.text = nsText.replacingCharacters(in: range, with: newNumber)
-                textView.selectedRange = NSRange(location: range.location + newNumber.count, length: 0)
+                textView.selectedRange = NSRange(location: range.location + newNumber.utf16.count, length: 0)
                 return false
             }
         }
-
-        // **Handle Backspace on Empty Bullet (Convert "  • " → "- ")**
+        
+        // Handle Backspace on Empty Bullet (Convert "  • " → "- ")
         if text.isEmpty && affectedLine.trimmingCharacters(in: .whitespaces) == "•" {
             lines[affectedLineIndex] = "- "  // Replace "  • " with "- "
             textView.text = lines.joined(separator: "\n")
@@ -4090,8 +4102,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
             return false
         }
         
-        if text.isEmpty, let numberMatch = affectedLine.range(of: #"^\s{2}(\d+)\.$"#, options: .regularExpression) {
-            lines[affectedLineIndex] = "\(affectedLine.trimmingCharacters(in: .whitespaces))" // Remove indent
+        // Handle Backspace on Numbered List
+        if text.isEmpty, affectedLine.range(of: #"^\s{2}(\d+)\.$"#, options: .regularExpression) != nil {
+            lines[affectedLineIndex] = affectedLine.trimmingCharacters(in: .whitespaces)
             textView.text = lines.joined(separator: "\n")
             textView.selectedRange = NSRange(location: range.location - 1, length: 0)
             return false
@@ -6105,7 +6118,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     textChat = textChat.components(separatedBy: "■")[0]
                     textChat = textChat.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                if !fileChat.isEmpty && dataMessages[indexPath.row]["lock"] as? String != "2" {
+                if !fileChat.isEmpty && dataMessages[indexPath.row]["lock"] as? String != "1" && dataMessages[indexPath.row]["lock"] as? String != "2" {
                     textChat = textChat.components(separatedBy: "|")[1]
                 }
                 let finalAtribute = textChat.richText()
