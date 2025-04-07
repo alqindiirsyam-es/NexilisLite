@@ -255,6 +255,8 @@ public class CoreMessage_TMessageCode {
     public static let ADD_FRIEND_IMEI              = "A100A";
     public static let REMOVE_FRIEND                = "A100B";
     public static let CHECK_FRIEND                 = "A100C";
+    public static let FRIEND_REQUEST = "A100R";
+    public static let APPROVAL_FRIEND_REQUEST = "A100RA";
     public static let CONTACT_LIST                 = "CL";
     
     //    public static let REQUEST_APPS          = "A100";

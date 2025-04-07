@@ -2667,4 +2667,25 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func getAddFriendRequest(fPin: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.FRIEND_REQUEST
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.L_PIN] = fPin
+        return tMessage
+    }
+    
+    public static func getAddFriendApproval(lPin: String, isAccept: Bool) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.APPROVAL_FRIEND_REQUEST
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.F_PIN] = lPin
+        tMessage.mBodies[CoreMessage_TMessageKey.DATA] = isAccept ? "1" : "2"
+        return tMessage
+    }
+    
 }
