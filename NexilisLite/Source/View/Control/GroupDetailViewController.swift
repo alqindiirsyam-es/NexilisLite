@@ -688,7 +688,7 @@ class GroupDetailViewController: UITableViewController {
                     if result {
                         let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                         imageView.tintColor = .white
-                        let banner = FloatingNotificationBanner(title: "Successfully add friend".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                        let banner = FloatingNotificationBanner(title: Nexilis.checkingAccess(key: "friend_request_approval") ? "Friend request has been sent".localized() : "Successfully add friend".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
                         banner.show()
                         self.reload()
                     } else {
@@ -708,7 +708,11 @@ class GroupDetailViewController: UITableViewController {
                 completion(false)
                 return
             }
-            if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendQRCode(fpin: pin)), response.isOk() {
+            var dataMessage = CoreMessage_TMessageBank.getAddFriendQRCode(fpin: pin)
+            if Nexilis.checkingAccess(key: "friend_request_approval"){
+                dataMessage = CoreMessage_TMessageBank.getAddFriendRequest(fPin: pin)
+            }
+            if let response = Nexilis.writeAndWait(message: dataMessage), response.isOk() {
                 completion(true)
             } else {
                 completion(false)

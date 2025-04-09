@@ -575,7 +575,11 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                 completion(false)
                 return
             }
-            if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendQRCode(fpin: self.data)), response.isOk() {
+            var dataMessage = CoreMessage_TMessageBank.getAddFriendQRCode(fpin: self.data)
+            if Nexilis.checkingAccess(key: "friend_request_approval"){
+                dataMessage = CoreMessage_TMessageBank.getAddFriendRequest(fPin: self.data)
+            }
+            if let response = Nexilis.writeAndWait(message: dataMessage), response.isOk() {
                 completion(true)
             } else {
                 completion(false)
@@ -705,7 +709,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                         let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                         imageView.tintColor = .white
                         publicBanner.dismiss()
-                        publicBanner = FloatingNotificationBanner(title: "Successfully add friend".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                        publicBanner = FloatingNotificationBanner(title: Nexilis.checkingAccess(key: "friend_request_approval") ? "Friend request has been sent".localized() : "Successfully add friend".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
                         publicBanner.show()
                         self.isDismiss?()
                         self.navigationController?.popViewController(animated: true)

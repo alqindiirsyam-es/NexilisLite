@@ -15,6 +15,7 @@ import nuSDKService
 import SwiftLinkPreview
 import SDWebImage
 import PhotosUI
+import ObjectiveC
 
 public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestureRecognizerDelegate, CLLocationManagerDelegate {
     @IBOutlet var wallpaperView: UIImageView!
@@ -2763,6 +2764,65 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 //        }
     }
     
+    @objc func addFriendReqAction(sender: UIButton) {
+        if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
+            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+            imageView.tintColor = .white
+            let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+            banner.show()
+            return
+        }
+        Nexilis.showLoader()
+        let lPin = sender.restorationIdentifier?.components(separatedBy: ",")[0]
+        let messageId = sender.restorationIdentifier?.components(separatedBy: ",")[1]
+        let isAccept = (sender.tag == 0)
+        DispatchQueue.global().async {
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getAddFriendApproval(lPin: lPin ?? "", isAccept: isAccept), timeout: 5 * 1000) {
+                if response.isOk() {
+                    self.deleteMessage(l_pin: User.getMyPin() ?? "", message_id: messageId ?? "", scope: "3", type: "1", chat: "")
+                    let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == messageId})
+                    if idx != nil {
+                        self.dataMessages.remove(at: idx!)
+                        if (idx == self.dataMessages.count - 1) {
+                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                        }
+                        for i in 0..<self.dataDates.count {
+                            if self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[i] }).count == 0 {
+                                self.dataDates.remove(at: i)
+                            }
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader {
+                            if self.dataMessages.count == 0 {
+                                if self.fromNotification {
+                                    self.didTapExit()
+                                } else {
+                                    self.navigationController?.popViewController(animated: true)
+                                }
+                                UIApplication.shared.visibleViewController?.view.makeToast(sender.tag == 0 ? "Friend request has been accepted".localized() : "Friend request has been rejected".localized(), duration: 3)
+                            }
+                        }
+                    }
+                } else {
+                    Nexilis.hideLoader {
+                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                        imageView.tintColor = .white
+                        let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                        banner.show()
+                    }
+                }
+            } else {
+                Nexilis.hideLoader {
+                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    banner.show()
+                }
+            }
+        }
+    }
+    
     @objc func ccAction(sender: UIButton) {
         if self.nowSelectedCategoryCC == "CantReturn" {
             if sender.tag == 503 {
@@ -5407,12 +5467,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         containerView.addSubview(dateView)
         dateView.translatesAutoresizingMaskIntoConstraints = false
         var topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor)
-        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 20.0)
+        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10.0)
         NSLayoutConstraint.activate([
             topAnchor,
-            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20.0),
+            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10.0),
             dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            dateView.heightAnchor.constraint(equalToConstant: 30),
+//            dateView.heightAnchor.constraint(equalToConstant: 30),
             dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
         ])
         dateView.backgroundColor = .orangeColor
@@ -5442,7 +5502,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     }
     
     public func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return 80
+        return 50
     }
     
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -5967,6 +6027,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         messageText.font = .systemFont(ofSize: 12 + offset())
+        var textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
+        var messageRequestFriend: String!
         if dataMessages[indexPath.row]["attachment_flag"] as? String == "27" || dataMessages[indexPath.row]["attachment_flag"] as? String == "26" ||
             dataMessages[indexPath.row]["attachment_flag"] as? String == "25" || dataMessages[indexPath.row]["message_scope_id"] as? String == "18" {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
@@ -6006,11 +6068,59 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageQR.heightAnchor.constraint(equalToConstant: 100.0)
             ])
             imageQR.image = generateQRCode(from: dataMessages[indexPath.row]["blog_id"]  as? String ?? "")
+        } else if dataMessages[indexPath.row]["attachment_flag"] as? String == "61" {
+            messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -50).isActive = true
+            let fPinFriend = dataMessages[indexPath.row]["blog_id"]  as? String ?? ""
+            
+            let buttonAccept = UIButton(type: .custom)
+            buttonAccept.setTitle("Accept".localized(), for: .normal)
+            buttonAccept.setBackgroundImage(UIImage(color: UIColor.clear), for: .normal)
+            buttonAccept.setBackgroundImage(UIImage(color: UIColor.blueBubbleColor), for: .highlighted)
+            buttonAccept.setTitleColor(.black, for: .normal)
+            buttonAccept.titleLabel?.font = UIFont.systemFont(ofSize: 12)
+            buttonAccept.layer.borderWidth = 2.0
+            buttonAccept.layer.borderColor = UIColor.blueBubbleColor.cgColor
+            buttonAccept.layer.cornerRadius = 8.0
+            buttonAccept.tag = 0
+            buttonAccept.restorationIdentifier = "\(fPinFriend),\(messageIdChat)"
+            buttonAccept.clipsToBounds = true
+            containerMessage.addSubview(buttonAccept)
+            buttonAccept.translatesAutoresizingMaskIntoConstraints = false
+            
+            buttonAccept.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+            buttonAccept.topAnchor.constraint(equalTo: messageText.bottomAnchor, constant: 5).isActive = true
+            buttonAccept.widthAnchor.constraint(equalToConstant: self.view!.frame.size.width/5).isActive = true
+            buttonAccept.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            buttonAccept.addTarget(self, action: #selector(addFriendReqAction), for: .touchUpInside)
+            
+            let buttonDecline = UIButton(type: .custom)
+            buttonDecline.setTitle("Decline".localized(), for: .normal)
+            buttonDecline.setBackgroundImage(UIImage(color: UIColor.clear), for: .normal)
+            buttonDecline.setBackgroundImage(UIImage(color: UIColor.blueBubbleColor), for: .highlighted)
+            buttonDecline.setTitleColor(.black, for: .normal)
+            buttonDecline.titleLabel?.font = UIFont.systemFont(ofSize: 12)
+            buttonDecline.layer.borderWidth = 2.0
+            buttonDecline.tag = 1
+            buttonDecline.restorationIdentifier = "\(fPinFriend),\(messageIdChat)"
+            buttonDecline.layer.borderColor = UIColor.blueBubbleColor.cgColor
+            buttonDecline.layer.cornerRadius = 8.0
+            buttonDecline.clipsToBounds = true
+            containerMessage.addSubview(buttonDecline)
+            buttonDecline.translatesAutoresizingMaskIntoConstraints = false
+            
+            buttonDecline.leadingAnchor.constraint(equalTo: buttonAccept.trailingAnchor, constant: 10).isActive = true
+            buttonDecline.topAnchor.constraint(equalTo: messageText.bottomAnchor, constant: 5).isActive = true
+            buttonDecline.widthAnchor.constraint(equalToConstant: self.view!.frame.size.width/5).isActive = true
+            buttonDecline.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            buttonDecline.addTarget(self, action: #selector(addFriendReqAction), for: .touchUpInside)
+            
+            let textName = textChat.components(separatedBy: " ")[0]
+            let textAfterName = textChat.components(separatedBy: "* ")[1]
+            messageRequestFriend = textName + " " + textAfterName.localized()
         } else {
             messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15).isActive = true
         }
         messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-        var textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
         let originalMessageText = textChat
         if (dataMessages[indexPath.row]["lock"] != nil && (dataMessages[indexPath.row]["lock"])! as? String == "1") {
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
@@ -6070,6 +6180,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     messageText.attributedText = stringLS.richText()
                     messageText.isUserInteractionEnabled = false
                 }
+            }
+            else if attachmentFlag == "61" {
+                messageText.attributedText = messageRequestFriend.richText()
+                messageText.isUserInteractionEnabled = false
             }
             else if attachmentFlag == "11" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2" {
                 messageText.text = ""
@@ -6149,7 +6263,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
         
         if isSearching && textSearch.count > 1 {
-            messageText.attributedText = stringLS.isEmpty ? textChat.richText(isSearching: true, textSearch: textSearch) : stringLS.richText(isSearching: true, textSearch: textSearch)
+            messageText.attributedText = messageRequestFriend != nil ? messageRequestFriend.richText(isSearching: true, textSearch: textSearch) : stringLS.isEmpty ? textChat.richText(isSearching: true, textSearch: textSearch) : stringLS.richText(isSearching: true, textSearch: textSearch)
         }
         
         let stringDate = (dataMessages[indexPath.row]["server_date"] as? String) ?? ""

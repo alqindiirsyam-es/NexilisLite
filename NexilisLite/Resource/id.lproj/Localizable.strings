@@ -396,3 +396,9 @@
 "Go to Settings" = "Buka Pengaturan";
 "To stay updated, please enable notification in the Settings." = "Untuk tetap mendapatkan informasi terbaru, harap aktifkan notifikasi di Pengaturan.";
 "Chat Font Size" = "Ukuran Font Chat";
+"Accept" = "Terima";
+"Decline" = "Tolak";
+"Friend request has been sent" = "Permintaan pertemanan telah dikirim";
+"has requested to be your friend" = "telah meminta untuk menjadi teman kamu";
+"Friend request has been accepted" = "Permintaan pertemanan telah diterima";
+"Friend request has been rejected" = "Permintaan pertemanan telah ditolak";

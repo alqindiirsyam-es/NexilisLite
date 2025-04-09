@@ -334,6 +334,20 @@ extension UIImage {
         }
         return nil
     }
+    
+    convenience init?(color: UIColor, size: CGSize = CGSize(width: 1, height: 1)) {
+        UIGraphicsBeginImageContext(size)
+        guard let context = UIGraphicsGetCurrentContext() else { return nil }
+
+        context.setFillColor(color.cgColor)
+        context.fill(CGRect(origin: .zero, size: size))
+
+        let image = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+
+        guard let cgImage = image?.cgImage else { return nil }
+        self.init(cgImage: cgImage)
+    }
 
 }
 
@@ -442,9 +456,7 @@ extension NSObject {
                 
                 DispatchQueue.main.async {
                     if tableView != nil {
-                        tableView!.beginUpdates()
                         tableView!.reloadRows(at: [indexPath!], with: .none)
-                        tableView!.endUpdates()
                     }
                 }
             }

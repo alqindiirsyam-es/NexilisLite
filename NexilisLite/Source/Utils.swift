@@ -415,6 +415,10 @@ public final class Utils {
             return showNSMutableAttributedString("Confidential Message".localized())
         } else if chat.attachmentFlag == "27" {
             return showNSMutableAttributedString(("📄 " + "Live Streaming".localized()))
+        } else if chat.attachmentFlag == "61" {
+            let textName = chat.messageText.components(separatedBy: " ")[0]
+            let textAfterName = chat.messageText.components(separatedBy: "* ")[1]
+            return (textName + " " + textAfterName.localized()).richText(group_id: chat.pin)
         } else if chat.attachmentFlag == "26" {
             return showNSMutableAttributedString(("📄 " + "Seminar".localized()))
         } else if chat.attachmentFlag == "25" {
@@ -422,21 +426,21 @@ public final class Utils {
         } else if !chat.audio.isEmpty {
             return showNSMutableAttributedString(("♫ " + "Audio".localized()))
         } else if !chat.image.isEmpty {
-            if !chat.messageText.isEmpty {
+            if !chat.messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return "📷 \(chat.messageText)".richText(group_id: chat.pin)
             } else {
                 return showNSMutableAttributedString(("📷 " + "Photo".localized()))
             }
         }
         else if !chat.gif.isEmpty {
-            if !chat.messageText.isEmpty {
+            if !chat.messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return "🎬 \(chat.messageText)".richText(group_id: chat.pin)
             } else {
                 return showNSMutableAttributedString("🎬 GIF")
             }
         }
         else if !chat.video.isEmpty {
-            if !chat.messageText.isEmpty {
+            if !chat.messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return "📹 \(chat.messageText)".richText(group_id: chat.pin)
             } else {
                 return showNSMutableAttributedString(("📹 " + "Video".localized()))

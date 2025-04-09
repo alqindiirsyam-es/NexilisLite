@@ -4230,12 +4230,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         containerView.addSubview(dateView)
         dateView.translatesAutoresizingMaskIntoConstraints = false
         var topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor)
-        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 20.0)
+        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10.0)
         NSLayoutConstraint.activate([
             topAnchor,
-            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20.0),
+            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10.0),
             dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            dateView.heightAnchor.constraint(equalToConstant: 30),
+//            dateView.heightAnchor.constraint(equalToConstant: 30),
             dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
         ])
         dateView.backgroundColor = .orangeColor
@@ -4262,7 +4262,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if tableView == tableMention {
             return 0
         }
-        return 80
+        return 50
     }
     
     public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {

@@ -103,13 +103,17 @@ class AddFriendTableViewController: UITableViewController {
             
             
             DispatchQueue.main.async {
-                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendQRCode(fpin: qrCode), timeout: 1000 * 30) {
+                var dataMessage = CoreMessage_TMessageBank.getAddFriendQRCode(fpin: qrCode)
+                if Nexilis.checkingAccess(key: "friend_request_approval"){
+                    dataMessage = CoreMessage_TMessageBank.getAddFriendRequest(fPin: qrCode)
+                }
+                if let response = Nexilis.writeAndWait(message: dataMessage, timeout: 1000 * 30) {
                     print(response.toLogString())
                     isQR = true
                 }
                 
                 if isQR {
-                    let alert = UIAlertController(title: "Action Successful".localized(), message: "Successfully added a new friend".localized(), preferredStyle: .alert)
+                    let alert = UIAlertController(title: "Action Successful".localized(), message: Nexilis.checkingAccess(key: "friend_request_approval") ? "Friend request has been sent".localized() : "Successfully added a new friend".localized(), preferredStyle: .alert)
                     alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
                     self.present(alert, animated: true, completion: nil)
                 }

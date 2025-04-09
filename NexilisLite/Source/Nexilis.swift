@@ -1348,6 +1348,21 @@ public class Nexilis: NSObject {
         }
         let message_id = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
         guard !message_id.isEmpty else {
+            if message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_FLAG) == "61" {
+                let nameReq = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
+                let nameFpin = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
+                var messageExist = false
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where attachment_flag = '61' and blog_id = '\(nameFpin)'"), cursor.next() {
+                        messageExist = true
+                        cursor.close()
+                    }
+                })
+                if !messageExist {
+                    Nexilis.saveMessageBot(textMessage: "*\(nameReq.trimmingCharacters(in: .whitespaces))*" + " " + "has requested to be your friend", blog_id: nameFpin, attachment_type: "61")
+                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                }
+            }
             return
         }
         let f_pin = message.getBody(key : CoreMessage_TMessageKey.F_PIN, default_value : "")
