@@ -265,6 +265,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         center.addObserver(self, selector: #selector(onUnfriend(notification:)), name: NSNotification.Name(rawValue: "onUpdatePersonInfo"), object: nil)
         center.addObserver(self, selector: #selector(onTyping(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerTypingChat), object: nil)
         center.addObserver(self, selector: #selector(onFailedSendMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.failedSendMessage), object: nil)
+        center.addObserver(self, selector: #selector(onRefreshCallLog(notification:)), name: NSNotification.Name(rawValue: "refreshCallLog"), object: nil)
         
         locationManager.delegate = self
         locationManager.requestWhenInUseAuthorization()
@@ -282,7 +283,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if dataMessageForward != nil {
             for i in 0..<dataMessageForward!.count {
                 let isForwarded = (dataMessageForward![i][TypeDataMessage.is_forwarded] as? Int) ?? 0
-                sendChat(message_scope_id: "3", status: "2", message_text: dataMessageForward![i]["message_text"]  as? String ?? "", credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"]  as? String ?? "", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"]  as? String ?? "", audio_id: dataMessageForward![i]["audio_id"]  as? String ?? "", video_id: dataMessageForward![i]["video_id"]  as? String ?? "", file_id: dataMessageForward![i]["file_id"]  as? String ?? "", thumb_id: dataMessageForward![i]["thumb_id"]  as? String ?? "", reff_id: "", read_receipts: dataMessageForward![i]["read_receipts"]  as? String ?? "", chat_id: "", is_call_center: "0", call_center_id: "", viewController: self, gif_id: dataMessageForward![i][TypeDataMessage.gif_id]  as? String ?? "", is_forwarded: isForwarded + 1, is_secret: (dataMessageForward![i][TypeDataMessage.is_secret] as? Int) ?? 0)
+                sendChat(message_scope_id: MessageScope.WHISPER, status: "2", message_text: dataMessageForward![i]["message_text"]  as? String ?? "", credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"]  as? String ?? "", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"]  as? String ?? "", audio_id: dataMessageForward![i]["audio_id"]  as? String ?? "", video_id: dataMessageForward![i]["video_id"]  as? String ?? "", file_id: dataMessageForward![i]["file_id"]  as? String ?? "", thumb_id: dataMessageForward![i]["thumb_id"]  as? String ?? "", reff_id: "", read_receipts: dataMessageForward![i]["read_receipts"]  as? String ?? "", chat_id: "", is_call_center: "0", call_center_id: "", viewController: self, gif_id: dataMessageForward![i][TypeDataMessage.gif_id]  as? String ?? "", is_forwarded: isForwarded + 1, is_secret: (dataMessageForward![i][TypeDataMessage.is_secret] as? Int) ?? 0)
             }
             dataMessageForward = nil
         }
@@ -363,7 +364,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 alert.addAction(UIAlertAction(title: "Delete".localized(), style: .destructive, handler: {(_) in
                     Database.shared.database?.inTransaction({ (fmdb, rollback) in
                         do {
-                            _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE", _where: "(f_pin='\(self.dataPerson["f_pin"]!!)' or l_pin='\(self.dataPerson["f_pin"]!!)') and (message_scope_id='3' or message_scope_id='18') and is_call_center = 0")
+                            _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE", _where: "(f_pin='\(self.dataPerson["f_pin"]!!)' or l_pin='\(self.dataPerson["f_pin"]!!)') and (message_scope_id='\(MessageScope.WHISPER)' or message_scope_id='\(MessageScope.FORM)' or message_scope_id='\(MessageScope.CALL)' or message_scope_id='\(MessageScope.MISSED_CALL)') and is_call_center = 0")
                             _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", _where: "l_pin='\(self.dataPerson["f_pin"]!!)'")
                             let l_pin = self.dataPerson["f_pin"]!!
                             SecureUserDefaults.shared.removeValue(forKey: "new_saved_\(l_pin)")
@@ -621,7 +622,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         if let idx = dataMessages.firstIndex(where: { $0["message_id"] as? String == markerCounter}) {
                             for i in idx..<dataMessages.count {
                                 if dataMessages[i]["f_pin"] as? String != idMe {
-                                    sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: "3", message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                                    sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                                 }
                             }
                             counter = 0
@@ -653,7 +654,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             let idMe = User.getMyPin() as String?
             for i in 0..<dataMessages.count {
                 if dataMessages[i]["f_pin"] as? String != idMe {
-                    sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: "3", message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                    sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                 }
             }
             tableChatView.scrollToBottom(isAnimated: false)
@@ -936,8 +937,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     private func addDataMessage() {
         multipleOffsetUp += 1
-        let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0"
-        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
+        let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0"
+        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
@@ -1081,12 +1082,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func getData() {
 //        let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0"
 //        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20 ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
-        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc"
+        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc"
         if isContactCenter {
             if complaintId.isEmpty {
-                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '5' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc"
+                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc"
             } else {
-                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where message_scope_id = '5' AND broadcast_flag = 0 AND is_call_center = 1 AND call_center_id = '\(complaintId)' order by server_date asc"
+                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 AND call_center_id = '\(complaintId)' order by server_date asc"
             }
             if isRequestContactCenter && !isDirectCC {
                 viewButton.isHidden = true
@@ -1592,7 +1593,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         self.changeAppBar()
                     }
                 }
-                else if (chatData[CoreMessage_TMessageKey.F_PIN] == self.dataPerson["f_pin"]!! && !self.isContactCenter && (chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == "3")) || (self.isContactCenter && chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == "5" && self.complaintId == chatData[CoreMessage_TMessageKey.CALL_CENTER_ID]) {
+                else if (chatData[CoreMessage_TMessageKey.F_PIN] == self.dataPerson["f_pin"]!! && !self.isContactCenter && (chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == MessageScope.WHISPER)) || (self.isContactCenter && chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == "5" && self.complaintId == chatData[CoreMessage_TMessageKey.CALL_CENTER_ID]) {
                     if chatData[CoreMessage_TMessageKey.F_PIN] == nil {
                         return
                     }
@@ -1906,6 +1907,58 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
     }
     
+    @objc func onRefreshCallLog(notification: NSNotification) {
+        DispatchQueue.main.async {
+            let data:[AnyHashable : Any] = notification.userInfo!
+            let messageId = data["message_id"]  as? String ?? ""
+            self.appendNewMessage(messageId: messageId)
+        }
+    }
+    
+    private func appendNewMessage(messageId: String) {
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message from MESSAGE where message_id = '\(messageId)'"), cursorData.next() {
+                var row: [String: Any?] = [:]
+                row["message_id"] = cursorData.string(forColumnIndex: 0)
+                row["f_pin"] = cursorData.string(forColumnIndex: 1)
+                row["l_pin"] = cursorData.string(forColumnIndex: 2)
+                row["message_scope_id"] = cursorData.string(forColumnIndex: 3)
+                row["server_date"] = cursorData.string(forColumnIndex: 4)
+                row["status"] = cursorData.string(forColumnIndex: 5)
+                row["message_text"] = cursorData.string(forColumnIndex: 6)
+                row["audio_id"] = cursorData.string(forColumnIndex: 7)
+                row["video_id"] = cursorData.string(forColumnIndex: 8)
+                row["image_id"] = cursorData.string(forColumnIndex: 9)
+                row["thumb_id"] = cursorData.string(forColumnIndex: 10)
+                row["read_receipts"] = cursorData.string(forColumnIndex: 11)
+                row["chat_id"] = cursorData.string(forColumnIndex: 12)
+                row["file_id"] = cursorData.string(forColumnIndex: 13)
+                row["attachment_flag"] = cursorData.string(forColumnIndex: 14)
+                row["reff_id"] = cursorData.string(forColumnIndex: 15)
+                row["lock"] = cursorData.string(forColumnIndex: 16)
+                row["is_stared"] = cursorData.string(forColumnIndex: 17)
+                row["blog_id"] = cursorData.string(forColumnIndex: 18)
+                row["credential"] = cursorData.string(forColumnIndex: 19)
+                row[TypeDataMessage.is_call_center] = cursorData.string(forColumnIndex: 20)
+                row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 21)
+                row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 22)
+                row[TypeDataMessage.last_edit] = cursorData.longLongInt(forColumnIndex: 23)
+                row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 24)
+                row[TypeDataMessage.is_forwarded] = Int(cursorData.int(forColumnIndex: 25))
+                row["progress"] = 0.0
+                row["isSelected"] = false
+                if !self.dataDates.contains("Today".localized()) {
+                    self.dataDates.append("Today".localized())
+                    self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
+                }
+                row["chat_date"] = "Today".localized()
+                dataMessages.append(row)
+                self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                cursorData.close()
+            }
+        })
+    }
+    
     private func updateStatusDelete(idx: Int?, chatData: [String: String]) {
         do {
             if self.dataMessages[idx!]["lock"] != nil && self.dataMessages[idx!]["lock"]  as? String ?? "" == "1" {
@@ -2078,7 +2131,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
                         if listData[i]["f_pin"] as? String != idMe {
-                            self.sendReadMessageStatus(chat_id: "", f_pin: self.dataPerson["f_pin"]!!, message_scope_id: "3", message_id: listData[i]["message_id"]  as? String ?? "")
+                            self.sendReadMessageStatus(chat_id: "", f_pin: self.dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
                 }
@@ -2090,7 +2143,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
                         if listData[i]["f_pin"] as? String != idMe {
-                            self.sendReadMessageStatus(chat_id: "", f_pin: self.dataPerson["f_pin"]!!, message_scope_id: "3", message_id: listData[i]["message_id"]  as? String ?? "")
+                            self.sendReadMessageStatus(chat_id: "", f_pin: self.dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
                 }
@@ -2570,7 +2623,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
     }
     
-    private func sendChat(message_scope_id:String =  "3", status:String =  "1", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "4", chat_id: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, isAutoSendCC : Bool = false, gif_id: String = "", is_forwarded: Int = 0, is_secret: Int = 0) {
+    private func sendChat(message_scope_id:String =  MessageScope.WHISPER, status:String =  "1", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "4", chat_id: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, isAutoSendCC : Bool = false, gif_id: String = "", is_forwarded: Int = 0, is_secret: Int = 0) {
         if viewController is EditorPersonal && file_id == "" && dataMessageForward == nil && !isAutoSendCC{
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
@@ -2609,7 +2662,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             is_call_center = "1"
             call_center_id = complaintId
             l_pin = fPinContacCenter
-            message_scope_id = "5"
+            message_scope_id = MessageScope.CHATROOM
             chat_id = complaintId
             if isAutoSendCC {
                 timeoutCC = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
@@ -2779,7 +2832,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         DispatchQueue.global().async {
             if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getAddFriendApproval(lPin: lPin ?? "", isAccept: isAccept), timeout: 5 * 1000) {
                 if response.isOk() {
-                    self.deleteMessage(l_pin: User.getMyPin() ?? "", message_id: messageId ?? "", scope: "3", type: "1", chat: "")
+                    self.deleteMessage(l_pin: User.getMyPin() ?? "", message_id: messageId ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
                     let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == messageId})
                     if idx != nil {
                         self.dataMessages.remove(at: idx!)
@@ -3385,7 +3438,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     private func sendTyping(l_pin: String, isTyping: Bool = false) {
         DispatchQueue.global().async {
-            let tmessage = CoreMessage_TMessageBank.getUpdateTypingStatus(p_opposite: l_pin, p_scope: "3", p_status: isTyping ? "3": "4")
+            let tmessage = CoreMessage_TMessageBank.getUpdateTypingStatus(p_opposite: l_pin, p_scope: MessageScope.WHISPER, p_status: isTyping ? "3": "4")
             _ = Nexilis.write(message: tmessage)
         }
     }
@@ -3534,7 +3587,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 let idMe = User.getMyPin() as String?
                 for i in 0...listData.count - 1 {
                     if listData[i]["f_pin"] as? String != idMe {
-                        sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: "3", message_id: listData[i]["message_id"]  as? String ?? "")
+                        sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: listData[i]["message_id"]  as? String ?? "")
                     }
                 }
             }
@@ -4965,7 +5018,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             contactChatNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             if let controller = contactChatNav.viewControllers.first as? ContactChatViewController {
                 controller.isChooser = { [weak self] scope, pin in
-                    if scope == "3" {
+                    if scope == MessageScope.WHISPER {
                         let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
                         editorPersonalVC.unique_l_pin = pin
                         editorPersonalVC.dataMessageForward = dataMessages
@@ -5144,7 +5197,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 if (type == "me") {
                     if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
                         for i in 0..<groupingImages.count {
-                            self.deleteMessage(l_pin: groupingImages[i].lPin, message_id: groupingImages[i].messageId, scope: "3", type: "1", chat: "")
+                            self.deleteMessage(l_pin: groupingImages[i].lPin, message_id: groupingImages[i].messageId, scope: MessageScope.WHISPER, type: "1", chat: "")
                             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId })
                             if idx != nil {
                                 self.dataMessages.remove(at: idx!)
@@ -5160,7 +5213,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                         }
                         self.groupImages.removeValue(forKey: groupingImages[0].messageId)
                     } else {
-                        self.deleteMessage(l_pin: dataMessages[i]["l_pin"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: "3", type: "1", chat: "")
+                        self.deleteMessage(l_pin: dataMessages[i]["l_pin"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
                         let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
                         if idx != nil {
                             self.dataMessages.remove(at: idx!)
@@ -5183,7 +5236,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     } else {
                         if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
                             for i in 0..<groupingImages.count {
-                                self.deleteMessage(l_pin: groupingImages[i].lPin, message_id: groupingImages[i].messageId, scope: "3", type: "2", chat: "")
+                                self.deleteMessage(l_pin: groupingImages[i].lPin, message_id: groupingImages[i].messageId, scope: MessageScope.WHISPER, type: "2", chat: "")
                                 let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId})
                                 if idx != nil {
                                     self.dataMessages[idx!]["lock"] = "1"
@@ -5198,7 +5251,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                                 self.groupImages.removeValue(forKey: groupingImages[0].messageId)
                             }
                         } else {
-                            self.deleteMessage(l_pin: dataMessages[i]["l_pin"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: "3", type: "2", chat: "")
+                            self.deleteMessage(l_pin: dataMessages[i]["l_pin"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.WHISPER, type: "2", chat: "")
                             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
                             if idx != nil {
                                 self.dataMessages[idx!]["lock"] = "1"
@@ -5846,7 +5899,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             
             timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
             
-            if (dataMessages[indexPath.row]["lock"] as? String == "0" || (dataMessages[indexPath.row]["lock"] as? String ?? "").isEmpty) {
+            if (dataMessages[indexPath.row]["lock"] as? String == "0" || (dataMessages[indexPath.row]["lock"] as? String ?? "").isEmpty)  && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.CALL && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.MISSED_CALL {
                 cell.contentView.addSubview(statusMessage)
                 statusMessage.translatesAutoresizingMaskIntoConstraints = false
                 statusMessage.bottomAnchor.constraint(equalTo: timeMessage.topAnchor).isActive = true
@@ -6256,13 +6309,91 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
         }
         
+        if dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String == MessageScope.CALL || dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String == MessageScope.MISSED_CALL{
+            messageText.removeFromSuperview()
+            
+            let containerCall = UIButton(type: .custom)
+            containerCall.backgroundColor = .white.withAlphaComponent(0.3)
+            containerMessage.addSubview(containerCall)
+            containerCall.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: 5, paddingLeft: 5, paddingBottom: 5, paddingRight: 5, height: 60)
+            containerCall.layer.cornerRadius = 5
+            containerCall.clipsToBounds = true
+            
+            var imageCall = "phone.fill.arrow.up.right"
+            var textCall = "Audio call".localized()
+            let isVideo = textChat.lowercased().contains("video")
+            let isMissedCall = textChat.lowercased().contains("missed")
+            let isImageLeft = textChat.lowercased().contains("incoming") || isMissedCall
+            let longCall = textChat.components(separatedBy: " at ")[1]
+            var subTextCall = longCall
+            
+            let contIconCall = UIView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+            containerCall.addSubview(contIconCall)
+            contIconCall.anchor(top: containerCall.topAnchor, left: containerCall.leftAnchor, bottom: containerCall.bottomAnchor, paddingTop: 10, paddingLeft: 10, paddingBottom: 10, width: 40, height: 40)
+            contIconCall.circle()
+            if isImageLeft {
+                contIconCall.backgroundColor = .white
+            } else {
+                contIconCall.backgroundColor = .black.withAlphaComponent(0.6)
+            }
+            
+            if isVideo && isImageLeft {
+                imageCall = "arrow.down.left.video.fill"
+                if isMissedCall {
+                    textCall = "Missed video call".localized()
+                    subTextCall = "Tap to call back".localized()
+                } else {
+                    textCall = "Video call".localized()
+                }
+            } else if isVideo {
+                imageCall = "arrow.up.right.video.fill"
+                textCall = "Video call".localized()
+                if longCall.trimmingCharacters(in: .whitespaces) == "0" {
+                    subTextCall = "No answer".localized()
+                }
+            } else if isImageLeft {
+                imageCall = "phone.fill.arrow.down.left"
+                if isMissedCall {
+                    textCall = "Missed audio call".localized()
+                    subTextCall = "Tap to call back".localized()
+                }
+            } else if longCall.trimmingCharacters(in: .whitespaces) == "0" {
+                subTextCall = "No answer".localized()
+            }
+            
+            let iconCall = UIImageView()
+            iconCall.image = UIImage(systemName: imageCall, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18))
+            contIconCall.addSubview(iconCall)
+            if isMissedCall {
+                iconCall.tintColor = .red
+            }else if isImageLeft {
+                iconCall.tintColor = .black
+            } else {
+                iconCall.tintColor = .white
+            }
+            iconCall.anchor(centerX: contIconCall.centerXAnchor, centerY: contIconCall.centerYAnchor)
+            
+            let titleCall = UILabel()
+            containerCall.addSubview(titleCall)
+            titleCall.anchor(top: containerCall.topAnchor, left: contIconCall.rightAnchor, right: containerCall.rightAnchor, paddingTop: 10, paddingLeft: 10, paddingRight: 10)
+            titleCall.text = textCall
+            titleCall.font = .systemFont(ofSize: 14)
+            
+            let subtitleCall = UILabel()
+            containerCall.addSubview(subtitleCall)
+            subtitleCall.anchor(top: titleCall.bottomAnchor, left: contIconCall.rightAnchor, right: containerCall.rightAnchor, paddingLeft: 10, paddingRight: 10)
+            subtitleCall.text = subTextCall
+            subtitleCall.font = .systemFont(ofSize: 13)
+            subtitleCall.textColor = .gray
+        }
+        
         if !copySession && !forwardSession && !deleteSession && !self.removed {
             let interaction = UIContextMenuInteraction(delegate: self)
             containerMessage.addInteraction(interaction)
             containerMessage.isUserInteractionEnabled = true
         }
         
-        if isSearching && textSearch.count > 1 {
+        if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.CALL && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.MISSED_CALL {
             messageText.attributedText = messageRequestFriend != nil ? messageRequestFriend.richText(isSearching: true, textSearch: textSearch) : stringLS.isEmpty ? textChat.richText(isSearching: true, textSearch: textSearch) : stringLS.richText(isSearching: true, textSearch: textSearch)
         }
         
@@ -6457,7 +6588,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     timeInImage.textColor = .white
                     timeInImage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
                     
-                    if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                    if (dataMessages[indexPath.row]["f_pin"] as? String == idMe && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.CALL && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.MISSED_CALL) {
                         let statusInImage = UIImageView()
                         containerTimeStatus.addSubview(statusInImage)
                         statusInImage.anchor(right: containerTimeStatus.rightAnchor, centerY: containerTimeStatus.centerYAnchor, width: 15, height: 15)
@@ -7159,7 +7290,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             let textForwarded = "Forwarded".localized()
             titleForwarded.attributedText = " $\(textForwarded)$".richText()
         }
-        topMarginText.isActive = true
+        if messageText.isDescendant(of: containerMessage) {
+            topMarginText.isActive = true
+        }
 //        let panGestureRecognizer = UIPanGestureRecognizer(target: self, action: #selector(panGestureCellAction))
 //        panGestureRecognizer.delegate = self
 //        cellMessage.addGestureRecognizer(panGestureRecognizer)

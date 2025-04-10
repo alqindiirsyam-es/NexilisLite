@@ -281,7 +281,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         if dataMessageForward != nil {
             for i in 0..<dataMessageForward!.count {
                 let isForwarded = (dataMessageForward![i][TypeDataMessage.is_forwarded] as? Int) ?? 0
-                sendChat(message_scope_id: "4", status: "2", message_text: dataMessageForward![i]["message_text"]  as? String ?? "", credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"]  as? String ?? "", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"]  as? String ?? "", audio_id: dataMessageForward![i]["audio_id"]  as? String ?? "", video_id: dataMessageForward![i]["video_id"]  as? String ?? "", file_id: dataMessageForward![i]["file_id"]  as? String ?? "", thumb_id: dataMessageForward![i]["thumb_id"]  as? String ?? "", reff_id: "", read_receipts: "", is_call_center: "0", call_center_id: "", viewController: self, gif_id: dataMessageForward![i][TypeDataMessage.gif_id]  as? String ?? "", is_forwarded: isForwarded + 1)
+                sendChat(message_scope_id: MessageScope.GROUP, status: "2", message_text: dataMessageForward![i]["message_text"]  as? String ?? "", credential: "0", attachment_flag: dataMessageForward![i]["attachment_flag"]  as? String ?? "", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: dataMessageForward![i]["image_id"]  as? String ?? "", audio_id: dataMessageForward![i]["audio_id"]  as? String ?? "", video_id: dataMessageForward![i]["video_id"]  as? String ?? "", file_id: dataMessageForward![i]["file_id"]  as? String ?? "", thumb_id: dataMessageForward![i]["thumb_id"]  as? String ?? "", reff_id: "", read_receipts: "", is_call_center: "0", call_center_id: "", viewController: self, gif_id: dataMessageForward![i][TypeDataMessage.gif_id]  as? String ?? "", is_forwarded: isForwarded + 1)
             }
             dataMessageForward = nil
         }
@@ -486,7 +486,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     if let idx = dataMessages.firstIndex(where: { $0["message_id"] as? String == markerCounter}) {
                         for i in idx..<dataMessages.count {
                             if dataMessages[i]["f_pin"] as? String != idMe {
-                                sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: "4", message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                                sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                             }
                         }
                         counter = 0
@@ -1228,7 +1228,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             if let dataMessage = data["message"] as? TMessage {
                 let idMe = User.getMyPin() as String?
                 let chatData = dataMessage.mBodies
-                if (chatData[CoreMessage_TMessageKey.F_PIN] == idMe || chatData[CoreMessage_TMessageKey.L_PIN] == self.dataGroup["group_id"] as? String || chatData[CoreMessage_TMessageKey.F_PIN] == self.dataGroup["group_id"] as? String) && chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == "4" {
+                if (chatData[CoreMessage_TMessageKey.F_PIN] == idMe || chatData[CoreMessage_TMessageKey.L_PIN] == self.dataGroup["group_id"] as? String || chatData[CoreMessage_TMessageKey.F_PIN] == self.dataGroup["group_id"] as? String) && chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID] == MessageScope.GROUP {
                     if (chatData.keys.contains(CoreMessage_TMessageKey.MESSAGE_ID) && !(chatData[CoreMessage_TMessageKey.MESSAGE_ID]!).contains("-2,")) {
                         var idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == chatData[CoreMessage_TMessageKey.MESSAGE_ID]! })
                         if let idxMessageIdParent = self.groupImages.firstIndex(where: { $0.value.contains(where: { $0.messageId == chatData[CoreMessage_TMessageKey.MESSAGE_ID]! }) }) {
@@ -1619,7 +1619,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
                         if listData[i]["f_pin"] as? String != idMe {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: "4", message_id: listData[i]["message_id"]  as? String ?? "")
+                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
                 }
@@ -1631,7 +1631,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
                         if listData[i]["f_pin"] as? String != idMe {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: "4", message_id: listData[i]["message_id"]  as? String ?? "")
+                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
                 }
@@ -1782,7 +1782,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         sendChat(message_text: textFieldSend.text!, viewController: self)
     }
     
-    private func sendChat(message_scope_id:String =  "4", status:String =  "2", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, gif_id: String = "", is_forwarded: Int = 0) {
+    private func sendChat(message_scope_id:String =  MessageScope.GROUP, status:String =  "2", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, gif_id: String = "", is_forwarded: Int = 0) {
         if viewController is EditorGroup && file_id == "" && dataMessageForward == nil {
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
@@ -2215,7 +2215,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     private func sendTyping(l_pin: String, isTyping: Bool = false) {
         DispatchQueue.global().async {
-            let tmessage = CoreMessage_TMessageBank.getUpdateTypingStatus(p_opposite: l_pin, p_scope: "4", p_status: isTyping ? "3": "4")
+            let tmessage = CoreMessage_TMessageBank.getUpdateTypingStatus(p_opposite: l_pin, p_scope: MessageScope.GROUP, p_status: isTyping ? "3": "4")
             _ = Nexilis.write(message: tmessage)
         }
     }
@@ -2263,7 +2263,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 let idMe = User.getMyPin() as String?
                 for i in 0...listData.count - 1 {
                     if listData[i]["f_pin"] as? String != idMe {
-                        sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: "4", message_id: listData[i]["message_id"]  as? String ?? "")
+                        sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
                     }
                 }
             }
@@ -4019,7 +4019,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 if (type == "me") {
                     if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
                         for i in 0..<groupingImages.count {
-                            self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: groupingImages[i].messageId, scope: "4", type: "1", chat: dataTopic["chat_id"]  as? String ?? "")
+                            self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: groupingImages[i].messageId, scope: MessageScope.GROUP, type: "1", chat: dataTopic["chat_id"]  as? String ?? "")
                             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId })
                             if idx != nil {
                                 self.dataMessages.remove(at: idx!)
@@ -4043,7 +4043,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         } else {
                             if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
                                 for i in 0..<groupingImages.count {
-                                    self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: groupingImages[i].messageId, scope: "4", type: "2", chat: dataTopic["chat_id"]  as? String ?? "")
+                                    self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: groupingImages[i].messageId, scope: MessageScope.GROUP, type: "2", chat: dataTopic["chat_id"]  as? String ?? "")
                                     let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId})
                                     if idx != nil {
                                         self.dataMessages[idx!]["lock"] = "1"
@@ -4058,7 +4058,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                     self.groupImages.removeValue(forKey: groupingImages[0].messageId)
                                 }
                             } else {
-                                self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: "4", type: "1", chat: dataTopic["chat_id"]  as? String ?? "")
+                                self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.GROUP, type: "1", chat: dataTopic["chat_id"]  as? String ?? "")
                                 let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
                                 if idx != nil {
                                     self.dataMessages.remove(at: idx!)
@@ -4075,7 +4075,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         }
                     }
                 } else {
-                    self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: "4", type: "2", chat: dataTopic["chat_id"]  as? String ?? "")
+                    self.deleteMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.GROUP, type: "2", chat: dataTopic["chat_id"]  as? String ?? "")
                     let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[i]["message_id"]  as? String ?? ""})
                     if idx != nil {
                         self.dataMessages[idx!]["lock"] = "1"

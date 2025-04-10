@@ -640,7 +640,7 @@ class IncomingThread {
                         if let message = cursor.string(forColumnIndex: 0) {
                             //print("MASUK MINQ ADA MESSAGE")
                             OutgoingThread.default.addQueue(message: TMessage(data: message))
-                            if message_scope != "3" {
+                            if message_scope != MessageScope.WHISPER {
                                 DispatchQueue.main.async {
                                     self.updateInquiry(messageId: message_id)
                                 }
@@ -1472,7 +1472,7 @@ class IncomingThread {
             do {
                 if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select * from BUDDY where f_pin = '\(l_pin)'"), cursor.next() {
                     _ = Database.shared.deleteRecord(fmdb: fmdb, table: "BUDDY", _where: "f_pin = '\(l_pin)'")
-                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE", _where: "(f_pin='\(l_pin)' or l_pin='\(l_pin)') and (message_scope_id='3' or message_scope_id='18')")
+                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE", _where: "(f_pin='\(l_pin)' or l_pin='\(l_pin)') and (message_scope_id='\(MessageScope.WHISPER)' or message_scope_id='\(MessageScope.FORM)' or message_scope_id='\(MessageScope.CALL)' or message_scope_id='\(MessageScope.MISSED_CALL)')")
                     _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", _where: "l_pin='\(l_pin)'")
                     _ = Database.shared.deleteRecord(fmdb: fmdb, table: "POST", _where: "author_f_pin='\(l_pin)'")
                     cursor.close()

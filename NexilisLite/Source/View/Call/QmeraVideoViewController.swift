@@ -97,6 +97,8 @@ class QmeraVideoViewController: UIViewController {
     var isAddCall = ""
     var ticketId = ""
     var autoAcceptAPN = false
+    var timeStartCall = ""
+    var idCall = ""
     private var frontCamera = true
     var users: [User] = []
     let poweredByView: UIStackView = {
@@ -248,7 +250,8 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         }
-        
+        self.timeStartCall = String(Date().currentTimeMillis())
+        self.idCall = (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID()
     }
     
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
@@ -483,7 +486,7 @@ class QmeraVideoViewController: UIViewController {
                         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
                             if response.isOk() {
                                 
-                            } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
+                            } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" && self.dataPerson.count > 0 {
                                 API.initiateCCall(sParty: self.dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
                             } else {
                                 DispatchQueue.main.async {
@@ -613,6 +616,22 @@ class QmeraVideoViewController: UIViewController {
         }
     }
     
+    private func makeStateCall() {
+        var longCall = "0"
+        if self.vcTimer.isValid {
+            longCall = self.labelTimerVC.text ?? ""
+        }
+        if self.isInisiator {
+            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing video call" + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: self.dataPerson[0]["f_pin"]!!, timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+        } else {
+            if !self.vcTimer.isValid {
+                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Missed video call" + " at 0", fPin: self.dataPerson[0]["f_pin"]!!, lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.MISSED_CALL)
+            } else {
+                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming video call" + " at \(longCall)", fPin: self.dataPerson[0]["f_pin"]!!, lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+            }
+        }
+    }
+    
     @objc func didTapDeclineCallButton(sender: AnyObject){
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         if !onGoingCC.isEmpty {
@@ -636,6 +655,7 @@ class QmeraVideoViewController: UIViewController {
             let alert = LibAlertController(title: "End Video Call".localized(), message: "Are you sure you want to end video call?".localized(), preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
             alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {(_) in
+                self.makeStateCall()
                 Nexilis.stopRingtoneCall()
                 Nexilis.stopRingbacktoneCall()
 //                if self.labelIncomingOutgoing.isDescendant(of: self.view) {
@@ -1392,6 +1412,11 @@ class QmeraVideoViewController: UIViewController {
             }
             DispatchQueue.main.async {
                 if (self.dataPerson.count == 1) {
+                    var longCall = "0"
+                    if self.vcTimer.isValid {
+                        longCall = self.labelTimerVC.text ?? ""
+                    }
+                    self.makeStateCall()
 //                    if self.labelIncomingOutgoing.isDescendant(of: self.view) {
 //                        self.labelIncomingOutgoing.text = "Video call is over".localized()
 //                    }
@@ -1569,6 +1594,7 @@ class QmeraVideoViewController: UIViewController {
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             DispatchQueue.main.async { [self] in
                 if (self.dataPerson.count == 1) {
+                    self.makeStateCall()
                     if self.labelIncomingOutgoing.isDescendant(of: self.view) {
                         self.labelIncomingOutgoing.text = "Busy".localized()
                     }

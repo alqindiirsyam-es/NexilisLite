@@ -31,6 +31,8 @@ class QmeraAudioViewController: UIViewController {
     var wbRoomId = ""
     var callFCM = true
     var autoAcceptAPN = false
+    var timeStartCall = ""
+    var idCall = ""
     
     
     let buttonSize: CGFloat = 70
@@ -414,6 +416,8 @@ class QmeraAudioViewController: UIViewController {
 //                })
             }
         }
+        self.timeStartCall = String(Date().currentTimeMillis())
+        self.idCall = (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID()
     }
     
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
@@ -743,6 +747,12 @@ class QmeraAudioViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
         alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {(_) in
             DispatchQueue.main.async {
+                if self.timer == nil || self.isOutgoing {
+                    let longCall = self.timer == nil ? "0" : self.status.text ?? ""
+                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                } else if !self.isOutgoing {
+                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming audio call".localized() + " at \(self.status.text ?? "")", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                }
                 self.timer?.invalidate()
                 self.timer = nil
                 self.status.text = "Audio Call Ended".localized()
@@ -886,6 +896,9 @@ class QmeraAudioViewController: UIViewController {
     }
     
     @objc func didReject(sender: Any?) {
+        if self.timer == nil {
+            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Missed audio call".localized() + " at 0", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.MISSED_CALL)
+        }
         didEnd(sender: sender)
     }
     
@@ -1082,6 +1095,16 @@ class QmeraAudioViewController: UIViewController {
                         return
                     } else if users.count == 0 {
                         DispatchQueue.main.async {
+                            if self.isOutgoing {
+                                let longCall = self.timer == nil ? "0" : self.status.text ?? ""
+                                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                            } else {
+                                if self.timer == nil {
+                                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Missed audio call".localized() + " at 0", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.MISSED_CALL)
+                                } else {
+                                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming audio call".localized() + " at \(self.status.text ?? "")", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                                }
+                            }
                             self.timer?.invalidate()
                             self.timer = nil
                             self.status.text = "Audio Call Ended".localized()
@@ -1171,6 +1194,8 @@ class QmeraAudioViewController: UIViewController {
                 }
                 if users.count == 0 {
                     DispatchQueue.main.async {
+                        let longCall =  "0"
+                        Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
                         self.status.text = "Busy..."
                         self.end.isEnabled = false
                         if self.isOutgoing {

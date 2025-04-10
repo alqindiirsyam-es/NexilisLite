@@ -256,7 +256,7 @@ class HistoryBroadcastViewController: UIViewController, UITableViewDelegate, UIT
         DispatchQueue.global().async {
             self.chats.removeAll()
             self.chats.append(contentsOf: Chat.getData())
-            self.chats = self.chats.filter({($0.official == "1" || $0.pin == "-999") && $0.messageScope == "3"})
+            self.chats = self.chats.filter({($0.official == "1" || $0.pin == "-999") && $0.messageScope == MessageScope.WHISPER})
             completion()
         }
     }

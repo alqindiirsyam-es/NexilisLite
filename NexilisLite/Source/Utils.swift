@@ -411,6 +411,56 @@ public final class Utils {
     public static func previewMessageText(chat: Chat) -> Any {
         if chat.credential == "1" && chat.lock == "2" {
             return ("🚫 _"+"Message has expired".localized()+"_").richText(group_id: chat.pin)
+        } else if chat.messageScope == MessageScope.CALL || chat.messageScope == MessageScope.MISSED_CALL {
+            let imageAttachment = NSTextAttachment()
+            var stringImage = ""
+            let isVideo = chat.messageText.lowercased().contains("video")
+            let type = chat.messageText.lowercased().contains("incoming") ? "1" : chat.messageText.lowercased().contains("outgoing") ? "2" : "3"
+            var textPreview = ""
+            if isVideo && type == "2" {
+                stringImage = "arrow.up.right.video.fill"
+                textPreview = "Video call".localized()
+            } else if !isVideo && type == "2" {
+                stringImage = "phone.fill.arrow.up.right"
+                textPreview = "Audio call".localized()
+            } else if isVideo {
+                stringImage = "arrow.down.left.video.fill"
+                textPreview = type == "3" ? "Missed video call".localized() : "Video call".localized()
+            } else {
+                stringImage = "phone.fill.arrow.down.left"
+                textPreview = type == "3" ? "Missed audio call".localized() : "Audio call".localized()
+            }
+            if let image = UIImage(systemName: stringImage)?.withRenderingMode(.alwaysTemplate) {
+                let imageView = UIImageView(image: image)
+                if type == "3" {
+                    imageView.tintColor = .red
+                } else {
+                    imageView.tintColor = .gray
+                }
+                
+                // Render the UIImageView to UIImage with tint applied
+                UIGraphicsBeginImageContextWithOptions(imageView.bounds.size, false, 0.0)
+                imageView.layer.render(in: UIGraphicsGetCurrentContext()!)
+                let tintedImage = UIGraphicsGetImageFromCurrentImageContext()
+                UIGraphicsEndImageContext()
+                
+                imageAttachment.image = tintedImage
+            }
+
+            let imageSize = CGSize(width: 18, height: 18)
+            imageAttachment.bounds = CGRect(x: 0, y: -2, width: isVideo ? imageSize.width + 8 : imageSize.width, height: imageSize.height)
+
+            let imageString = NSAttributedString(attachment: imageAttachment)
+            let textString = NSAttributedString(string: " " + textPreview, attributes: [
+                .font: UIFont.systemFont(ofSize: 14),
+                .foregroundColor: UIColor.gray
+            ])
+            
+            let finalString = NSMutableAttributedString()
+            finalString.append(imageString)
+            finalString.append(textString)
+            
+            return finalString
         } else if chat.credential == "1" {
             return showNSMutableAttributedString("Confidential Message".localized())
         } else if chat.attachmentFlag == "27" {
@@ -2762,5 +2812,37 @@ public class SecureUserDefaults {
     public func removeValue(forKey key: String) {
         defaults.removeObject(forKey: key)
     }
+}
+
+public class MessageScope {
+    public static let GLOBAL = "1";
+    public static let LOCAL = "2";
+    public static let WHISPER = "3";
+    public static let GROUP = "4";
+    public static let CHATROOM = "5";
+    public static let PLACE = "6";
+    public static let BUDDY = "7";
+    public static let FOLLOWER = "8";
+    public static let APP = "9";
+    public static let BLOG = "10";
+    public static let BOT = "11";
+    public static let CALL = "12";
+    public static let QUOTE = "13";
+    public static let DRAW = "14";
+    public static let SMS = "15";
+    public static let EMAIL = "16";
+    public static let LIVE_BRAODCAST = "17";
+    public static let FORM = "18";
+    public static let MISSED_CALL = "19";
+    public static let VIDEO_ATTACHMNET = "20";
+    public static let UNREAD_COUNT = "21";
+    public static let FAVORITE = "22";
+    public static let CALENDAR = "23";
+    public static let PILPRES = "25";
+    public static let CHATBOT = "26";
+    public static let BROADCAST_HISTORY = "30";
+    public static let GPT_CHATBOT = "31";
+    public static let COMMUNITY = "32";
+    public static let CHANNEL = "33";
 }
 

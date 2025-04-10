@@ -402,3 +402,14 @@
 "has requested to be your friend" = "telah meminta untuk menjadi teman kamu";
 "Friend request has been accepted" = "Permintaan pertemanan telah diterima";
 "Friend request has been rejected" = "Permintaan pertemanan telah ditolak";
+"Calls" = "Panggilan";
+"Recent" = "Terbaru";
+"Incoming" = "Panggilan masuk";
+"Outgoing" = "Panggilan keluar";
+"Missed" = "Panggilan tak terjawab";
+"Audio call" = "Panggilan suara";
+"Video call" = "Panggilan video";
+"Missed audio call" = "Panggilan suara tak terjawab";
+"Missed video call" = "Panggilan video tak terjawab";
+"No answer" = "Tidak ada jawaban";
+"Tap to call back" = "Ketuk untuk menelepon kembali";

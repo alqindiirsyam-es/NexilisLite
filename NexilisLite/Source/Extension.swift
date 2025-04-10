@@ -587,6 +587,10 @@ extension UIColor {
         return renderColor(hex: "#4c92d2")
     }
     
+    public static var whatsappGreenColor: UIColor {
+        return renderColor(hex: "#25D366")
+    }
+    
     public class func renderColor(hex: String) -> UIColor {
         var cString:String = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 

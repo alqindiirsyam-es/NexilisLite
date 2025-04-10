@@ -112,6 +112,8 @@ class ContactCallViewController: UIViewController {
         
         let center: NotificationCenter = NotificationCenter.default
         center.addObserver(self, selector: #selector(refresh(notification:)), name: NSNotification.Name(rawValue: "onUpdatePersonInfo"), object: nil)
+        
+        pullBuddy()
     }
     
     @objc func addFriend(sender: UIBarButtonItem) {
@@ -203,6 +205,14 @@ class ContactCallViewController: UIViewController {
     func filterContentForSearchText(_ searchText: String) {
         fillteredData = self.dataPerson.filter { $0["name"]!!.lowercased().contains(searchText.lowercased()) }
         tableView.reloadData()
+    }
+    
+    private func pullBuddy() {
+        if let me = User.getMyPin() {
+            DispatchQueue.global().async {
+                let _ = Nexilis.write(message: CoreMessage_TMessageBank.getBatchBuddiesInfos(p_f_pin: me, last_update: 0))
+            }
+        }
     }
 }
 

@@ -702,7 +702,7 @@ extension ContactChatViewController {
                     smartChatVC.hidesBottomBarWhenPushed = true
                     smartChatVC.fromNotification = false
                     navigationController?.show(smartChatVC, sender: nil)
-                } else if data.messageScope == "3" {
+                } else if data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL {
                     let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
                     editorPersonalVC.hidesBottomBarWhenPushed = true
                     editorPersonalVC.unique_l_pin = data.pin
@@ -1176,7 +1176,7 @@ extension ContactChatViewController {
                 ])
                 var leadingAnchor = imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10.0)
                 if data.profile.isEmpty && data.pin != "-999" && data.pin != "-997" {
-                    if data.messageScope == "3" {
+                    if data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL {
                         imageView.image = UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                     } else {
                         imageView.image = UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
@@ -1224,8 +1224,8 @@ extension ContactChatViewController {
                             }
                         }
                     } else {
-                        if data.messageScope == "3" || data.isParent || data.pin == "-999" {
-                            getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : data.messageScope == "3" ? "Profile---Purple" : "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                        if data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL || data.isParent || data.pin == "-999" {
+                            getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : (data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL) ? "Profile---Purple" : "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                                 imageView.image = image
                             })
                         } else {
@@ -1351,7 +1351,7 @@ extension ContactChatViewController {
                                     stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                                 }
                                 stringMessage.append(("🚫 _"+"You were deleted this message".localized()+"_").richText())
-                            } else {
+                            } else if data.messageScope != MessageScope.CALL && data.messageScope != MessageScope.MISSED_CALL {
                                 let imageStatus = NSTextAttachment()
                                 let status = getRealStatus(messageId: data.messageId)
                                 if status == "0" {

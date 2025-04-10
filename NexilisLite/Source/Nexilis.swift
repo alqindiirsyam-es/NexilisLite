@@ -712,7 +712,7 @@ public class Nexilis: NSObject {
 //    }
     
     public static func apiSendChat(destination: String, message: String, isGroup: Bool, thumbnailName: String = "", imageName: String = "", videoName: String = "", fileName: String = "", audioName: String = "", replyMessageId : String = "") -> String {
-        let message = CoreMessage_TMessageBank.sendMessage(l_pin: destination, message_scope_id: isGroup ? "4" : "3", status: "3", message_text: message, credential: "", attachment_flag: !imageName.isEmpty ? "1" : !videoName.isEmpty ? "2" : !audioName.isEmpty ? "5" : !fileName.isEmpty ? "6" : "0", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageName, audio_id: audioName, video_id: videoName, file_id: fileName, thumb_id: thumbnailName, reff_id: replyMessageId, read_receipts: "4", chat_id: "", is_call_center: "0", call_center_id: "", opposite_pin: User.getMyPin() ?? "")
+        let message = CoreMessage_TMessageBank.sendMessage(l_pin: destination, message_scope_id: isGroup ? MessageScope.GROUP : MessageScope.WHISPER, status: "3", message_text: message, credential: "", attachment_flag: !imageName.isEmpty ? "1" : !videoName.isEmpty ? "2" : !audioName.isEmpty ? "5" : !fileName.isEmpty ? "6" : "0", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageName, audio_id: audioName, video_id: videoName, file_id: fileName, thumb_id: thumbnailName, reff_id: replyMessageId, read_receipts: "4", chat_id: "", is_call_center: "0", call_center_id: "", opposite_pin: User.getMyPin() ?? "")
         addQueueMessage(message: message)
         return message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
     }
@@ -1377,7 +1377,7 @@ public class Nexilis: NSObject {
                     cursor.close()
                 }
                 let l_pin = message.getBody(key : CoreMessage_TMessageKey.L_PIN, default_value : "")
-                let scope = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_SCOPE_ID, default_value : "3")
+                let scope = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_SCOPE_ID, default_value : MessageScope.WHISPER)
                 let status = message.getBody(key : CoreMessage_TMessageKey.STATUS, default_value : "")
                 let chat_id = message.getBody(key : CoreMessage_TMessageKey.CHAT_ID, default_value : "")
                 let broadcast_flag = message.getBody(key: CoreMessage_TMessageKey.BROADCAST_FLAG, default_value: "0")
@@ -1432,7 +1432,7 @@ public class Nexilis: NSObject {
                 
                 if withStatus {
                     do {
-                        if scope == "4" {
+                        if scope == MessageScope.GROUP {
                             for pin in getGroupMembers(fmdb: fmdb, l_pin: l_pin) {
                                 if f_pin == pin { continue }
                                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
@@ -1457,7 +1457,7 @@ public class Nexilis: NSObject {
                 }
                 var pin = opposite_pin
                 if pin.isEmpty {
-                    if scope == "4" {
+                    if scope == MessageScope.GROUP {
                         pin = chat_id.isEmpty ? l_pin : chat_id
                     } else {
                         pin = f_pin
@@ -1483,9 +1483,9 @@ public class Nexilis: NSObject {
                 }
                 if is_call_center == "0" {
                     do {
-                        var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND message_scope_id = '3' order by server_date desc LIMIT 1"
+                        var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND message_scope_id = '\(MessageScope.WHISPER)' order by server_date desc LIMIT 1"
                         if scope == "4" {
-                            queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(chat_id.isEmpty ? pin : l_pin)' AND chat_id = '\(chat_id)' AND message_scope_id = '4' order by server_date desc LIMIT 1"
+                            queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(chat_id.isEmpty ? pin : l_pin)' AND chat_id = '\(chat_id)' AND message_scope_id = '\(MessageScope.GROUP)' order by server_date desc LIMIT 1"
                         }
                         var messageId = ""
                         if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: queryGetLastMessageId), cursorData.next() {
@@ -1548,7 +1548,7 @@ public class Nexilis: NSObject {
                     "f_display_name" : "Bot",
                     "l_pin" : me,
                     "l_user_id" : String(user_id!),
-                    "message_scope_id" : "3",
+                    "message_scope_id" : MessageScope.WHISPER,
                     "server_date" : String(Date().currentTimeMillis()),
                     "status" : "3",
                     "message_text" : textMessage,
@@ -1606,6 +1606,75 @@ public class Nexilis: NSObject {
             }
         })
         //print("insert db message summary \(message_id)")
+    }
+    
+    public static func saveMessageCall(idCall: String, textMessage: String, fPin: String, lPin: String, timeCall: String, attachment_type:String) {
+        guard let me = User.getMyPin() else {
+            return
+        }
+        let dataFpin = User.getDataCanNil(pin: fPin)
+        let dataLpin = User.getDataCanNil(pin: lPin)
+        var messageExist = false
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select server_date from MESSAGE where server_date = '\(timeCall)'"), cursor.next() {
+                messageExist = true
+                cursor.close()
+            }
+        })
+        if messageExist {
+            return
+        }
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            do {
+                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                    "message_id" : idCall ,
+                    "f_pin" : fPin,
+                    "f_display_name" : dataFpin != nil ? dataFpin!.fullName : "",
+                    "l_pin" : lPin,
+                    "l_user_id" : dataLpin != nil ? dataLpin!.pin : "",
+                    "message_scope_id" : attachment_type,
+                    "server_date" : timeCall,
+                    "status" : "3",
+                    "message_text" : textMessage,
+                    "audio_id" : "",
+                    "video_id" : "",
+                    "image_id" : "",
+                    "file_id" : "",
+                    "thumb_id" : "",
+                    "opposite_pin" : "",
+                    "format" : "",
+                    "blog_id" : "",
+                    "read_receipts" : "0",
+                    "chat_id" : "",
+                    "account_type" : "1",
+                    "credential" :"",
+                    "reff_id" : "",
+                    "message_large_text" : "",
+                    "attachment_flag" : attachment_type,
+                    "local_timestamp" : timeCall
+                ], replace: true)
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+        let pin = lPin == me ? fPin : lPin
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            do {
+                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+                    "l_pin" : pin,
+                    "message_id" : idCall,
+                    "counter" : 0
+                ], replace: true)
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+        var dataMessage: [AnyHashable : Any] = [:]
+        dataMessage["message_id"] = idCall
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "refreshCallLog"), object: nil, userInfo: dataMessage)
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
     }
     
     static func updateMessageStatus(message: TMessage) -> Void {
@@ -3674,7 +3743,7 @@ extension Nexilis: MessageDelegate {
                 } else if !message.getBody(key: videoId).isEmpty {
                     text = "Sent Video 📹"
                 } else if !message.getBody(key: fileId).isEmpty {
-                    if message.getBody(key: messageScopeId) == "18" {
+                    if message.getBody(key: messageScopeId) == MessageScope.FORM {
                         text = "Sent Form 📄"
                     } else {
                         text = "Sent File 📄"
@@ -3704,7 +3773,7 @@ extension Nexilis: MessageDelegate {
 //                if Utils.inTabChats{
 //                    return
 //                }
-                if message.getBody(key: messageScopeId) == "3" || message.getBody(key: messageScopeId) == "18" || message.getBody(key: messageScopeId) == "5" {
+                if message.getBody(key: messageScopeId) == MessageScope.WHISPER || message.getBody(key: messageScopeId) == MessageScope.FORM || message.getBody(key: messageScopeId) == MessageScope.CHATROOM {
                     if inEditorPersonal == sender || (inEditorPersonal != nil && inEditorPersonal!.contains(",")) {
                         return
                     }
@@ -3887,7 +3956,7 @@ extension Nexilis: MessageDelegate {
                                                 showNotif()
                                             }
                                             var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"
-                                            if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == "4" {
+                                            if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == MessageScope.GROUP {
                                                 soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
                                             }
                                             do {
@@ -3993,7 +4062,7 @@ extension Nexilis: MessageDelegate {
                             profileImage.contentMode = .scaleAspectFill
                         } else {
                             profileImage.circle()
-                            if message.getBody(key: messageScopeId) == "3" {
+                            if message.getBody(key: messageScopeId) == MessageScope.WHISPER {
                                 profileImage.image = UIImage(systemName: "person")
                             } else {
                                 profileImage.image = UIImage(systemName: "person.3")
@@ -4006,7 +4075,7 @@ extension Nexilis: MessageDelegate {
                         floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
     //                    let vibrateMode: Bool = SecureUserDefaults.shared.value(forKey: "vibrateMode") ?? false
                         var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"
-                        if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == "4" {
+                        if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == MessageScope.GROUP {
                             soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
                         }
                         do {
@@ -4188,7 +4257,7 @@ extension Nexilis: MessageDelegate {
                                 print("Access database error: \(error.localizedDescription)")
                             }
                         })
-                        if message.getBody(key: messageScopeId) == "3" || message.getBody(key: messageScopeId) == "18" || message.getBody(key: messageScopeId) == "5" {
+                        if message.getBody(key: messageScopeId) == MessageScope.WHISPER || message.getBody(key: messageScopeId) == MessageScope.FORM || message.getBody(key: messageScopeId) == MessageScope.CHATROOM {
                             let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
                             editorPersonalVC.hidesBottomBarWhenPushed = true
                             editorPersonalVC.unique_l_pin = threadIdentifier
