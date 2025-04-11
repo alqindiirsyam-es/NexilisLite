@@ -44,17 +44,17 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         navigationController?.navigationBar.standardAppearance = appearance
         navigationController?.navigationBar.scrollEdgeAppearance = appearance
         
-        let leftButton = UIButton(type: .system)
-        let imageLeft = UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .bold))
-        leftButton.setImage(imageLeft, for: .normal)
-        leftButton.tintColor = .black
-        leftButton.backgroundColor = UIColor(white: 0.95, alpha: 1.0)
-        leftButton.layer.cornerRadius = 15
-        leftButton.clipsToBounds = true
-        leftButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
-        leftButton.addTarget(self, action: #selector(leftBarButtonTapped), for: .touchUpInside)
-        let leftBarButtonItem = UIBarButtonItem(customView: leftButton)
-        tabBarController?.navigationItem.leftBarButtonItem = leftBarButtonItem
+//        let leftButton = UIButton(type: .system)
+//        let imageLeft = UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .bold))
+//        leftButton.setImage(imageLeft, for: .normal)
+//        leftButton.tintColor = .black
+//        leftButton.backgroundColor = UIColor(white: 0.95, alpha: 1.0)
+//        leftButton.layer.cornerRadius = 15
+//        leftButton.clipsToBounds = true
+//        leftButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
+//        leftButton.addTarget(self, action: #selector(leftBarButtonTapped), for: .touchUpInside)
+//        let leftBarButtonItem = UIBarButtonItem(customView: leftButton)
+//        tabBarController?.navigationItem.leftBarButtonItem = leftBarButtonItem
         
         let rightButton = UIButton(type: .system)
         let imageRight = UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .bold))

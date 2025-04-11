@@ -222,7 +222,7 @@ extension ContactCallViewController: UITableViewDelegate {
         if startWhiteBoard && startSS {
             return
         } else if (isAddParticipantVideo) {
-            self.dismiss(animated: true, completion: {
+            UIApplication.shared.visibleViewController?.dismiss(animated: true, completion: {
                 self.isDismiss?(self.dataPerson[indexPath.row] as [String: String?])
             })
         } else if startWhiteBoard {

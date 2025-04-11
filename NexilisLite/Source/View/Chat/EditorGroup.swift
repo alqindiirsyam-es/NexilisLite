@@ -3854,6 +3854,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             contactChatNav.navigationBar.isTranslucent = false
             let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
             contactChatNav.navigationBar.titleTextAttributes = textAttributes
+            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
             contactChatNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             if let controller = contactChatNav.viewControllers.first as? ContactChatViewController {
                 controller.isChooser = { [weak self] scope, pin in

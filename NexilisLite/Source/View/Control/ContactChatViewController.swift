@@ -432,6 +432,9 @@ class ContactChatViewController: UITableViewController {
                     tempChats.append(singleChat)
                 }
             }
+            if self.isChooser != nil {
+                tempChats.removeAll(where: { $0.pin == "-997" })
+            }
             self.chats = tempChats
             completion()
         }
@@ -439,13 +442,15 @@ class ContactChatViewController: UITableViewController {
     
     private func getContacts(completion: @escaping ()->()) {
         self.contacts.removeAll()
-        let gptUser = User(pin: "-997",
-                        firstName: "GPT SmartBot",
-                        lastName: "",
-                        thumb: "",
-                        userType: "0",
-                        official: "1")
-        contacts.append(gptUser)
+        if self.isChooser == nil {
+            let gptUser = User(pin: "-997",
+                            firstName: "GPT SmartBot",
+                            lastName: "",
+                            thumb: "",
+                            userType: "0",
+                            official: "1")
+            contacts.append(gptUser)
+        }
         DispatchQueue.global().async {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {

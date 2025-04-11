@@ -4587,7 +4587,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             else {
                 children = [reply, copy]
             }
-        } else if (dataMessages[indexPath!.row]["lock"] != nil && dataMessages[indexPath!.row]["lock"]  as? String ?? "" == "1") || dataMessages[indexPath!.row]["message_scope_id"]  as? String ?? "" == "18" || dataPerson["f_pin"] == "-999" || dataMessages[indexPath!.row]["credential"]  as? String ?? "" == "1" {
+        } else if (dataMessages[indexPath!.row]["lock"] != nil && dataMessages[indexPath!.row]["lock"] as? String == "1") || dataMessages[indexPath!.row]["message_scope_id"] as? String == MessageScope.FORM || dataPerson["f_pin"] == "-999" || dataMessages[indexPath!.row]["credential"]  as? String == "1" || dataMessages[indexPath!.row]["message_scope_id"] as? String == MessageScope.CALL || dataMessages[indexPath!.row]["message_scope_id"] as? String == MessageScope.MISSED_CALL {
             children = [delete]
         } else if (groupImages[dataMessages[indexPath!.row]["message_id"]  as? String ?? ""] != nil) {
             forward.title = "Forward All".localized()
@@ -5015,6 +5015,8 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             contactChatNav.navigationBar.isTranslucent = false
             let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
             contactChatNav.navigationBar.titleTextAttributes = textAttributes
+            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
             contactChatNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             if let controller = contactChatNav.viewControllers.first as? ContactChatViewController {
                 controller.isChooser = { [weak self] scope, pin in
@@ -5051,9 +5053,10 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             let idMe = User.getMyPin() as String?
             let dataFilterFpin = dataMessages.filter({ $0["l_pin"] as? String == idMe})
             let dataFilterLock = dataMessages.filter({ $0["lock"] as? String == "1" || $0["lock"] as? String == "2" })
+            let dataFilterCall = dataMessages.filter({ $0[TypeDataMessage.message_scope_id] as? String == MessageScope.CALL || $0[TypeDataMessage.message_scope_id] as? String == MessageScope.MISSED_CALL })
 //            let statusDataRead = dataMessages.filter({ Int($0["status"]  as? String ?? "")! >= 4})
             let statusFailed = dataMessages.filter({ Int($0["status"]  as? String ?? "")! == 0})
-            if dataFilterFpin.count == 0 && dataFilterLock.count == 0 && statusFailed.count == 0 {
+            if dataFilterFpin.count == 0 && dataFilterLock.count == 0 && statusFailed.count == 0 && dataFilterCall.count == 0 {
                 if let action = self.actionDelete(for: "everyone", title: "Delete".localized() + " \(countSelected) " + "For Everyone".localized(), dataMessages: dataMessages) {
                     alertController.addAction(action)
                 }

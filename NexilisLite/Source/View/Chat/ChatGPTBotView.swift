@@ -1741,9 +1741,9 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
         topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10.0)
         NSLayoutConstraint.activate([
             topAnchor,
-            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20.0),
+            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10.0),
             dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            dateView.heightAnchor.constraint(equalToConstant: 30),
+//            dateView.heightAnchor.constraint(equalToConstant: 30),
             dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
         ])
         dateView.backgroundColor = .orangeColor
@@ -1773,7 +1773,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
     }
     
     public func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return 80
+        return 50
     }
     
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
