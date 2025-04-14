@@ -1673,6 +1673,7 @@ public class Nexilis: NSObject {
         })
         var dataMessage: [AnyHashable : Any] = [:]
         dataMessage["message_id"] = idCall
+        dataMessage["pin"] = pin
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "refreshCallLog"), object: nil, userInfo: dataMessage)
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
     }

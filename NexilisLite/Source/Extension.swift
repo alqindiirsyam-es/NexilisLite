@@ -425,9 +425,13 @@ extension NSObject {
                     
                     DispatchQueue.main.async {
                         if tableView != nil {
-                            tableView!.beginUpdates()
-                            tableView!.reloadRows(at: [indexPath!], with: .none)
-                            tableView!.endUpdates()
+                            if let indexPath = indexPath,
+                               indexPath.section < tableView!.numberOfSections,
+                               indexPath.row < tableView!.numberOfRows(inSection: indexPath.section) {
+                                tableView!.beginUpdates()
+                                tableView!.reloadRows(at: [indexPath], with: .none)
+                                tableView!.endUpdates()
+                            }
                         }
                         if type(of: self).urlStore[tmpAddress] == name && tableView == nil {
                             if FileManager().fileExists(atPath: file.path) {
@@ -456,7 +460,13 @@ extension NSObject {
                 
                 DispatchQueue.main.async {
                     if tableView != nil {
-                        tableView!.reloadRows(at: [indexPath!], with: .none)
+                        if let indexPath = indexPath,
+                           indexPath.section < tableView!.numberOfSections,
+                           indexPath.row < tableView!.numberOfRows(inSection: indexPath.section) {
+                            tableView!.beginUpdates()
+                            tableView!.reloadRows(at: [indexPath], with: .none)
+                            tableView!.endUpdates()
+                        }
                     }
                 }
             }
@@ -552,6 +562,10 @@ extension UIColor {
         return renderColor(hex: "#F5F5F5")
     }
     
+    public static var grayTitleColor: UIColor {
+        return renderColor(hex: "#5A5A5A")
+    }
+    
     public static var docColor: UIColor {
         return renderColor(hex: "#798F9A")
     }
@@ -589,6 +603,14 @@ extension UIColor {
     
     public static var whatsappGreenColor: UIColor {
         return renderColor(hex: "#25D366")
+    }
+    
+    public static var whatsappGreenTitleColor: UIColor {
+        return renderColor(hex: "#295C3B")
+    }
+    
+    public static var whatsappGreenLightColor: UIColor {
+        return renderColor(hex: "#E5FCE4")
     }
     
     public class func renderColor(hex: String) -> UIColor {

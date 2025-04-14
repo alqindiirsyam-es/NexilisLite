@@ -8,7 +8,7 @@
 import Foundation
 import UIKit
 
-public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating {
+public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UISearchBarDelegate {
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let searchController = UISearchController(searchResultsController: nil)
         
@@ -23,6 +23,9 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         tableView.sectionHeaderHeight = 0
         tableView.sectionFooterHeight = 0
         tableView.automaticallyAdjustsScrollIndicatorInsets = false
+        if #available(iOS 15.0, *) {
+            tableView.sectionHeaderTopPadding = 0
+        }
         
         setupTableView()
         refresh()
@@ -30,9 +33,9 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
     }
     
     public override func viewWillAppear(_ animated: Bool) {
-        tabBarController?.navigationItem.title = "Calls".localized()
-        tabBarController?.navigationItem.hidesSearchBarWhenScrolling = true
-        navigationController?.setNavigationBarHidden(false, animated: false)
+        navigationItem.title = "Calls".localized()
+        navigationItem.hidesSearchBarWhenScrolling = true
+        tabBarController?.navigationController?.setNavigationBarHidden(true, animated: false)
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationItem.largeTitleDisplayMode = .always
         let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]
@@ -43,6 +46,8 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         appearance.largeTitleTextAttributes = largeAttributes
         navigationController?.navigationBar.standardAppearance = appearance
         navigationController?.navigationBar.scrollEdgeAppearance = appearance
+        let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+        UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
         
 //        let leftButton = UIButton(type: .system)
 //        let imageLeft = UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .bold))
@@ -54,7 +59,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
 //        leftButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
 //        leftButton.addTarget(self, action: #selector(leftBarButtonTapped), for: .touchUpInside)
 //        let leftBarButtonItem = UIBarButtonItem(customView: leftButton)
-//        tabBarController?.navigationItem.leftBarButtonItem = leftBarButtonItem
+//        navigationItem.leftBarButtonItem = leftBarButtonItem
         
         let rightButton = UIButton(type: .system)
         let imageRight = UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .bold))
@@ -66,7 +71,19 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         rightButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
         rightButton.addTarget(self, action: #selector(rightBarButtonTapped), for: .touchUpInside)
         let rightBarButtonItem = UIBarButtonItem(customView: rightButton)
-        tabBarController?.navigationItem.rightBarButtonItem = rightBarButtonItem
+        navigationItem.rightBarButtonItem = rightBarButtonItem
+        
+        searchController.searchResultsUpdater = self
+        searchController.searchBar.searchTextField.attributedPlaceholder = NSAttributedString(string: "Search".localized(), attributes: [NSAttributedString.Key.foregroundColor: UIColor.gray, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)])
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.hidesNavigationBarDuringPresentation = true
+        searchController.searchBar.delegate = self
+
+        navigationItem.searchController = searchController
+        definesPresentationContext = true
+        DispatchQueue.main.async {
+            self.navigationController?.navigationBar.sizeToFit()
+        }
     }
     
     private func refresh() {
@@ -76,16 +93,10 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
             if textCallEmpty.isDescendant(of: view){
                 textCallEmpty.removeFromSuperview()
             }
-            searchController.searchResultsUpdater = self
-            searchController.searchBar.searchTextField.attributedPlaceholder = NSAttributedString(string: "Search".localized(), attributes: [NSAttributedString.Key.foregroundColor: UIColor.gray, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)])
-            searchController.obscuresBackgroundDuringPresentation = false
-            searchController.hidesNavigationBarDuringPresentation = true
-
-            tabBarController?.navigationItem.searchController = searchController
-            definesPresentationContext = true
-            
+            searchController.searchBar.isHidden = false
             tableView.reloadData()
         } else {
+            searchController.searchBar.isHidden = true
             textCallEmpty.numberOfLines = 0
             let fullText = "To place audio or video call, tap ⊕ at the top and select a contact.".localized()
             let attributedString = NSMutableAttributedString(string: fullText)
@@ -98,9 +109,6 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
             
             view.addSubview(textCallEmpty)
             textCallEmpty.anchor(left: view.leftAnchor, right: view.rightAnchor, paddingLeft: 20, paddingRight: 20, centerX: view.centerXAnchor, centerY: view.centerYAnchor)
-        }
-        DispatchQueue.main.async {
-            self.navigationController?.navigationBar.sizeToFit()
         }
     }
     
@@ -287,9 +295,6 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
     }
     
     public func updateSearchResults(for searchController: UISearchController) {
-        // Handle search updates here
-        let searchText = searchController.searchBar.text ?? ""
-        print("Searching for: \(searchText)")
     }
     
     private func typeCallLog(type: String, isVideo: Bool) -> NSMutableAttributedString {

@@ -217,6 +217,10 @@
 		CD46A0C52A0D0D5D009E4C87 /* MyArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD46A0C42A0D0D5D009E4C87 /* MyArchive.swift */; };
 		CD5A73AE2A77642D000541A5 /* MessageInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD5A73AC2A77642D000541A5 /* MessageInfo.swift */; };
 		CD5A73AF2A77642D000541A5 /* ListGroupImages.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD5A73AD2A77642D000541A5 /* ListGroupImages.swift */; };
+		CD6312592DA925260088964E /* CallLogVC.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD6312582DA925260088964E /* CallLogVC.swift */; };
+		CD63125B2DA925320088964E /* ChatWALikeVC.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD63125A2DA925320088964E /* ChatWALikeVC.swift */; };
+		CD63125E2DA925960088964E /* Group_NM.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD63125D2DA925960088964E /* Group_NM.swift */; };
+		CD63125F2DA925960088964E /* CallModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD63125C2DA925960088964E /* CallModel.swift */; };
 		CD637E3D2D9534ED004780FB /* NexilisLite.podspec in Resources */ = {isa = PBXBuildFile; fileRef = CD46A0BE2A0CE4FD009E4C87 /* NexilisLite.podspec */; };
 		CD7054EA2AD39DE2003741BF /* ChatGPTBotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD7054E92AD39DE2003741BF /* ChatGPTBotView.swift */; };
 		CD9551592A664BDA00AF6476 /* Poppins-LightItalic.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD9551402A664BD400AF6476 /* Poppins-LightItalic.otf */; };
@@ -502,6 +506,10 @@
 		CD46A0C42A0D0D5D009E4C87 /* MyArchive.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MyArchive.swift; sourceTree = "<group>"; };
 		CD5A73AC2A77642D000541A5 /* MessageInfo.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MessageInfo.swift; sourceTree = "<group>"; };
 		CD5A73AD2A77642D000541A5 /* ListGroupImages.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ListGroupImages.swift; sourceTree = "<group>"; };
+		CD6312582DA925260088964E /* CallLogVC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLogVC.swift; sourceTree = "<group>"; };
+		CD63125A2DA925320088964E /* ChatWALikeVC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatWALikeVC.swift; sourceTree = "<group>"; };
+		CD63125C2DA925960088964E /* CallModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallModel.swift; sourceTree = "<group>"; };
+		CD63125D2DA925960088964E /* Group_NM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Group_NM.swift; sourceTree = "<group>"; };
 		CD7054E92AD39DE2003741BF /* ChatGPTBotView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ChatGPTBotView.swift; sourceTree = "<group>"; };
 		CD9551332A664BD400AF6476 /* Poppins-SemiBoldItalic.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-SemiBoldItalic.otf"; sourceTree = "<group>"; };
 		CD9551342A664BD400AF6476 /* Poppins-ExtraBoldItalic.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-ExtraBoldItalic.otf"; sourceTree = "<group>"; };
@@ -676,13 +684,15 @@
 		CD1E715E2A0BA86100BF871F /* Model */ = {
 			isa = PBXGroup;
 			children = (
-				CD1E715F2A0BA86100BF871F /* Model.swift */,
-				CD1E71602A0BA86100BF871F /* Chat.swift */,
-				CD1E71612A0BA86100BF871F /* User.swift */,
+				CD63125C2DA925960088964E /* CallModel.swift */,
 				CD1E71622A0BA86100BF871F /* CategoryCC.swift */,
-				CD1E71632A0BA86100BF871F /* WorkingArea.swift */,
+				CD1E71602A0BA86100BF871F /* Chat.swift */,
 				CD1E71642A0BA86100BF871F /* Group.swift */,
+				CD63125D2DA925960088964E /* Group_NM.swift */,
+				CD1E715F2A0BA86100BF871F /* Model.swift */,
 				CD1E71652A0BA86100BF871F /* NotifSound.swift */,
+				CD1E71612A0BA86100BF871F /* User.swift */,
+				CD1E71632A0BA86100BF871F /* WorkingArea.swift */,
 			);
 			path = Model;
 			sourceTree = "<group>";
@@ -720,8 +730,8 @@
 		CD1E716D2A0BA86100BF871F /* Chat */ = {
 			isa = PBXGroup;
 			children = (
-				12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */,
 				CD7054E92AD39DE2003741BF /* ChatGPTBotView.swift */,
+				CD63125A2DA925320088964E /* ChatWALikeVC.swift */,
 				CD1E71742A0BA86100BF871F /* CustomTextView.swift */,
 				CD1E71722A0BA86100BF871F /* EditorGroup.swift */,
 				CD1E71702A0BA86100BF871F /* EditorPersonal.swift */,
@@ -731,6 +741,7 @@
 				CD5A73AC2A77642D000541A5 /* MessageInfo.swift */,
 				CD1E71732A0BA86100BF871F /* PreviewAttachmentImageVideo.swift */,
 				CD1E716F2A0BA86100BF871F /* PreviewAttachmentImageVideo.xib */,
+				12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -756,6 +767,7 @@
 			children = (
 				CD1E717F2A0BA86100BF871F /* AudioViewController.swift */,
 				CD1E71872A0BA86100BF871F /* Call.swift */,
+				CD6312582DA925260088964E /* CallLogVC.swift */,
 				CD1E717D2A0BA86100BF871F /* CallManager.swift */,
 				CD1E71812A0BA86100BF871F /* CallProviderDelegate.swift */,
 				CD43C80A2D687DBF00297C6E /* CreateConferenceCallController.swift */,
@@ -1254,9 +1266,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite/Pods-NexilisLite-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite/Pods-NexilisLite-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1271,9 +1287,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1288,9 +1308,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1403,6 +1427,10 @@
 				CD1E721B2A0BA86100BF871F /* Nexilis.swift in Sources */,
 				CD1E72102A0BA86100BF871F /* Extension.swift in Sources */,
 				CD1E724C2A0BA86100BF871F /* NotificationSound.swift in Sources */,
+				CD63125E2DA925960088964E /* Group_NM.swift in Sources */,
+				CD63125F2DA925960088964E /* CallModel.swift in Sources */,
+				CD6312592DA925260088964E /* CallLogVC.swift in Sources */,
+				CD63125B2DA925320088964E /* ChatWALikeVC.swift in Sources */,
 				CDDF467A2A2EF0A700049A19 /* ScreenSharingViewController.swift in Sources */,
 				CD1E72402A0BA86100BF871F /* ChangeNamePassswordViewController.swift in Sources */,
 				CD1E722E2A0BA86100BF871F /* AudioViewController.swift in Sources */,

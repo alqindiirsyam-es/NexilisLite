@@ -1911,7 +1911,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         DispatchQueue.main.async {
             let data:[AnyHashable : Any] = notification.userInfo!
             let messageId = data["message_id"]  as? String ?? ""
-            self.appendNewMessage(messageId: messageId)
+            let pin = data["pin"]  as? String ?? ""
+            if pin == self.dataPerson["f_pin"]!! {
+                self.appendNewMessage(messageId: messageId)
+            }
         }
     }
     
