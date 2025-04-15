@@ -15,6 +15,7 @@ import FMDB
 import QuickLook
 import NotificationBannerSwift
 import SDWebImage
+import CryptoKit
 
 public class Nexilis: NSObject {
     public static var sAPIKey = ""
@@ -304,6 +305,7 @@ public class Nexilis: NSObject {
         }
         
         _ = LocationManager()
+        FileEncryption.shared.wipeFolderOldSecure()
     }
     
     private static var ringtoneID: SystemSoundID = 0
@@ -526,21 +528,16 @@ public class Nexilis: NSObject {
                                     Utils.setAuthenticationDuration(value: ad)
                                 }
                                 if jsonData["secure_folder_encrypt_key"]! != nil {
-                                    do {
-                                        if let documentsDirectoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-                                            let secureURL = documentsDirectoryURL.appendingPathComponent("secure")
-                                            if !FileManager.default.fileExists(atPath: secureURL.path){
-                                                 try FileManager.default.createDirectory(at: secureURL, withIntermediateDirectories: true, attributes: nil)
-                                            }
-                                        }
-                                        try MasterKeyUtil.shared.generateAndStoreServerKey(jsonData["secure_folder_encrypt_key"] as! String)
-                                    }
-                                    catch {
-                                        
+                                    if let dataKey = Data(base64Encoded: jsonData["secure_folder_encrypt_key"] as! String, options: .ignoreUnknownCharacters) {
+                                        FileEncryption.shared.aesKey = SymmetricKey(data: dataKey)
+                                        Utils.setSecureFolderEncrypt(value: jsonData["secure_folder_encrypt_key"] as! String)
                                     }
                                 }
                                 if jsonData["secure_folder_encrypt_key_iv"]! != nil {
-                                    Utils.setSecureFolderEncryptIv(value: jsonData["secure_folder_encrypt_key_iv"] as! String)
+                                    if let dataKey = Data(base64Encoded: jsonData["secure_folder_encrypt_key_iv"] as! String, options: .ignoreUnknownCharacters) {
+                                        FileEncryption.shared.aesIV = dataKey
+                                        Utils.setSecureFolderEncryptIv(value: jsonData["secure_folder_encrypt_key_iv"] as! String)
+                                    }
                                 }
                                 if jsonData["chatbot_greetings"]! != nil {
                                     if let greeting = jsonData["chatbot_greetings"] as? String {
@@ -1834,7 +1831,11 @@ public class Nexilis: NSObject {
         }
         else if FileEncryption.shared.isSecureExists(filename: url.lastPathComponent) {
             do {
-                if let imageData = try FileEncryption.shared.readSecure(filename: url.lastPathComponent) {
+                if var imageData = try FileEncryption.shared.readSecure(filename: url.lastPathComponent) {
+                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
+                    if dataDecrypt != nil {
+                        imageData = dataDecrypt!
+                    }
                     image = UIImage(data: imageData)
                 }
             }
@@ -2792,17 +2793,22 @@ extension Nexilis: MessageDelegate {
                                     }
                                 } else if FileEncryption.shared.isSecureExists(filename: image) {
                                     do {
-                                        let data = try FileEncryption.shared.readSecure(filename: image)
-                                        let image = UIImage(data: data!)
-                                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                                        previewImageVC.image = image
-                                        previewImageVC.isHiddenTextField = true
-                                        previewImageVC.modalPresentationStyle = .overFullScreen
-                                        previewImageVC.modalTransitionStyle  = .crossDissolve
-                                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                            UIApplication.shared.visibleViewController?.navigationController?.present(previewImageVC, animated: true, completion: nil)
-                                        } else {
-                                            UIApplication.shared.visibleViewController?.present(previewImageVC, animated: true, completion: nil)
+                                        if var data = try FileEncryption.shared.readSecure(filename: image) {
+                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                            if dataDecrypt != nil {
+                                                data = dataDecrypt!
+                                            }
+                                            let image = UIImage(data: data)
+                                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                                            previewImageVC.image = image
+                                            previewImageVC.isHiddenTextField = true
+                                            previewImageVC.modalPresentationStyle = .overFullScreen
+                                            previewImageVC.modalTransitionStyle  = .crossDissolve
+                                            if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                                UIApplication.shared.visibleViewController?.navigationController?.present(previewImageVC, animated: true, completion: nil)
+                                            } else {
+                                                UIApplication.shared.visibleViewController?.present(previewImageVC, animated: true, completion: nil)
+                                            }
                                         }
                                     } catch {
                                         
@@ -2811,12 +2817,6 @@ extension Nexilis: MessageDelegate {
                                     Download().startHTTP(forKey: image) { (name, progress) in
                                         guard progress == 100 else {
                                             return
-                                        }
-                                        
-                                        do {
-                                            try FileEncryption.shared.writeSecure(filename: image)
-                                        } catch {
-                                            
                                         }
                 
                                         DispatchQueue.main.async {
@@ -2827,7 +2827,12 @@ extension Nexilis: MessageDelegate {
                                             else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                                 do {
                                                     if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
-                                                        image = UIImage(data: imageData)
+                                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
+                                                        if dataDecrypt == nil {
+                                                            image = UIImage(data: imageData)
+                                                        } else {
+                                                            image = UIImage(data: dataDecrypt!)
+                                                        }
                                                     }
                                                 } catch {
                                                     
@@ -2877,7 +2882,11 @@ extension Nexilis: MessageDelegate {
                                     }
                                 } else if FileEncryption.shared.isSecureExists(filename: file) {
                                     do {
-                                        if let docData = try FileEncryption.shared.readSecure(filename: file) {
+                                        if var docData = try FileEncryption.shared.readSecure(filename: file) {
+                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: docData)
+                                            if dataDecrypt != nil {
+                                                docData = dataDecrypt!
+                                            }
                                             let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                                             let tempPath = cachesDirectory.appendingPathComponent(file)
                                             try docData.write(to: tempPath)
@@ -2904,8 +2913,11 @@ extension Nexilis: MessageDelegate {
                                                 return
                                             }
                                             do {
-                                                let secureFilename = try FileEncryption.shared.writeSecure(filename: name)
-                                                if let docData = try FileEncryption.shared.readSecure(filename: secureFilename?[0] as! String) {
+                                                if var docData = try FileEncryption.shared.readSecure(filename: file) {
+                                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: docData)
+                                                    if dataDecrypt != nil {
+                                                        docData = dataDecrypt!
+                                                    }
                                                     let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                                                     let tempPath = cachesDirectory.appendingPathComponent(file)
                                                     try docData.write(to: tempPath)
@@ -3714,7 +3726,7 @@ extension Nexilis: MessageDelegate {
                 }
                 return
             }
-            if !Nexilis.showLibraryNotification || APIS.checkAppStateisBackground() {
+            if !Nexilis.showLibraryNotification || APIS.checkAppStateisBackground() || APIS.stopNotif {
                 return
             }
             let sender = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
@@ -4006,7 +4018,11 @@ extension Nexilis: MessageDelegate {
                                                                 }
                                                             } else if FileEncryption.shared.isSecureExists(filename: nameSound) {
                                                                 do {
-                                                                    if let audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                                                                    if var audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                                                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: audioData)
+                                                                        if dataDecrypt != nil {
+                                                                            audioData = dataDecrypt!
+                                                                        }
                                                                         let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                                                                         let tempPath = cachesDirectory.appendingPathComponent(nameSound)
                                                                         try audioData.write(to: tempPath)
@@ -4125,7 +4141,11 @@ extension Nexilis: MessageDelegate {
                                             }
                                         } else if FileEncryption.shared.isSecureExists(filename: nameSound) {
                                             do {
-                                                if let audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                                                if var audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: audioData)
+                                                    if dataDecrypt != nil {
+                                                        audioData = dataDecrypt!
+                                                    }
                                                     let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                                                     let tempPath = cachesDirectory.appendingPathComponent(nameSound)
                                                     try audioData.write(to: tempPath)

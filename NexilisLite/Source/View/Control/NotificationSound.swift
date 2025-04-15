@@ -157,7 +157,11 @@ public class NotificationSound: UIViewController, UITableViewDelegate, UITableVi
                         }
                     } else if FileEncryption.shared.isSecureExists(filename: nameSound) {
                         do {
-                            if let audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                            if var audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: audioData)
+                                if dataDecrypt != nil {
+                                    audioData = dataDecrypt!
+                                }
                                 let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                                 let tempPath = cachesDirectory.appendingPathComponent(nameSound)
                                 try audioData.write(to: tempPath)

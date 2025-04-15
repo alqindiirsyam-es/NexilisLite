@@ -149,7 +149,11 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
                         else if let img = UIImage(contentsOfFile: imageURL.path)?.resize(target: CGSize(width: 1000, height: 1000)) {
                             Nexilis.imageCache.setObject(img, forKey: imageId as NSString)
                             return img
-                        } else if let imgData = try FileEncryption.shared.readSecure(filename: imageId) {
+                        } else if var imgData = try FileEncryption.shared.readSecure(filename: imageId) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imgData)
+                            if dataDecrypt != nil {
+                                imgData = dataDecrypt!
+                            }
                             let img = UIImage(data: imgData)?.resize(target: CGSize(width: 1000, height: 1000))
                             Nexilis.imageCache.setObject(img!, forKey: imageId as NSString)
                             return img
@@ -356,8 +360,6 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
                         }
                         
                         do {
-                            
-                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as! String
                             let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.listGroupingImages[indexPath.row].imageId)
                             if FileManager.default.fileExists(atPath: imageURL.path){
                                 let image    = UIImage(contentsOfFile: imageURL.path)
@@ -366,8 +368,12 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
                                     UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
                                 }
                             }
-                            else if FileEncryption.shared.isSecureExists(filename: secureName){
-                                if let imageData = try FileEncryption.shared.readSecure(filename: secureName) {
+                            else if FileEncryption.shared.isSecureExists(filename: self.listGroupingImages[indexPath.row].imageId){
+                                if var imageData = try FileEncryption.shared.readSecure(filename: self.listGroupingImages[indexPath.row].imageId) {
+                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
+                                    if dataDecrypt != nil {
+                                        imageData = dataDecrypt!
+                                    }
                                     let image    = UIImage(data: imageData)
                                     let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
                                     if save {
@@ -658,7 +664,11 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
                     imagePath = UIImage(contentsOfFile: imageURL.path)
                 }
                 else if FileEncryption.shared.isSecureExists(filename: image) {
-                    if let imageData = try FileEncryption.shared.readSecure(filename: image) {
+                    if var imageData = try FileEncryption.shared.readSecure(filename: image) {
+                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
+                        if dataDecrypt != nil {
+                            imageData = dataDecrypt!
+                        }
                         imagePath = UIImage(data: imageData)
                     }
                 }
@@ -666,12 +676,6 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
                     Download().startHTTP(forKey: image) { (name, progress) in
                         guard progress == 100 else {
                             return
-                        }
-                        do {
-                            try FileEncryption.shared.writeSecure(filename: image)
-                        }
-                        catch {
-                            
                         }
                     }
                     imagePath = UIImage(named: "Send-Image", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)

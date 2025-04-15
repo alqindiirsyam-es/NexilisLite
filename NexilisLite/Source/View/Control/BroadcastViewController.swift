@@ -412,6 +412,11 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
             Network().uploadHTTP(name: String(thumbId)) { (result1, progress) in
                 if result1 {
                     if progress == 100 {
+                        do {
+                            try FileEncryption.shared.writeSecure(filename: String(self.thumbId))
+                        } catch {
+                            
+                        }
                         Network().uploadHTTP(name: String(self.fileId)) { (result2, progress) in
                             if result2 {
                                 if progress == 100 {

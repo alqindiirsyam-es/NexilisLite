@@ -1580,7 +1580,11 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                         }
                                         else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                             do {
-                                                if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                if var imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
+                                                    if dataDecrypt != nil {
+                                                        imageData = dataDecrypt!
+                                                    }
                                                     let image = UIImage(data: imageData)
                                                     UIPasteboard.general.image = image
                                                     self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
@@ -1614,7 +1618,11 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
                                         }
                                         else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                             do {
-                                                if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                if var imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
+                                                    if dataDecrypt != nil {
+                                                        imageData = dataDecrypt!
+                                                    }
                                                     let image = UIImage(data: imageData)
                                                     UIPasteboard.general.image = image
                                                     self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)

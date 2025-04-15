@@ -166,13 +166,17 @@ class OutgoingThread {
                 Network().uploadHTTP(name: message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)) { (result, progress) in
                     if result, progress == 100 {
                         do {
-                            let fileManager = FileManager.default
-                            let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                            let fileDir = documentDir.appendingPathComponent(message.getBody(key: CoreMessage_TMessageKey.THUMB_ID))
-                            let path = fileDir.path
-                            if FileManager.default.fileExists(atPath: path) {
-                                let data = try Data(contentsOf: URL(fileURLWithPath: path))
-                                message.setMedia(media: [UInt8] (data))
+                            do{
+                                try FileEncryption.shared.writeSecure(filename: fileName)
+                                if var data = try FileEncryption.shared.readSecure(filename: fileName) {
+                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                    if dataDecrypt != nil {
+                                        data = dataDecrypt!
+                                    }
+                                    message.setMedia(media: [UInt8] (data))
+                                }
+                            } catch {
+                                
                             }
                         } catch {}
                         Network().uploadHTTP(name: fileName) { (result, progress) in
@@ -201,17 +205,14 @@ class OutgoingThread {
                                             
                                         }
                                     } else {
-                                        print("masuk 1")
                                         self.retryUpload(message: message, fileName: fileName)
                                     }
                                 }
                             } else {
-                                print("masuk 2")
                                 self.retryUpload(message: message, fileName: fileName)
                             }
                         }
                     } else {
-                        print("masuk 3")
                         if !result {
                             self.retryUpload(message: message, fileName: fileName)
                         }

@@ -245,7 +245,7 @@ class IncomingThread {
                     if Utils.getForceAnonymous() {
                         viewController?.deleteAllRecordDatabase()
                         SecureUserDefaults.shared.removeValue(forKey: "device_id")
-                        FileEncryption.shared.wipeFolder()
+//                        FileEncryption.shared.wipeFolder()
                         Nexilis.destroyAll()
                     }
                     DispatchQueue.main.async {
@@ -1296,17 +1296,15 @@ class IncomingThread {
             }
         }
         let media = message.getMedia()
-        //print("MEDIA \(media)");
         let thumb_id = message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)
-        do {
-            let data = Data(media)
-            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            let url = documentDir.appendingPathComponent(thumb_id)
-            //print("write thumb \(url.path)")
-            try data.write(to: url, options: .atomic)
-        } catch {
+        if media.count != 0 {
+            do {
+                let data = Data(media)
+                try FileEncryption.shared.writeSecure(filename: thumb_id, data: data)
+            } catch {
+            }
         }
-        if (!thumb_id.isEmpty) {
+        if (!thumb_id.isEmpty && media.count == 0) {
             Download().startHTTP(forKey: thumb_id) { (file, progress) in
                 //print ("masuk download \(progress)")
                 if(progress == 100 || progress == -100) {

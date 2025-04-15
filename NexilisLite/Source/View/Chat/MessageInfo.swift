@@ -899,7 +899,11 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         }
                     }
                     else if FileEncryption.shared.isSecureExists(filename: fileChat) {
-                        if let dataFile = try? FileEncryption.shared.readSecure(filename: fileChat) {
+                        if var dataFile = try? FileEncryption.shared.readSecure(filename: fileChat) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: dataFile)
+                            if dataDecrypt != nil {
+                                dataFile = dataDecrypt!
+                            }
                             var sizeOfFile = Int(dataFile.count / 1000000)
                             if (sizeOfFile < 1) {
                                 sizeOfFile = Int(dataFile.count / 1000)

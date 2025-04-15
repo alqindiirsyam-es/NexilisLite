@@ -983,14 +983,34 @@ public class APIS: NSObject {
                                 }
                                 Nexilis.playRingtoneCall()
                             } else if code == "CL02" {
+                                print("data \(data)")
+                                let callFromName = data["call-cancel-name"] as? String ?? ""
                                 let callFrom = data["call-cancel"] as? String ?? ""
+                                let callType = data["call-type"] as? String ?? ""
 //                                if let uuidCall = uuidCall {
-                                    print("STOP RINGTONE CALL")
-                                    Nexilis.stopRingtoneCall()
-                                    print("removeDeliveredNotifications \(callFrom)")
-                                    Nexilis.callAPNActivated = false
-                                    let center = UNUserNotificationCenter.current()
-                                    center.removeDeliveredNotifications(withIdentifiers: [callFrom])
+                                Nexilis.stopRingtoneCall()
+                                Nexilis.callAPNActivated = false
+                                let center = UNUserNotificationCenter.current()
+                                center.removeDeliveredNotifications(withIdentifiers: [callFrom])
+                                var textCall = ""
+                                if callType == "1" {
+                                    textCall = "audio"
+                                } else {
+                                    textCall = "video"
+                                }
+                                let content = UNMutableNotificationContent()
+                                content.title = callFromName
+                                content.body = "☎️ Missed \(textCall) call".localized()
+                                content.userInfo = ["id" : callFrom, "type" : code, "callType": callType]
+                                content.sound = nil
+                                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+                                let request = UNNotificationRequest(identifier: callFrom, content: content, trigger: trigger)
+                                center.add(request) { error in
+                                    if let error = error {
+                                        print("Error scheduling notification: \(error.localizedDescription)")
+                                    }
+                                }
+                                Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callFrom, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
     //                                    CallManager.shared.endCall(with: uuidCall)
 //                                }
                             }
@@ -1149,7 +1169,11 @@ public class APIS: NSObject {
                     sourceURL = audioURL
                 } else if FileEncryption.shared.isSecureExists(filename: nameSound) {
                     do {
-                        if let audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                        if var audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: audioData)
+                            if dataDecrypt != nil {
+                                audioData = dataDecrypt!
+                            }
                             let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                             let tempPath = cachesDirectory.appendingPathComponent(nameSound)
                             try audioData.write(to: tempPath)
@@ -1390,11 +1414,14 @@ public class APIS: NSObject {
     }
     
     public static func enterBackground() {
-        if !API.bAVisOngoing() {
-            API.deinitConnection()
-        }
+//        if !API.bAVisOngoing() {
+//            API.deinitConnection()
+//        }
+        notifTimer.invalidate()
     }
     
+    public static var notifTimer = Timer()
+    public static var stopNotif = false
     public static func enterForeground() {
         APIS.checkNotificationPermission(completion: { isAllowed in
             if !isAllowed {
@@ -1404,6 +1431,10 @@ public class APIS: NSObject {
             }
         })
         DispatchQueue.main.async {
+            stopNotif = true
+            self.notifTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { _ in
+                stopNotif = false
+            }
             do {
                 if !Nexilis.afterConnect && API.nGetCLXConnState() == 0 {
                     let id = Utils.getConnectionID()

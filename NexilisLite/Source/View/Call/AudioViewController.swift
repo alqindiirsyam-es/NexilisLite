@@ -199,6 +199,15 @@ extension UIImageView {
             if FileManager().fileExists(atPath: file.path) {
                 self.image = UIImage(contentsOfFile: file.path)
                 self.backgroundColor = .clear
+            } else if FileEncryption.shared.isSecureExists(filename: url) {
+                if var dataFile = try? FileEncryption.shared.readSecure(filename: url) {
+                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: dataFile)
+                    if dataDecrypt != nil {
+                        dataFile = dataDecrypt!
+                    }
+                    self.image = UIImage(data: dataFile)
+                    self.backgroundColor = .clear
+                }
             } else {
                 Download().startHTTP(forKey: url) { (name, progress) in
                     print ("masuk download \(progress)")
@@ -208,8 +217,14 @@ extension UIImageView {
                     
                     DispatchQueue.main.async {
                         if UIImageView.urlStore[tmpAddress] == url {
-                            self.image = UIImage(contentsOfFile: file.path)
-                            self.backgroundColor = .clear
+                            if var dataFile = try? FileEncryption.shared.readSecure(filename: url) {
+                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: dataFile)
+                                if dataDecrypt != nil {
+                                    dataFile = dataDecrypt!
+                                }
+                                self.image = UIImage(data: dataFile)
+                                self.backgroundColor = .clear
+                            }
                         }
                     }
                 }

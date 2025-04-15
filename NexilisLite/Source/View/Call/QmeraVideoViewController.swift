@@ -647,6 +647,7 @@ class QmeraVideoViewController: UIViewController {
                 Nexilis.stopRingtoneCall()
                 Nexilis.stopRingbacktoneCall()
                 QmeraVideoViewController.isLoop = false
+                QmeraVideoViewController.bSpeakerPhone = false
                 self.endAllCall()
                 self.dismiss(animated: true, completion: nil)
             }))
@@ -655,6 +656,17 @@ class QmeraVideoViewController: UIViewController {
             let alert = LibAlertController(title: "End Video Call".localized(), message: "Are you sure you want to end video call?".localized(), preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
             alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {(_) in
+                if self.callFCM && !self.vcTimer.isValid {
+                    DispatchQueue.global().async {
+                        if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
+                        } else {
+                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                            banner.show()
+                        }
+                    }
+                }
                 self.makeStateCall()
                 Nexilis.stopRingtoneCall()
                 Nexilis.stopRingbacktoneCall()
@@ -692,6 +704,7 @@ class QmeraVideoViewController: UIViewController {
                 self.vcTimer.invalidate()
 //                self.labelTimerVC.text = "Video call is over".localized()
                 QmeraVideoViewController.isLoop = false
+                QmeraVideoViewController.bSpeakerPhone = false
                 self.endAllCall()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     if self.isInisiator && !self.isPresent {
@@ -1093,9 +1106,30 @@ class QmeraVideoViewController: UIViewController {
                         self.isAddCall = data["f_pin"]!!
                     }
                 } else {
-                    DispatchQueue.main.async {
-                        self.dataPerson.append(data)
-                        API.initiateCCall(sParty: data["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
+                    if self.callFCM {
+                        DispatchQueue.global().async {
+                            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: data["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
+                                if response.isOk() {
+                                } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
+                                    self.dataPerson.append(data)
+                                    API.initiateCCall(sParty: data["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
+                                    Nexilis.playRingbacktoneCall()
+                                } else {
+                                    Nexilis.stopRingbacktoneCall()
+                                }
+                            } else {
+                                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                banner.show()
+                            }
+                        }
+                    } else {
+                        DispatchQueue.main.async {
+                            self.dataPerson.append(data)
+                            API.initiateCCall(sParty: data["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
+                            Nexilis.playRingbacktoneCall()
+                        }
                     }
                 }
             }
@@ -1169,7 +1203,7 @@ class QmeraVideoViewController: UIViewController {
             }
         } else if (state == Nexilis.VIDEO_CALL_ZOOM) && self.dataPerson.count > 1 {
             DispatchQueue.main.async {
-                if arrayMessage[0] == arrayMessage[3] {
+                if arrayMessage[2] != "2" {
                     self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
                     self.zoomView.contentMode = .scaleAspectFit
                 } else {
@@ -1190,14 +1224,19 @@ class QmeraVideoViewController: UIViewController {
         }
         else if state == Nexilis.STREAMING_SEMINAR_ENDED { // always call turnspeaker
             QmeraVideoViewController.isLoop = true
-            DispatchQueue.global(qos: .userInitiated).async {
-                repeat {
-                    Thread.sleep(forTimeInterval : 1)
-                    if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
-                        API.turnSpeakerPhone(bSPon: QmeraVideoViewController.bSpeakerPhone!)
-                    }
-                } while (QmeraVideoViewController.isLoop)
-            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5, execute: {
+                API.adjustVolume(fValue: 10.0)
+                self.setSpeaker()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    repeat {
+                        Thread.sleep(forTimeInterval : 1)
+                        print("Audio: \(API.bAudioEngineIsRunning())")
+                        if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
+                            API.turnSpeakerPhone(bSPon: QmeraVideoViewController.bSpeakerPhone!)
+                        }
+                    } while (QmeraVideoViewController.isLoop)
+                }
+            })
 //                DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: {
 //                    API.turnSpeakerPhone(bSPon: QmeraAudioViewController.bSpeakerPhone!)
 //                })
@@ -1403,6 +1442,7 @@ class QmeraVideoViewController: UIViewController {
                         _ = Nexilis.getWhiteboardDelegate()?.terminate()
                     }
                     QmeraVideoViewController.isLoop = false
+                    QmeraVideoViewController.bSpeakerPhone = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self.endAllCall()
                         self.dismiss(animated: true, completion: nil)
@@ -1456,6 +1496,7 @@ class QmeraVideoViewController: UIViewController {
                         controller!.dismiss(animated: true)
                     }
                     QmeraVideoViewController.isLoop = false
+                    QmeraVideoViewController.bSpeakerPhone = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self.endAllCall()
                         if self.isInisiator && !self.isPresent {
@@ -1674,7 +1715,7 @@ class QmeraVideoViewController: UIViewController {
                         for i in 0...1{
                             self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
                             self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
-                            self.listRemoteViewFix[i].backgroundColor = .clear
+                            self.listRemoteViewFix[i].backgroundColor = .white
                             self.listRemoteViewFix[i].makeRoundedView(radius: 8.0)
                             self.scrollRemoteView.addSubview(self.containerLabelName[i])
                             self.containerLabelName[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 30)
@@ -1702,7 +1743,7 @@ class QmeraVideoViewController: UIViewController {
                         let i = self.dataPerson.count - 1
                         self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
                         self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
-                        self.listRemoteViewFix[i].backgroundColor = .clear
+                        self.listRemoteViewFix[i].backgroundColor = .white
                         self.listRemoteViewFix[i].makeRoundedView(radius: 8.0)
                         self.scrollRemoteView.addSubview(self.containerLabelName[i])
                         self.containerLabelName[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 30)

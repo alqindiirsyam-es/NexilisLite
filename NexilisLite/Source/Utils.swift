@@ -647,6 +647,17 @@ public final class Utils {
         return "easySoftIndonesia"
     }
     
+    public static func setSecureFolderEncrypt(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "secure_folder_encrypt_key")
+    }
+    
+    public static func getSecureFolderEncrypt() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "secure_folder_encrypt_key") {
+            return value
+        }
+        return "easySoftIndonesia"
+    }
+    
     public static func setSecureFolderEncryptIv(value: String){
         SecureUserDefaults.shared.set(value, forKey: "secure_folder_encrypt_key_iv")
     }

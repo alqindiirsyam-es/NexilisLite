@@ -56,10 +56,6 @@ public class MasterKeyUtil {
         try generateAndStoreKey(keyAlias)
     }
     
-    func generateAndStoreServerKey(_ key_s: String) throws {
-        try generateAndStoreKey(serverKeyAlias, key_s: key_s)
-    }
-    
     func isDeviceNotSecure() -> Bool {
         let context = LAContext()
         var error: NSError?
@@ -86,11 +82,6 @@ public class MasterKeyUtil {
         } else {
             throw NSError(domain: "KeychainError", code: Int(status), userInfo: nil)
         }
-    }
-    
-    func getServerKeyIV() -> Data {
-        let keyData = base64toData(Utils.getSecureFolderEncryptIv()) ?? Data()
-        return keyData
     }
     
     func getMasterKey() throws -> SymmetricKey {
@@ -141,26 +132,6 @@ public class MasterKeyUtil {
         let query: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: prefsKeyAlias,
-            kSecReturnData as String: true
-        ]
-        
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess else {
-            throw NSError(domain: "KeychainError", code: Int(status), userInfo: nil)
-        }
-        
-        guard let keyData = item as? Data else {
-            throw NSError(domain: "KeyRetrievalError", code: -1, userInfo: nil)
-        }
-        
-        return SymmetricKey(data: keyData)
-    }
-    
-    func getServerKey() throws -> SymmetricKey {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: serverKeyAlias,
             kSecReturnData as String: true
         ]
         

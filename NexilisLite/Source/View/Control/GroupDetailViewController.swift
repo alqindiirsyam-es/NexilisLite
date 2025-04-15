@@ -1067,6 +1067,11 @@ extension GroupDetailViewController: ImageVideoPickerDelegate {
                         guard result, progress == 100 else {
                             return
                         }
+                        do {
+                            try FileEncryption.shared.writeSecure(filename: fileDir.lastPathComponent)
+                        } catch {
+                            
+                        }
                         if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChangeGroupInfo(p_group_id: g.id, p_thumb_id: fileDir.lastPathComponent)), response.isOk() {
                             Database.shared.database?.inTransaction({ fmdb, rollback in
                                 do {

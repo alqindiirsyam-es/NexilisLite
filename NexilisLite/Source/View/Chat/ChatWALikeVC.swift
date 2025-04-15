@@ -473,7 +473,11 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                         }
                     }
                     else if FileEncryption.shared.isSecureExists(filename: data.file) {
-                        if let dataFile = try? FileEncryption.shared.readSecure(filename: data.file) {
+                        if var dataFile = try? FileEncryption.shared.readSecure(filename: data.file) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: dataFile)
+                            if dataDecrypt != nil {
+                                dataFile = dataDecrypt!
+                            }
                             var sizeOfFile = Int(dataFile.count / 1000000)
                             if (sizeOfFile < 1) {
                                 sizeOfFile = Int(dataFile.count / 1000)
@@ -929,8 +933,11 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                     self.present(previewController, animated: true)
                 } else if FileEncryption.shared.isSecureExists(filename: sender.file_id) {
                     do {
-                        if let docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
-                            
+                        if var docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: docData)
+                            if dataDecrypt != nil {
+                                docData = dataDecrypt!
+                            }
                             let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                             let tempPath = cachesDirectory.appendingPathComponent(sender.file_id)
                             try docData.write(to: tempPath)
@@ -983,7 +990,11 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                     }
                 } else if FileEncryption.shared.isSecureExists(filename: sender.audio_id) {
                     do {
-                        if let audioData = try FileEncryption.shared.readSecure(filename: sender.audio_id) {
+                        if var audioData = try FileEncryption.shared.readSecure(filename: sender.audio_id) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: audioData)
+                            if dataDecrypt != nil {
+                                audioData = dataDecrypt!
+                            }
                             let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                             let tempPath = cachesDirectory.appendingPathComponent(sender.audio_id)
                             try audioData.write(to: tempPath)

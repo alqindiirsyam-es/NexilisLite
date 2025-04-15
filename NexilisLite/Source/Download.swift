@@ -93,26 +93,20 @@ public class Download {
                             let url = documentDir.appendingPathComponent(filename)
 //                            print("write file \(url.path)")
 //                            try successResponse.write(to: url)
-                            let dResponse = try FileEncryption.shared.decryptToMemory(successResponse, MasterKeyUtil.shared.getServerKey())
-                            if isImage {
-                                let imageDec = UIImage(data: dResponse)
-                                if imageDec != nil {
-                                    try dResponse.write(to: url)
-                                } else {
-                                    try successResponse.write(to: url)
-                                }
+                            let dResponse = FileEncryption.shared.decryptFileFromServer(data: successResponse)
+                            if dResponse != nil {
+                                try FileEncryption.shared.writeSecure(filename: filename, data: dResponse!)
+                            } else {
+                                try FileEncryption.shared.writeSecure(filename: filename, data: successResponse)
                             }
-                            else {
-                                try successResponse.write(to: url)
-                            }
-                            Nexilis.removeDownload(forKey: filename)
+                            _ = Nexilis.removeDownload(forKey: filename)
                             completion(filename,100)
                         }
                         catch {}
                     }
                     else {
-                        let statusCode = result.response?.statusCode
-                        print("Response fail: \(result.debugDescription)")
+//                        let statusCode = result.response?.statusCode
+//                        print("Response fail: \(result.debugDescription)")
                         completion(filename,-100)
                     }
                 }

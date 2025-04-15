@@ -217,9 +217,6 @@ public class Network {
                         let filenameServer = "\(name)"
                         let fileDirServer = tempDir.appendingPathComponent(filenameServer)
                         let fileURLServer = URL(fileURLWithPath: fileDirServer.path)
-                        try FileEncryption.shared.encryptFile(fileURL, fileURLServer, MasterKeyUtil.shared.getServerKey())
-//                        let dataSecure = try FileEncryption.shared.encryptFile(fileURL)
-//                        dataSecure?.write(to: fileURLSecure)
                         filesIn.append(fileURL)
                         filesTempServer.append(fileURLServer)
                     }
@@ -248,7 +245,11 @@ public class Network {
         
         let uploadRequest = SessionManager.shared.session.upload(multipartFormData: { (multipartFormData: MultipartFormData) in
             for (key, value) in parameters {
-                multipartFormData.append("\(value)".data(using: String.Encoding.utf8)!, withName: key as String)
+                var dataToUpload = "\(value)".data(using: String.Encoding.utf8)!
+                if Nexilis.checkingAccess(key: "secure_folder_encrypt"){
+                    dataToUpload = FileEncryption.shared.encryptFileToServer(data: dataToUpload) ?? Data()
+                }
+                multipartFormData.append(dataToUpload, withName: key as String)
                 //print(multipartFormData)
             }
             

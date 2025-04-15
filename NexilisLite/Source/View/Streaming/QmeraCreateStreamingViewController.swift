@@ -241,7 +241,11 @@ public class QmeraCreateStreamingViewController: UITableViewController {
             }
             var data: [String: Any] = [:]
             if !isJoin && !self.data.isEmpty {
-                data = self.data
+                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                imageView.tintColor = .white
+                let banner = FloatingNotificationBanner(title: "The streaming session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                banner.show()
+                return
             } else if self.data.isEmpty {
                 guard let streamingTitle = titleView.text else {
                     return

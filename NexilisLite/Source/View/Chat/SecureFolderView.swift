@@ -185,14 +185,19 @@ class SecureFolderViewController: UIViewController, UISearchBarDelegate, UIColle
         if fileItem.imageId != "" {
             print("this image")
             do {
-                let data = try FileEncryption.shared.readSecure(filename: fileItem.filename)
-                let image = UIImage(data: data!)
-                let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                previewImageVC.image = image
-                previewImageVC.isHiddenTextField = true
-                previewImageVC.modalPresentationStyle = .custom
-                previewImageVC.modalTransitionStyle  = .crossDissolve
-                self.present(previewImageVC, animated: true, completion: nil)
+                if var data = try FileEncryption.shared.readSecure(filename: fileItem.filename) {
+                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                    if dataDecrypt != nil {
+                        data = dataDecrypt!
+                    }
+                    let image = UIImage(data: data)
+                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                    previewImageVC.image = image
+                    previewImageVC.isHiddenTextField = true
+                    previewImageVC.modalPresentationStyle = .custom
+                    previewImageVC.modalTransitionStyle  = .crossDissolve
+                    self.present(previewImageVC, animated: true, completion: nil)
+                }
             }
             catch {
                 print("Error reading secure file")
@@ -201,7 +206,11 @@ class SecureFolderViewController: UIViewController, UISearchBarDelegate, UIColle
         else if fileItem.videoId != "" {
             print("this video")
             do {
-                if let secureData = try FileEncryption.shared.readSecure(filename: fileItem.filename) {
+                if var secureData = try FileEncryption.shared.readSecure(filename: fileItem.filename) {
+                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                    if dataDecrypt != nil {
+                        secureData = dataDecrypt!
+                    }
                     let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                     let tempPath = cachesDirectory.appendingPathComponent(fileItem.filename)
                     try secureData.write(to: tempPath)
@@ -218,8 +227,11 @@ class SecureFolderViewController: UIViewController, UISearchBarDelegate, UIColle
         else if fileItem.fileId != "" {
             print("this file")
             do {
-                if let docData = try FileEncryption.shared.readSecure(filename: fileItem.filename) {
-                    
+                if var docData = try FileEncryption.shared.readSecure(filename: fileItem.filename) {
+                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: docData)
+                    if dataDecrypt != nil {
+                        docData = dataDecrypt!
+                    }
                     let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                     let tempPath = cachesDirectory.appendingPathComponent(fileItem.filename)
                     try docData.write(to: tempPath)

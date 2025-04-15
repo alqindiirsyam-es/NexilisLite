@@ -413,8 +413,12 @@ extension NSObject {
                 let image = UIImage(contentsOfFile: file.path)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
                 completion(true, false, isCircle ? image?.circleMasked : image)
             } else if var tempData = try FileEncryption.shared.readSecure(filename: url) {
+                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: tempData)
+                if dataDecrypt != nil {
+                    tempData = dataDecrypt!
+                }
                 let image = UIImage(data: tempData)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-                FileEncryption.shared.wipeData(&tempData)
+//                FileEncryption.shared.wipeData(&tempData)
                 completion(true, true, isCircle ? image?.circleMasked : image)
             } else {
                 completion(false, false, placeholderImage)
@@ -439,7 +443,11 @@ extension NSObject {
                                 completion(true, true, isCircle ? image?.circleMasked : image)
                             } else if FileEncryption.shared.isSecureExists(filename: url) {
                                 do {
-                                    if let imageData = try FileEncryption.shared.readSecure(filename: url) {
+                                    if var imageData = try FileEncryption.shared.readSecure(filename: url) {
+                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
+                                        if dataDecrypt != nil {
+                                            imageData = dataDecrypt!
+                                        }
                                         let image = UIImage(data: imageData)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
                                         completion(true, true, isCircle ? image?.circleMasked : image)
                                     }

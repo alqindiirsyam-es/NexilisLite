@@ -2835,7 +2835,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         DispatchQueue.global().async {
             if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getAddFriendApproval(lPin: lPin ?? "", isAccept: isAccept), timeout: 5 * 1000) {
                 if response.isOk() {
-                    self.deleteMessage(l_pin: User.getMyPin() ?? "", message_id: messageId ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
+                    self.deleteMessage(l_pin: self.dataPerson["f_pin"]!!, message_id: messageId ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
                     let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == messageId})
                     if idx != nil {
                         self.dataMessages.remove(at: idx!)
@@ -2856,8 +2856,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 } else {
                                     self.navigationController?.popViewController(animated: true)
                                 }
-                                UIApplication.shared.visibleViewController?.view.makeToast(sender.tag == 0 ? "Friend request has been accepted".localized() : "Friend request has been rejected".localized(), duration: 3)
+                            } else {
+                                self.tableChatView.reloadData()
                             }
+                            UIApplication.shared.visibleViewController?.view.makeToast(sender.tag == 0 ? "Friend request has been accepted".localized() : "Friend request has been rejected".localized(), duration: 3)
                         }
                     }
                 } else {
@@ -3289,7 +3291,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                     return
                                 }
                                 do {
-                                    let secureName = try FileEncryption.shared.writeSecure(filename: valueListGroupImages[i].imageId)?[0]
                                     let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                                     let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                                     let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -3303,7 +3304,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                             }
                                         }
                                         else if FileEncryption.shared.isSecureExists(filename: valueListGroupImages[i].imageId) {
-                                            if let secureData = try FileEncryption.shared.readSecure(filename: valueListGroupImages[i].imageId) {
+                                            if var secureData = try FileEncryption.shared.readSecure(filename: valueListGroupImages[i].imageId) {
+                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                                                if dataDecrypt != nil {
+                                                    secureData = dataDecrypt!
+                                                }
                                                 let image = UIImage(data: secureData)
                                                 let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
                                                 if save {
@@ -3331,7 +3336,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 return
                             }
                             do {
-                                let secureName = try FileEncryption.shared.writeSecure(filename: self.dataMessages[index]["image_id"] as? String)?[0]  as? String ?? ""
                                 let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                                 let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -3344,8 +3348,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                             UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
                                         }
                                     }
-                                    else if FileEncryption.shared.isSecureExists(filename: secureName) {
-                                        if let secureData = try FileEncryption.shared.readSecure(filename: secureName) {
+                                    else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
+                                        if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
+                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                                            if dataDecrypt != nil {
+                                                secureData = dataDecrypt!
+                                            }
                                             let image = UIImage(data: secureData)
                                             let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
                                             if save {
@@ -3372,7 +3380,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             return
                         }
                         do {
-                            let secureName = try FileEncryption.shared.writeSecure(filename: self.dataMessages[index]["video_id"] as? String)?[0]  as? String ?? ""
                             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -3388,8 +3395,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                         }
                                     }
                                 }
-                                else if FileEncryption.shared.isSecureExists(filename: secureName) {
-                                    if let secureData = try FileEncryption.shared.readSecure(filename: secureName) {
+                                else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
+                                    if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
+                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                                        if dataDecrypt != nil {
+                                            secureData = dataDecrypt!
+                                        }
                                         let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                                         let tempPath = cachesDirectory.appendingPathComponent(name)
                                         try secureData.write(to: tempPath)
@@ -3420,11 +3431,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     Download().startHTTP(forKey: dataMessages[index]["file_id"]  as? String ?? "", isImage: false) { (name, progress) in
                         guard progress == 100 else {
                             return
-                        }
-                        do {
-                            try FileEncryption.shared.writeSecure(filename: name)
-                        } catch {
-                            
                         }
                         DispatchQueue.main.async { [self] in
                             let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
@@ -5145,7 +5151,11 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                                         self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                     } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                         do {
-                                            if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                            if var imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
+                                                if dataDecrypt != nil {
+                                                    imageData = dataDecrypt!
+                                                }
                                                 let image = UIImage(data: imageData)
                                                 UIPasteboard.general.image = image
                                                 self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
@@ -5176,7 +5186,11 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                                         self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
                                     } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                         do {
-                                            if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                            if var imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
+                                                if dataDecrypt != nil {
+                                                    imageData = dataDecrypt!
+                                                }
                                                 let image = UIImage(data: imageData)
                                                 UIPasteboard.general.image = image
                                                 self.view.makeToast("Image coppied to clipboard".localized(), duration: 3)
@@ -6484,7 +6498,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 } else {
                     if !FileManager.default.fileExists(atPath: audioURL.path) {
                         do {
-                            if let audioData = try FileEncryption.shared.readSecure(filename: audioChat) {
+                            if var audioData = try FileEncryption.shared.readSecure(filename: audioChat) {
+                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: audioData)
+                                if dataDecrypt != nil {
+                                    audioData = dataDecrypt!
+                                }
                                 let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                                 let tempPath = cachesDirectory.appendingPathComponent(audioChat)
                                 try audioData.write(to: tempPath)
@@ -6672,18 +6690,44 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                 if let dirPath = paths.first {
                     let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumbChat)
-                    DispatchQueue.main.async {
-                        let image : UIImage? =  {
-                            if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
-                                return img
-                            }
-                            else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                    Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                    if FileManager.default.fileExists(atPath: thumbURL.path) {
+                        DispatchQueue.main.async {
+                            let image : UIImage? =  {
+                                if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
                                     return img
+                                }
+                                else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
+                                        Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                                        return img
+                                }
+                                return nil
+                            }()
+                            imageThumb.image = image
+                        }
+                    } else if FileEncryption.shared.isSecureExists(filename: thumbChat) {
+                        do {
+                            if var data = try FileEncryption.shared.readSecure(filename: thumbChat) {
+                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                if dataDecrypt != nil {
+                                    data = dataDecrypt!
+                                }
+                                DispatchQueue.main.async {
+                                    let image : UIImage? =  {
+                                        if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
+                                            return img
+                                        }
+                                        else if let img = UIImage(data: data)?.resize(target: CGSize(width: 500, height: 500)) {
+                                            Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                                            return img
+                                        }
+                                        return nil
+                                    }()
+                                    imageThumb.image = image
+                                }
                             }
-                            return nil
-                        }()
-                        imageThumb.image = image
+                        } catch {
+                            
+                        }
                     }
 //                    let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
                     let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
@@ -6736,11 +6780,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
 //                                imageGif.animationRepeatCount = 4
                             } else if FileEncryption.shared.isSecureExists(filename: gifChat){
                                 do {
-                                    let data = try FileEncryption.shared.readSecure(filename: gifChat)
-                                    if let imageData = SDAnimatedImage(data: data!) {
-                                        imageGif.image = imageData
-//                                        imageGif.shouldCustomLoopCount = true
-//                                        imageGif.animationRepeatCount = 4
+                                    if var data = try FileEncryption.shared.readSecure(filename: gifChat) {
+                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                        if dataDecrypt != nil {
+                                            data = dataDecrypt!
+                                        }
+                                        if let imageData = SDAnimatedImage(data: data) {
+                                            imageGif.image = imageData
+    //                                        imageGif.shouldCustomLoopCount = true
+    //                                        imageGif.animationRepeatCount = 4
+                                        }
                                     }
                                 }
                                 catch {
@@ -6828,7 +6877,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     }
                 }
                 else if FileEncryption.shared.isSecureExists(filename: fileChat) {
-                    if let dataFile = try? FileEncryption.shared.readSecure(filename: fileChat), textChat.isEmpty {
+                    if var dataFile = try? FileEncryption.shared.readSecure(filename: fileChat), textChat.isEmpty {
+                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: dataFile)
+                        if dataDecrypt != nil {
+                            dataFile = dataDecrypt!
+                        }
                         var sizeOfFile = Int(dataFile.count / 1000000)
                         if (sizeOfFile < 1) {
                             sizeOfFile = Int(dataFile.count / 1000)
@@ -7585,14 +7638,19 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     self.present(previewImageVC, animated: true, completion: nil)
                 } else if FileEncryption.shared.isSecureExists(filename: sender.image_id) {
                     do {
-                        let data = try FileEncryption.shared.readSecure(filename: sender.image_id)
-                        let image = UIImage(data: data!)
-                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                        previewImageVC.image = image
-                        previewImageVC.isHiddenTextField = true
-                        previewImageVC.modalPresentationStyle = .custom
-                        previewImageVC.modalTransitionStyle  = .crossDissolve
-                        self.present(previewImageVC, animated: true, completion: nil)
+                        if var data = try FileEncryption.shared.readSecure(filename: sender.image_id) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                            if dataDecrypt != nil {
+                                data = dataDecrypt!
+                            }
+                            let image = UIImage(data: data)
+                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                            previewImageVC.image = image
+                            previewImageVC.isHiddenTextField = true
+                            previewImageVC.modalPresentationStyle = .custom
+                            previewImageVC.modalTransitionStyle  = .crossDissolve
+                            self.present(previewImageVC, animated: true, completion: nil)
+                        }
                     }
                     catch {
                         print("Error reading secure file")
@@ -7615,7 +7673,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                             return
                         }
                         do {
-                            let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0]  as? String ?? ""
                             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -7628,8 +7685,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                                         UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
                                     }
                                 }
-                                else if FileEncryption.shared.isSecureExists(filename: secureName) {
-                                    if let secureData = try FileEncryption.shared.readSecure(filename: secureName) {
+                                else if FileEncryption.shared.isSecureExists(filename: sender.image_id) {
+                                    if var secureData = try FileEncryption.shared.readSecure(filename: sender.image_id) {
+                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                                        if dataDecrypt != nil {
+                                            secureData = dataDecrypt!
+                                        }
                                         let image = UIImage(data: secureData)
                                         let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
                                         if save {
@@ -7660,7 +7721,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     }
                 } else if FileEncryption.shared.isSecureExists(filename: sender.gif_id) {
                     do {
-                        if let secureData = try FileEncryption.shared.readSecure(filename: sender.gif_id) {
+                        if var secureData = try FileEncryption.shared.readSecure(filename: sender.gif_id) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                            if dataDecrypt != nil {
+                                secureData = dataDecrypt!
+                            }
                             APIS.openImageNexilis(image: UIImage(), data: secureData, isGIF: true)
                         }
                     } catch {
@@ -7679,7 +7744,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     self.present(playerVC, animated: true, completion: nil)
                 } else if FileEncryption.shared.isSecureExists(filename: sender.video_id) {
                     do {
-                        if let secureData = try FileEncryption.shared.readSecure(filename: sender.video_id) {
+                        if var secureData = try FileEncryption.shared.readSecure(filename: sender.video_id) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                            if dataDecrypt != nil {
+                                secureData = dataDecrypt!
+                            }
                             let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                             let tempPath = cachesDirectory.appendingPathComponent(sender.video_id)
                             try secureData.write(to: tempPath)
@@ -7735,25 +7804,18 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                                 return
                             }
                             do {
-                                if let secureName = try FileEncryption.shared.writeSecure(filename: name)?[0] as? String {
-                                    let secureData = try FileEncryption.shared.readSecure(filename: secureName)
+                                if var secureData = try FileEncryption.shared.readSecure(filename: sender.video_id) {
+                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                                    if dataDecrypt != nil {
+                                        secureData = dataDecrypt!
+                                    }
                                     let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                                     let tempPath = cachesDirectory.appendingPathComponent(name)
-                                    try secureData!.write(to: tempPath)
+                                    try secureData.write(to: tempPath)
                                     let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
                                     if save {
                                         PHPhotoLibrary.shared().performChanges({
                                             PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempPath)
-                                        }) { saved, error in
-                                            
-                                        }
-                                    }
-                                } else {
-                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                    if save {
-                                        let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.video_id)
-                                        PHPhotoLibrary.shared().performChanges({
-                                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
                                         }) { saved, error in
                                             
                                         }
@@ -7785,8 +7847,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     self.present(previewController, animated: true)
                 } else if FileEncryption.shared.isSecureExists(filename: sender.file_id) {
                     do {
-                        if let docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
-                            
+                        if var docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: docData)
+                            if dataDecrypt != nil {
+                                docData = dataDecrypt!
+                            }
                             let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                             let tempPath = cachesDirectory.appendingPathComponent(sender.file_id)
                             try docData.write(to: tempPath)
@@ -7842,11 +7907,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
                                 return
-                            }
-                            do {
-                                try FileEncryption.shared.writeSecure(filename: name)
-                            } catch {
-                                
                             }
                             let idx = self.dataMessages.firstIndex(where: { $0["file_id"]  as? String ?? "" == sender.file_id})
                             if idx != nil {

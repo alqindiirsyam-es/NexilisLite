@@ -679,14 +679,19 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                     self.present(previewImageVC, animated: true, completion: nil)
                 } else if FileEncryption.shared.isSecureExists(filename: self.user!.thumb) {
                     do {
-                        let data = try FileEncryption.shared.readSecure(filename: self.user!.thumb)
-                        let image = UIImage(data: data!)
-                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                        previewImageVC.image = image
-                        previewImageVC.isHiddenTextField = true
-                        previewImageVC.modalPresentationStyle = .custom
-                        previewImageVC.modalTransitionStyle  = .crossDissolve
-                        self.present(previewImageVC, animated: true, completion: nil)
+                        if var data = try FileEncryption.shared.readSecure(filename: self.user!.thumb) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                            if dataDecrypt != nil {
+                                data = dataDecrypt!
+                            }
+                            let image = UIImage(data: data)
+                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                            previewImageVC.image = image
+                            previewImageVC.isHiddenTextField = true
+                            previewImageVC.modalPresentationStyle = .custom
+                            previewImageVC.modalTransitionStyle  = .crossDissolve
+                            self.present(previewImageVC, animated: true, completion: nil)
+                        }
                     }
                     catch {
                         print("Error reading secure file")
@@ -891,6 +896,11 @@ extension ProfileViewController: ImageVideoPickerDelegate {
                         }
                         guard progress == 100 else {
                             return
+                        }
+                        do {
+                            try FileEncryption.shared.writeSecure(filename: fileDir.lastPathComponent)
+                        } catch {
+                            
                         }
                         if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChangePersonImage(thumb_id: fileDir.lastPathComponent)), response.isOk() {
                             Database.shared.database?.inTransaction({ fmdb, rollback in
