@@ -913,6 +913,7 @@ public class APIS: NSObject {
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
         if checkAppStateisBackground() {
 //            Nexilis.sendStateToServer(s: "MASUK SHOW NOTIFICATION NEXILIS")
+            print("MASUK SHOW NOTIFICATION NEXILIS: \(userInfo)")
             DispatchQueue.main.async {
                 if let payload = userInfo["payload"] as? [String: Any] {
                     if let messagePayload = payload["message"] as? [String: Any] {
@@ -949,14 +950,6 @@ public class APIS: NSObject {
 //                                uuidCall = UUID()
                                 fpinCall = callFrom
                                 Nexilis.callAPNActivated = true
-    //                                    CallManager.shared.reportIncomingCall(uuid: uuidCall!, callerName: callFromName, callerId: callFrom, isVideo: callType != "1") { error in
-    //                                        if let error = error {
-    //                                            print("Error reporting incoming call: \(error.localizedDescription)")
-    //                                        } else {
-    //                                            print("Incoming call reported successfully")
-    //                                        }
-    //                                    }
-//                                copySoundToLocalPath("pb_call_in_ios", false)
                                 let center = UNUserNotificationCenter.current()
                                 let content = UNMutableNotificationContent()
                                 content.title = callFromName
@@ -967,8 +960,7 @@ public class APIS: NSObject {
                                 }
                                 content.userInfo = ["id" : callFrom, "type" : code, "callType": callType]
                                 content.sound = nil
-                                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-                                let request = UNNotificationRequest(identifier: callFrom, content: content, trigger: trigger)
+                                let request = UNNotificationRequest(identifier: callFrom, content: content, trigger: nil)
                                 center.add(request) { error in
                                     if let error = error {
                                         print("Error scheduling notification: \(error.localizedDescription)")
@@ -1003,17 +995,66 @@ public class APIS: NSObject {
                                 content.body = "☎️ Missed \(textCall) call".localized()
                                 content.userInfo = ["id" : callFrom, "type" : code, "callType": callType]
                                 content.sound = nil
-                                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-                                let request = UNNotificationRequest(identifier: callFrom, content: content, trigger: trigger)
+                                let request = UNNotificationRequest(identifier: callFrom, content: content, trigger: nil)
                                 center.add(request) { error in
                                     if let error = error {
                                         print("Error scheduling notification: \(error.localizedDescription)")
                                     }
                                 }
                                 Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callFrom, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
-    //                                    CallManager.shared.endCall(with: uuidCall)
-//                                }
                             }
+                        }
+                    }
+                } else if let message_id = userInfo["message_id"] as? String {
+                    getMessageById(id: message_id)
+                }
+            }
+        }
+    }
+    
+    public static func showNotificationCallKitNexilis(payload: [AnyHashable : Any], completion: @escaping () -> ()) {
+        if let messagePayload = payload["payload"] as? [String: Any] {
+            if let message = messagePayload["message"] as? [String: Any] {
+                if let data = message["data"] as? [String: Any] {
+                    let nxCode = data["nx_code"] as? String ?? ""
+                    let callFromName = data["call-from-name"] as? String ?? ""
+                    let callCancelName = data["call-cancel-name"] as? String ?? ""
+                    let callFrom = data["call-from"] as? String ?? ""
+                    let callCancel = data["call-cancel"] as? String ?? ""
+                    let callType = data["call-type"] as? String ?? ""
+                    if nxCode == "CL03" {
+                        Nexilis.callAPNActivated = true
+                        APIS.uuidCall = UUID()
+                        CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callFromName, callerId: callFrom, isVideo: callType != "1")
+                    } else {
+                        if APIS.uuidCall != nil {
+                            CallManager.shared.endCall(uuid: APIS.uuidCall!) {
+                                Nexilis.callAPNActivated = false
+                                APIS.uuidCall = nil
+                                let center = UNUserNotificationCenter.current()
+                                var textCall = ""
+                                if callType == "1" {
+                                    textCall = "audio"
+                                } else {
+                                    textCall = "video"
+                                }
+                                let content = UNMutableNotificationContent()
+                                content.title = callCancelName
+                                content.body = "☎️ Missed \(textCall) call".localized()
+                                content.userInfo = ["id" : callFrom, "type" : nxCode, "callType": callType]
+                                content.sound = nil
+                                let request = UNNotificationRequest(identifier: callCancel, content: content, trigger: nil)
+                                center.add(request) { error in
+                                    if let error = error {
+                                        print("Error scheduling notification: \(error.localizedDescription)")
+                                    }
+                                }
+                                Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callCancel, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
+                            }
+                        } else if UIApplication.shared.visibleViewController is QmeraAudioViewController || UIApplication.shared.visibleViewController is QmeraVideoViewController {
+                            var dataMessage: [AnyHashable : Any] = [:]
+                            dataMessage["call_cancel"] = true
+                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.callFCM), object: nil, userInfo: dataMessage)
                         }
                     }
                 }
@@ -1032,6 +1073,66 @@ public class APIS: NSObject {
                 Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "ack_message")!, parameter: parameter, isFormData: true) { data, response, error in
                 }
             }
+        }
+    }
+    
+    private static func getMessageById(id: String) {
+        DispatchQueue.global().async {
+//            Nexilis.sendStateToServer(s: "send ack from apn")
+            DispatchQueue.global().async {
+                let parameter: [String : Any] = [
+                    "pin": User.getMyPin() ?? "",
+                    "message_id": id
+                ]
+                Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
+                    if let data = data {
+                        do {
+                            if let dataString = String(data: data, encoding: .utf8) {
+                                if let jsonObj = try! JSONSerialization.jsonObject(with: dataString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
+                                    let dataObj = jsonObj["data"] as? String ?? ""
+                                    let message = TMessage(data: dataObj)
+                                    Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
+                                    ackAPN(id: id)
+                                }
+                            }
+                        } catch {
+                            
+                        }
+                    }
+                }
+            }
+//            do {
+//                if API.nGetCLXConnState() == 0 {
+//                    let id = Utils.getConnectionID()
+//                    try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+//                    while API.nGetCLXConnState() == 0 {
+//                        print("nGetCLXConnState: 0")
+//                        Thread.sleep(forTimeInterval: 1)
+//                    }
+//                    print("nGetCLXConnState: lewat")
+//                    getMessage()
+//                } else {
+//                    getMessage()
+//                }
+//                func getMessage() {
+//                    if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.getMessageById(messageId: id), timeout: 30 * 1000) {
+//                        print("result: \(result.toLogString())")
+//                        if result.isOk() {
+//                            let respData = result.getBody(key: CoreMessage_TMessageKey.DATA)
+//                            if let data = Data(base64Encoded: respData, options: .ignoreUnknownCharacters),
+//                               let decodedString = String(data: data, encoding: .utf8) {
+//                                let message = TMessage(data: decodedString)
+//                                print("message: \(message.toLogString())")
+//                            }
+//                        } else {
+//                            
+//                        }
+//                    } else {
+//                    }
+//                }
+//            } catch {
+//                
+//            }
         }
     }
     
@@ -1145,8 +1246,7 @@ public class APIS: NSObject {
         }
         content.userInfo = ["id" : threadIdentifier, "type" : type]
         content.sound = UNNotificationSound(named: UNNotificationSoundName("\(nameSound).mp3"))
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-        let request = UNNotificationRequest(identifier: messageId, content: content, trigger: trigger)
+        let request = UNNotificationRequest(identifier: messageId, content: content, trigger: nil)
         center.add(request) { error in
             if let error = error {
                 print("Error scheduling notification: \(error.localizedDescription)")
@@ -1233,37 +1333,26 @@ public class APIS: NSObject {
             } else {
                 let userInfo = response.notification.request.content.userInfo
                 DispatchQueue.main.async {
-                    if let payload = userInfo["payload"] as? [String: Any] {
-                        if let messagePayload = payload["message"] as? [String: Any] {
-                            if let data = messagePayload["data"] as? [String: Any] {
-                                let code = data["nx_code"] as? String ?? ""
-                                if code == "CL01" {
-                                    if let message = data["bodies"] as? [String: String] {
-                                        let idAck = data["message_id"] as? String ?? ""
-                                        let messageToSave = TMessage()
-                                        messageToSave.mBodies = message
-                                        do {
-                                            var messageExist = false
-                                            Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")'"), cursor.next() {
-                                                    messageExist = true
-                                                    cursor.close()
-                                                }
-                                            })
-                                            if messageExist {
-                                                ackAPN(id: idAck)
-                                                return
-                                            }
-                                        } catch {
-                                            print("error saving message: \(error)")
-                                        }
-                                        ackAPN(id: idAck)
-                                        Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
-                                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-                                    }
-                                }
+                    if let message_id = userInfo[CoreMessage_TMessageKey.MESSAGE_ID] as? String {
+                        var f_pin = ""
+                        var l_pin = ""
+                        var message_scope_id = ""
+                        var pin = ""
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin, message_scope_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
+                                f_pin = cursor.string(forColumnIndex: 0) ?? ""
+                                l_pin = cursor.string(forColumnIndex: 1) ?? ""
+                                message_scope_id = cursor.string(forColumnIndex: 2) ?? ""
+                                pin = f_pin == User.getMyPin() ? l_pin : f_pin
+                                cursor.close()
+                            }
+                        })
+                        if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
+                            if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
+                                navigationC.popViewController(animated: false)
                             }
                         }
+                        showEditorOrCallFromAPN(pin, message_scope_id == "4" ? "1" : "0", "CL01")
                     }
                 }
             }
@@ -1422,6 +1511,7 @@ public class APIS: NSObject {
     
     public static var notifTimer = Timer()
     public static var stopNotif = false
+    public static var afterEnterForeground = false
     public static func enterForeground() {
         APIS.checkNotificationPermission(completion: { isAllowed in
             if !isAllowed {
@@ -1448,6 +1538,15 @@ public class APIS: NSObject {
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        afterEnterForeground = true
+    }
+    
+    public static func willEnterForeground() {
+        if APIS.uuidCall != nil {
+            CallManager.shared.endCall(uuid: APIS.uuidCall!) {
+                APIS.uuidCall = nil
+            }
+        }
     }
     
     private static func checkNotificationPermission(completion: @escaping (Bool) -> Void) {

@@ -496,7 +496,7 @@ public final class Utils {
                 return showNSMutableAttributedString(("📹 " + "Video".localized()))
             }
         }
-        else if !chat.file.isEmpty {
+        else if !chat.file.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if chat.messageScope == "18" {
                 return showNSMutableAttributedString(("📄 Form"))
             }

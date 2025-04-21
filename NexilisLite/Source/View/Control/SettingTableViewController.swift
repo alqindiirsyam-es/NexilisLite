@@ -170,6 +170,24 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                             dataImage["name"] = imageSignIn
                                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
                                         }
+                                    } else if FileEncryption.shared.isSecureExists(filename: imageSignIn) {
+                                        do {
+                                            if var data = try FileEncryption.shared.readSecure(filename: imageSignIn) {
+                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                                if dataDecrypt != nil {
+                                                    data = dataDecrypt!
+                                                }
+                                                let image = UIImage(data: data)
+                                                Item.menus["Personal"]?[0].icon = image?.circleMasked
+                                                if !imageSignIn.isEmpty {
+                                                    var dataImage: [AnyHashable : Any] = [:]
+                                                    dataImage["name"] = imageSignIn
+                                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
+                                                }
+                                            }
+                                        } catch {
+                                            
+                                        }
                                     } else {
                                         Download().start(forKey: image!) { (name, progress) in
                                             guard progress == 100 else {
@@ -177,13 +195,24 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                             }
 
                                             DispatchQueue.main.async {
-                                                let image = UIImage(contentsOfFile: file.path)
-                                                Item.menus["Personal"]?[0].icon = image?.circleMasked
-                                                self.tableView.reloadData()
-                                                if !imageSignIn.isEmpty {
-                                                    var dataImage: [AnyHashable : Any] = [:]
-                                                    dataImage["name"] = imageSignIn
-                                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
+                                                if FileEncryption.shared.isSecureExists(filename: imageSignIn) {
+                                                    do {
+                                                        if var data = try FileEncryption.shared.readSecure(filename: imageSignIn) {
+                                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                                            if dataDecrypt != nil {
+                                                                data = dataDecrypt!
+                                                            }
+                                                            let image = UIImage(data: data)
+                                                            Item.menus["Personal"]?[0].icon = image?.circleMasked
+                                                            if !imageSignIn.isEmpty {
+                                                                var dataImage: [AnyHashable : Any] = [:]
+                                                                dataImage["name"] = imageSignIn
+                                                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
+                                                            }
+                                                        }
+                                                    } catch {
+                                                        
+                                                    }
                                                 }
                                             }
                                         }
@@ -213,18 +242,49 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                     var dataImage: [AnyHashable : Any] = [:]
                                     dataImage["name"] = imageSignIn
                                     NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
+                                } else if FileEncryption.shared.isSecureExists(filename: imageSignIn) {
+                                    do {
+                                        if var data = try FileEncryption.shared.readSecure(filename: imageSignIn) {
+                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                            if dataDecrypt != nil {
+                                                data = dataDecrypt!
+                                            }
+                                            let image = UIImage(data: data)
+                                            Item.menus["Personal"]?[0].icon = image?.circleMasked
+                                            if !imageSignIn.isEmpty {
+                                                var dataImage: [AnyHashable : Any] = [:]
+                                                dataImage["name"] = imageSignIn
+                                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
+                                            }
+                                        }
+                                    } catch {
+                                        
+                                    }
                                 } else {
                                     Download().start(forKey: imageSignIn) { (name, progress) in
                                         guard progress == 100 else {
                                             return
                                         }
                                         DispatchQueue.main.async {
-                                            let image = UIImage(contentsOfFile: file.path)
-                                            Item.menus["Personal"]?[0].icon = image?.circleMasked
-                                            self.tableView.reloadData()
-                                            var dataImage: [AnyHashable : Any] = [:]
-                                            dataImage["name"] = imageSignIn
-                                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
+                                            if FileEncryption.shared.isSecureExists(filename: imageSignIn) {
+                                                do {
+                                                    if var data = try FileEncryption.shared.readSecure(filename: imageSignIn) {
+                                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                                        if dataDecrypt != nil {
+                                                            data = dataDecrypt!
+                                                        }
+                                                        let image = UIImage(data: data)
+                                                        Item.menus["Personal"]?[0].icon = image?.circleMasked
+                                                        if !imageSignIn.isEmpty {
+                                                            var dataImage: [AnyHashable : Any] = [:]
+                                                            dataImage["name"] = imageSignIn
+                                                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
+                                                        }
+                                                    }
+                                                } catch {
+                                                    
+                                                }
+                                            }
                                         }
                                     }
                                 }

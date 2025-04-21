@@ -7,86 +7,175 @@
 
 import Foundation
 import CallKit
+import nuSDKService
 
-final class CallManager: NSObject, ObservableObject {
+public class CallManager: NSObject, ObservableObject {
     
-    let callController = CXCallController()
+    public static let shared = CallManager()
+    private var activeCalls: [UUID: CallInfo] = [:]
+        
+    private let provider: CXProvider
+    private let callController = CXCallController()
     
-    func startCall(handle: String, video: Bool = false) {
-        let cx = CXHandle(type: .phoneNumber, value: handle)
-        let startCallAction = CXStartCallAction(call: UUID(), handle: cx)
+    override init() {
+        let providerConfiguration = CXProviderConfiguration(localizedName: Bundle.main.infoDictionary?["CFBundleName"] as! String)
+        providerConfiguration.supportsVideo = true
+        providerConfiguration.maximumCallsPerCallGroup = 1
+        providerConfiguration.supportedHandleTypes = [.generic]
+        providerConfiguration.iconTemplateImageData = nil
         
-        startCallAction.isVideo = video
         
-        let transaction = CXTransaction()
-        transaction.addAction(startCallAction)
-        
-        requestTransaction(transaction)
+        provider = CXProvider(configuration: providerConfiguration)
+        super.init()
+        self.provider.setDelegate(self, queue: nil)
     }
     
-    func end(call: Call) {
-        let endCallAction = CXEndCallAction(call: call.uuid)
-        let transaction = CXTransaction()
-        transaction.addAction(endCallAction)
-        
-        requestTransaction(transaction)
-    }
-    
-    func setOnHoldStatus(for call: Call, to onHold: Bool) {
-        let setHeldCallAction = CXSetHeldCallAction(call: call.uuid, onHold: onHold)
-        let transaction = CXTransaction()
-        transaction.addAction(setHeldCallAction)
-        
-        requestTransaction(transaction)
-    }
-    
-    func startGroupCall(uuid1: UUID) {
-        let call1UUID = calls[0].uuid
-        let call2UUID = uuid1
-        let mergeCallAction = CXSetGroupCallAction(call: call1UUID, callUUIDToGroupWith: call2UUID)
+    public func reportIncomingCall(uuid: UUID, callerName: String, callerId: String, isVideo: Bool) {
+        let update = CXCallUpdate()
+        update.remoteHandle = CXHandle(type: .generic, value: callerId)
+        update.localizedCallerName = callerName
+        update.hasVideo = isVideo
+        activeCalls[uuid] = CallInfo(uuid: uuid, callerId: callerId, callerName: callerName, isVideo: isVideo, isAccepted: false)
 
-        let transaction = CXTransaction()
-        transaction.addAction(mergeCallAction)
-        
-        requestTransaction(transaction)
-    }
-    
-    private func requestTransaction(_ transaction: CXTransaction) {
-        callController.request(transaction) { error in
-//            if let error = error {
-//                //print("Error requesting transaction:", error.localizedDescription)
-//            } else {
-//                //print("Requested transaction successfully")
-//            }
+        provider.reportNewIncomingCall(with: uuid, update: update) { error in
+            if let error = error {
+                print("Error reporting incoming call: \(error.localizedDescription)")
+            }
         }
     }
     
-    @Published private(set) var calls = [Call]()
-    
-    func callWithUUID(uuid: UUID) -> Call? {
-        guard let index = calls.firstIndex(where: { $0.uuid == uuid }) else { return nil }
-        
-        return calls[index]
+    public func endCall(uuid: UUID, completion: @escaping () -> ()) {
+        let endCallAction = CXEndCallAction(call: uuid)
+        let transaction = CXTransaction(action: endCallAction)
+
+        callController.request(transaction) { error in
+            if let error = error {
+                print("Failed to end call: \(error.localizedDescription)")
+            } else {
+                completion()
+            }
+        }
     }
     
-    func call(with handle: String) -> Call? {
-        guard let index = calls.firstIndex(where: { $0.handle == handle }) else { return nil }
-        
-        return calls[index]
+}
+
+extension CallManager: CXProviderDelegate {
+    public func providerDidReset(_ provider: CXProvider) {
     }
     
-    func addCall(_ call: Call) {
-        calls.append(call)
+    public func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+        let uuid = action.callUUID
+        if let callInfo = activeCalls[uuid] {
+            self.activeCalls[uuid]?.isAccepted = true
+            if callInfo.isVideo {
+                let videoController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
+                videoController.fPin = callInfo.callerId
+                videoController.isInisiator = false
+                videoController.autoAcceptAPN = true
+                let navigationController = CustomNavigationController(rootViewController: videoController)
+                navigationController.modalPresentationStyle = .fullScreen
+                if UIApplication.shared.visibleViewController is UIAlertController {
+                    let vc = UIApplication.shared.visibleViewController as! UIAlertController
+                    vc.dismiss(animated: true, completion: {
+                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                        } else {
+                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                        }
+                    })
+                    return
+                }
+                if UIApplication.shared.visibleViewController?.navigationController != nil {
+                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                } else {
+                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                }
+            } else {
+                let controller = QmeraAudioViewController()
+                controller.isOutgoing = false
+                controller.user = User.getData(pin: callInfo.callerId)
+                controller.autoAcceptAPN = true
+                controller.modalPresentationStyle = .overCurrentContext
+                if UIApplication.shared.visibleViewController is UIAlertController {
+                    let vc = UIApplication.shared.visibleViewController as! UIAlertController
+                    vc.dismiss(animated: true, completion: {
+                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                            UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
+                        } else {
+                            UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
+                        }
+                    })
+                    return
+                }
+                if UIApplication.shared.visibleViewController?.navigationController != nil {
+                    UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
+                } else {
+                    UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
+                }
+            }
+        }
+        action.fulfill()
     }
     
-    func removeCall(_ call: Call) {
-        guard let index = calls.firstIndex(where: { $0 === call }) else { return }
-        
-        calls.remove(at: index)
+    public func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+        if Nexilis.callAPNActivated {
+            let uuid = action.callUUID
+            if let callInfo = activeCalls[uuid] {
+                if !callInfo.isAccepted {
+                    DispatchQueue.global().async {
+                        do {
+                            if API.nGetCLXConnState() == 0 {
+                                let id = Utils.getConnectionID()
+                                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+                                while API.nGetCLXConnState() == 0 {
+                                    Thread.sleep(forTimeInterval: 1)
+                                }
+                                sendCancel()
+                            } else {
+                                sendCancel()
+                            }
+                            func sendCancel() {
+                                if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: callInfo.callerId, type: !callInfo.isVideo ? "1" : "2"), timeout: 30 * 1000) {
+                                    if result.isOk() {
+                                        let center = UNUserNotificationCenter.current()
+                                        var textCall = ""
+                                        if !callInfo.isVideo {
+                                            textCall = "audio"
+                                        } else {
+                                            textCall = "video"
+                                        }
+                                        let content = UNMutableNotificationContent()
+                                        content.title = callInfo.callerName
+                                        content.body = "☎️ Missed \(textCall) call".localized()
+                                        content.userInfo = ["id" : callInfo.callerId, "type" : "CL02", "callType": callInfo.isVideo ? "2" : "1"]
+                                        content.sound = nil
+                                        let request = UNNotificationRequest(identifier: callInfo.callerId, content: content, trigger: nil)
+                                        center.add(request) { error in
+                                            if let error = error {
+                                                print("Error scheduling notification: \(error.localizedDescription)")
+                                            }
+                                        }
+                                        Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callInfo.callerId, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
+                                    }
+                                }
+                            }
+                        } catch {
+                            
+                        }
+                    }
+                    APIS.uuidCall = nil
+                    Nexilis.callAPNActivated = false
+                }
+            }
+        }
+        action.fulfill()
     }
-    
-    func removeAllCalls() {
-        calls.removeAll()
-    }
-    
+}
+
+struct CallInfo {
+    let uuid: UUID
+    let callerId: String
+    let callerName: String
+    let isVideo: Bool
+    var isAccepted: Bool
 }

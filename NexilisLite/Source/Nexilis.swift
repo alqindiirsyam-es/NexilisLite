@@ -43,10 +43,6 @@ public class Nexilis: NSObject {
     public static var showFB = false
     public static var fromMAB = false
     
-    let callManager = CallManager()
-    
-    var providerDelegate: CallProviderDelegate?
-    
     public static let shared = Nexilis()
     
 //    public static var broadcastTimer = Timer()
@@ -138,7 +134,6 @@ public class Nexilis: NSObject {
         messageDelegate = self
         groupDelegate = self
         personInfoDelegate = self
-        providerDelegate = CallProviderDelegate(callManager: callManager)
     }
     
     public static func connect(apiKey: String, delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
@@ -234,7 +229,7 @@ public class Nexilis: NSObject {
                                     do {
                                         let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                                         let file = documentDir.appendingPathComponent(cursorData.string(forColumnIndex: 0)!)
-                                        if !FileManager().fileExists(atPath: file.path) {
+                                        if !FileManager().fileExists(atPath: file.path) || !FileEncryption.shared.isSecureExists(filename: cursorData.string(forColumnIndex: 0)!) {
                                             Download().startHTTP(forKey: cursorData.string(forColumnIndex: 0)!) { (name, progress) in}
                                         }
                                     } catch {}
@@ -1423,6 +1418,7 @@ public class Nexilis: NSObject {
                         "is_forwarded_message" : is_forwarded_message
                     ], replace: true)
                 } catch {
+                    print("ERROR: \(error)")
                     rollback.pointee = true
                     //print(error)
                 }
@@ -2351,10 +2347,6 @@ public var uuidOngoing = UUID()
 
 extension Nexilis: CallDelegate {
     
-    func displayIncomingCall(uuid: UUID, handle: String, hasVideo: Bool = false, completion: ((Error?) -> Void)? = nil) {
-        providerDelegate?.reportIncomingCall(uuid: uuid, handle: handle, hasVideo: hasVideo, completion: completion)
-    }
-    
     public func onIncomingCall(state: Int, message: String) {
         DispatchQueue.main.async {
             let idMe = User.getMyPin()!
@@ -2401,11 +2393,6 @@ extension Nexilis: CallDelegate {
                     })
                     return
                 }
-//                    let backgroundTaskIdentifier = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
-//                    uuidOngoing = UUID()
-//                    self.displayIncomingCall(uuid: uuidOngoing, handle: String(deviceId), hasVideo: false) { error in
-//                        UIApplication.shared.endBackgroundTask(backgroundTaskIdentifier)
-//                    }
                 let controller = QmeraAudioViewController()
                 controller.user = User.getData(pin: String(deviceId))
                 controller.isOutgoing = false
@@ -2426,7 +2413,6 @@ extension Nexilis: CallDelegate {
                 } else {
                     UIApplication.shared.visibleViewController?.present(controller, animated: true, completion: nil)
                 }
-//                    API.receiveCCall(sParty: String(deviceId))
             } else if (state == Nexilis.VIDEO_CALL_INCOMING && message.split(separator: ",")[1] != "joining Ac.room on channel 0" && message.split(separator: ",")[1] != "joining Vc.room on channel 0") {
                 if Nexilis.callAPNActivated || APIS.checkAppStateisBackground() {
                     return
@@ -2464,28 +2450,6 @@ extension Nexilis: CallDelegate {
     }
     
     public func onStatusCall(state: Int, message: String) {
-//        let r = message.split(separator: ",")
-//        if state == Nexilis.AUDIO_CALL_RINGING {
-//            if let call = callManager.call(with: String(r[0])) {
-//                //print("onStatusCall:connectingCall")
-//                DispatchQueue.main.async {
-//                    call.connectingCall()
-//                }
-//            }
-//        } else if state == Nexilis.AUDIO_CALL_OFFHOOK {
-////            if let call = callManager.call(with: String(r[1])) {
-//                //print("onStatusCall:answerCall")
-////                DispatchQueue.main.async {
-////                    call.answerCall()
-////                }
-////            }
-//        } else if state == Nexilis.AUDIO_CALL_END {
-//            DispatchQueue.main.async {
-//                if QmeraAudioViewController().viewIfLoaded?.window == nil {
-//                    Nexilis.shared.callManager.end(call: Call(uuid: uuidOngoing))
-//                }
-//            }
-//        }
         var dataCall: [AnyHashable : Any] = [:]
         dataCall["state"] = state
         dataCall["message"] = message
@@ -3951,6 +3915,19 @@ extension Nexilis: MessageDelegate {
                                 if FileManager().fileExists(atPath: file.path) {
                                     profileImage.image = UIImage(contentsOfFile: file.path)
                                     profileImage.backgroundColor = .clear
+                                } else if FileEncryption.shared.isSecureExists(filename: profile) {
+                                    do {
+                                        if var data = try FileEncryption.shared.readSecure(filename: profile) {
+                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                            if dataDecrypt != nil {
+                                                data = dataDecrypt!
+                                            }
+                                            profileImage.image = UIImage(data: data)
+                                            profileImage.backgroundColor = .clear
+                                        }
+                                    } catch {
+                                        
+                                    }
                                 } else {
                                     Download().startHTTP(forKey: profile) { (name, progress) in
                                         guard progress == 100 else {
@@ -3958,8 +3935,20 @@ extension Nexilis: MessageDelegate {
                                         }
                                         
                                         DispatchQueue.main.async { [self] in
-                                            profileImage.image = UIImage(contentsOfFile: file.path)
-                                            profileImage.backgroundColor = .clear
+                                            if FileEncryption.shared.isSecureExists(filename: profile) {
+                                                do {
+                                                    if var data = try FileEncryption.shared.readSecure(filename: profile) {
+                                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                                        if dataDecrypt != nil {
+                                                            data = dataDecrypt!
+                                                        }
+                                                        profileImage.image = UIImage(data: data)
+                                                        profileImage.backgroundColor = .clear
+                                                    }
+                                                } catch {
+                                                    
+                                                }
+                                            }
                                             if !onGoingCC.isEmpty {
                                                 floating.autoDismiss = false
                                             }

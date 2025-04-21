@@ -309,8 +309,15 @@ class IncomingThread {
     }
     
     private func sendOnlineUser(message: TMessage) -> Void {
-        if let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID] {
-            _ = Nexilis.responseString(packetId: packetId, message: "01", timeout: 3000)
+        DispatchQueue.main.async {
+            if !APIS.checkAppStateisBackground() {
+                let fPIn = message.getPIN()
+                if let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID] {
+                    if fPIn != User.getMyPin() {
+                        _ = Nexilis.responseString(packetId: packetId, message: "01", timeout: 3000)
+                    }
+                }
+            }
         }
     }
     
@@ -568,6 +575,19 @@ class IncomingThread {
                                     if FileManager().fileExists(atPath: file.path) {
                                         profileImage.image = UIImage(contentsOfFile: file.path)
                                         profileImage.backgroundColor = .clear
+                                    } else if FileEncryption.shared.isSecureExists(filename: profile) {
+                                        do {
+                                            if var data = try FileEncryption.shared.readSecure(filename: profile) {
+                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                                if dataDecrypt != nil {
+                                                    data = dataDecrypt!
+                                                }
+                                                profileImage.image = UIImage(data: data)
+                                                profileImage.backgroundColor = .clear
+                                            }
+                                        } catch {
+                                            
+                                        }
                                     } else {
                                         Download().startHTTP(forKey: profile) { (name, progress) in
                                             guard progress == 100 else {
@@ -575,8 +595,20 @@ class IncomingThread {
                                             }
                                             
                                             DispatchQueue.main.async {
-                                                profileImage.image = UIImage(contentsOfFile: file.path)
-                                                profileImage.backgroundColor = .clear
+                                                if FileEncryption.shared.isSecureExists(filename: profile) {
+                                                    do {
+                                                        if var data = try FileEncryption.shared.readSecure(filename: profile) {
+                                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                                            if dataDecrypt != nil {
+                                                                data = dataDecrypt!
+                                                            }
+                                                            profileImage.image = UIImage(data: data)
+                                                            profileImage.backgroundColor = .clear
+                                                        }
+                                                    } catch {
+                                                        
+                                                    }
+                                                }
                                                 Nexilis.shared.floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
                                                 return
                                             }
@@ -671,12 +703,12 @@ class IncomingThread {
     }
     
     private func endCall(message: TMessage) {
-        if let call = Nexilis.shared.callManager.call(with: message.mPIN) {
-            call.isReceiveEnd = true
-            DispatchQueue.main.async {
-                Nexilis.shared.callManager.end(call: call)
-            }
-        }
+//        if let call = Nexilis.shared.callManager.call(with: message.mPIN) {
+//            call.isReceiveEnd = true
+//            DispatchQueue.main.async {
+//                Nexilis.shared.callManager.end(call: call)
+//            }
+//        }
         ack(message: message)
     }
     
@@ -1277,24 +1309,24 @@ class IncomingThread {
             ack(message: message)
             return
         }
-        var messageExist = false
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))'"), cursor.next() {
-                messageExist = true
-                cursor.close()
-            }
-        })
-        DispatchQueue.main.async {
-            if APIS.checkAppStateisBackground() {
-                if !messageExist {
-                    let message_id = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
-                    DispatchQueue.global().async {
-                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message_id))
-                    }
-                    APIS.addNotificationNexilis(message)
-                }
-            }
-        }
+//        var messageExist = false
+//        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+//            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))'"), cursor.next() {
+//                messageExist = true
+//                cursor.close()
+//            }
+//        })
+//        DispatchQueue.main.async {
+//            if APIS.checkAppStateisBackground() {
+//                if !messageExist {
+//                    let message_id = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
+//                    DispatchQueue.global().async {
+//                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getAckMessage(messageId: message_id))
+//                    }
+//                    APIS.addNotificationNexilis(message)
+//                }
+//            }
+//        }
         let media = message.getMedia()
         let thumb_id = message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)
         if media.count != 0 {
@@ -1315,19 +1347,19 @@ class IncomingThread {
         } else {
             Nexilis.saveMessage(message: message, withStatus: false)
         }
-        DispatchQueue.main.async { [self] in
-            if APIS.checkAppStateisBackground() {
-                APIS.addNotificationNexilis(message)
-                ackAPN(id: message.mStatus)
-            }
-        }
+//        DispatchQueue.main.async { [self] in
+//            if APIS.checkAppStateisBackground() {
+//                APIS.addNotificationNexilis(message)
+//                ackAPN(id: message.mStatus)
+//            }
+//        }
         //print("save message incoming")
         ack(message: message)
     }
     
     private func ackAPN(id: String) {
         DispatchQueue.global().async {
-            Nexilis.sendStateToServer(s: "send ack from apn")
+//            Nexilis.sendStateToServer(s: "send ack from apn")
             DispatchQueue.global().async {
                 let parameter: [String : Any] = [
                     "pin": User.getMyPin() ?? "",
@@ -1664,7 +1696,7 @@ class IncomingThread {
                                 do {
                                     let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                                     let file = documentDir.appendingPathComponent(imageId)
-                                    if !FileManager().fileExists(atPath: file.path) {
+                                    if !FileManager().fileExists(atPath: file.path) || !FileEncryption.shared.isSecureExists(filename: imageId) {
                                         Download().startHTTP(forKey: imageId) { (name, progress) in}
                                     }
                                 } catch {}

@@ -18,8 +18,8 @@ import MediaPlayer
 
 class QmeraVideoViewController: UIViewController {
     
-    static private let nMaxSPOn: Float! = 10.0
-    static private let nMaxSPOff: Float! = 9.0
+    static private var nMaxSPOn: Float! = 20.0
+    static private var nMaxSPOff: Float! = 20.0
     static private var volumeView: MPVolumeView!
     static private var lastVolume: Float! = AVAudioSession.sharedInstance().outputVolume
     static private var bSpeakerPhone: Bool! = false
@@ -146,13 +146,15 @@ class QmeraVideoViewController: UIViewController {
     static func turnSpeakerOn() {
         bSpeakerPhone = !bSpeakerPhone
         var bAudioEngineIsAvtive: Bool! = false
+        API.turnSpeakerPhone(bSPon: bSpeakerPhone)
         repeat {
-            API.turnSpeakerPhone(bSPon: bSpeakerPhone!)
+            Thread.sleep(forTimeInterval : 0.3)
             bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
             print("Audio Session State: \(bAudioEngineIsAvtive ? "Active" : "Inactive" )")
             if (bAudioEngineIsAvtive) {
                 break
             }
+            API.restartAudioEngine()
         } while (!bAudioEngineIsAvtive)
         var volume:Float! = 0
         if (bSpeakerPhone) {
@@ -182,7 +184,6 @@ class QmeraVideoViewController: UIViewController {
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
-        Nexilis.callAPNActivated = false
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -195,7 +196,6 @@ class QmeraVideoViewController: UIViewController {
             NotificationCenter.default.removeObserver(self)
         }
         Nexilis.floatingButton.isHidden = false
-        Nexilis.callAPNActivated = false
     }
     
     private func backToDefaultAudioSession() {
@@ -242,12 +242,11 @@ class QmeraVideoViewController: UIViewController {
             didTapAcceptCallButton()
         }
         if autoAcceptAPN {
-//            API.receiveCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView,ivRemoteZ: zoomView)
             DispatchQueue.global().async {
-                if let response1 = Nexilis.writeSync(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: self.fPin, lPin: User.getMyPin()!, type: "1")) {
-                    if response1.isOk() {
-                    }
+                while API.nGetCLXConnState() == 0 || !APIS.afterEnterForeground {
+                    Thread.sleep(forTimeInterval : 0.3)
                 }
+                _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: self.fPin, lPin: User.getMyPin()!, type: "2"))
             }
         }
         self.timeStartCall = String(Date().currentTimeMillis())
@@ -485,7 +484,9 @@ class QmeraVideoViewController: UIViewController {
                     DispatchQueue.global().async {
                         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
                             if response.isOk() {
-                                
+                                DispatchQueue.main.async {
+                                    self.labelIncomingOutgoing.text = "Waiting for answer".localized()
+                                }
                             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" && self.dataPerson.count > 0 {
                                 API.initiateCCall(sParty: self.dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
                             } else {
@@ -520,7 +521,7 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
         } else {
-            if ticketId.isEmpty {
+            if ticketId.isEmpty && !autoAcceptAPN {
                 backToDefaultAudioSession()
                 Nexilis.playRingtoneCall()
             }
@@ -533,11 +534,11 @@ class QmeraVideoViewController: UIViewController {
         labelIncomingOutgoing.textColor = .mainColor
     }
     
-    func addToolbar() {
+    func addToolbar(resetToolbar: Bool = false) {
         view.addSubview(buttonDecline)
         buttonDecline.translatesAutoresizingMaskIntoConstraints = false
         buttonDecline.frame.size = CGSize(width: 70.0, height: 70.0)
-        if isInisiator {
+        if isInisiator || resetToolbar {
             constraintLeadingButtonDecline = buttonDecline.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         } else {
             constraintLeadingButtonDecline = buttonDecline.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: view.frame.width * 0.2)
@@ -555,7 +556,7 @@ class QmeraVideoViewController: UIViewController {
         buttonDecline.tintColor = .white
         buttonDecline.addTarget(self, action: #selector(didTapDeclineCallButton(sender:)), for: .touchUpInside)
         
-        if !isInisiator{
+        if !isInisiator && !resetToolbar {
             view.addSubview(buttonAccept)
             buttonAccept.translatesAutoresizingMaskIntoConstraints = false
             buttonAccept.frame.size = CGSize(width: 70.0, height: 70.0)
@@ -579,7 +580,9 @@ class QmeraVideoViewController: UIViewController {
             if let l_pin = data["l_pin"] as? String {
                 if let f_pin = data["f_pin"] as? String {
                     if f_pin == User.getMyPin()!  {
-                        labelIncomingOutgoing.text = "Waiting for answer".localized()
+                        if !Nexilis.callAPNActivated {
+                            labelIncomingOutgoing.text = "Waiting for answer".localized()
+                        }
                         API.initiateCCall(sParty: l_pin, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
                     }
                 }
@@ -648,6 +651,8 @@ class QmeraVideoViewController: UIViewController {
                 Nexilis.stopRingbacktoneCall()
                 QmeraVideoViewController.isLoop = false
                 QmeraVideoViewController.bSpeakerPhone = false
+                do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
+                Nexilis.callAPNActivated = false
                 self.endAllCall()
                 self.dismiss(animated: true, completion: nil)
             }))
@@ -705,6 +710,8 @@ class QmeraVideoViewController: UIViewController {
 //                self.labelTimerVC.text = "Video call is over".localized()
                 QmeraVideoViewController.isLoop = false
                 QmeraVideoViewController.bSpeakerPhone = false
+                do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
+                Nexilis.callAPNActivated = false
                 self.endAllCall()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     if self.isInisiator && !self.isPresent {
@@ -771,9 +778,44 @@ class QmeraVideoViewController: UIViewController {
                     self.labelTimerVC.text = format
                 }
                 self.vcTimer.fire()
-//                self.setSpeaker()
+                if !QmeraVideoViewController.bSpeakerPhone {
+                    self.setSpeaker()
+                }
             }
         }
+    }
+    
+    private func resetViewToOutgoing() {
+        self.vcTimer.invalidate()
+        self.zoomView.image = nil
+        self.cameraView.image = nil
+        if self.stackViewToolbar.isDescendant(of: self.view){
+            self.stackViewToolbar.removeFromSuperview()
+        }
+        if self.stackViewToolbar2.isDescendant(of: self.view){
+            self.stackViewToolbar2.removeFromSuperview()
+        }
+        if self.buttonWB.isDescendant(of: self.view){
+            self.buttonWB.removeFromSuperview()
+        }
+        if self.buttonChat.isDescendant(of: self.view){
+            self.buttonChat.removeFromSuperview()
+        }
+        if self.buttonDecline.isDescendant(of: self.view) {
+            self.buttonDecline.removeFromSuperview()
+        }
+        if self.buttonAccept.isDescendant(of: self.view) {
+            self.buttonAccept.removeFromSuperview()
+        }
+        if self.buttonRotate.isDescendant(of: self.view) {
+            self.buttonRotate.removeFromSuperview()
+        }
+        if self.buttonMuted.isDescendant(of: self.view) {
+            self.buttonMuted.removeFromSuperview()
+        }
+        addBackgroundIncoming()
+        addProfileNameCalling()
+        addToolbar(resetToolbar: true)
     }
     
     @objc func didTapChatButton(){
@@ -1112,6 +1154,9 @@ class QmeraVideoViewController: UIViewController {
                                 if response.isOk() {
                                 } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
                                     self.dataPerson.append(data)
+                                    if let user = User.getData(pin: String(data["f_pin"]!!)) {
+                                        self.users.append(user)
+                                    }
                                     API.initiateCCall(sParty: data["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
                                     Nexilis.playRingbacktoneCall()
                                 } else {
@@ -1127,6 +1172,9 @@ class QmeraVideoViewController: UIViewController {
                     } else {
                         DispatchQueue.main.async {
                             self.dataPerson.append(data)
+                            if let user = User.getData(pin: String(data["f_pin"]!!)) {
+                                self.users.append(user)
+                            }
                             API.initiateCCall(sParty: data["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
                             Nexilis.playRingbacktoneCall()
                         }
@@ -1191,7 +1239,12 @@ class QmeraVideoViewController: UIViewController {
         let message = (data?["message"] ?? "") as! String
         var remoteChannel = [String:String]()
         let arrayMessage = message.split(separator: ",")
-        if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
+        if state == Nexilis.VIDEO_CALL_INCOMING {
+            if autoAcceptAPN {
+                didTapAcceptCallButton()
+            }
+        }
+        else if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
             DispatchQueue.main.async { [self] in
                 if self.dataPerson.count == 1 {
                     if arrayMessage[1] == "1" {
@@ -1203,7 +1256,7 @@ class QmeraVideoViewController: UIViewController {
             }
         } else if (state == Nexilis.VIDEO_CALL_ZOOM) && self.dataPerson.count > 1 {
             DispatchQueue.main.async {
-                if arrayMessage[2] != "2" {
+                if arrayMessage[0] == arrayMessage[3] {
                     self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
                     self.zoomView.contentMode = .scaleAspectFit
                 } else {
@@ -1223,35 +1276,19 @@ class QmeraVideoViewController: UIViewController {
             }
         }
         else if state == Nexilis.STREAMING_SEMINAR_ENDED { // always call turnspeaker
-            QmeraVideoViewController.isLoop = true
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5, execute: {
-                API.adjustVolume(fValue: 10.0)
-                self.setSpeaker()
-                DispatchQueue.global(qos: .userInitiated).async {
-                    repeat {
-                        Thread.sleep(forTimeInterval : 1)
-                        print("Audio: \(API.bAudioEngineIsRunning())")
-                        if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
-                            API.turnSpeakerPhone(bSPon: QmeraVideoViewController.bSpeakerPhone!)
-                        }
-                    } while (QmeraVideoViewController.isLoop)
-                }
-            })
-//                DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: {
-//                    API.turnSpeakerPhone(bSPon: QmeraAudioViewController.bSpeakerPhone!)
-//                })
-//                DispatchQueue.global().async {
-//                    var bAudioSessionIsAvtive: Bool! = false
+//            QmeraVideoViewController.isLoop = true
+//            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5, execute: {
+//                API.adjustVolume(fValue: 10.0)
+//                self.setSpeaker()
+//                DispatchQueue.global(qos: .userInitiated).async {
 //                    repeat {
-//                        API.turnSpeakerPhone(bSPon: QmeraAudioViewController.bSpeakerPhone!)
-//                        let audioSession = AVAudioSession.sharedInstance()
-//                        bAudioSessionIsAvtive = !audioSession.secondaryAudioShouldBeSilencedHint
-//                        print("repeat turnSpeakerPhone >> \(bAudioSessionIsAvtive)")
-//                        if (bAudioSessionIsAvtive) {
-//                            break
+//                        Thread.sleep(forTimeInterval : 1)
+//                        if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
+//                            API.turnSpeakerPhone(bSPon: QmeraVideoViewController.bSpeakerPhone!)
 //                        }
-//                    } while (!bAudioSessionIsAvtive)
+//                    } while (QmeraVideoViewController.isLoop)
 //                }
+//            })
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
             DispatchQueue.main.async {
@@ -1353,8 +1390,13 @@ class QmeraVideoViewController: UIViewController {
                     }
                 }
                 
-                if self.users.count >= 1, let user = User.getData(pin: String(arrayMessage[1])), !self.users.contains(user) {
-                    self.users.append(user)
+                if let user = User.getData(pin: String(arrayMessage[1])) {
+                    if !self.users.contains(user) {
+                        user.isConnected = true
+                        self.users.append(user)
+                    } else if let userEx = self.users.firstIndex(where: { $0.pin == String(arrayMessage[1]) }) {
+                        self.users[userEx].isConnected = true
+                    }
                 }
                 if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
                     DispatchQueue.main.async {
@@ -1381,7 +1423,7 @@ class QmeraVideoViewController: UIViewController {
                 }
             }
             DispatchQueue.main.async {
-                if self.isInisiator && self.name.isDescendant(of: self.view) {
+                if self.name.isDescendant(of: self.view) {
                     self.didTapAcceptCallButton()
                 }
                 let indexPerson = self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[1]})
@@ -1443,6 +1485,8 @@ class QmeraVideoViewController: UIViewController {
                     }
                     QmeraVideoViewController.isLoop = false
                     QmeraVideoViewController.bSpeakerPhone = false
+                    do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
+                    Nexilis.callAPNActivated = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self.endAllCall()
                         self.dismiss(animated: true, completion: nil)
@@ -1452,10 +1496,6 @@ class QmeraVideoViewController: UIViewController {
             }
             DispatchQueue.main.async {
                 if (self.dataPerson.count == 1) {
-                    var longCall = "0"
-                    if self.vcTimer.isValid {
-                        longCall = self.labelTimerVC.text ?? ""
-                    }
                     self.makeStateCall()
 //                    if self.labelIncomingOutgoing.isDescendant(of: self.view) {
 //                        self.labelIncomingOutgoing.text = "Video call is over".localized()
@@ -1497,6 +1537,8 @@ class QmeraVideoViewController: UIViewController {
                     }
                     QmeraVideoViewController.isLoop = false
                     QmeraVideoViewController.bSpeakerPhone = false
+                    do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
+                    Nexilis.callAPNActivated = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self.endAllCall()
                         if self.isInisiator && !self.isPresent {
@@ -1539,15 +1581,18 @@ class QmeraVideoViewController: UIViewController {
                         }
                         self.dataPerson.remove(at: indexPerson!)
                     }
-                    if !onGoingCC.isEmpty {
-                        if let pin = arrayMessage.first, let index = self.users.firstIndex(of: User(pin: String(pin))) {
-                            self.users.remove(at: index)
-                        }
+                    let pin = "\(arrayMessage[0])"
+                    if let index = self.users.firstIndex(where: { $0.pin == pin }) {
+                        self.users.remove(at: index)
                     }
                     
                     if self.dataPerson.count == 1 {
                         self.transformZoomAfterNewUserMore2 = false
                         self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
+                        
+                        if !self.users[0].isConnected {
+                            self.resetViewToOutgoing()
+                        }
                     }
                 }
             }
@@ -1691,7 +1736,9 @@ class QmeraVideoViewController: UIViewController {
                             }
                         }
                     }
-                    self.dataPerson.remove(at: indexPerson!)
+                    if let indexP = indexPerson {
+                        self.dataPerson.remove(at: indexP)
+                    }
                 }
             }
             if (self.dataPerson.count == 1) {
@@ -1772,6 +1819,12 @@ class QmeraVideoViewController: UIViewController {
                     }
                     if self.buttonRotate.isEnabled {
                         self.buttonRotate.isEnabled = false
+                    }
+                } else {
+                    if self.dataPerson.count == 1 && !self.autoAcceptAPN {
+                        DispatchQueue.main.async {
+                            self.labelIncomingOutgoing.text = "Waiting for answer".localized()
+                        }
                     }
                 }
             }

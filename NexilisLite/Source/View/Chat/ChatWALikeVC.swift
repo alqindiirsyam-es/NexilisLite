@@ -15,6 +15,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     private let searchController = UISearchController(searchResultsController: nil)
     
     var chats: [Chat] = []
+    var tempChats: [Chat] = []
     var chatGroupMaps: [String: [Chat]] = [:]
     var loadingData = true
     private let textChatEmpty = UILabel()
@@ -25,6 +26,8 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     let textUnread = UILabel()
     let contGroups = UIButton(type: .custom)
     let textGroups = UILabel()
+    
+    private static var filterMain = 0
     
     var fillteredData: [Any] = []
     var fillteredMessages: [Chat] = []
@@ -67,10 +70,15 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         tabBarController?.navigationController?.setNavigationBarHidden(true, animated: false)
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationItem.largeTitleDisplayMode = .always
+        navigationController?.navigationBar.backgroundColor = .clear
+        navigationController?.navigationBar.tintColor = .black
+        navigationController?.navigationBar.overrideUserInterfaceStyle = .light
+        self.setNeedsStatusBarAppearanceUpdate()
         let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]
         let largeAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 34)]
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
+        appearance.backgroundColor = .clear
         appearance.titleTextAttributes = attributes
         appearance.largeTitleTextAttributes = largeAttributes
         navigationController?.navigationBar.standardAppearance = appearance
@@ -118,9 +126,12 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     
     private func refresh() {
         getData { [self] in
-            if chats.count == 0 {
-                searchController.searchBar.isHidden = true
-                if textChatEmpty.isDescendant(of: view){
+            if tempChats.count == 0 {
+                navigationItem.searchController = nil
+                DispatchQueue.main.async {
+                    self.navigationController?.navigationBar.sizeToFit()
+                }
+                if textChatEmpty.isDescendant(of: view) {
                     textChatEmpty.removeFromSuperview()
                 }
                 textChatEmpty.numberOfLines = 0
@@ -133,15 +144,21 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 }
                 textChatEmpty.attributedText = attributedString
                 
-                view.addSubview(textChatEmpty)
-                textChatEmpty.anchor(left: view.leftAnchor, right: view.rightAnchor, paddingLeft: 20, paddingRight: 20, centerX: view.centerXAnchor, centerY: view.centerYAnchor)
+                tableView.addSubview(textChatEmpty)
+                textChatEmpty.anchor(left: tableView.leftAnchor, right: tableView.rightAnchor, paddingLeft: 20, paddingRight: 20, centerX: tableView.centerXAnchor)
+                textChatEmpty.centerYAnchor.constraint(equalTo: tableView.centerYAnchor, constant: -60).isActive = true
             } else {
-                searchController.searchBar.isHidden = false
+                if textChatEmpty.isDescendant(of: view) {
+                    textChatEmpty.removeFromSuperview()
+                }
             }
         }
     }
     
     public override func viewDidAppear(_ animated: Bool) {
+        if Nexilis.floatingButton.isHidden {
+            Nexilis.floatingButton.isHidden = false
+        }
         refresh()
     }
     
@@ -198,8 +215,14 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                     }
                 }
             }
-
-            self.chats = tempChats
+            self.tempChats = tempChats
+            if ChatWALikeVC.filterMain == 0 {
+                self.chats = tempChats
+            } else if ChatWALikeVC.filterMain == 1 {
+                self.chats = tempChats.filter({ Int($0.counter) ?? 0 > 0 })
+            } else {
+                self.chats = tempChats.filter({ !$0.groupId.isEmpty })
+            }
             completion()
         }
     }
@@ -227,19 +250,19 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     public func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         let header = UIView()
         
-        if chats.count > 0 {
+        if tempChats.count > 0 {
             header.addSubview(contAll)
             contAll.anchor(top: header.topAnchor, left: header.leftAnchor, bottom: header.bottomAnchor, paddingLeft: 20, height: 30)
             contAll.layer.cornerRadius = 15
             contAll.clipsToBounds = true
             contAll.tag = 0
-            contAll.backgroundColor = .whatsappGreenLightColor
+            contAll.backgroundColor = ChatWALikeVC.filterMain == 0 ? .whatsappGreenLightColor : .whiteBubbleColor
             contAll.addTarget(self, action: #selector(selectFilter), for: .touchUpInside)
             
             contAll.addSubview(textAll)
             textAll.text = "All".localized()
             textAll.font = .boldSystemFont(ofSize: 14)
-            textAll.textColor = .whatsappGreenTitleColor
+            textAll.textColor = ChatWALikeVC.filterMain == 0 ? .whatsappGreenTitleColor : .grayTitleColor
             textAll.anchor(left: contAll.leftAnchor, right: contAll.rightAnchor, paddingLeft: 15, paddingRight: 15, centerX: contAll.centerXAnchor, centerY: contAll.centerYAnchor, height: 20)
             
             header.addSubview(contUnread)
@@ -247,13 +270,13 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             contUnread.layer.cornerRadius = 15
             contUnread.clipsToBounds = true
             contUnread.tag = 1
-            contUnread.backgroundColor = .whiteBubbleColor
+            contUnread.backgroundColor = ChatWALikeVC.filterMain == 1 ? .whatsappGreenLightColor : .whiteBubbleColor
             contUnread.addTarget(self, action: #selector(selectFilter), for: .touchUpInside)
             
             contUnread.addSubview(textUnread)
             textUnread.text = "Unread".localized()
             textUnread.font = .boldSystemFont(ofSize: 14)
-            textUnread.textColor = .grayTitleColor
+            textUnread.textColor = ChatWALikeVC.filterMain == 1 ? .whatsappGreenTitleColor : .grayTitleColor
             textUnread.anchor(left: contUnread.leftAnchor, right: contUnread.rightAnchor, paddingLeft: 15, paddingRight: 15, centerX: contUnread.centerXAnchor, centerY: contUnread.centerYAnchor, height: 20)
             
             header.addSubview(contGroups)
@@ -261,13 +284,13 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             contGroups.layer.cornerRadius = 15
             contGroups.clipsToBounds = true
             contGroups.tag = 2
-            contGroups.backgroundColor = .whiteBubbleColor
+            contGroups.backgroundColor = ChatWALikeVC.filterMain == 2 ? .whatsappGreenLightColor : .whiteBubbleColor
             contGroups.addTarget(self, action: #selector(selectFilter), for: .touchUpInside)
             
             contGroups.addSubview(textGroups)
             textGroups.text = "Groups".localized()
             textGroups.font = .boldSystemFont(ofSize: 14)
-            textGroups.textColor = .grayTitleColor
+            textGroups.textColor = ChatWALikeVC.filterMain == 2 ? .whatsappGreenTitleColor : .grayTitleColor
             textGroups.anchor(left: contGroups.leftAnchor, right: contGroups.rightAnchor, paddingLeft: 15, paddingRight: 15, centerX: contGroups.centerXAnchor, centerY: contGroups.centerYAnchor, height: 20)
         }
         
@@ -275,33 +298,18 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     }
     
     @objc func selectFilter(_ sender: UIButton) {
-        if sender.tag == 0 && contAll.backgroundColor != .whatsappGreenLightColor {
-            contAll.backgroundColor = .whatsappGreenLightColor
-            textAll.textColor = .whatsappGreenTitleColor
-            
-            contUnread.backgroundColor = .whiteBubbleColor
-            textUnread.textColor = .grayTitleColor
-            
-            contGroups.backgroundColor = .whiteBubbleColor
-            textGroups.textColor = .grayTitleColor
-        } else if sender.tag == 1 && contUnread.backgroundColor != .whatsappGreenLightColor {
-            contUnread.backgroundColor = .whatsappGreenLightColor
-            textUnread.textColor = .whatsappGreenTitleColor
-            
-            contAll.backgroundColor = .whiteBubbleColor
-            textAll.textColor = .grayTitleColor
-            
-            contGroups.backgroundColor = .whiteBubbleColor
-            textGroups.textColor = .grayTitleColor
-        }  else if sender.tag == 2 && contGroups.backgroundColor != .whatsappGreenLightColor {
-            contGroups.backgroundColor = .whatsappGreenLightColor
-            textGroups.textColor = .whatsappGreenTitleColor
-            
-            contAll.backgroundColor = .whiteBubbleColor
-            textAll.textColor = .grayTitleColor
-            
-            contUnread.backgroundColor = .whiteBubbleColor
-            textUnread.textColor = .grayTitleColor
+        if sender.tag == 0 && ChatWALikeVC.filterMain != 0 {
+            ChatWALikeVC.filterMain = 0
+            self.chats = self.tempChats
+            self.tableView.reloadData()
+        } else if sender.tag == 1 && ChatWALikeVC.filterMain != 1 {
+            ChatWALikeVC.filterMain = 1
+            self.chats = self.tempChats.filter({ Int($0.counter) ?? 0 > 0 })
+            self.tableView.reloadData()
+        }  else if sender.tag == 2 && ChatWALikeVC.filterMain != 2 {
+            ChatWALikeVC.filterMain = 2
+            self.chats = self.tempChats.filter({ !$0.groupId.isEmpty })
+            self.tableView.reloadData()
         }
     }
     
@@ -1020,6 +1028,83 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 }
             }
         }
+    }
+    
+    public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let data: Chat
+        if isFiltering {
+            data = fillteredData[indexPath.row] as! Chat
+        } else {
+            data = chats[indexPath.row]
+        }
+        if data.isParent {
+            expandCollapseChats(tableView: tableView, indexPath: indexPath)
+            return
+        }
+        if data.pin == "-997" {
+            let smartChatVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "chatGptVC") as! ChatGPTBotView
+            smartChatVC.hidesBottomBarWhenPushed = true
+            smartChatVC.fromNotification = false
+            navigationController?.show(smartChatVC, sender: nil)
+        } else if data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL {
+            if data.pin.isEmpty {
+                return
+            }
+            let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+            editorPersonalVC.hidesBottomBarWhenPushed = true
+            editorPersonalVC.unique_l_pin = data.pin
+            navigationController?.show(editorPersonalVC, sender: nil)
+        } else {
+            if data.pin.isEmpty {
+                return
+            }
+            let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorGroupVC") as! EditorGroup
+            editorGroupVC.hidesBottomBarWhenPushed = true
+            editorGroupVC.unique_l_pin = data.pin
+            navigationController?.show(editorGroupVC, sender: nil)
+        }
+    }
+    
+    func expandCollapseChats(tableView: UITableView, indexPath: IndexPath) {
+        let data: Chat
+        if isFiltering || selectedTag == UNREAD_TAG {
+            data = fillteredData[indexPath.row] as! Chat
+        } else {
+            data = chats[indexPath.row]
+        }
+        data.isSelected = !data.isSelected
+        if data.isSelected {
+            for dataSubChat in self.chatGroupMaps[data.groupId]! {
+                if var indexParent = chats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
+                    if isFiltering || selectedTag == UNREAD_TAG {
+                        if var indexParentFilter = fillteredData.firstIndex(where: { ($0 as! Chat).isParent && ($0 as! Chat).groupId == data.groupId }) {
+                            fillteredData.insert(dataSubChat, at: indexParentFilter + 1)
+                            indexParentFilter+=1
+                        }
+                    } else {
+                        chats.insert(dataSubChat, at: indexParent + 1)
+                        indexParent+=1
+                        if var indexParentFilter = tempChats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
+                            tempChats.insert(dataSubChat, at: indexParentFilter + 1)
+                            indexParentFilter+=1
+                        }
+                    }
+                }
+                
+            }
+        } else {
+            if isFiltering || selectedTag == UNREAD_TAG {
+                if var changedFillteredData = fillteredData as? [Chat] {
+                    changedFillteredData.removeAll(where: { $0.isParent == false && $0.groupId == data.groupId })
+                    self.fillteredData = changedFillteredData
+                }
+            } else {
+                chats.removeAll(where: { $0.isParent == false && $0.groupId == data.groupId })
+                tempChats.removeAll(where: { $0.isParent == false && $0.groupId == data.groupId })
+            }
+        }
+        tableView.reloadData()
     }
     
     private func getRealStatus(messageId: String) -> String {

@@ -152,10 +152,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         navigationController?.navigationBar.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
         navigationController?.navigationBar.tintColor = .white
         navigationController?.navigationBar.overrideUserInterfaceStyle = .dark
+        self.setNeedsStatusBarAppearanceUpdate()
         navigationController?.navigationBar.barStyle = .black
         if self.navigationController?.isNavigationBarHidden ?? false {
             self.navigationController?.setNavigationBarHidden(false, animated: false)
         }
+        navigationController?.navigationBar.prefersLargeTitles = false
+        navigationController?.navigationItem.largeTitleDisplayMode = .never
         updateProfile()
         gettingDataMessage = false
         let indexPath = tableChatView.indexPathsForVisibleRows?.first
@@ -3649,50 +3652,62 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
             let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
             UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
         }
-        guard let result = results.first else { return }
+        guard let result = results.first else {
+            picker.dismiss(animated: true, completion: nil)
+            return
+        }
         if result.itemProvider.hasItemConformingToTypeIdentifier("com.compuserve.gif") {
-            picker.dismiss(animated: true, completion: nil)
-            result.itemProvider.loadDataRepresentation(forTypeIdentifier: "com.compuserve.gif") { data, error in
-                if let error = error {
-                    print("Error loading GIF: \(error.localizedDescription)")
-                } else if let data = data {
-                    DispatchQueue.main.async {
-                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                        if (self.textFieldSend.textColor != .lightGray) {
-                            previewImageVC.currentTextTextField = self.textFieldSend.text
+            picker.dismiss(animated: true, completion: {
+                Nexilis.showLoader()
+                result.itemProvider.loadDataRepresentation(forTypeIdentifier: "com.compuserve.gif") { data, error in
+                    if let error = error {
+                        print("Error loading GIF: \(error.localizedDescription)")
+                        Nexilis.hideLoader() {
+                            
                         }
-                        previewImageVC.fromCopy = true
-                        previewImageVC.isGIF = true
-                        previewImageVC.dataGIF = data
-                        previewImageVC.modalPresentationStyle = .custom
-                        previewImageVC.delegate = self
-                        previewImageVC.isAck = self.isAck
-                        previewImageVC.isConfidential = self.isConfidential
-                        previewImageVC.isCC = self.isContactCenter
-                        self.present(previewImageVC, animated: true, completion: nil)
+                    } else if let data = data {
+                        DispatchQueue.main.async {
+                            Nexilis.hideLoader() {
+                                let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                                if (self.textFieldSend.textColor != .lightGray) {
+                                    previewImageVC.currentTextTextField = self.textFieldSend.text
+                                }
+                                previewImageVC.fromCopy = true
+                                previewImageVC.isGIF = true
+                                previewImageVC.dataGIF = data
+                                previewImageVC.modalPresentationStyle = .custom
+                                previewImageVC.delegate = self
+                                previewImageVC.isAck = self.isAck
+                                previewImageVC.isConfidential = self.isConfidential
+                                self.present(previewImageVC, animated: true, completion: nil)
+                            }
+                        }
                     }
                 }
-            }
+            })
         } else if result.itemProvider.hasItemConformingToTypeIdentifier("public.image") {
-            picker.dismiss(animated: true, completion: nil)
-            result.itemProvider.loadObject(ofClass: UIImage.self) { object, error in
-                if let image = object as? UIImage {
-                    DispatchQueue.main.async {
-                        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                        if (self.textFieldSend.textColor != .lightGray) {
-                            previewImageVC.currentTextTextField = self.textFieldSend.text
+            picker.dismiss(animated: true, completion: {
+                Nexilis.showLoader()
+                result.itemProvider.loadObject(ofClass: UIImage.self) { object, error in
+                    if let image = object as? UIImage {
+                        DispatchQueue.main.async {
+                            Nexilis.hideLoader {
+                                let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                                if (self.textFieldSend.textColor != .lightGray) {
+                                    previewImageVC.currentTextTextField = self.textFieldSend.text
+                                }
+                                previewImageVC.fromCopy = true
+                                previewImageVC.image = image
+                                previewImageVC.modalPresentationStyle = .custom
+                                previewImageVC.delegate = self
+                                previewImageVC.isAck = self.isAck
+                                previewImageVC.isConfidential = self.isConfidential
+                                self.present(previewImageVC, animated: true, completion: nil)
+                            }
                         }
-                        previewImageVC.fromCopy = true
-                        previewImageVC.image = image
-                        previewImageVC.modalPresentationStyle = .custom
-                        previewImageVC.delegate = self
-                        previewImageVC.isAck = self.isAck
-                        previewImageVC.isConfidential = self.isConfidential
-                        previewImageVC.isCC = self.isContactCenter
-                        self.present(previewImageVC, animated: true, completion: nil)
                     }
                 }
-            }
+            })
         } else if result.itemProvider.hasItemConformingToTypeIdentifier("public.movie") {
             picker.dismiss(animated: true, completion: {
                 Nexilis.showLoader()
@@ -3744,9 +3759,8 @@ extension EditorPersonal: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPr
             let navController = CustomNavigationController(rootViewController: previewController)
             navController.navigationBar.tintColor = .white
             navController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+            navController.navigationBar.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             navController.navigationBar.isTranslucent = false
-            navController.navigationBar.overrideUserInterfaceStyle = .dark
-            navController.navigationBar.barStyle = .black
             let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
             UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
             let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]

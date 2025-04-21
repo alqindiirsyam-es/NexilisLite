@@ -38,10 +38,15 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         tabBarController?.navigationController?.setNavigationBarHidden(true, animated: false)
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationController?.navigationItem.largeTitleDisplayMode = .always
+        navigationController?.navigationBar.backgroundColor = .clear
+        navigationController?.navigationBar.tintColor = .black
+        navigationController?.navigationBar.overrideUserInterfaceStyle = .light
+        self.setNeedsStatusBarAppearanceUpdate()
         let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]
         let largeAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 34)]
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
+        appearance.backgroundColor = .clear
         appearance.titleTextAttributes = attributes
         appearance.largeTitleTextAttributes = largeAttributes
         navigationController?.navigationBar.standardAppearance = appearance
@@ -83,6 +88,12 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         definesPresentationContext = true
         DispatchQueue.main.async {
             self.navigationController?.navigationBar.sizeToFit()
+        }
+    }
+    
+    public override func viewDidAppear(_ animated: Bool) {
+        if Nexilis.floatingButton.isHidden {
+            Nexilis.floatingButton.isHidden = false
         }
     }
     

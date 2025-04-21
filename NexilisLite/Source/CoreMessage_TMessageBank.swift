@@ -10,15 +10,6 @@ import Foundation
 
 public class CoreMessage_TMessageBank {
     
-    public static func endCall(pin: String) -> TMessage {
-        let tmessage = TMessage()
-        tmessage.mCode = CoreMessage_TMessageCode.END_CALL
-        tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
-        tmessage.mPIN = User.getMyPin()!
-        tmessage.mBodies[CoreMessage_TMessageKey.F_PIN] = pin
-        return tmessage
-    }
-    
     public static func checkCallStatus(pin: String) -> TMessage {
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.ASKING_FOR_END_CALL

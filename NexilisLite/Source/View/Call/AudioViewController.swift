@@ -80,7 +80,7 @@ class AudioViewController: UIViewController {
             })
             
             if isOutgoing {
-                Nexilis.shared.callManager.startCall(handle: pin)
+//                Nexilis.shared.callManager.startCall(handle: pin)
             }
         }
     }
@@ -108,14 +108,14 @@ class AudioViewController: UIViewController {
     
     @objc func didEnd(sender: AnyObject?) {
         //print("didEnd:\(pin)")
-        if let pin = self.pin, let call = Nexilis.shared.callManager.call(with: pin) {
-            Nexilis.shared.callManager.end(call: call)
-            if isOutgoing {
-                navigationController?.popViewController(animated: true)
-            } else {
-                navigationController?.dismiss(animated: true, completion: nil)
-            }
-        }
+//        if let pin = self.pin, let call = Nexilis.shared.callManager.call(with: pin) {
+//            Nexilis.shared.callManager.end(call: call)
+//            if isOutgoing {
+//                navigationController?.popViewController(animated: true)
+//            } else {
+//                navigationController?.dismiss(animated: true, completion: nil)
+//            }
+//        }
     }
     
     @objc func onStatusCall(_ notification: NSNotification) {

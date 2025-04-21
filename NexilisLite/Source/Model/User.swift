@@ -25,6 +25,7 @@ public class User: Model {
     
     public var isSelected: Bool = false
     public var isMuted: Bool = false
+    public var isConnected: Bool = false
     
     public init(pin: String) {
         self.pin = pin

@@ -38,20 +38,13 @@ class Callback : CallBack {
         //print(nState,"/",sMessage)
         if nState == Nexilis.AUDIO_CALL_INCOMING || nState == Nexilis.VIDEO_CALL_INCOMING {
             if let delegate = Nexilis.shared.callDelegate {
-                if !Nexilis.showLibraryNotification {
+                if !Nexilis.showLibraryNotification || Nexilis.callAPNActivated {
                     delegate.onStatusCall(state: nState, message: sMessage)
                 } else {
                     delegate.onIncomingCall(state: nState, message: sMessage)
                 }
             }
         } else {
-//            if nstate == Nexilis.AUDIO_CALL_END {
-//                let pin = sMessage.split(separator: ",")[0]
-//                if let call = Palio.shared.callManager.call(with: String(pin)), !call.hasVideo, !call.hasEnded {
-//                    call.reconnectingCall()
-//                    return 1
-//                }
-//            }
             if let delegate = Nexilis.shared.callDelegate {
                 delegate.onStatusCall(state: nState, message: sMessage)
             }

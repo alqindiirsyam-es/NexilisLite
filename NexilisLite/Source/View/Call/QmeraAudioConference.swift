@@ -295,7 +295,7 @@ class QmeraAudioConference: UIViewController {
             } else {
                 self.users.append(user)
                 // Start Calling
-                Nexilis.shared.callManager.startCall(handle: user.pin)
+//                Nexilis.shared.callManager.startCall(handle: user.pin)
             }
         }
         controller.selectedUser.append(contentsOf: users)
