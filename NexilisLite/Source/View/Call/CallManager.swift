@@ -25,7 +25,11 @@ public class CallManager: NSObject, ObservableObject {
         providerConfiguration.supportsVideo = true
         providerConfiguration.maximumCallsPerCallGroup = 1
         providerConfiguration.supportedHandleTypes = [.generic]
-        providerConfiguration.iconTemplateImageData = nil
+        if let logoImage = UIImage(named: "pb_ball", in: Bundle.resourceBundle(for: Nexilis.self), with: nil) {
+            if let imageData = logoImage.pngData() {
+                providerConfiguration.iconTemplateImageData = imageData
+            }
+        }
         
         
         provider = CXProvider(configuration: providerConfiguration)
@@ -67,10 +71,6 @@ extension CallManager: CXProviderDelegate {
     }
     
     public func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
-//        let audioSession = AVAudioSession.sharedInstance()
-//        try? audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .defaultToSpeaker])
-//        try? audioSession.setActive(true)
-//        
         let uuid = action.callUUID
         if let callInfo = activeCalls[uuid] {
             self.activeCalls[uuid]?.isAccepted = true
@@ -114,11 +114,6 @@ extension CallManager: CXProviderDelegate {
                     })
                     return
                 }
-//                let vc = UIViewController()
-//                vc.modalPresentationStyle = .fullScreen
-//                if #available(iOS 15.0, *) {
-//                    rootWindowScene()?.keyWindow?.topVC().present(vc, animated: false)
-//                }
                 if UIApplication.shared.visibleViewController?.navigationController != nil {
                     UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
                 } else {
@@ -189,16 +184,6 @@ extension CallManager: CXProviderDelegate {
             }
         }
         action.fulfill()
-    }
-}
-
-private extension UIWindow {
-    func topVC() -> UIViewController {
-        var top = rootViewController!
-        while let next = top.presentedViewController {
-            top = next
-        }
-        return top
     }
 }
 

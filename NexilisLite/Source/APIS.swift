@@ -1523,7 +1523,7 @@ public class APIS: NSObject {
     
     public static var notifTimer = Timer()
     public static var stopNotif = false
-    public static var afterEnterForeground = false
+//    public static var afterEnterForeground = false
     public static func enterForeground() {
         APIS.checkNotificationPermission(completion: { isAllowed in
             if !isAllowed {
@@ -1550,15 +1550,15 @@ public class APIS: NSObject {
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-        afterEnterForeground = true
+//        afterEnterForeground = true
     }
     
     public static func willEnterForeground() {
-        if APIS.uuidCall != nil {
-            CallManager.shared.endCall(uuid: APIS.uuidCall!) {
-                APIS.uuidCall = nil
-            }
-        }
+//        if APIS.uuidCall != nil {
+//            CallManager.shared.endCall(uuid: APIS.uuidCall!) {
+//                APIS.uuidCall = nil
+//            }
+//        }
     }
     
     private static func checkNotificationPermission(completion: @escaping (Bool) -> Void) {

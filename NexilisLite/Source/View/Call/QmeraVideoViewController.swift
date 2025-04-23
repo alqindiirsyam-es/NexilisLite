@@ -202,6 +202,7 @@ class QmeraVideoViewController: UIViewController {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playAndRecord, mode: .default, options: .allowBluetooth)
             try audioSession.overrideOutputAudioPort(.speaker)
+            try audioSession.setPreferredSampleRate(48000)
             try audioSession.setActive(true)
         } catch {
         }
@@ -242,7 +243,24 @@ class QmeraVideoViewController: UIViewController {
         }
         if autoAcceptAPN {
             DispatchQueue.global().async {
-                while API.nGetCLXConnState() == 0 || !APIS.afterEnterForeground {
+                do {
+                    if API.nGetCLXConnState() == 0 {
+                        let id = Utils.getConnectionID()
+                        try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+                    }
+                } catch {
+                    
+                }
+                let audioSession = AVAudioSession.sharedInstance()
+                do {
+                    try audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth])
+                    try audioSession.overrideOutputAudioPort(.speaker)
+                    try audioSession.setPreferredSampleRate(48000)
+                    try audioSession.setActive(true)
+                } catch {
+                    print("Audio session error: \(error)")
+                }
+                while API.nGetCLXConnState() == 0 {
                     Thread.sleep(forTimeInterval : 0.3)
                 }
                 _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: self.fPin, lPin: User.getMyPin()!, type: "2"))
@@ -1105,6 +1123,11 @@ class QmeraVideoViewController: UIViewController {
             }
         }
         API.terminateCall(sParty: nil)
+        if APIS.uuidCall != nil {
+            CallManager.shared.endCall(uuid: APIS.uuidCall!) {
+                APIS.uuidCall = nil
+            }
+        }
         cameraView.image = nil
         zoomView.image = nil
         listRemoteViewFix.removeAll()
