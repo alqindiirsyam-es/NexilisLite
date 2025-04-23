@@ -2679,4 +2679,14 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func updateVersion() -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.UPDATE_VERSION
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.VERSION] = UIApplication.appVersion
+        return tMessage
+    }
+    
 }

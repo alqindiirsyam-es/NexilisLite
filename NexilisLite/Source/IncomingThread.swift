@@ -241,6 +241,7 @@ class IncomingThread {
 //                            Nexilis.changeUser(f_pin: id)
                     SecureUserDefaults.shared.set(id, forKey: "me")
                     APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
+                    Nexilis.sendVersionToBE()
                     Utils.setProfile(value: false)
                     if Utils.getForceAnonymous() {
                         viewController?.deleteAllRecordDatabase()
@@ -563,7 +564,7 @@ class IncomingThread {
                                 Nexilis.shared.floating.dismiss()
                             }
                             Nexilis.shared.floating = FloatingNotificationBanner(customView: container)
-                            Nexilis.shared.floating.bannerHeight = 100.0
+                            Nexilis.shared.floating.bannerHeight = UIScreen.main.bounds.height / 6 - 10
                             Nexilis.shared.floating.transparency = 0.9
                             
                             let profile = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.THUMB_ID)
@@ -1480,6 +1481,7 @@ class IncomingThread {
                         if User.getMyPin() != cursorUser.string(forColumnIndex: 0) {
                             SecureUserDefaults.shared.set(cursorUser.string(forColumnIndex: 0), forKey: "me")
                             APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
+                            Nexilis.sendVersionToBE()
                         }
                         cursorUser.close()
                     }
@@ -1590,6 +1592,7 @@ class IncomingThread {
                     if User.getMyPin() != cursorUser.string(forColumnIndex: 0) {
                         SecureUserDefaults.shared.set(cursorUser.string(forColumnIndex: 0), forKey: "me")
                         APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
+                        Nexilis.sendVersionToBE()
                     }
                     cursorUser.close()
                 }
@@ -2093,6 +2096,7 @@ class IncomingThread {
             let f_pin = message.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "00")
             SecureUserDefaults.shared.set(f_pin, forKey: "me")
             APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
+            Nexilis.sendVersionToBE()
             if let delegate = Nexilis.shared.loginDelegate {
                 delegate.onProcess(message: f_pin, status: message.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "00"))
             }

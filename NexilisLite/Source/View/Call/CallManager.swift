@@ -8,6 +8,9 @@
 import Foundation
 import CallKit
 import nuSDKService
+import AVFAudio
+import UIKit
+import Combine
 
 public class CallManager: NSObject, ObservableObject {
     
@@ -64,6 +67,10 @@ extension CallManager: CXProviderDelegate {
     }
     
     public func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+//        let audioSession = AVAudioSession.sharedInstance()
+//        try? audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .defaultToSpeaker])
+//        try? audioSession.setActive(true)
+//        
         let uuid = action.callUUID
         if let callInfo = activeCalls[uuid] {
             self.activeCalls[uuid]?.isAccepted = true
@@ -107,6 +114,11 @@ extension CallManager: CXProviderDelegate {
                     })
                     return
                 }
+//                let vc = UIViewController()
+//                vc.modalPresentationStyle = .fullScreen
+//                if #available(iOS 15.0, *) {
+//                    rootWindowScene()?.keyWindow?.topVC().present(vc, animated: false)
+//                }
                 if UIApplication.shared.visibleViewController?.navigationController != nil {
                     UIApplication.shared.visibleViewController?.navigationController?.present(controller, animated: true, completion: nil)
                 } else {
@@ -115,6 +127,10 @@ extension CallManager: CXProviderDelegate {
             }
         }
         action.fulfill()
+    }
+    
+    private func rootWindowScene() -> UIWindowScene? {
+        UIApplication.shared.connectedScenes.compactMap{$0 as? UIWindowScene}.first{$0.activationState == .foregroundActive}
     }
     
     public func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
@@ -135,29 +151,26 @@ extension CallManager: CXProviderDelegate {
                                 sendCancel()
                             }
                             func sendCancel() {
-                                if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: callInfo.callerId, type: !callInfo.isVideo ? "1" : "2"), timeout: 30 * 1000) {
-                                    if result.isOk() {
-                                        let center = UNUserNotificationCenter.current()
-                                        var textCall = ""
-                                        if !callInfo.isVideo {
-                                            textCall = "audio"
-                                        } else {
-                                            textCall = "video"
-                                        }
-                                        let content = UNMutableNotificationContent()
-                                        content.title = callInfo.callerName
-                                        content.body = "☎️ Missed \(textCall) call".localized()
-                                        content.userInfo = ["id" : callInfo.callerId, "type" : "CL02", "callType": callInfo.isVideo ? "2" : "1"]
-                                        content.sound = nil
-                                        let request = UNNotificationRequest(identifier: callInfo.callerId, content: content, trigger: nil)
-                                        center.add(request) { error in
-                                            if let error = error {
-                                                print("Error scheduling notification: \(error.localizedDescription)")
-                                            }
-                                        }
-                                        Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callInfo.callerId, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
+                                _ = Nexilis.write(message: CoreMessage_TMessageBank.getCancelCall(fPin: callInfo.callerId, type: !callInfo.isVideo ? "1" : "2"))
+                                let center = UNUserNotificationCenter.current()
+                                var textCall = ""
+                                if !callInfo.isVideo {
+                                    textCall = "audio"
+                                } else {
+                                    textCall = "video"
+                                }
+                                let content = UNMutableNotificationContent()
+                                content.title = callInfo.callerName
+                                content.body = "☎️ Missed \(textCall) call".localized()
+                                content.userInfo = ["id" : callInfo.callerId, "type" : "CL02", "callType": callInfo.isVideo ? "2" : "1"]
+                                content.sound = nil
+                                let request = UNNotificationRequest(identifier: callInfo.callerId, content: content, trigger: nil)
+                                center.add(request) { error in
+                                    if let error = error {
+                                        print("Error scheduling notification: \(error.localizedDescription)")
                                     }
                                 }
+                                Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callInfo.callerId, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
                             }
                         } catch {
                             
@@ -165,10 +178,27 @@ extension CallManager: CXProviderDelegate {
                     }
                     APIS.uuidCall = nil
                     Nexilis.callAPNActivated = false
+                } else {
+                    DispatchQueue.main.async {
+                        if APIS.checkAppStateisBackground() {
+                            do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
+                            API.terminateCall(sParty: nil)
+                        }
+                    }
                 }
             }
         }
         action.fulfill()
+    }
+}
+
+private extension UIWindow {
+    func topVC() -> UIViewController {
+        var top = rootViewController!
+        while let next = top.presentedViewController {
+            top = next
+        }
+        return top
     }
 }
 

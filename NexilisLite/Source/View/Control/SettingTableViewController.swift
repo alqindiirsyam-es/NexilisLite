@@ -654,6 +654,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
 //                            Nexilis.changeUser(f_pin: id)
                             SecureUserDefaults.shared.set(id, forKey: "me")
                             APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
+                            Nexilis.sendVersionToBE()
                             Utils.setProfile(value: false)
                             if Utils.getForceAnonymous() {
                                 self.deleteAllRecordDatabase()

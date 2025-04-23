@@ -324,6 +324,12 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             }
             return 130.0
         }
+        let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0")
+        if fontSize == 4 {
+            return 85.0
+        } else if fontSize == 6 {
+            return 95.0
+        }
         return 75.0
     }
     
@@ -662,8 +668,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         content.addSubview(imageView)
         imageView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            imageView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10.0),
-            imageView.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10.0),
+            imageView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
             imageView.widthAnchor.constraint(equalToConstant: 55.0),
             imageView.heightAnchor.constraint(equalToConstant: 55.0)
         ])
@@ -969,7 +974,12 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
             }
             guard let url = URL(string: stringURl) else { return }
-            UIApplication.shared.open(url)
+            if Nexilis.checkingAccess(key: "secure_browser") {
+                APIS.openUrl(url: stringURl)
+            } else {
+                guard let url = URL(string: stringURl) else { return }
+                UIApplication.shared.open(url)
+            }
         } else if selectedTag == AUDIOS_TAG {
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask

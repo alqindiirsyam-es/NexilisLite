@@ -144,7 +144,6 @@ class QmeraVideoViewController: UIViewController {
     }()
     
     static func turnSpeakerOn() {
-        bSpeakerPhone = !bSpeakerPhone
         var bAudioEngineIsAvtive: Bool! = false
         API.turnSpeakerPhone(bSPon: bSpeakerPhone)
         repeat {
@@ -778,9 +777,6 @@ class QmeraVideoViewController: UIViewController {
                     self.labelTimerVC.text = format
                 }
                 self.vcTimer.fire()
-                if !QmeraVideoViewController.bSpeakerPhone {
-                    self.setSpeaker()
-                }
             }
         }
     }
@@ -1117,7 +1113,7 @@ class QmeraVideoViewController: UIViewController {
     
     func setSpeaker() {
         DispatchQueue.main.async {
-            QmeraVideoViewController.turnSpeakerOn()
+            QmeraVideoViewController.bSpeakerPhone = !QmeraVideoViewController.bSpeakerPhone
             if (QmeraVideoViewController.bSpeakerPhone) {
                 self.buttonSpeaker.backgroundColor = .lightGray
                 self.buttonSpeaker.tintColor = .mainColor
@@ -1126,6 +1122,9 @@ class QmeraVideoViewController: UIViewController {
                 self.buttonSpeaker.backgroundColor = .secondaryColor
                 self.buttonSpeaker.tintColor = .mainColor
                 self.buttonSpeaker.setImage(UIImage(systemName: "speaker.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            }
+            DispatchQueue.global().async {
+                QmeraVideoViewController.turnSpeakerOn()
             }
         }
     }
@@ -1289,11 +1288,9 @@ class QmeraVideoViewController: UIViewController {
 //                    } while (QmeraVideoViewController.isLoop)
 //                }
 //            })
+            self.setSpeaker()
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
-            DispatchQueue.main.async {
-                Nexilis.stopRingbacktoneCall()
-            }
             let channel = arrayMessage[3]
             remoteChannel[String(channel)] = String(arrayMessage[5])
             DispatchQueue.main.async {
@@ -1425,6 +1422,12 @@ class QmeraVideoViewController: UIViewController {
             DispatchQueue.main.async {
                 if self.name.isDescendant(of: self.view) {
                     self.didTapAcceptCallButton()
+                    if QmeraVideoViewController.bSpeakerPhone {
+                        DispatchQueue.main.async {
+                            QmeraVideoViewController.bSpeakerPhone = false
+                            self.setSpeaker()
+                        }
+                    }
                 }
                 let indexPerson = self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[1]})
                 if indexPerson != nil {

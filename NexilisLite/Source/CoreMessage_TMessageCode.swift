@@ -805,4 +805,5 @@ public class CoreMessage_TMessageCode {
     public static let GPT_SERVICE = "GPTS";
     
     public static let GET_PUSH_PREFS = "GPR";
+    public static let UPDATE_VERSION = "UPV";
 }

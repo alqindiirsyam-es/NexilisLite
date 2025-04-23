@@ -502,7 +502,7 @@ public final class Utils {
             }
             let nameFile = chat.messageText.components(separatedBy: "|")[0]
             let dataText = chat.messageText.components(separatedBy: "|")[1]
-            if !dataText.isEmpty {
+            if !dataText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return ("📄 " + dataText).richText(group_id: chat.pin)
             }
             return showNSMutableAttributedString(("📄 \(nameFile)"))

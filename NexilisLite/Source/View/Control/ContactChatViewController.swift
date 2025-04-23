@@ -1174,8 +1174,7 @@ extension ContactChatViewController {
                 content.addSubview(imageView)
                 imageView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
-                    imageView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10.0),
-                    imageView.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10.0),
+                    imageView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
                     imageView.widthAnchor.constraint(equalToConstant: 55.0),
                     imageView.heightAnchor.constraint(equalToConstant: 55.0)
                 ])
@@ -1642,6 +1641,12 @@ extension ContactChatViewController {
     }
     
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0")
+        if fontSize == 4 {
+            return 85.0
+        } else if fontSize == 6 {
+            return 95.0
+        }
         return 75.0
     }
     

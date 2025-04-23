@@ -177,7 +177,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         if lang == "id" {
             intLang = 1
         }
-        if stringQMS.starts(with: Utils.getURLBase()) {
+        if stringQMS.starts(with: Utils.getURLBase()) && !stringQMS.contains("/TrustedChannel") && !stringQMS.contains("/get_oneapp") {
             stringQMS = stringQMS + "&lang=\(intLang)&theme=\(self.traitCollection.userInterfaceStyle == .dark ? "0" : "1")"
         }
         if let url = URL(string: "\(stringQMS)") {
@@ -197,50 +197,42 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     
     func loadContentBlocker(into config: WKWebViewConfiguration, completion: @escaping () -> Void) {
         // Define ad-blocking rules directly in Swift as a string
-        let contentRules = """
+        let contentRules = #"""
         [
-            {
-                "trigger": { 
-                    "url-filter": ".*(ads|adserver|advert|doubleclick|popads|popcash|onclickads|adfly|shorte|media.net|buysellads|revcontent).*", 
-                    "resource-type": ["script", "iframe", "xmlhttprequest", "media"],
-                    "unless-domain": ["nexilis.io"]
-                },
-                "action": { "type": "block" }
+          {
+            "trigger": {
+              "url-filter": "doubleclick.net"
             },
-            {
-                "trigger": { 
-                    "url-filter": ".*(taboola|outbrain|scorecardresearch|googlesyndication|tracking|track|pixel|cpxinteractive|zedo|rubiconproject).*", 
-                    "resource-type": ["script", "iframe", "xmlhttprequest"],
-                    "unless-domain": ["nexilis.io"]
-                },
-                "action": { "type": "block" }
-            },
-            {
-                "trigger": { 
-                    "url-filter": ".*(google-analytics|facebook.com/tr|analytics|gtag|data-collect|collect|hotjar|mixpanel|segment|mouseflow).*", 
-                    "resource-type": ["script", "xmlhttprequest"],
-                    "unless-domain": ["nexilis.io"]
-                },
-                "action": { "type": "block" }
-            },
-            {
-                "trigger": { 
-                    "url-filter": ".*(banner|sponsored|clicktrack|beacon|stats|metrics|impression|affiliate|clksite).*", 
-                    "resource-type": ["script", "image", "iframe"],
-                    "unless-domain": ["nexilis.io"]
-                },
-                "action": { "type": "block" }
-            },
-            {
-                "trigger": { 
-                    "url-filter": ".*(interstitial|popunder|redirect|clickunder|popup|overlayad).*", 
-                    "resource-type": ["script", "document", "subdocument"],
-                    "unless-domain": ["nexilis.io"]
-                },
-                "action": { "type": "block" }
+            "action": {
+              "type": "block"
             }
+          },
+          {
+            "trigger": {
+              "url-filter": "googlesyndication.com"
+            },
+            "action": {
+              "type": "block"
+            }
+          },
+          {
+            "trigger": {
+              "url-filter": "taboola.com"
+            },
+            "action": {
+              "type": "block"
+            }
+          },
+          {
+            "trigger": {
+              "url-filter": "outbrain.com"
+            },
+            "action": {
+              "type": "block"
+            }
+          }
         ]
-        """
+        """#
 
         WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "AdBlocker", encodedContentRuleList: contentRules) { ruleList, error in
             if let ruleList = ruleList {
@@ -847,62 +839,95 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     }
     
     public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
-        if navigationAction.targetFrame?.isMainFrame == true {
-            guard let url = navigationAction.request.url else {
+        guard let url = navigationAction.request.url else {
+//            print("return 0")
+            decisionHandler(.cancel)
+            return
+        }
+        
+        if let scheme = url.scheme?.lowercased(), scheme.hasPrefix("itms") || scheme == "mailto" || scheme == "tel" {
+            DispatchQueue.main.async {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            }
+//            print("return 1 \(url.absoluteString)")
+            decisionHandler(.cancel)
+            return
+        }
+
+        guard navigationAction.targetFrame?.isMainFrame == true else {
+            decisionHandler(.allow)
+//            print("return 2 \(url.absoluteString)")
+            return
+        }
+
+        if loadingURL {
+            decisionHandler(.cancel)
+//            print("return 3 \(url.absoluteString)")
+            return
+        }
+
+        loadingURL = true
+
+        if allowedURLs.contains(url.absoluteString) {
+            loadingURL = false
+            decisionHandler(.allow)
+//            print("return 4 \(url.absoluteString)")
+            return
+        }
+        
+        validateSSLCertificate(url: url) { [weak self] isValid in
+            guard let self = self else {
+//                print("return 5 \(url.absoluteString)")
                 decisionHandler(.cancel)
                 return
             }
-            if loadingURL {
-                decisionHandler(.cancel)
-                return
-            }
-            loadingURL = true
-            if allowedURLs.contains(url.absoluteString) {
-                loadingURL = false
-                decisionHandler(.allow)
-                return
-            }
-            validateSSLCertificate(url: url) { isValid in
+
+            DispatchQueue.main.async {
                 if isValid {
                     self.allowedURLs.insert(url.absoluteString)
                     self.loadingURL = false
+//                    print("return 6 \(url.absoluteString)")
                     decisionHandler(.allow)
                 } else {
                     let host = url.host ?? ""
-                    DispatchQueue.main.async {
-                        var messageText = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability".localized()
-                        messageText = messageText.replacingOccurrences(of: "<<domain>>", with: host)
-                        let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
-                                                      message: messageText,
-                                                      preferredStyle: .alert)
+                    var messageText = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability".localized()
+                    messageText = messageText.replacingOccurrences(of: "<<domain>>", with: host)
 
-                        let yesAction = UIAlertAction(title: "Yes", style: .default) { _ in
-                            let storedCertificate = Utils.getCertificatePinningWebview()
-                            if let jsonData = storedCertificate.data(using: .utf8),
-                               let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
-                                var certJson = certJson
-                                certJson[host] = self.blockedCertificate
-                                if let jsonData = try? JSONSerialization.data(withJSONObject: certJson, options: []),
-                                   let jsonString = String(data: jsonData, encoding: .utf8) {
-                                    Utils.setCertificatePinningWebview(value: jsonString)
-                                }
+                    let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
+                                                  message: messageText,
+                                                  preferredStyle: .alert)
+
+                    alert.addAction(UIAlertAction(title: "Yes", style: .default) { _ in
+                        let storedCertificate = Utils.getCertificatePinningWebview()
+                        if let jsonData = storedCertificate.data(using: .utf8),
+                           let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
+                            var certJson = certJson
+                            certJson[host] = self.blockedCertificate
+                            if let jsonData = try? JSONSerialization.data(withJSONObject: certJson, options: []),
+                               let jsonString = String(data: jsonData, encoding: .utf8) {
+                                Utils.setCertificatePinningWebview(value: jsonString)
                             }
-                            self.allowedURLs.insert(url.absoluteString)
-                            self.loadingURL = false
-                            decisionHandler(.allow)
                         }
-                        let noAction = UIAlertAction(title: "No", style: .cancel) { _ in
-                            self.loadingURL = false
-                            decisionHandler(.cancel)
-                        }
-                        alert.addAction(yesAction)
-                        alert.addAction(noAction)
+
+                        self.allowedURLs.insert(url.absoluteString)
+                        self.loadingURL = false
+                        decisionHandler(.allow)
+                    })
+
+                    alert.addAction(UIAlertAction(title: "No", style: .cancel) { _ in
+                        self.loadingURL = false
+                        decisionHandler(.cancel)
+                    })
+
+                    if self.presentedViewController == nil {
                         self.present(alert, animated: true, completion: nil)
+                    } else {
+                        self.loadingURL = false
+//                        print("return 7 \(url.absoluteString)")
+                        decisionHandler(.cancel)
                     }
                 }
             }
-        } else {
-            decisionHandler(.cancel)
         }
     }
     

@@ -204,6 +204,7 @@ public class Nexilis: NSObject {
                     SecureUserDefaults.shared.set(apiKey, forKey: "apiKey")
                 }
                 
+                sendVersionToBE()
                 getPullPrefs()
                 getFeatureAccess()
                 
@@ -391,6 +392,12 @@ public class Nexilis: NSObject {
                 vc = (viewController as! UINavigationController).rootViewController!
             }
             floatingButton.mySettingDelegate = vc as? any SettingMABDelegate
+        }
+    }
+    
+    public static func sendVersionToBE() {
+        DispatchQueue.global().async {
+            _ = Nexilis.write(message: CoreMessage_TMessageBank.updateVersion())
         }
     }
     
@@ -3895,7 +3902,7 @@ extension Nexilis: MessageDelegate {
                     
                     func displayNotif() {
                         floating = FloatingNotificationBanner(customView: container)
-                        floating.bannerHeight = 100.0
+                        floating.bannerHeight = UIScreen.main.bounds.height / 6 - 10
                         floating.transparency = 0.9
                         
                         if threadIdentifier == "-999" {

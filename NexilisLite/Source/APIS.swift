@@ -913,7 +913,7 @@ public class APIS: NSObject {
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
         if checkAppStateisBackground() {
 //            Nexilis.sendStateToServer(s: "MASUK SHOW NOTIFICATION NEXILIS")
-            print("MASUK SHOW NOTIFICATION NEXILIS: \(userInfo)")
+//            print("MASUK SHOW NOTIFICATION NEXILIS: \(userInfo)")
             DispatchQueue.main.async {
                 if let payload = userInfo["payload"] as? [String: Any] {
                     if let messagePayload = payload["message"] as? [String: Any] {
@@ -1088,7 +1088,7 @@ public class APIS: NSObject {
                     if let data = data {
                         do {
                             if let dataString = String(data: data, encoding: .utf8) {
-                                if let jsonObj = try! JSONSerialization.jsonObject(with: dataString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
+                                if let jsonObj = try JSONSerialization.jsonObject(with: dataString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
                                     let dataObj = jsonObj["data"] as? String ?? ""
                                     let message = TMessage(data: dataObj)
                                     Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
@@ -1099,6 +1099,12 @@ public class APIS: NSObject {
                             
                         }
                     }
+                    DispatchQueue.main.async {
+                        UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+                    }
+                }
+                DispatchQueue.main.async {
+                    UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
                 }
             }
 //            do {
@@ -1338,12 +1344,17 @@ public class APIS: NSObject {
                         var l_pin = ""
                         var message_scope_id = ""
                         var pin = ""
+                        var chat_id = ""
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin, message_scope_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
+                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin, message_scope_id, chat_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
                                 f_pin = cursor.string(forColumnIndex: 0) ?? ""
                                 l_pin = cursor.string(forColumnIndex: 1) ?? ""
                                 message_scope_id = cursor.string(forColumnIndex: 2) ?? ""
+                                chat_id = cursor.string(forColumnIndex: 3) ?? ""
                                 pin = f_pin == User.getMyPin() ? l_pin : f_pin
+                                if message_scope_id == "4" {
+                                    pin = chat_id.isEmpty ? l_pin : chat_id
+                                }
                                 cursor.close()
                             }
                         })
@@ -1352,6 +1363,7 @@ public class APIS: NSObject {
                                 navigationC.popViewController(animated: false)
                             }
                         }
+                        print("HUHU \(f_pin) \(l_pin) \(message_scope_id)")
                         showEditorOrCallFromAPN(pin, message_scope_id == "4" ? "1" : "0", "CL01")
                     }
                 }
@@ -1362,7 +1374,7 @@ public class APIS: NSObject {
     
     private static func showEditorOrCallFromAPN(_ id: String, _ type: String, _ callType: String) {
         if type == "0" {
-            if User.getDataCanNil(pin: id) == nil {
+            if User.getDataCanNil(pin: id) == nil && id != "-999" && id != "-997" {
                 return
             }
             let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal

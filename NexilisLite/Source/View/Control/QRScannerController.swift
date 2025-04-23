@@ -59,7 +59,9 @@ class QRScannerController: UIViewController, AVCaptureMetadataOutputObjectsDeleg
         view.layer.addSublayer(previewLayer)
 
         // Start the capture session
-        captureSession.startRunning()
+        DispatchQueue.main.async {
+            self.captureSession.startRunning()
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {

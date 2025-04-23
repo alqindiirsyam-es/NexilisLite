@@ -3124,23 +3124,41 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         return true
     }
     
-    public func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
-            switch interaction {
-            case .invokeDefaultAction:
-                let gesture = ObjectGesture()
-                gesture.message_id = URL.absoluteString
-                tapMessageText(gesture)
-                return false
-            case .presentActions:
-                UIPasteboard.general.string = URL.absoluteString
-                self.view.makeToast("Link Copied".localized(), duration: 3)
-                return false
-            case .preview:
-                return true
-            @unknown default:
-                return true
+    public func textView(_ textView: UITextView, shouldInteractWith URL: URL?, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+        var urlString: String?
+
+        if let url = URL {
+            urlString = url.absoluteString
+        } else {
+            if let range = Range(characterRange, in: textView.text) {
+                let tappedText = String(textView.text[range])
+                urlString = tappedText
             }
         }
+        
+        guard let finalURL = urlString else {
+            return false
+        }
+
+        switch interaction {
+        case .invokeDefaultAction:
+            let gesture = ObjectGesture()
+            gesture.message_id = finalURL
+            tapMessageText(gesture)
+            return false
+
+        case .presentActions:
+            UIPasteboard.general.string = finalURL
+            self.view.makeToast("Link Copied".localized(), duration: 3)
+            return false
+
+        case .preview:
+            return true
+
+        @unknown default:
+            return true
+        }
+    }
 }
 
 extension EditorGroup: UIContextMenuInteractionDelegate {
@@ -4491,7 +4509,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         let messageText = UITextView()
         messageText.isEditable = false
         messageText.isSelectable = true
-        messageText.dataDetectorTypes = []
+        messageText.dataDetectorTypes = [.link]
         messageText.backgroundColor = .clear
         messageText.isScrollEnabled = false
         messageText.textContainerInset = UIEdgeInsets.zero
@@ -5105,18 +5123,45 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                     if let dirPath = paths.first {
                         let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(listImages[i].thumbId)
-                        let image : UIImage? =  {
-                            if let img = Nexilis.imageCache.object(forKey: listImages[i].thumbId as NSString) {
-                                return img
+                        if FileManager.default.fileExists(atPath: thumbURL.path) {
+                            DispatchQueue.main.async {
+                                let image : UIImage? =  {
+                                    if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
+                                        return img
+                                    }
+                                    else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
+                                            Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                                            return img
+                                    }
+                                    return nil
+                                }()
+                                imageThumb.image = image
                             }
-                            else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                Nexilis.imageCache.setObject(img, forKey: listImages[i].thumbId as NSString)
-                                return img
+                        } else if FileEncryption.shared.isSecureExists(filename: listImages[i].thumbId) {
+                            do {
+                                if var data = try FileEncryption.shared.readSecure(filename: listImages[i].thumbId) {
+                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                    if dataDecrypt != nil {
+                                        data = dataDecrypt!
+                                    }
+                                    DispatchQueue.main.async {
+                                        let image : UIImage? =  {
+                                            if let img = Nexilis.imageCache.object(forKey: listImages[i].thumbId as NSString) {
+                                                return img
+                                            }
+                                            else if let img = UIImage(data: data)?.resize(target: CGSize(width: 500, height: 500)) {
+                                                Nexilis.imageCache.setObject(img, forKey: listImages[i].thumbId as NSString)
+                                                return img
+                                            }
+                                            return nil
+                                        }()
+                                        imageThumb.image = image
+                                    }
+                                }
+                            } catch {
+                                
                             }
-                            return nil
-                        }()
-                        //                        let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
-                        listImageThumb[i].image = image
+                        }
                         
                         let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(listImages[i].imageId)
                         if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
@@ -5225,18 +5270,45 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                 if let dirPath = paths.first {
                     let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumbChat)
-                    let image : UIImage? =  {
-                        if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
-                            return img
+                    if FileManager.default.fileExists(atPath: thumbURL.path) {
+                        DispatchQueue.main.async {
+                            let image : UIImage? =  {
+                                if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
+                                    return img
+                                }
+                                else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
+                                        Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                                        return img
+                                }
+                                return nil
+                            }()
+                            imageThumb.image = image
                         }
-                        else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                            Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
-                            return img
+                    } else if FileEncryption.shared.isSecureExists(filename: thumbChat) {
+                        do {
+                            if var data = try FileEncryption.shared.readSecure(filename: thumbChat) {
+                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                if dataDecrypt != nil {
+                                    data = dataDecrypt!
+                                }
+                                DispatchQueue.main.async {
+                                    let image : UIImage? =  {
+                                        if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
+                                            return img
+                                        }
+                                        else if let img = UIImage(data: data)?.resize(target: CGSize(width: 500, height: 500)) {
+                                            Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                                            return img
+                                        }
+                                        return nil
+                                    }()
+                                    imageThumb.image = image
+                                }
+                            }
+                        } catch {
+                            
                         }
-                        return nil
-                    }()
-                    //                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
-                    imageThumb.image = image
+                    }
                     
                     let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
                     if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
