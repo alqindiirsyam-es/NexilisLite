@@ -1063,9 +1063,9 @@ class QmeraAudioViewController: UIViewController {
                     }
                 }
             } else if state == Nexilis.AUDIO_CALL_OFFHOOK || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_OFFHOOK) {
-//                DispatchQueue.main.async {
-//                    Nexilis.stopRingbacktoneCall()
-//                }
+                DispatchQueue.main.async {
+                    Nexilis.stopRingbacktoneCall()
+                }
                 if users.count == 1 && firstCall {
                     DispatchQueue.main.async {
                         if !self.ticketId.isEmpty || (self.timer == nil && !self.stack.isDescendant(of: self.view)) {

@@ -1291,6 +1291,9 @@ class QmeraVideoViewController: UIViewController {
             self.setSpeaker()
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
+            DispatchQueue.main.async {
+                Nexilis.stopRingbacktoneCall()
+            }
             let channel = arrayMessage[3]
             remoteChannel[String(channel)] = String(arrayMessage[5])
             DispatchQueue.main.async {
