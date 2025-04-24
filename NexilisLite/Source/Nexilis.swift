@@ -1358,7 +1358,7 @@ public class Nexilis: NSObject {
                     }
                 })
                 if !messageExist {
-                    Nexilis.saveMessageBot(textMessage: "*\(nameReq.trimmingCharacters(in: .whitespaces))*" + " " + "has requested to be your friend", blog_id: nameFpin, attachment_type: "61")
+                    Nexilis.saveMessageBot(textMessage: "*\(nameReq.trimmingCharacters(in: .whitespaces))*" + "~" + "has requested to be your friend", blog_id: nameFpin, attachment_type: "61")
                     NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                 }
             }
@@ -1702,7 +1702,7 @@ public class Nexilis: NSObject {
                         if t == "-1" || t == "-2" {
                             continue
                         }
-                        if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS where message_id = '\(t)'"), cursorStatus.next() {
+                        if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS where message_id = '\(t)' and f_pin = '\(l_pin)'"), cursorStatus.next() {
                             let lastStatus = cursorStatus.int(forColumnIndex: 0)
                             if lastStatus < Int(status)! {
                                 if status == "3" {
@@ -1732,14 +1732,17 @@ public class Nexilis: NSObject {
                                 } else {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                         "status" : status,
-                                        "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
+                                        "longitude" : longitude,
+                                        "latitude" : latitude,
+                                        "location" : desc,
+                                        "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                                 }
                             }
                             cursorStatus.close()
                         }
                     }
                 } else {
-                    if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS where message_id = '\(message_id)'"), cursorStatus.next() {
+                    if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS where message_id = '\(message_id)' and f_pin = '\(l_pin)'"), cursorStatus.next() {
                         let lastStatus = cursorStatus.int(forColumnIndex: 0)
                         if lastStatus < Int(status)! {
                             if status == "3" {

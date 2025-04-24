@@ -466,8 +466,8 @@ public final class Utils {
         } else if chat.attachmentFlag == "27" {
             return showNSMutableAttributedString(("📄 " + "Live Streaming".localized()))
         } else if chat.attachmentFlag == "61" {
-            let textName = chat.messageText.components(separatedBy: " ")[0]
-            let textAfterName = chat.messageText.components(separatedBy: "* ")[1]
+            let textName = chat.messageText.components(separatedBy: "~")[0]
+            let textAfterName = chat.messageText.components(separatedBy: "~")[1]
             return (textName + " " + textAfterName.localized()).richText(group_id: chat.pin)
         } else if chat.attachmentFlag == "26" {
             return showNSMutableAttributedString(("📄 " + "Seminar".localized()))

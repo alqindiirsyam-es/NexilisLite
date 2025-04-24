@@ -6219,8 +6219,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             buttonDecline.heightAnchor.constraint(equalToConstant: 30).isActive = true
             buttonDecline.addTarget(self, action: #selector(addFriendReqAction), for: .touchUpInside)
             
-            let textName = textChat.components(separatedBy: " ")[0]
-            let textAfterName = textChat.components(separatedBy: "* ")[1]
+            let textName = textChat.components(separatedBy: "~")[0]
+            let textAfterName = textChat.components(separatedBy: "~")[1]
             messageRequestFriend = textName + " " + textAfterName.localized()
         } else {
             messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15).isActive = true

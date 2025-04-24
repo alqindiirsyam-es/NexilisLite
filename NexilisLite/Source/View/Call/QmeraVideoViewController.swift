@@ -23,6 +23,8 @@ class QmeraVideoViewController: UIViewController {
     static private var volumeView: MPVolumeView!
     static private var lastVolume: Float! = AVAudioSession.sharedInstance().outputVolume
     static private var bSpeakerPhone: Bool! = false
+    private var tempSpeaker = false
+    private var timerSpeaker: Timer?
     static private var isLoop = false
     
     
@@ -1136,8 +1138,9 @@ class QmeraVideoViewController: UIViewController {
     
     func setSpeaker() {
         DispatchQueue.main.async {
-            QmeraVideoViewController.bSpeakerPhone = !QmeraVideoViewController.bSpeakerPhone
-            if (QmeraVideoViewController.bSpeakerPhone) {
+            self.timerSpeaker?.invalidate()
+            self.tempSpeaker = !self.tempSpeaker
+            if (self.tempSpeaker) {
                 self.buttonSpeaker.backgroundColor = .lightGray
                 self.buttonSpeaker.tintColor = .mainColor
                 self.buttonSpeaker.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
@@ -1146,9 +1149,15 @@ class QmeraVideoViewController: UIViewController {
                 self.buttonSpeaker.tintColor = .mainColor
                 self.buttonSpeaker.setImage(UIImage(systemName: "speaker.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
             }
-            DispatchQueue.global().async {
-                QmeraVideoViewController.turnSpeakerOn()
-            }
+            self.timerSpeaker = Timer.scheduledTimer(withTimeInterval: 1, repeats: false, block: {_ in
+                if QmeraVideoViewController.bSpeakerPhone != self.tempSpeaker {
+                    QmeraVideoViewController.bSpeakerPhone = !QmeraVideoViewController.bSpeakerPhone
+                    self.tempSpeaker = QmeraVideoViewController.bSpeakerPhone
+                    DispatchQueue.global().async {
+                        QmeraVideoViewController.turnSpeakerOn()
+                    }
+                }
+            })
         }
     }
     

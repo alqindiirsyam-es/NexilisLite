@@ -1712,7 +1712,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             
             self.constraintViewTextField.constant = 0
             self.constraintBottomContainerMultpileSelectSession.constant = 0
-            if self.contraintBottomMention.constant > 0 {
+            if self.contraintBottomMention.constant > 0 && self.keyboardHeightForMention != nil {
                 self.contraintBottomMention.constant = self.contraintBottomMention.constant - self.keyboardHeightForMention! + 60
             }
             keyboardHeightForMention = nil
