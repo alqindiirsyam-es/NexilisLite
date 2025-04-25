@@ -146,17 +146,17 @@ class QmeraVideoViewController: UIViewController {
     }()
     
     static func turnSpeakerOn() {
-        var bAudioEngineIsAvtive: Bool! = false
+//        var bAudioEngineIsAvtive: Bool! = false
         API.turnSpeakerPhone(bSPon: bSpeakerPhone)
-        repeat {
-            Thread.sleep(forTimeInterval : 0.3)
-            bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
-            print("Audio Session State: \(bAudioEngineIsAvtive ? "Active" : "Inactive" )")
-            if (bAudioEngineIsAvtive) {
-                break
-            }
-            API.restartAudioEngine()
-        } while (!bAudioEngineIsAvtive)
+//        repeat {
+//            Thread.sleep(forTimeInterval : 0.3)
+//            bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
+//            print("Audio Session State: \(bAudioEngineIsAvtive ? "Active" : "Inactive" )")
+//            if (bAudioEngineIsAvtive) {
+//                break
+//            }
+//            API.restartAudioEngine()
+//        } while (!bAudioEngineIsAvtive)
         var volume:Float! = 0
         if (bSpeakerPhone) {
             volume = lastVolume * nMaxSPOn
@@ -202,7 +202,7 @@ class QmeraVideoViewController: UIViewController {
     private func backToDefaultAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: .allowBluetooth)
+            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .mixWithOthers])
             try audioSession.overrideOutputAudioPort(.speaker)
             try audioSession.setPreferredSampleRate(48000)
             try audioSession.setActive(true)
@@ -253,15 +253,7 @@ class QmeraVideoViewController: UIViewController {
                 } catch {
                     
                 }
-                let audioSession = AVAudioSession.sharedInstance()
-                do {
-                    try audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth])
-                    try audioSession.overrideOutputAudioPort(.speaker)
-                    try audioSession.setPreferredSampleRate(48000)
-                    try audioSession.setActive(true)
-                } catch {
-                    print("Audio session error: \(error)")
-                }
+                self.backToDefaultAudioSession()
                 while API.nGetCLXConnState() == 0 {
                     Thread.sleep(forTimeInterval : 0.3)
                 }

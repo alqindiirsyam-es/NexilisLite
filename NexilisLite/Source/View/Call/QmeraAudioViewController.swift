@@ -266,17 +266,17 @@ class QmeraAudioViewController: UIViewController {
     }()
     
     static func turnSpeakerOn() {
-        var bAudioEngineIsAvtive: Bool! = false
+//        var bAudioEngineIsAvtive: Bool! = false
         API.turnSpeakerPhone(bSPon: bSpeakerPhone)
-        repeat {
-            Thread.sleep(forTimeInterval : 0.3)
-            bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
-            print("Audio Session State: \(bAudioEngineIsAvtive ? "Active" : "Inactive" )")
-            if (bAudioEngineIsAvtive) {
-                break
-            }
-            API.restartAudioEngine()
-        } while (!bAudioEngineIsAvtive)
+//        repeat {
+//            Thread.sleep(forTimeInterval : 0.3)
+//            bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
+//            print("Audio Session State: \(bAudioEngineIsAvtive ? "Active" : "Inactive" )")
+//            if (bAudioEngineIsAvtive) {
+//                break
+//            }
+//            API.restartAudioEngine()
+//        } while (!bAudioEngineIsAvtive)
         var volume:Float! = 0
         if (bSpeakerPhone) {
             DispatchQueue.main.async {
@@ -319,7 +319,7 @@ class QmeraAudioViewController: UIViewController {
     private func backToDefaultAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth])
+            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .mixWithOthers])
             try audioSession.overrideOutputAudioPort(.speaker)
             try audioSession.setPreferredSampleRate(44100)
             try audioSession.setActive(true)
@@ -366,12 +366,6 @@ class QmeraAudioViewController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(onStatusCall(_:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusCall), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onReceiveMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onCallFCM(notification:)), name: NSNotification.Name(rawValue: Nexilis.callFCM), object: nil)
-        NotificationCenter.default.addObserver(
-                    self,
-                    selector: #selector(handleRouteChange),
-                    name: AVAudioSession.routeChangeNotification,
-                    object: nil
-                )
         
         if let u = self.user {
             self.users.append(u)
@@ -439,15 +433,7 @@ class QmeraAudioViewController: UIViewController {
                     } catch {
                         
                     }
-                    let audioSession = AVAudioSession.sharedInstance()
-                    do {
-                        try audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth])
-                        try audioSession.overrideOutputAudioPort(.speaker)
-                        try audioSession.setPreferredSampleRate(44100)
-                        try audioSession.setActive(true)
-                    } catch {
-                        print("Audio session error: \(error)")
-                    }
+                    self.backToDefaultAudioSession()
                     while API.nGetCLXConnState() == 0 {
                         Thread.sleep(forTimeInterval : 0.3)
                     }
@@ -457,39 +443,6 @@ class QmeraAudioViewController: UIViewController {
         }
         self.timeStartCall = String(Date().currentTimeMillis())
         self.idCall = (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID()
-    }
-    
-    @objc func handleRouteChange(notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-
-        switch reason {
-        case .newDeviceAvailable:
-            print("🎧 Headphones plugged in")
-        case .oldDeviceUnavailable:
-            print("🎧 Headphones unplugged")
-        case .categoryChange:
-            DispatchQueue.main.async { [self] in
-                if !canChangeSpeaker {
-                    canChangeSpeaker = true
-                } else if APIS.checkAppStateisBackground() {
-                    if canChangeSpeaker {
-                        didSpeaker(sender: nil)
-                    }
-                }
-            }
-        case .override:
-            DispatchQueue.main.async { [self] in
-                if APIS.checkAppStateisBackground() {
-                    if canChangeSpeaker {
-                        didSpeaker(sender: nil)
-                    }
-                }
-            }
-        default:
-            print("🔄 Audio route changed: \(reason)")
-        }
     }
     
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
@@ -1119,11 +1072,11 @@ class QmeraAudioViewController: UIViewController {
 //                        }
 //                    } while (QmeraAudioViewController.isLoop)
 //                }
-                DispatchQueue.main.async { [self] in
-                    QmeraAudioViewController.bSpeakerPhone = true
-                    self.tempSpeaker = true
-                    didSpeaker(sender: nil)
-                }
+//                DispatchQueue.main.async { [self] in
+//                    QmeraAudioViewController.bSpeakerPhone = true
+//                    self.tempSpeaker = true
+//                    didSpeaker(sender: nil)
+//                }
             } else if state == Nexilis.AUDIO_CALL_RINGING || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_RINGING) {
                 if users.count == 1 && !autoAcceptAPN {
                     DispatchQueue.main.async {
