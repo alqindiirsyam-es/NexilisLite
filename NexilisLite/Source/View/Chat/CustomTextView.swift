@@ -83,6 +83,8 @@ class CustomTextView: UITextView {
                 customDelegate?.customTextViewDidPasteText(image: pasteboardItems["public.png"] as? UIImage ?? pasteboardItems["public.jpeg"] as? UIImage, dataGIF: dataGif)
                 return
             }
+        } else if let string = UIPasteboard.general.string {
+            self.replace(self.selectedTextRange!, withText: string)
         }
         super.paste(sender)
     }

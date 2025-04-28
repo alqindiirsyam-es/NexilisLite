@@ -1085,23 +1085,25 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         }
         data.isSelected = !data.isSelected
         if data.isSelected {
-            for dataSubChat in self.chatGroupMaps[data.groupId]! {
-                if var indexParent = chats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
-                    if isFiltering || selectedTag == UNREAD_TAG {
-                        if var indexParentFilter = fillteredData.firstIndex(where: { ($0 as! Chat).isParent && ($0 as! Chat).groupId == data.groupId }) {
-                            fillteredData.insert(dataSubChat, at: indexParentFilter + 1)
-                            indexParentFilter+=1
-                        }
-                    } else {
-                        chats.insert(dataSubChat, at: indexParent + 1)
-                        indexParent+=1
-                        if var indexParentFilter = tempChats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
-                            tempChats.insert(dataSubChat, at: indexParentFilter + 1)
-                            indexParentFilter+=1
+            if let dataSubChats = self.chatGroupMaps[data.groupId] {
+                for dataSubChat in dataSubChats {
+                    if var indexParent = chats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
+                        if isFiltering || selectedTag == UNREAD_TAG {
+                            if var indexParentFilter = fillteredData.firstIndex(where: { ($0 as! Chat).isParent && ($0 as! Chat).groupId == data.groupId }) {
+                                fillteredData.insert(dataSubChat, at: indexParentFilter + 1)
+                                indexParentFilter+=1
+                            }
+                        } else {
+                            chats.insert(dataSubChat, at: indexParent + 1)
+                            indexParent+=1
+                            if var indexParentFilter = tempChats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
+                                tempChats.insert(dataSubChat, at: indexParentFilter + 1)
+                                indexParentFilter+=1
+                            }
                         }
                     }
+                    
                 }
-                
             }
         } else {
             if isFiltering || selectedTag == UNREAD_TAG {

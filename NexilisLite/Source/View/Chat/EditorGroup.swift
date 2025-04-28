@@ -87,6 +87,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var keyboardHeightForMention: CGFloat?
     var listMentionWithText:[User] = []
     var listMentionInTextField:[User] = []
+    var tempListMentionWithText:[User] = []
+    var tempListMentionInTextField:[User] = []
     var showingLink = ""
     var isAlwaysHideLinkPreview = false
     var timerCheckLink: Timer?
@@ -118,6 +120,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var timers: [IndexPath: Timer] = [:]
     var playingIndexPath: IndexPath?
     var timerSearch: Timer?
+    
+    var tableMentionEdit = UITableView()
     
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
@@ -1517,8 +1521,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     @IBAction func stickerTapped(_ sender: UIButton) {
+        if textFieldSend.isFirstResponder {
+            dismissKeyboard()
+        }
         DispatchQueue.main.async {
-            if (self.constraintBottomAttachment.constant == 0.0) {
+            if !self.viewSticker.isDescendant(of: self.view) {
                 self.constraintBottomAttachment.constant = 200.0
                 self.view.addSubview(self.viewSticker)
                 self.viewSticker.translatesAutoresizingMaskIntoConstraints = false
@@ -1671,10 +1678,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
             if self.constraintViewTextField.constant != keyboardHeight - 60 {
-                if self.contraintBottomMention.constant > 0 && self.contraintBottomMention.constant < self.contraintBottomMention.constant + keyboardHeight - 60 {
-                    self.contraintBottomMention.constant = self.contraintBottomMention.constant + keyboardHeight - 60
+//                self.constraintViewTextField.constant = keyboardHeight - 60
+                self.constraintBottomAttachment.constant = keyboardHeight
+                if self.contraintBottomMention.constant > 0 {
+                    self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
                 }
-                self.constraintViewTextField.constant = keyboardHeight - 60
                 self.keyboardHeightForMention = keyboardHeight
                 if isSearching {
                     self.constraintViewTextField.constant = self.constraintViewTextField.constant + 60
@@ -1710,10 +1718,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             let info:NSDictionary = notification.userInfo! as NSDictionary
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
-            self.constraintViewTextField.constant = 0
+//            self.constraintViewTextField.constant = 0
+            self.constraintBottomAttachment.constant = 0
             self.constraintBottomContainerMultpileSelectSession.constant = 0
-            if self.contraintBottomMention.constant > 0 && self.keyboardHeightForMention != nil {
-                self.contraintBottomMention.constant = self.contraintBottomMention.constant - self.keyboardHeightForMention! + 60
+            if self.contraintBottomMention.constant > 0 {
+                self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
             }
             keyboardHeightForMention = nil
             UIView.animate(withDuration: TimeInterval(duration), animations: {
@@ -1723,7 +1732,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     @objc func showChooserACKConfidential() {
-        dismissKeyboard()
+//        dismissKeyboard()
         let alertController = LibAlertController(title: "Message Mode".localized(), message: "Select".localized() + " " + "Message Mode".localized(), preferredStyle: .actionSheet)
         let imageConfidential = resizeImage(image: UIImage(named: "pb_icon_conf_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
         let imageAck = resizeImage(image: UIImage(named: "pb_icon_ack_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
@@ -1758,7 +1767,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         stickerAction.setValue(imageSticker, forKey: "image")
         alertController.addAction(confidentialAction)
         alertController.addAction(ackAction)
-        alertController.addAction(stickerAction)
+//        alertController.addAction(stickerAction)
         alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { (UIAlertAction) in
             self.isConfidential = false
             self.isAck = false
@@ -2507,92 +2516,94 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
     
     public func textViewDidChangeSelection(_ textView: UITextView) {
         lastPositionCursorMention = textView.selectedRange.location
-        guard lastPositionCursorMention > 0 else {
-            hideMention()
-            return
-        }
 
-        let fulltextForMention = textView.text.prefix(lastPositionCursorMention)
-        var isShowMention = false
-        var listHaveToRemoved: [User] = []
-        var continueCheckMention = true
+        if lastPositionCursorMention > 0 {
+            let fulltextForMention = textView.text.prefix(lastPositionCursorMention)
+            var isShowMention = false
+            var listHaveToRemoved: [User] = []
+            var continueCheckMention = true
 
-        for mention in listMentionInTextField where mention.ex_block?.isEmpty == false {
-            let nameWithMention = "@\(mention.firstName) \(mention.lastName)".trimmingCharacters(in: .whitespaces)
+            for mention in listMentionInTextField where mention.ex_block?.isEmpty == false {
+                let nameWithMention = "@\(mention.firstName) \(mention.lastName)".trimmingCharacters(in: .whitespaces)
 
-            guard let blockPosition = Int(mention.ex_block ?? ""), blockPosition >= 0 else { continue }
+                guard let blockPosition = Int(mention.ex_block ?? ""), blockPosition >= 0 else { continue }
 
-            guard !textView.text.isEmpty else { continue }
+                guard !textView.text.isEmpty else { continue }
 
-            let textCount = textView.text.count
-            let lowerOffset = max(0, blockPosition - nameWithMention.count)
-            let upperOffset = min(textCount, blockPosition)
+                let textCount = textView.text.count
+                let lowerOffset = max(0, blockPosition - nameWithMention.count)
+                let upperOffset = min(textCount, blockPosition)
 
-            guard lowerOffset < textCount, upperOffset <= textCount else { continue }
+                guard lowerOffset < textCount, upperOffset <= textCount else { continue }
 
-            let lowerBound = textView.text.index(textView.text.startIndex, offsetBy: lowerOffset)
-            let upperBound = textView.text.index(textView.text.startIndex, offsetBy: upperOffset)
-            let range = lowerBound..<upperBound
-            
-            if textView.text[range] == nameWithMention {
-                if lastPositionCursorMention >= textView.text.distance(from: textView.text.startIndex, to: lowerBound) + 1,
-                   lastPositionCursorMention <= textView.text.distance(from: textView.text.startIndex, to: upperBound) {
-                    continueCheckMention = false
-                    break
-                }
-            } else {
-                let exOffmpValue = Int(mention.ex_offmp ?? "") ?? 0
+                let lowerBound = textView.text.index(textView.text.startIndex, offsetBy: lowerOffset)
+                let upperBound = textView.text.index(textView.text.startIndex, offsetBy: upperOffset)
+                let range = lowerBound..<upperBound
+                
+                if textView.text[range] == nameWithMention {
+                    if lastPositionCursorMention >= textView.text.distance(from: textView.text.startIndex, to: lowerBound) + 1,
+                       lastPositionCursorMention <= textView.text.distance(from: textView.text.startIndex, to: upperBound) {
+                        continueCheckMention = false
+                        break
+                    }
+                } else {
+                    let exOffmpValue = Int(mention.ex_offmp ?? "") ?? 0
 
-                let offset = mention.ex_offmp?.isEmpty == false ? listMentionWithText.count - exOffmpValue : listMentionWithText.count
+                    let offset = mention.ex_offmp?.isEmpty == false ? listMentionWithText.count - exOffmpValue : listMentionWithText.count
 
-                let safeOffset = max(-textView.text.distance(from: lowerBound, to: textView.text.endIndex),
-                                     min(offset, textView.text.distance(from: upperBound, to: textView.text.endIndex)))
+                    let safeOffset = max(-textView.text.distance(from: lowerBound, to: textView.text.endIndex),
+                                         min(offset, textView.text.distance(from: upperBound, to: textView.text.endIndex)))
 
-                if let adjustedLowerBound = textView.text.index(lowerBound, offsetBy: safeOffset, limitedBy: textView.text.endIndex),
-                   let adjustedUpperBound = textView.text.index(upperBound, offsetBy: safeOffset, limitedBy: textView.text.endIndex) {
-                    
-                    let adjustedRange = adjustedLowerBound..<adjustedUpperBound
-                    
-                    if textView.text[adjustedRange] == nameWithMention {
-                        if lastPositionCursorMention >= textView.text.distance(from: textView.text.startIndex, to: adjustedLowerBound) + 1,
-                           lastPositionCursorMention <= textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound) {
-                            continueCheckMention = false
-                            break
+                    if let adjustedLowerBound = textView.text.index(lowerBound, offsetBy: safeOffset, limitedBy: textView.text.endIndex),
+                       let adjustedUpperBound = textView.text.index(upperBound, offsetBy: safeOffset, limitedBy: textView.text.endIndex) {
+                        let adjustedRange = adjustedLowerBound..<adjustedUpperBound
+                        
+                        if textView.text[adjustedRange] == nameWithMention {
+                            if lastPositionCursorMention >= textView.text.distance(from: textView.text.startIndex, to: adjustedLowerBound) + 1,
+                               lastPositionCursorMention <= textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound) {
+                                continueCheckMention = false
+                                break
+                            }
+                            mention.ex_block = "\(textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound))"
+                            mention.ex_offmp = "\(textView.text.count)"
+                        } else {
+                            listHaveToRemoved.append(mention)
                         }
-                        mention.ex_block = "\(textView.text.distance(from: textView.text.startIndex, to: adjustedUpperBound))"
-                        mention.ex_offmp = "\(textView.text.count)"
-                    } else {
-                        listHaveToRemoved.append(mention)
                     }
                 }
             }
-        }
-
-        if continueCheckMention {
-            if let indexLastBreak = fulltextForMention.split(separator: "\n").lastIndex(where: { $0.contains("@") }) {
-                let splitSpace = fulltextForMention.split(separator: "\n")[indexLastBreak].split(separator: " ")
-                if let indexLastMention = splitSpace.lastIndex(where: { $0.hasPrefix("@") }),
-                   let lastChar = fulltextForMention.last,
-                   lastChar != " " && lastChar != "\n" {
-                    showMention(text: String(splitSpace[indexLastMention].dropFirst()))
-                    isShowMention = true
-                }
-            } else if fulltextForMention.count >= 3 && self.textFieldSend.textColor != UIColor.lightGray {
-                if let indexLastBreak = fulltextForMention.split(separator: "\n").lastIndex(where: { $0.count >= 3 }) {
+            
+            if continueCheckMention {
+                if let indexLastBreak = fulltextForMention.split(separator: "\n").lastIndex(where: { $0.contains("@") }) {
                     let splitSpace = fulltextForMention.split(separator: "\n")[indexLastBreak].split(separator: " ")
-                    if let indexLastMention = splitSpace.lastIndex(of: splitSpace.last ?? ""),
+                    if let indexLastMention = splitSpace.lastIndex(where: { $0.hasPrefix("@") }),
                        let lastChar = fulltextForMention.last,
                        lastChar != " " && lastChar != "\n" {
-                        if String(splitSpace[indexLastMention]).count >= 3 {
-                            showMention(text: String(splitSpace[indexLastMention]))
+                        let textM = String(splitSpace[indexLastMention].dropFirst())
+                        if lastPositionCursorMention == textM.count + 1 {
+                            showMention(text: textM)
                             isShowMention = true
                         }
                     }
+                } else if fulltextForMention.count >= 3 && self.textFieldSend.textColor != UIColor.lightGray {
+                    if let indexLastBreak = fulltextForMention.split(separator: "\n").lastIndex(where: { $0.count >= 3 }) {
+                        let splitSpace = fulltextForMention.split(separator: "\n")[indexLastBreak].split(separator: " ")
+                        if let indexLastMention = splitSpace.lastIndex(of: splitSpace.last ?? ""),
+                           let lastChar = fulltextForMention.last,
+                           lastChar != " " && lastChar != "\n" {
+                            if String(splitSpace[indexLastMention]).count >= 3 {
+                                showMention(text: String(splitSpace[indexLastMention]))
+                                isShowMention = true
+                            }
+                        }
+                    }
                 }
             }
-        }
-
-        if !isShowMention {
+            
+            if !isShowMention {
+                hideMention()
+            }
+        } else {
             hideMention()
         }
 
@@ -2603,10 +2614,20 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         let cursorPosition = textView.caretRect(for: nowTextFieldSend!.selectedTextRange!.start).origin
         let doubleCurrentLine = cursorPosition.y / nowTextFieldSend!.font!.lineHeight
         if doubleCurrentLine.isFinite {
-            let currentLine = Int(doubleCurrentLine)
+            let currentLine = Int(ceil(doubleCurrentLine))
             UIView.animate(withDuration: 0.3) {
-                let numberOfLines = textView.textContainer.lineBreakMode == .byWordWrapping ? Int(textView.contentSize.height / textView.font!.lineHeight) - 1 : 1
-                if currentLine == 0 && numberOfLines == 1 {
+                let layoutManager = textView.layoutManager
+                var numberOfLines = 0
+                var index = 0
+                let numberOfGlyphs = layoutManager.numberOfGlyphs
+
+                while index < numberOfGlyphs {
+                    var lineRange = NSRange()
+                    layoutManager.lineFragmentRect(forGlyphAt: index, effectiveRange: &lineRange)
+                    index = NSMaxRange(lineRange)
+                    numberOfLines += 1
+                }
+                if currentLine == 1 && (numberOfLines == 1 || numberOfLines == 0) {
                     if self.isEditingMessage {
                         self.constraintHeighteditTextView.constant = 40
                     } else {
@@ -2711,7 +2732,6 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                 let newCursorPosition = cursorPosition + 2  // Adjust cursor position
                 textView.text = replacedText
                 textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
-                return
             }
         }
 
@@ -2727,48 +2747,26 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                 let newCursorPosition = cursorPosition + 2  // Adjust cursor
                 textView.text = replacedText
                 textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
-                return
             }
         }
 
-        // Handle Undo: If user removes the first letter, revert back to original "- " or "1. "
-        let bulletUndoPattern = #"(^|\n)  • $"# // Matches "  • " when the letter is removed
-        if let match = text.range(of: bulletUndoPattern, options: .regularExpression) {
-            let replacedText = text.replacingOccurrences(of: "  • ", with: "- ", range: match)
-            let newCursorPosition = cursorPosition - 2
-            
-            textView.text = replacedText
-            textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
-            return
-        }
-
-        let numberUndoPattern = #"(^|\n)  (\d+)\. $"# // Matches "  1. " when the letter is removed
-        if let match = text.range(of: numberUndoPattern, options: .regularExpression) {
-            let replacedText = text.replacingOccurrences(of: "  ", with: "", range: match)
-            let newCursorPosition = cursorPosition - 2
-            
-            textView.text = replacedText
-            textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
-        }
-        
-        textView.preserveCursorPosition(withChanges: { _ in
-            textView.attributedText = textView.text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
-            return .preserveCursor
-        })
+        handleRichText(textView)
     }
     
     private func showMention(text: String) {
         if self.contraintBottomMention.constant < 0 {
-            self.contraintBottomMention.constant = 25 + ((self.keyboardHeightForMention != nil) ? self.keyboardHeightForMention! : 0) + self.heightTextFieldSend.constant
-            if self.viewTextfield.subviews.contains(self.containerLink) {
-                self.contraintBottomMention.constant = self.contraintBottomMention.constant + 80
+            if !isEditingMessage {
+                self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
+                if self.viewTextfield.subviews.contains(self.containerLink) {
+                    self.contraintBottomMention.constant = self.contraintBottomMention.constant + 80
+                }
+                if self.viewTextfield.subviews.contains(self.containerPreviewReply) {
+                    self.contraintBottomMention.constant = self.contraintBottomMention.constant + 50
+                }
+                UIView.animate(withDuration: 0.5, animations: {
+                    self.view.layoutIfNeeded()
+                })
             }
-            if self.viewTextfield.subviews.contains(self.containerPreviewReply) {
-                self.contraintBottomMention.constant = self.contraintBottomMention.constant + 50
-            }
-            UIView.animate(withDuration: 0.5, animations: {
-                self.view.layoutIfNeeded()
-            })
         }
         listMentionWithText.removeAll()
         Database.shared.database?.inTransaction({ fmdb, rollback in
@@ -2791,16 +2789,18 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                     cursor.close()
                 }
                 listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
-                if listMentionWithText.count > 0 {
-                    if listMentionWithText.count < 5 {
-                        self.heightTableMention.constant = CGFloat(44 * listMentionWithText.count)
+                if !isEditingMessage {
+                    if listMentionWithText.count > 0 {
+                        if listMentionWithText.count < 5 {
+                            self.heightTableMention.constant = CGFloat(44 * listMentionWithText.count)
+                        } else {
+                            self.heightTableMention.constant = 44 * 4
+                        }
+                        tableMention.reloadData()
                     } else {
-                        self.heightTableMention.constant = 44 * 4
+                        self.heightTableMention.constant = 44
+                        self.hideMention()
                     }
-                    tableMention.reloadData()
-                } else {
-                    self.heightTableMention.constant = 44
-                    self.hideMention()
                 }
             } catch {
                 rollback.pointee = true
@@ -3029,8 +3029,8 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
             if listMentionInTextField.count > 0 {
                 for i in 0..<listMentionInTextField.count {
                     if lastPositionCursorMention == Int(listMentionInTextField[i].ex_block!)! {
-                        let fulltextForMention = textFieldSend.text.substring(from: 0, to: lastPositionCursorMention - 1)
-                        let diff = textFieldSend.text.count - fulltextForMention.count
+                        let fulltextForMention = textView.text.substring(from: 0, to: lastPositionCursorMention - 1)
+                        let diff = textView.text.count - fulltextForMention.count
                         var text = textView.text ?? ""
                         let nameMention = (listMentionInTextField[i].firstName + " " + listMentionInTextField[i].lastName).trimmingCharacters(in: .whitespaces)
                         let rangeReplacement = NSRange(location: lastPositionCursorMention - nameMention.count - 1, length: nameMention.count + 1)
@@ -3039,7 +3039,7 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                         let copyAttributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
                         copyAttributedText.removeAttribute(.foregroundColor, range: rangeReplacement)
                         
-                        textFieldSend.attributedText = copyAttributedText
+                        textView.attributedText = copyAttributedText
 
                         // Replace the old text with the new text using the replaceSubrange(_:with:) method
                         if let startIndex = text.index(text.startIndex, offsetBy: rangeReplacement.location, limitedBy: text.endIndex),
@@ -3049,16 +3049,30 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                         
                         listMentionInTextField.remove(at: i)
                         
-                        textFieldSend.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
+                        textView.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
                         
-                        let newPosition = textFieldSend.position(from: textFieldSend.beginningOfDocument, offset: textView.text.count - diff)
-                        textFieldSend.selectedTextRange = textFieldSend.textRange(from: newPosition!, to: newPosition!)
+                        let newPosition = textView.position(from: textView.beginningOfDocument, offset: textView.text.count - diff)
+                        textView.selectedTextRange = textView.textRange(from: newPosition!, to: newPosition!)
+                        textViewDidChangeSelection(textView)
+                        handleRichText(textView)
                         return false
                     }
                 }
             }
         }
-        
+        let indent = handleIndent(textView, range, text)
+        if !indent {
+            textViewDidChangeSelection(textView)
+            handleRichText(textView)
+            return indent
+        }
+        if (textView.text.count == 0) {
+            return text != "\n"
+        }
+        return true
+    }
+    
+    private func handleIndent(_ textView: UITextView, _ range: NSRange, _ text: String) -> Bool {
         guard let nsText = textView.text as NSString? else { return true }
         let newText = nsText.replacingCharacters(in: range, with: text)
         var lines = newText.components(separatedBy: "\n")
@@ -3118,10 +3132,14 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
             textView.selectedRange = NSRange(location: range.location - 1, length: 0)
             return false
         }
-        if (self.textFieldSend.text.count == 0) {
-            return text != "\n"
-        }
         return true
+    }
+    
+    private func handleRichText(_ textView: UITextView) {
+        textView.preserveCursorPosition(withChanges: { _ in
+            textView.attributedText = textView.text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "")
+            return .preserveCursor
+        })
     }
     
     public func textView(_ textView: UITextView, shouldInteractWith URL: URL?, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
@@ -3533,8 +3551,55 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     }
     
     func showEditMessageView(at indexPath: IndexPath) {
+        tempListMentionWithText = listMentionWithText
+        tempListMentionInTextField = listMentionInTextField
+        listMentionWithText.removeAll()
+        listMentionInTextField.removeAll()
         let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         let oldText = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
+        var oldTextForTextview = oldText
+        let pattern = "@[\\w]+"
+        do {
+            let regex = try NSRegularExpression(pattern: pattern)
+            let nsrange = NSRange(oldText.startIndex..., in: oldText)
+            let matches = regex.matches(in: oldText, range: nsrange)
+            
+            let results = matches.map {
+                String(oldText[Range($0.range, in: oldText)!])
+            }
+            for result in results {
+                let pinRes = result.components(separatedBy: "@")[1]
+                Database.shared.database?.inTransaction({ fmdb, rollback in
+                    do {
+                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name || ' ' || ifnull(last_name, '') name FROM GROUPZ_MEMBER where f_pin = '\(pinRes)'"), cursor.next() {
+                            let user = User(pin: "")
+                            user.pin = cursor.string(forColumnIndex: 0) ?? ""
+                            user.firstName = cursor.string(forColumnIndex: 1) ?? ""
+                            if !user.pin.isEmpty {
+                                var fixUser = User.getDataCanNil(pin: user.pin, fmdb: fmdb)
+                                if fixUser == nil {
+                                    fixUser = user
+                                }
+                                var indexAt = 0
+                                if let range = oldText.range(of: result) {
+                                    indexAt = oldText.distance(from: oldText.startIndex, to: range.lowerBound)
+                                }
+                                fixUser?.ex_block = "\(indexAt + fixUser!.fullName.count + 1)"
+                                listMentionWithText.append(fixUser!)
+                                listMentionInTextField.append(fixUser!)
+                                oldTextForTextview = oldTextForTextview.replacingOccurrences(of: result, with: "@\(fixUser!.fullName)")
+                            }
+                            cursor.close()
+                        }
+                    } catch {
+                        rollback.pointee = true
+                        print("Access database error: \(error.localizedDescription)")
+                    }
+                })
+            }
+        } catch {
+            print("Invalid regex pattern")
+        }
         editVC = UIViewController()
         if let view = editVC.view {
             view.backgroundColor = .clear
@@ -3548,8 +3613,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             view.addSubview(blurView)
             blurView.anchor(top: view.topAnchor, left: view.leftAnchor, bottom: view.bottomAnchor, right: view.rightAnchor)
             
-            let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissEditVC))
-            tapGesture.cancelsTouchesInView = false
+            let tapGesture = ObjectGesture(target: self, action: #selector(dismissEditVC))
+            tapGesture.message_id = oldTextForTextview
             view.addGestureRecognizer(tapGesture)
             
             editTextView = CustomTextView()
@@ -3569,15 +3634,51 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             constraintHeighteditTextView = editTextView.heightAnchor.constraint(equalToConstant: 40)
             constraintBottomeditTextView.isActive = true
             constraintHeighteditTextView.isActive = true
-            editTextView.attributedText = oldText.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+            editTextView.attributedText = oldTextForTextview.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "")
             editTextView.becomeFirstResponder()
+            
+//            tableMentionEdit = UITableView()
+//            view.addSubview(tableMentionEdit)
+//            tableMentionEdit.anchor(left: view.leftAnchor, right: view.rightAnchor, height: 44)
+            
             
             buttonSendEdit.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
             buttonSendEdit.circle()
             buttonSendEdit.isEnabled = true
             buttonSendEdit.actionHandle(controlEvents: .touchUpInside,
              ForAction:{() -> Void in
-                let newText = self.editTextView.text ?? ""
+                var newText = self.editTextView.text ?? ""
+                if newText.contains("@") && self.listMentionInTextField.count > 0 {
+                    var diff: Int = 0
+                    for i in 0..<self.listMentionInTextField.count {
+                        let mention = self.listMentionInTextField[i]
+                        guard let exBlockStr = mention.ex_block, let exBlock = Int(exBlockStr) else {
+                            continue // skip if ex_block is nil or not an integer
+                        }
+                        let nameWithMention = ("@" + mention.firstName + " " + mention.lastName).trimmingCharacters(in: .whitespaces)
+                        let pinString = "@\(mention.pin)"
+                        let upperBound = exBlock + diff - 1
+                        let lowerBound = upperBound - nameWithMention.count + 1
+                        guard lowerBound >= 0, upperBound < newText.count else {
+                            continue // prevent index out-of-range
+                        }
+                        var afterMention = ""
+                        let nextCharIndex = newText.index(newText.startIndex, offsetBy: upperBound + 1, limitedBy: newText.endIndex)
+                        if let index = nextCharIndex, index < newText.endIndex {
+                            let nextChar = newText[index]
+                            if nextChar != "\n" && nextChar != " " {
+                                afterMention = " "
+                            }
+                        }
+                        let startIndex = newText.index(newText.startIndex, offsetBy: lowerBound)
+                        let endIndex = newText.index(newText.startIndex, offsetBy: upperBound + 1)
+                        let range = startIndex..<endIndex
+                        if newText[range] == nameWithMention {
+                            newText.replaceSubrange(range, with: pinString + afterMention)
+                            diff += (pinString + afterMention).count - nameWithMention.count
+                        }
+                    }
+                }
                 if !newText.isEmpty && newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
                     let lastEdited = Int64(Date().currentTimeMillis())
                     let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id]  as? String ?? "", l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin]  as? String ?? "", message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id]  as? String ?? "", status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential]  as? String ?? "", attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag]  as? String ?? "", ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id]  as? String ?? "", message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id]  as? String ?? "", audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id]  as? String ?? "", video_id: dataMessages[indexPath.row][TypeDataMessage.video_id]  as? String ?? "", file_id: dataMessages[indexPath.row][TypeDataMessage.file_id]  as? String ?? "", thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id]  as? String ?? "", reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id]  as? String ?? "", read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts]  as? String ?? "", chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id]  as? String ?? "", is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center]  as? String ?? "", call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id]  as? String ?? "", opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin]  as? String ?? "", server_date: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", local_time_stamp: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", last_edit: lastEdited)
@@ -3603,6 +3704,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         self.tableChatView.reloadRows(at: [indexPath], with: .none)
                     }
                 }
+                self.isEditingMessage = false
+                self.listMentionWithText = self.tempListMentionWithText
+                self.listMentionInTextField = self.tempListMentionWithText
+                self.editVC.dismiss(animated: true)
              })
             buttonSendEdit.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
             view.addSubview(buttonSendEdit)
@@ -3653,9 +3758,25 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         })
     }
     
-    @objc func dismissEditVC() {
-        self.isEditingMessage = false
-        editVC.dismiss(animated: true)
+    @objc func dismissEditVC(_ sender: ObjectGesture) {
+        if editTextView.text == sender.message_id {
+            self.isEditingMessage = false
+            self.listMentionWithText = self.tempListMentionWithText
+            self.listMentionInTextField = self.tempListMentionWithText
+            editVC.dismiss(animated: true)
+        } else if self.isEditingMessage {
+            let alert = LibAlertController(title: "".localized(), message: "Discard edit?".localized(), preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Cancel".localized(), style: UIAlertAction.Style.cancel, handler: nil))
+            alert.addAction(UIAlertAction(title: "Discard".localized(), style: UIAlertAction.Style.default, handler: {(_) in
+                self.isEditingMessage = false
+                self.listMentionWithText = self.tempListMentionWithText
+                self.listMentionInTextField = self.tempListMentionWithText
+                self.editVC.dismiss(animated: true)
+            }))
+            editVC.present(alert, animated: true, completion: nil)
+        } else {
+            editVC.dismiss(animated: true)
+        }
     }
     
     @objc func cancelAction() {
@@ -4498,12 +4619,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         containerMessage.translatesAutoresizingMaskIntoConstraints = false
         
         let timeMessage = UILabel()
+        timeMessage.numberOfLines = 0
         cellMessage.contentView.addSubview(timeMessage)
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
         if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
         } else {
-            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
         }
         
         let messageText = UITextView()
@@ -4594,9 +4716,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cellMessage.contentView.leadingAnchor, constant: 60).isActive = true
             if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
             } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
             }
             containerMessage.trailingAnchor.constraint(equalTo: profileMessage.leadingAnchor, constant: -5).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
@@ -4815,20 +4937,20 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
-        if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
-            let editedText = UILabel()
-            editedText.text = "Edited".localized()
-            editedText.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
-            editedText.textColor = .lightGray
-            cellMessage.contentView.addSubview(editedText)
-            editedText.translatesAutoresizingMaskIntoConstraints = false
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                editedText.trailingAnchor.constraint(equalTo: timeMessage.leadingAnchor, constant: -2).isActive = true
-            } else {
-                editedText.leadingAnchor.constraint(equalTo: timeMessage.trailingAnchor, constant: 2).isActive = true
-            }
-            editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
-        }
+//        if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
+//            let editedText = UILabel()
+//            editedText.text = "Edited".localized()
+//            editedText.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
+//            editedText.textColor = .lightGray
+//            cellMessage.contentView.addSubview(editedText)
+//            editedText.translatesAutoresizingMaskIntoConstraints = false
+//            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+//                editedText.trailingAnchor.constraint(equalTo: timeMessage.leadingAnchor, constant: -2).isActive = true
+//            } else {
+//                editedText.leadingAnchor.constraint(equalTo: timeMessage.trailingAnchor, constant: 2).isActive = true
+//            }
+//            editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
+//        }
         topMarginText.isActive = true
         if dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "27" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "26" {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
@@ -4990,6 +5112,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 timeMessage.textColor = .lightGray
             }
             timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
+            if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
+                timeMessage.text = (timeMessage.text ?? "") + "\n" + "Edited".localized()
+                if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                    timeMessage.textAlignment = .right
+                }
+            }
         }
         
         let imageThumb = UIImageView()

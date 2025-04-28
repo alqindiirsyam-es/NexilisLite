@@ -2259,8 +2259,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if isContactCenter && fPinContacCenter.isEmpty && isRequestContactCenter {
             return
         }
+        if textFieldSend.isFirstResponder {
+            dismissKeyboard()
+        }
         DispatchQueue.main.async {
-            if (self.constraintBottomAttachment.constant == 0.0) {
+            if !self.viewSticker.isDescendant(of: self.view) {
                 self.constraintBottomAttachment.constant = 200.0
                 self.view.addSubview(self.viewSticker)
                 self.viewSticker.translatesAutoresizingMaskIntoConstraints = false
@@ -2318,7 +2321,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     @objc func showChooserACKConfidential() {
-        dismissKeyboard()
+//        dismissKeyboard()
         let alertController = LibAlertController(title: "Message Mode".localized(), message: "Select".localized() + " " + "Message Mode".localized(), preferredStyle: .actionSheet)
         let imageConfidential = resizeImage(image: UIImage(named: "pb_icon_conf_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
         let imageAck = resizeImage(image: UIImage(named: "pb_icon_ack_msg_on", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
@@ -2377,7 +2380,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         alertController.addAction(confidentialAction)
         alertController.addAction(ackAction)
         alertController.addAction(secretAction)
-        alertController.addAction(stickerAction)
+//        alertController.addAction(stickerAction)
         alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { (UIAlertAction) in
             self.isConfidential = false
             self.isAck = false
@@ -2572,7 +2575,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             let info:NSDictionary = notification.userInfo! as NSDictionary
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
-            self.constraintViewTextField.constant = 0
+//            self.constraintViewTextField.constant = 0
+            self.constraintBottomAttachment.constant = 0
             self.constraintBottomContainerMultpileSelectSession.constant = 0
             UIView.animate(withDuration: TimeInterval(duration), animations: {
                 self.view.layoutIfNeeded()
@@ -2582,11 +2586,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     @objc func keyboardWillShow(notification: NSNotification) {
         if self.viewIfLoaded?.window != nil && !isEditingMessage {
-            if (self.constraintBottomAttachment.constant != 0.0) {
-                self.constraintBottomAttachment.constant = 0.0
-                self.viewSticker.removeConstraints(self.viewSticker.constraints)
-                self.viewSticker.removeFromSuperview()
-            }
+//            if (self.constraintBottomAttachment.constant != 0.0) {
+//                self.constraintBottomAttachment.constant = 0.0
+//                self.viewSticker.removeConstraints(self.viewSticker.constraints)
+//                self.viewSticker.removeFromSuperview()
+//            }
             let info:NSDictionary = notification.userInfo! as NSDictionary
             let keyboardSize = (info[UIResponder.keyboardFrameEndUserInfoKey] as! NSValue).cgRectValue
             
@@ -2595,7 +2599,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
             if self.constraintViewTextField.constant != keyboardHeight - 60 {
-                self.constraintViewTextField.constant = keyboardHeight - 60
+//                self.constraintViewTextField.constant = keyboardHeight - 60
+                self.constraintBottomAttachment.constant = keyboardHeight
                 if isSearching {
                     self.constraintViewTextField.constant = self.constraintViewTextField.constant + 60
                     self.constraintBottomContainerMultpileSelectSession.constant = -keyboardHeight
@@ -3843,10 +3848,20 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         let cursorPosition = textView.caretRect(for: nowTextFieldSend!.selectedTextRange!.start).origin
         let doubleCurrentLine = cursorPosition.y / nowTextFieldSend!.font!.lineHeight
         if doubleCurrentLine.isFinite {
-            let currentLine = Int(doubleCurrentLine)
+            let currentLine = Int(ceil(doubleCurrentLine))
             UIView.animate(withDuration: 0.3) {
-                let numberOfLines = textView.textContainer.lineBreakMode == .byWordWrapping ? Int(textView.contentSize.height / textView.font!.lineHeight) - 1 : 1
-                if currentLine == 0 && numberOfLines == 1 {
+                let layoutManager = textView.layoutManager
+                var numberOfLines = 0
+                var index = 0
+                let numberOfGlyphs = layoutManager.numberOfGlyphs
+
+                while index < numberOfGlyphs {
+                    var lineRange = NSRange()
+                    layoutManager.lineFragmentRect(forGlyphAt: index, effectiveRange: &lineRange)
+                    index = NSMaxRange(lineRange)
+                    numberOfLines += 1
+                }
+                if currentLine == 1 && (numberOfLines == 1 || numberOfLines == 0) {
                     if self.isEditingMessage {
                         self.constraintHeighteditTextView.constant = 40
                     } else {
@@ -3938,7 +3953,6 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                 let newCursorPosition = cursorPosition + 2  // Adjust cursor position
                 textView.text = replacedText
                 textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
-                return
             }
         }
 
@@ -3954,34 +3968,10 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                 let newCursorPosition = cursorPosition + 2  // Adjust cursor
                 textView.text = replacedText
                 textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
-                return
             }
         }
-
-        // Handle Undo: If user removes the first letter, revert back to original "- " or "1. "
-        let bulletUndoPattern = #"(^|\n)  • $"# // Matches "  • " when the letter is removed
-        if let match = text.range(of: bulletUndoPattern, options: .regularExpression) {
-            let replacedText = text.replacingOccurrences(of: "  • ", with: "- ", range: match)
-            let newCursorPosition = cursorPosition - 2
-            
-            textView.text = replacedText
-            textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
-            return
-        }
-
-        let numberUndoPattern = #"(^|\n)  (\d+)\. $"# // Matches "  1. " when the letter is removed
-        if let match = text.range(of: numberUndoPattern, options: .regularExpression) {
-            let replacedText = text.replacingOccurrences(of: "  ", with: "", range: match)
-            let newCursorPosition = cursorPosition - 2
-            
-            textView.text = replacedText
-            textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
-        }
         
-        textView.preserveCursorPosition(withChanges: { _ in
-            textView.attributedText = textView.text.richText(isEditing: true)
-            return .preserveCursor
-        })
+        handleRichText(textView)
     }
     
     private func checkLink(fullText: String) {
@@ -4186,6 +4176,18 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        let indent = handleIndent(textView, range, text)
+        if !indent {
+            handleRichText(textView)
+            return indent
+        }
+        if (self.textFieldSend.text.count == 0) {
+            return text != "\n"
+        }
+        return true
+    }
+    
+    private func handleIndent(_ textView: UITextView, _ range: NSRange, _ text: String) -> Bool {
         guard let nsText = textView.text as NSString? else { return true }
         let newText = nsText.replacingCharacters(in: range, with: text)
         var lines = newText.components(separatedBy: "\n")
@@ -4245,11 +4247,14 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
             textView.selectedRange = NSRange(location: range.location - 1, length: 0)
             return false
         }
-        
-        if (self.textFieldSend.text.count == 0) {
-            return text != "\n"
-        }
         return true
+    }
+    
+    private func handleRichText(_ textView: UITextView) {
+        textView.preserveCursorPosition(withChanges: { _ in
+            textView.attributedText = textView.text.richText(isEditing: true)
+            return .preserveCursor
+        })
     }
     
     func isGIFData(_ data: Data) -> Bool {
@@ -4697,8 +4702,8 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             view.addSubview(blurView)
             blurView.anchor(top: view.topAnchor, left: view.leftAnchor, bottom: view.bottomAnchor, right: view.rightAnchor)
             
-            let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissEditVC))
-            tapGesture.cancelsTouchesInView = false
+            let tapGesture = ObjectGesture(target: self, action: #selector(dismissEditVC))
+            tapGesture.message_id = oldText
             view.addGestureRecognizer(tapGesture)
             
             editTextView = CustomTextView()
@@ -4718,7 +4723,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             constraintHeighteditTextView = editTextView.heightAnchor.constraint(equalToConstant: 40)
             constraintBottomeditTextView.isActive = true
             constraintHeighteditTextView.isActive = true
-            editTextView.text = oldText
+            editTextView.attributedText = oldText.richText(isEditing: true)
             editTextView.becomeFirstResponder()
             
             buttonSendEdit.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
@@ -4752,6 +4757,8 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                         self.tableChatView.reloadRows(at: [indexPath], with: .none)
                     }
                 }
+                self.isEditingMessage = false
+                self.editVC.dismiss(animated: true)
              })
             buttonSendEdit.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
             view.addSubview(buttonSendEdit)
@@ -4790,7 +4797,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             messageText.trailingAnchor.constraint(equalTo: viewMessage.trailingAnchor, constant: -15).isActive = true
             messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
             messageText.font = .systemFont(ofSize: 12 + offset())
-            messageText.text = oldText
+            messageText.attributedText = oldText.richText()
         }
         editVC.modalTransitionStyle = .crossDissolve
         editVC.modalPresentationStyle = .overFullScreen
@@ -4802,9 +4809,21 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         })
     }
     
-    @objc func dismissEditVC() {
-        self.isEditingMessage = false
-        editVC.dismiss(animated: true)
+    @objc func dismissEditVC(_ sender: ObjectGesture) {
+        if editTextView.text == sender.message_id {
+            self.isEditingMessage = false
+            editVC.dismiss(animated: true)
+        } else if self.isEditingMessage {
+            let alert = LibAlertController(title: "".localized(), message: "Discard edit?".localized(), preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Cancel".localized(), style: UIAlertAction.Style.cancel, handler: nil))
+            alert.addAction(UIAlertAction(title: "Discard".localized(), style: UIAlertAction.Style.default, handler: {(_) in
+                self.isEditingMessage = false
+                self.editVC.dismiss(animated: true)
+            }))
+            editVC.present(alert, animated: true, completion: nil)
+        } else {
+            editVC.dismiss(animated: true)
+        }
     }
     
     @objc func cancelAction() {
@@ -5701,7 +5720,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 containerButton.widthAnchor.constraint(equalToConstant: self.view!.frame.size.width * 0.9).isActive = true
                 containerButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 55).isActive = true
                 containerButton.backgroundColor = .clear
-//                timeMessage.bottomAnchor.constraint(equalTo:containerButton.topAnchor, constant: -5).isActive = true
                 
                 
                 for i in 0..<category_cc.count {
@@ -5868,12 +5886,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         containerMessage.translatesAutoresizingMaskIntoConstraints = false
         
         let timeMessage = UILabel()
+        timeMessage.numberOfLines = 0
         cell.contentView.addSubview(timeMessage)
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
         if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-            timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+            timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
         } else {
-            timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+            timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
         }
         
         let statusMessage = UIImageView()
@@ -5928,9 +5947,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cell.contentView.leadingAnchor, constant: 60).isActive = true
             if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
             } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
             }
             if isContactCenter {
                 containerMessage.topAnchor.constraint(equalTo: nameSender.bottomAnchor).isActive = true
@@ -6026,9 +6045,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 }
             }
             if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
             } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
             }
             containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor, constant: -60).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
@@ -6103,20 +6122,20 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
         }
         
-        if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
-            let editedText = UILabel()
-            editedText.text = "Edited".localized()
-            editedText.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
-            editedText.textColor = .lightGray
-            cell.contentView.addSubview(editedText)
-            editedText.translatesAutoresizingMaskIntoConstraints = false
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                editedText.trailingAnchor.constraint(equalTo: timeMessage.leadingAnchor, constant: -2).isActive = true
-            } else {
-                editedText.leadingAnchor.constraint(equalTo: timeMessage.trailingAnchor, constant: 2).isActive = true
-            }
-            editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
-        }
+//        if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
+//            let editedText = UILabel()
+//            editedText.text = "Edited".localized()
+//            editedText.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
+//            editedText.textColor = .lightGray
+//            cell.contentView.addSubview(editedText)
+//            editedText.translatesAutoresizingMaskIntoConstraints = false
+//            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+//                editedText.trailingAnchor.constraint(equalTo: timeMessage.leadingAnchor, constant: -2).isActive = true
+//            } else {
+//                editedText.leadingAnchor.constraint(equalTo: timeMessage.trailingAnchor, constant: 2).isActive = true
+//            }
+//            editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
+//        }
         
         let messageText = UITextView()
         messageText.isEditable = false
@@ -6469,6 +6488,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 timeMessage.textColor = .lightGray
             }
             timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
+            if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
+                timeMessage.text = (timeMessage.text ?? "") + "\n" + "Edited".localized()
+                if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                    timeMessage.textAlignment = .right
+                }
+            }
         }
         
         let imageThumb = UIImageView()
@@ -8069,14 +8094,19 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
 //        if copySession || forwardSession || deleteSession {
 //            return nil
 //        }
-//        let action = UIContextualAction(style: .normal,
-//                                        title: "") { [weak self] (action, view, completionHandler) in
-//                                            self?.handleReply(indexPath: indexPath)
-//                                            completionHandler(true)
+//        let action = UIContextualAction(style: .normal, title: "Reply") { [weak self] (action, view, completionHandler) in
+//            let feedbackGenerator = UIImpactFeedbackGenerator(style: .medium)
+//            feedbackGenerator.impactOccurred()
+//
+//            self?.handleReply(indexPath: indexPath)
+//            completionHandler(true)
 //        }
+//        action.title = nil
 //        action.backgroundColor = .white
-//        action.image = UIImage(systemName: "arrowshape.turn.up.left.fill")?.withTintColor(.black, renderingMode: .alwaysOriginal)
-//        return UISwipeActionsConfiguration(actions: [action])
+//        action.image = UIImage(systemName: "arrowshape.turn.up.left.circle.fill")?.withTintColor(.gray, renderingMode: .alwaysOriginal)
+//        let config = UISwipeActionsConfiguration(actions: [action])
+//        config.performsFirstActionWithFullSwipe = false
+//        return config
 //    }
     
     private func handleReply(indexPath: IndexPath, dataMessagesImage: [String: Any?] = [:], reffId: String = "") {

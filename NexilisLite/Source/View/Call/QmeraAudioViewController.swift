@@ -267,7 +267,7 @@ class QmeraAudioViewController: UIViewController {
     
     static func turnSpeakerOn() {
 //        var bAudioEngineIsAvtive: Bool! = false
-        API.turnSpeakerPhone(bSPon: bSpeakerPhone)
+//        API.turnSpeakerPhone(bSPon: bSpeakerPhone)
 //        repeat {
 //            Thread.sleep(forTimeInterval : 0.3)
 //            bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
@@ -277,19 +277,25 @@ class QmeraAudioViewController: UIViewController {
 //            }
 //            API.restartAudioEngine()
 //        } while (!bAudioEngineIsAvtive)
-        var volume:Float! = 0
+//        var volume:Float! = 0
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.overrideOutputAudioPort(bSpeakerPhone ? .speaker : .none)
+        } catch {
+            
+        }
         if (bSpeakerPhone) {
             DispatchQueue.main.async {
                 UIDevice.current.isProximityMonitoringEnabled = false
             }
-            volume = lastVolume * nMaxSPOn
+//            volume = lastVolume * nMaxSPOn
         } else {
             DispatchQueue.main.async {
                 UIDevice.current.isProximityMonitoringEnabled = true
             }
-            volume = lastVolume * nMaxSPOff
+//            volume = lastVolume * nMaxSPOff
         }
-        API.adjustVolume(fValue: volume)
+//        API.adjustVolume(fValue: volume)
     }
     
 //    static func toggleSpeakerPhone() {
@@ -414,6 +420,7 @@ class QmeraAudioViewController: UIViewController {
                 }
             } else if !ticketId.isEmpty {
                 if isOutgoing {
+                    self.backToDefaultAudioSession()
                     API.ccs(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: false)
                     if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getIncomingCallCS(f_pin_opposite: u.pin), timeout: 30 * 1000){
                         if response.mBodies[CoreMessage_TMessageKey.ERRCOD] != "01" {
@@ -421,6 +428,7 @@ class QmeraAudioViewController: UIViewController {
                         }
                     }
                 } else {
+                    self.backToDefaultAudioSession()
                     API.csa(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: false)
                 }
             } else if autoAcceptAPN {

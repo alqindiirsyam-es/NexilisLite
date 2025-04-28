@@ -755,17 +755,19 @@ extension ContactChatViewController {
         }
         data.isSelected = !data.isSelected
         if data.isSelected {
-            for dataSubChat in self.chatGroupMaps[data.groupId]! {
-                if var indexParent = chats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
-                    if isFilltering {
-                        fillteredData.insert(dataSubChat, at: indexParent + 1)
-                        indexParent+=1
-                    } else {
-                        chats.insert(dataSubChat, at: indexParent + 1)
-                        indexParent+=1
+            if let dataSubChats = self.chatGroupMaps[data.groupId] {
+                for dataSubChat in dataSubChats {
+                    if var indexParent = chats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
+                        if isFilltering {
+                            fillteredData.insert(dataSubChat, at: indexParent + 1)
+                            indexParent+=1
+                        } else {
+                            chats.insert(dataSubChat, at: indexParent + 1)
+                            indexParent+=1
+                        }
                     }
+                    
                 }
-                
             }
         } else {
             if isFilltering {

@@ -62,13 +62,11 @@
 		CD1E722D2A0BA86100BF871F /* QmeraAudioConference.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E717E2A0BA86100BF871F /* QmeraAudioConference.swift */; };
 		CD1E722E2A0BA86100BF871F /* AudioViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E717F2A0BA86100BF871F /* AudioViewController.swift */; };
 		CD1E722F2A0BA86100BF871F /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71802A0BA86100BF871F /* ProfileView.swift */; };
-		CD1E72302A0BA86100BF871F /* CallProviderDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71812A0BA86100BF871F /* CallProviderDelegate.swift */; };
 		CD1E72312A0BA86100BF871F /* QmeraAudioViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71822A0BA86100BF871F /* QmeraAudioViewController.swift */; };
 		CD1E72322A0BA86100BF871F /* QmeraCallContactViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71832A0BA86100BF871F /* QmeraCallContactViewController.swift */; };
 		CD1E72332A0BA86100BF871F /* WhiteboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71842A0BA86100BF871F /* WhiteboardViewController.swift */; };
 		CD1E72342A0BA86100BF871F /* QmeraVideoViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71852A0BA86100BF871F /* QmeraVideoViewController.swift */; };
 		CD1E72352A0BA86100BF871F /* VideoViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71862A0BA86100BF871F /* VideoViewController.swift */; };
-		CD1E72362A0BA86100BF871F /* Call.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71872A0BA86100BF871F /* Call.swift */; };
 		CD1E72372A0BA86100BF871F /* GroupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71882A0BA86100BF871F /* GroupView.swift */; };
 		CD1E72382A0BA86100BF871F /* GroupCreateViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E718A2A0BA86100BF871F /* GroupCreateViewController.swift */; };
 		CD1E72392A0BA86100BF871F /* BroadcastMembersTableViewCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E718B2A0BA86100BF871F /* BroadcastMembersTableViewCell.swift */; };
@@ -344,13 +342,11 @@
 		CD1E717E2A0BA86100BF871F /* QmeraAudioConference.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QmeraAudioConference.swift; sourceTree = "<group>"; };
 		CD1E717F2A0BA86100BF871F /* AudioViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AudioViewController.swift; sourceTree = "<group>"; };
 		CD1E71802A0BA86100BF871F /* ProfileView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
-		CD1E71812A0BA86100BF871F /* CallProviderDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CallProviderDelegate.swift; sourceTree = "<group>"; };
 		CD1E71822A0BA86100BF871F /* QmeraAudioViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QmeraAudioViewController.swift; sourceTree = "<group>"; };
 		CD1E71832A0BA86100BF871F /* QmeraCallContactViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QmeraCallContactViewController.swift; sourceTree = "<group>"; };
 		CD1E71842A0BA86100BF871F /* WhiteboardViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = WhiteboardViewController.swift; sourceTree = "<group>"; };
 		CD1E71852A0BA86100BF871F /* QmeraVideoViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QmeraVideoViewController.swift; sourceTree = "<group>"; };
 		CD1E71862A0BA86100BF871F /* VideoViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoViewController.swift; sourceTree = "<group>"; };
-		CD1E71872A0BA86100BF871F /* Call.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Call.swift; sourceTree = "<group>"; };
 		CD1E71882A0BA86100BF871F /* GroupView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GroupView.swift; sourceTree = "<group>"; };
 		CD1E718A2A0BA86100BF871F /* GroupCreateViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GroupCreateViewController.swift; sourceTree = "<group>"; };
 		CD1E718B2A0BA86100BF871F /* BroadcastMembersTableViewCell.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BroadcastMembersTableViewCell.swift; sourceTree = "<group>"; };
@@ -766,10 +762,8 @@
 			isa = PBXGroup;
 			children = (
 				CD1E717F2A0BA86100BF871F /* AudioViewController.swift */,
-				CD1E71872A0BA86100BF871F /* Call.swift */,
 				CD6312582DA925260088964E /* CallLogVC.swift */,
 				CD1E717D2A0BA86100BF871F /* CallManager.swift */,
-				CD1E71812A0BA86100BF871F /* CallProviderDelegate.swift */,
 				CD43C80A2D687DBF00297C6E /* CreateConferenceCallController.swift */,
 				CD1E71882A0BA86100BF871F /* GroupView.swift */,
 				CD1E71802A0BA86100BF871F /* ProfileView.swift */,
@@ -1266,9 +1260,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite/Pods-NexilisLite-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite/Pods-NexilisLite-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1283,9 +1281,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1300,9 +1302,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1395,7 +1401,6 @@
 				1241AEBD2D017E8C0088175A /* FileEncryption.swift in Sources */,
 				CD1E725A2A0BA86100BF871F /* ScannerViewController.swift in Sources */,
 				CD1E72462A0BA86100BF871F /* GroupTopicViewController.swift in Sources */,
-				CD1E72302A0BA86100BF871F /* CallProviderDelegate.swift in Sources */,
 				CD1E72472A0BA86100BF871F /* SettingTableViewController.swift in Sources */,
 				CD1E72172A0BA86100BF871F /* CategoryCC.swift in Sources */,
 				CD1E72552A0BA86100BF871F /* BroadcastMembersTableViewController.swift in Sources */,
@@ -1459,7 +1464,6 @@
 				CD1E721E2A0BA86100BF871F /* BNIBookingWebView.swift in Sources */,
 				CD1E72482A0BA86100BF871F /* BroadcastModeViewController.swift in Sources */,
 				CD1E72492A0BA86100BF871F /* BackupRestoreOption.swift in Sources */,
-				CD1E72362A0BA86100BF871F /* Call.swift in Sources */,
 				CD1E723D2A0BA86100BF871F /* CheckConnection.swift in Sources */,
 				CD1E72262A0BA86100BF871F /* QmeraGroupChooserViewController.swift in Sources */,
 				CD1E72372A0BA86100BF871F /* GroupView.swift in Sources */,

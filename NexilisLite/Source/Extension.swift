@@ -728,6 +728,19 @@ extension UITextView {
         }
 
     }
+    
+    func rangesOfMentionText(withColor color: UIColor) -> [NSRange] {
+        var ranges: [NSRange] = []
+        guard let attributedText = self.attributedText else { return ranges }
+        
+        attributedText.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: attributedText.length), options: []) { value, range, _ in
+            if let foundColor = value as? UIColor, foundColor == color {
+                ranges.append(range)
+            }
+        }
+        
+        return ranges
+    }
 
 }
 
@@ -857,7 +870,6 @@ extension String {
             if let member = Member.getMember(f_pin: username) {
                 let fullName = "\(member.firstName) \(member.lastName)".trimmingCharacters(in: .whitespaces)
                 text.replaceCharacters(in: range, with: fullName)
-                
                 if !groupID.isEmpty, Member.getMemberInGroup(f_pin: username, group_id: groupID) != nil {
                     let newRange = (text.string as NSString).range(of: "@\(fullName)")
                     text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: newRange)

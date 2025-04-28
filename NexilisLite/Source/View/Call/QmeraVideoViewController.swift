@@ -146,8 +146,14 @@ class QmeraVideoViewController: UIViewController {
     }()
     
     static func turnSpeakerOn() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.overrideOutputAudioPort(bSpeakerPhone ? .speaker : .none)
+        } catch {
+            
+        }
 //        var bAudioEngineIsAvtive: Bool! = false
-        API.turnSpeakerPhone(bSPon: bSpeakerPhone)
+//        API.turnSpeakerPhone(bSPon: bSpeakerPhone)
 //        repeat {
 //            Thread.sleep(forTimeInterval : 0.3)
 //            bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
@@ -157,13 +163,13 @@ class QmeraVideoViewController: UIViewController {
 //            }
 //            API.restartAudioEngine()
 //        } while (!bAudioEngineIsAvtive)
-        var volume:Float! = 0
-        if (bSpeakerPhone) {
-            volume = lastVolume * nMaxSPOn
-        } else {
-            volume = lastVolume * nMaxSPOff
-        }
-        API.adjustVolume(fValue: volume)
+//        var volume:Float! = 0
+//        if (bSpeakerPhone) {
+//            volume = lastVolume * nMaxSPOn
+//        } else {
+//            volume = lastVolume * nMaxSPOff
+//        }
+//        API.adjustVolume(fValue: volume)
     }
 
 //    static func toggleSpeakerPhone() {
@@ -524,6 +530,7 @@ class QmeraVideoViewController: UIViewController {
                     API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
                 }
             } else {
+                backToDefaultAudioSession()
                 API.ccs(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: true)
                 if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getIncomingCallCS(f_pin_opposite: users[0].pin), timeout: 30 * 1000){
                     if response.mBodies[CoreMessage_TMessageKey.ERRCOD] != "01" {
@@ -756,6 +763,7 @@ class QmeraVideoViewController: UIViewController {
             if ticketId.isEmpty {
                 API.receiveCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView,ivRemoteZ: zoomView)
             } else {
+                backToDefaultAudioSession()
                 API.csa(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: true)
             }
         }
@@ -1279,21 +1287,16 @@ class QmeraVideoViewController: UIViewController {
             }
         } else if (state == Nexilis.VIDEO_CALL_ZOOM) && self.dataPerson.count > 1 {
             DispatchQueue.main.async {
-                if arrayMessage[0] == arrayMessage[3] {
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
-                    self.zoomView.contentMode = .scaleAspectFit
-                } else {
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
-                    self.zoomView.contentMode = .scaleAspectFit
-                }
+                self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
+                self.zoomView.contentMode = .scaleAspectFit
             }
         } else if (state == Nexilis.VIDEO_CAMERA_PARAMS_CHANED){
             if(arrayMessage[3] == "0"){
                 DispatchQueue.main.async {
                     if self.dataPerson.count == 1 && arrayMessage[2] == "1" && arrayMessage[4] == "1" {
-                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
+                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
                     } else {
-                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
+                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
                     }
                 }
             }
@@ -1424,13 +1427,13 @@ class QmeraVideoViewController: UIViewController {
                 }
                 if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
                     DispatchQueue.main.async {
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
                         self.zoomView.contentMode = .scaleAspectFit
                     }
                 }
                 else if self.dataPerson.count == 1 {
                     DispatchQueue.main.async {
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (-CGFloat.pi)/2)
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
                         self.zoomView.contentMode = .scaleAspectFit
                     }
                 } else if self.dataPerson.count > 1 {
@@ -1618,7 +1621,7 @@ class QmeraVideoViewController: UIViewController {
                     
                     if self.dataPerson.count == 1 {
                         self.transformZoomAfterNewUserMore2 = false
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: (CGFloat.pi)/2)
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
                         
                         if !self.users[0].isConnected {
                             self.resetViewToOutgoing()

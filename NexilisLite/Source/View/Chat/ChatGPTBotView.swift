@@ -1801,18 +1801,18 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
         cell.contentView.addSubview(timeMessage)
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
         if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-            timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+            timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
         } else {
-            timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+            timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
         }
         
         let statusMessage = UIImageView()
         if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cell.contentView.leadingAnchor, constant: 60).isActive = true
             if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
             } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
             }
             containerMessage.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -15).isActive = true
@@ -1886,9 +1886,9 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
                 containerMessage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 15).isActive = true
             }
             if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
             } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
             }
             containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor, constant: -60).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true

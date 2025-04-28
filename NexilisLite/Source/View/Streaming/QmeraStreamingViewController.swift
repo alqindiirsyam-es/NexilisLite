@@ -8,6 +8,7 @@
 import UIKit
 import nuSDKService
 import NotificationBannerSwift
+import AVFAudio
 
 class QmeraStreamingViewController: UIViewController {
     
@@ -644,17 +645,13 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
                     self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
                 }
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1, execute: {
-                API.adjustVolume(fValue: 10.0)
-                var bAudioEngineIsAvtive: Bool! = false
-                repeat {
-                    API.turnSpeakerPhone(bSPon: true)
-                    Thread.sleep(forTimeInterval: 1)
-                    bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
-                    if (bAudioEngineIsAvtive) {
-                        break
-                    }
-                } while (!bAudioEngineIsAvtive)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5, execute: {
+                do {
+                    let audioSession = AVAudioSession.sharedInstance()
+                    try audioSession.overrideOutputAudioPort(.speaker)
+                } catch {
+                    
+                }
             })
             sendJoin()
         } else if state == Nexilis.AUDIO_CALL_RINGING {

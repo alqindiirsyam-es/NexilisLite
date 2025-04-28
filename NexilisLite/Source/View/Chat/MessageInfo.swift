@@ -63,7 +63,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     private func getData() {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, status, time_delivered, time_read, time_ack, longitude, latitude FROM MESSAGE_STATUS where message_id='\(data["message_id"]!!)'") {
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, status, time_delivered, time_read, time_ack, longitude, latitude FROM MESSAGE_STATUS where message_id='\(data["message_id"]!!)' ORDER BY time_delivered DESC, time_read DESC, time_ack DESC") {
                     var listStatus: [Int] = []
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
@@ -555,17 +555,17 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             cell.contentView.addSubview(timeMessage)
             timeMessage.translatesAutoresizingMaskIntoConstraints = false
             if (data["read_receipts"] as? String) == "8" {
-                timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+                timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
             } else {
-                timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+                timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
             }
             
             let statusMessage = UIImageView()
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cell.contentView.leadingAnchor, constant: 60).isActive = true
             if (data["read_receipts"] as? String) == "8" {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
             } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
             }
             containerMessage.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -15).isActive = true
