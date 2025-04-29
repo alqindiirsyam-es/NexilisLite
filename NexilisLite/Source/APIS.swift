@@ -1601,6 +1601,32 @@ public class APIS: NSObject {
         }
     }
     
+    public static func showExpiredVersion() {
+        guard !isAlertPresented else { return }
+        isAlertPresented = true
+        let alertController = LibAlertController(
+            title: "Update Available".localized(),
+            message: "A new version is now available. Please update to the latest version to enjoy new features and important improvements.".localized(),
+            preferredStyle: .alert
+        )
+        
+        alertController.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: { _ in
+            if APIS.appNm == "OneApp" {
+                let appStoreURL = URL(string: "https://apps.apple.com/app/id6741251571")!
+                UIApplication.shared.open(appStoreURL)
+            } else {
+                let appStoreURL = URL(string: "https://apps.apple.com/app/")!
+                UIApplication.shared.open(appStoreURL)
+            }
+        }))
+        
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(alertController, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(alertController, animated: true, completion: nil)
+        }
+    }
+    
     private static func openAppSettings() {
         if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
             if UIApplication.shared.canOpenURL(settingsURL) {

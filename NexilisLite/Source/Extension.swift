@@ -577,7 +577,7 @@ extension UIColor {
     }
     
     public static var mentionColor: UIColor {
-        return UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? renderColor(hex: "#f6fcae") : renderColor(hex: "#53bdea")
+        return UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? renderColor(hex: "#f6fcae") : renderColor(hex: "#25D366")
     }
     
     public static var blueBubbleColor: UIColor {
@@ -815,7 +815,7 @@ extension String {
             applyTextFormatting(to: finalText, sign: sign, attributes: attributes, isEditing: isEditing)
         }
         
-        processMentions(in: finalText, groupID: group_id, isEditing: isEditing)
+        processMentions(in: finalText, groupID: group_id, isEditing: isEditing, listMentionInTextField: listMentionInTextField)
         
         if isSearching {
             highlightSearchText(in: finalText, searchText: textSearch)
@@ -859,20 +859,25 @@ extension String {
         }
     }
 
-    private func processMentions(in text: NSMutableAttributedString, groupID: String, isEditing: Bool) {
+    private func processMentions(in text: NSMutableAttributedString, groupID: String, isEditing: Bool, listMentionInTextField: [User] = []) {
         let regex = try? NSRegularExpression(pattern: "@(\\w+)", options: [])
         let matches = regex?.matches(in: text.string, options: [], range: NSRange(location: 0, length: text.length)) ?? []
 
         for match in matches.reversed() {
             let range = match.range(at: 1)
             let username = (text.string as NSString).substring(with: range)
-            
-            if let member = Member.getMember(f_pin: username) {
-                let fullName = "\(member.firstName) \(member.lastName)".trimmingCharacters(in: .whitespaces)
-                text.replaceCharacters(in: range, with: fullName)
-                if !groupID.isEmpty, Member.getMemberInGroup(f_pin: username, group_id: groupID) != nil {
-                    let newRange = (text.string as NSString).range(of: "@\(fullName)")
-                    text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: newRange)
+            if isEditing {
+                if let _ = listMentionInTextField.firstIndex(where: { $0.fullName == username }) {
+                    text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: match.range(at: 0))
+                }
+            } else {
+                if let member = Member.getMember(f_pin: username) {
+                    let fullName = "\(member.firstName) \(member.lastName)".trimmingCharacters(in: .whitespaces)
+                    text.replaceCharacters(in: range, with: fullName)
+                    if !groupID.isEmpty, Member.getMemberInGroup(f_pin: username, group_id: groupID) != nil {
+                        let newRange = (text.string as NSString).range(of: "@\(fullName)")
+                        text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: newRange)
+                    }
                 }
             }
         }

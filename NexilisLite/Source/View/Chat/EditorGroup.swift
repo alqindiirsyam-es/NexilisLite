@@ -122,6 +122,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var timerSearch: Timer?
     
     var tableMentionEdit = UITableView()
+    var heightTableEditMention: NSLayoutConstraint!
     
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
@@ -1677,7 +1678,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
-            if self.constraintViewTextField.constant != keyboardHeight - 60 {
+            if self.constraintBottomAttachment.constant != keyboardHeight || self.constraintViewTextField.constant != keyboardHeight - 60 {
 //                self.constraintViewTextField.constant = keyboardHeight - 60
                 self.constraintBottomAttachment.constant = keyboardHeight
                 if self.contraintBottomMention.constant > 0 {
@@ -1718,7 +1719,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             let info:NSDictionary = notification.userInfo! as NSDictionary
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
-//            self.constraintViewTextField.constant = 0
+            self.constraintViewTextField.constant = 0
             self.constraintBottomAttachment.constant = 0
             self.constraintBottomContainerMultpileSelectSession.constant = 0
             if self.contraintBottomMention.constant > 0 {
@@ -1941,10 +1942,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             })
             self.timerCredential[messageId] = timer
         }
-        if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintViewTextField.constant == 0 {
+        if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintBottomAttachment.constant == 0 {
             textFieldSend.text = "Send message".localized()
             textFieldSend.textColor = UIColor.lightGray
-        } else if constraintViewTextField.constant != 0 {
+        } else if constraintBottomAttachment.constant != 0 {
             textFieldSend.text = ""
             heightTextFieldSend.constant = 40
         }
@@ -2449,18 +2450,19 @@ extension EditorGroup: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPrevi
             navController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             navController.navigationBar.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             navController.navigationBar.isTranslucent = false
+            let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+            appearance.titleTextAttributes = attributes
+            appearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+            navController.navigationBar.standardAppearance = appearance
+            navController.navigationBar.scrollEdgeAppearance = appearance
             let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
             UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-            let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-            navController.navigationBar.titleTextAttributes = textAttributes
             let leftBarButton = navigationQLPreviewDocument(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancelDocumentPreview))
             let rightBarButton = navigationQLPreviewDocument(title: "Send".localized(), style: .done, target: self, action: #selector(sendDocument))
-//            leftBarButton.tintColor = .white
-//            rightBarButton.tintColor = .white
             leftBarButton.navigation = navController
             rightBarButton.navigation = navController
-//            navController.navigationBar.barTintColor = .mainColor
-            navController.navigationBar.isTranslucent = false
             previewController.navigationItem.leftBarButtonItem = leftBarButton
             previewController.navigationItem.rightBarButtonItem = rightBarButton
             previewController.dataSource = self
@@ -2574,25 +2576,15 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
             }
             
             if continueCheckMention {
-                if let indexLastBreak = fulltextForMention.split(separator: "\n").lastIndex(where: { $0.contains("@") }) {
-                    let splitSpace = fulltextForMention.split(separator: "\n")[indexLastBreak].split(separator: " ")
-                    if let indexLastMention = splitSpace.lastIndex(where: { $0.hasPrefix("@") }),
-                       let lastChar = fulltextForMention.last,
-                       lastChar != " " && lastChar != "\n" {
-                        let textM = String(splitSpace[indexLastMention].dropFirst())
-                        if lastPositionCursorMention == textM.count + 1 {
-                            showMention(text: textM)
-                            isShowMention = true
-                        }
-                    }
-                } else if fulltextForMention.count >= 3 && self.textFieldSend.textColor != UIColor.lightGray {
-                    if let indexLastBreak = fulltextForMention.split(separator: "\n").lastIndex(where: { $0.count >= 3 }) {
-                        let splitSpace = fulltextForMention.split(separator: "\n")[indexLastBreak].split(separator: " ")
-                        if let indexLastMention = splitSpace.lastIndex(of: splitSpace.last ?? ""),
-                           let lastChar = fulltextForMention.last,
-                           lastChar != " " && lastChar != "\n" {
-                            if String(splitSpace[indexLastMention]).count >= 3 {
-                                showMention(text: String(splitSpace[indexLastMention]))
+                let lines = fulltextForMention.split(separator: "\n")
+                if let lastLineIndex = lines.lastIndex(where: { !$0.isEmpty }) {
+                    let words = lines[lastLineIndex].split(separator: " ")
+                    if let lastWordIndex = words.lastIndex(where: { !$0.isEmpty }) {
+                        let mentionText = words[lastWordIndex]
+                        let lastChar = fulltextForMention.last
+                        if lastChar != "\n" && lastChar != " " {
+                            if mentionText.starts(with: "@") || (mentionText.count >= 2 && (self.textFieldSend.textColor != UIColor.lightGray || heightTableEditMention != nil)) {
+                                showMention(text: mentionText.starts(with: "@") ? String(mentionText.dropFirst()) : String(mentionText))
                                 isShowMention = true
                             }
                         }
@@ -2757,12 +2749,6 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         if self.contraintBottomMention.constant < 0 {
             if !isEditingMessage {
                 self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
-                if self.viewTextfield.subviews.contains(self.containerLink) {
-                    self.contraintBottomMention.constant = self.contraintBottomMention.constant + 80
-                }
-                if self.viewTextfield.subviews.contains(self.containerPreviewReply) {
-                    self.contraintBottomMention.constant = self.contraintBottomMention.constant + 50
-                }
                 UIView.animate(withDuration: 0.5, animations: {
                     self.view.layoutIfNeeded()
                 })
@@ -2789,18 +2775,22 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                     cursor.close()
                 }
                 listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
-                if !isEditingMessage {
-                    if listMentionWithText.count > 0 {
-                        if listMentionWithText.count < 5 {
-                            self.heightTableMention.constant = CGFloat(44 * listMentionWithText.count)
-                        } else {
-                            self.heightTableMention.constant = 44 * 4
-                        }
-                        tableMention.reloadData()
+                var nowTableMention = tableMention!
+                var nowHeightTableMention = heightTableMention!
+                if isEditingMessage {
+                    nowTableMention = tableMentionEdit
+                    nowHeightTableMention = heightTableEditMention
+                }
+                if listMentionWithText.count > 0 {
+                    if listMentionWithText.count < 5 {
+                        nowHeightTableMention.constant = CGFloat(44 * listMentionWithText.count)
                     } else {
-                        self.heightTableMention.constant = 44
-                        self.hideMention()
+                        nowHeightTableMention.constant = 44 * 4
                     }
+                    nowTableMention.reloadData()
+                } else {
+                    nowHeightTableMention.constant = 44
+                    self.hideMention()
                 }
             } catch {
                 rollback.pointee = true
@@ -2817,6 +2807,10 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
             UIView.animate(withDuration: 0.5, animations: {
                 self.view.layoutIfNeeded()
             })
+        } else if self.heightTableEditMention != nil && self.heightTableEditMention.constant != 0 {
+            listMentionWithText.removeAll()
+            tableMentionEdit.reloadData()
+            self.heightTableEditMention.constant = 0
         }
     }
     
@@ -3137,7 +3131,7 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
     
     private func handleRichText(_ textView: UITextView) {
         textView.preserveCursorPosition(withChanges: { _ in
-            textView.attributedText = textView.text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "")
+            textView.attributedText = textView.text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: self.listMentionInTextField)
             return .preserveCursor
         })
     }
@@ -3602,6 +3596,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         }
         editVC = UIViewController()
         if let view = editVC.view {
+//            let tapGesture = ObjectGesture(target: self, action: #selector(dismissEditVC))
+//            tapGesture.message_id = oldTextForTextview
+//            view.addGestureRecognizer(tapGesture)
+            
             view.backgroundColor = .clear
             let blurView = UIView()
             let blurEffect = UIBlurEffect(style: .systemUltraThinMaterialLight)
@@ -3615,7 +3613,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             
             let tapGesture = ObjectGesture(target: self, action: #selector(dismissEditVC))
             tapGesture.message_id = oldTextForTextview
-            view.addGestureRecognizer(tapGesture)
+            blurView.addGestureRecognizer(tapGesture)
             
             editTextView = CustomTextView()
             editTextView.layer.cornerRadius = textFieldSend.maxCornerRadius()
@@ -3636,11 +3634,6 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             constraintHeighteditTextView.isActive = true
             editTextView.attributedText = oldTextForTextview.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "")
             editTextView.becomeFirstResponder()
-            
-//            tableMentionEdit = UITableView()
-//            view.addSubview(tableMentionEdit)
-//            tableMentionEdit.anchor(left: view.leftAnchor, right: view.rightAnchor, height: 44)
-            
             
             buttonSendEdit.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
             buttonSendEdit.circle()
@@ -3707,6 +3700,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.isEditingMessage = false
                 self.listMentionWithText = self.tempListMentionWithText
                 self.listMentionInTextField = self.tempListMentionWithText
+                self.heightTableEditMention = nil
                 self.editVC.dismiss(animated: true)
              })
             buttonSendEdit.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
@@ -3747,6 +3741,17 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
             messageText.font = .systemFont(ofSize: 12 + offset())
             messageText.attributedText = oldText.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+            
+            tableMentionEdit = UITableView()
+            tableMentionEdit.register(UITableViewCell.self, forCellReuseIdentifier: "cellEditMention")
+            tableMentionEdit.dataSource = self
+            tableMentionEdit.delegate = self
+            tableMentionEdit.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
+            tableMentionEdit.backgroundColor = .white
+            view.addSubview(tableMentionEdit)
+            tableMentionEdit.anchor(left: view.leftAnchor, bottom: editTextView.topAnchor, right: view.rightAnchor)
+            heightTableEditMention = tableMentionEdit.heightAnchor.constraint(equalToConstant: 0)
+            self.heightTableEditMention.isActive = true
         }
         editVC.modalTransitionStyle = .crossDissolve
         editVC.modalPresentationStyle = .overFullScreen
@@ -3763,6 +3768,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             self.isEditingMessage = false
             self.listMentionWithText = self.tempListMentionWithText
             self.listMentionInTextField = self.tempListMentionWithText
+            self.heightTableEditMention = nil
             editVC.dismiss(animated: true)
         } else if self.isEditingMessage {
             let alert = LibAlertController(title: "".localized(), message: "Discard edit?".localized(), preferredStyle: .alert)
@@ -3771,6 +3777,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.isEditingMessage = false
                 self.listMentionWithText = self.tempListMentionWithText
                 self.listMentionInTextField = self.tempListMentionWithText
+                self.heightTableEditMention = nil
                 self.editVC.dismiss(animated: true)
             }))
             editVC.present(alert, animated: true, completion: nil)
@@ -4385,14 +4392,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     }
     
     public func numberOfSections(in tableView: UITableView) -> Int {
-        if tableView == tableMention {
+        if tableView == tableMention || tableView == tableMentionEdit {
             return 1
         }
         return dataDates.count
     }
     
     public func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        if tableView == tableMention {
+        if tableView == tableMention || tableView == tableMentionEdit {
             return listMentionWithText.count
         }
         let count = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[section] }).count
@@ -4400,7 +4407,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     }
     
     public func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        if tableView == tableMention {
+        if tableView == tableMention || tableView == tableMentionEdit {
             return .none
         }
         let containerView = UIView()
@@ -4439,17 +4446,21 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     }
     
     public func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        if tableView == tableMention {
+        if tableView == tableMention || tableView == tableMentionEdit {
             return 0
         }
         return 50
     }
     
     public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        if tableView == tableMention {
+        if tableView == tableMention || tableView == tableMentionEdit {
             tableView.deselectRow(at: indexPath, animated: true)
-            let fulltextForMention = textFieldSend.text.substring(from: 0, to: lastPositionCursorMention - 1)
-            let diff = textFieldSend.text.count - fulltextForMention.count
+            var nowTextField = textFieldSend!
+            if tableView == tableMentionEdit {
+                nowTextField = editTextView
+            }
+            let fulltextForMention = nowTextField.text.substring(from: 0, to: lastPositionCursorMention - 1)
+            let diff = nowTextField.text.count - fulltextForMention.count
             var indexLastMention = fulltextForMention.lastIndex(of: "@")
             if indexLastMention == nil {
                 if let spaceIndex = fulltextForMention.lastIndex(of: " ") {
@@ -4470,7 +4481,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     addSpaceAfterReplacement = " "
                 }
                 
-                var text = textFieldSend.text ?? ""
+                var text = nowTextField.text ?? ""
                 let nameMention = (listMentionWithText[indexPath.row].firstName + " " + listMentionWithText[indexPath.row].lastName).trimmingCharacters(in: .whitespaces)
                 let replacementText = "@\(nameMention)"
                 
@@ -4480,12 +4491,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     text.replaceSubrange(startIndex..<endIndex, with: replacementText + addSpaceAfterReplacement)
                 }
                 
-                textFieldSend.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
+                nowTextField.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
                 
-                let newPosition = textFieldSend.position(from: textFieldSend.beginningOfDocument, offset: textFieldSend.text.count - diff)
-                textFieldSend.selectedTextRange = textFieldSend.textRange(from: newPosition!, to: newPosition!)
+                let newPosition = nowTextField.position(from: nowTextField.beginningOfDocument, offset: nowTextField.text.count - diff)
+                nowTextField.selectedTextRange = nowTextField.textRange(from: newPosition!, to: newPosition!)
                 
-                listMentionInTextField.last?.ex_block = "\(textFieldSend.text.count - diff - addSpaceAfterReplacement.count)" //upperBound
+                listMentionInTextField.last?.ex_block = "\(nowTextField.text.count - diff - addSpaceAfterReplacement.count)" //upperBound
                 
                 hideMention()
             }
@@ -4570,8 +4581,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     
     
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        if tableView == tableMention {
-            let cellMention = tableView.dequeueReusableCell(withIdentifier: "cellMention", for: indexPath as IndexPath)
+        if tableView == tableMention || tableView == tableMentionEdit {
+            let cellMention = tableView.dequeueReusableCell(withIdentifier: tableView == tableMention ? "cellMention" : "cellEditMention", for: indexPath as IndexPath)
             var content = cellMention.defaultContentConfiguration()
             content.textProperties.font = UIFont.systemFont(ofSize: 11 + offset())
             content.imageProperties.tintColor = .black

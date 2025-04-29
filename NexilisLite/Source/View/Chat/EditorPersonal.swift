@@ -2575,7 +2575,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             let info:NSDictionary = notification.userInfo! as NSDictionary
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
-//            self.constraintViewTextField.constant = 0
+            self.constraintViewTextField.constant = 0
             self.constraintBottomAttachment.constant = 0
             self.constraintBottomContainerMultpileSelectSession.constant = 0
             UIView.animate(withDuration: TimeInterval(duration), animations: {
@@ -2598,7 +2598,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
-            if self.constraintViewTextField.constant != keyboardHeight - 60 {
+            if self.constraintBottomAttachment.constant != keyboardHeight || self.constraintViewTextField.constant != keyboardHeight - 60 {
 //                self.constraintViewTextField.constant = keyboardHeight - 60
                 self.constraintBottomAttachment.constant = keyboardHeight
                 if isSearching {
@@ -2660,10 +2660,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         
         if (isContactCenter) {
             if fPinContacCenter.isEmpty && isRequestContactCenter {
-                if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintViewTextField.constant == 0 {
+                if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintBottomAttachment.constant == 0 {
                     textFieldSend.text = "Send message".localized()
                     textFieldSend.textColor = UIColor.lightGray
-                } else if constraintViewTextField.constant != 0 {
+                } else if constraintBottomAttachment.constant != 0 {
                     textFieldSend.text = ""
                 }
                 dismissKeyboard()
@@ -2792,10 +2792,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             })
             self.timerCredential[messageId] = timer
         }
-        if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintViewTextField.constant == 0 {
+        if textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized() && textFieldSend.textColor != UIColor.lightGray && constraintBottomAttachment.constant == 0 {
             textFieldSend.text = "Send message".localized()
             textFieldSend.textColor = UIColor.lightGray
-        } else if constraintViewTextField.constant != 0 {
+        } else if constraintBottomAttachment.constant != 0 {
             textFieldSend.text = ""
             heightTextFieldSend.constant = 40
         }
@@ -3766,18 +3766,19 @@ extension EditorPersonal: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPr
             navController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             navController.navigationBar.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             navController.navigationBar.isTranslucent = false
+            let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithDefaultBackground()
+            appearance.titleTextAttributes = attributes
+            appearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+            navController.navigationBar.standardAppearance = appearance
+            navController.navigationBar.scrollEdgeAppearance = appearance
             let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
             UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-            let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-            navController.navigationBar.titleTextAttributes = textAttributes
             let leftBarButton = navigationQLPreviewDocument(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancelDocumentPreview))
             let rightBarButton = navigationQLPreviewDocument(title: "Send".localized(), style: .done, target: self, action: #selector(sendDocument))
-//            leftBarButton.tintColor = .white
-//            rightBarButton.tintColor = .white
             leftBarButton.navigation = navController
             rightBarButton.navigation = navController
-//            navController.navigationBar.barTintColor = .mainColor
-            navController.navigationBar.isTranslucent = false
             previewController.navigationItem.leftBarButtonItem = leftBarButton
             previewController.navigationItem.rightBarButtonItem = rightBarButton
             previewController.dataSource = self

@@ -2690,4 +2690,15 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func checkVersion() -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.VERSION_CHECK
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.VERSION] = UIApplication.appVersion
+        tMessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Nexilis.cpaasVersion
+        return tMessage
+    }
+    
 }

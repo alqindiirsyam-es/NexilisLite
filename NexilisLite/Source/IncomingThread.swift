@@ -1476,15 +1476,6 @@ class IncomingThread {
                             "f_display_name" : (CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.FIRST_NAME) + " " + CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LAST_NAME)).trimmingCharacters(in: .whitespaces)
                         ], _where: "f_pin = '\(CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.F_PIN))'")
                     }
-                    let device_id: String = SecureUserDefaults.shared.value(forKey: "device_id") ?? ""
-                    if !device_id.isEmpty, let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin FROM BUDDY where device_id='\(device_id)'"), cursorUser.next() {
-                        if User.getMyPin() != cursorUser.string(forColumnIndex: 0) {
-                            SecureUserDefaults.shared.set(cursorUser.string(forColumnIndex: 0), forKey: "me")
-                            APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
-                            Nexilis.sendVersionToBE()
-                        }
-                        cursorUser.close()
-                    }
                     if let delegate = Nexilis.shared.personInfoDelegate {
                         delegate.onUpdatePersonInfo(state: 99, message: "update_buddy")
                     }

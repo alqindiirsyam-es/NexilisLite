@@ -18,6 +18,7 @@ import SDWebImage
 import CryptoKit
 
 public class Nexilis: NSObject {
+    public static var cpaasVersion = "5.0.32"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -284,6 +285,14 @@ public class Nexilis: NSObject {
                         dialog.modalTransitionStyle = .crossDissolve
                         dialog.modalPresentationStyle = .overCurrentContext
                         UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                    }
+                    DispatchQueue.global().async {
+                        if let vers = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.checkVersion()) {
+                            let dataVersion = vers.getBody(key: CoreMessage_TMessageKey.DATA)
+                            if dataVersion == "1" {
+                                APIS.showExpiredVersion()
+                            }
+                        }
                     }
                 }
             } catch {

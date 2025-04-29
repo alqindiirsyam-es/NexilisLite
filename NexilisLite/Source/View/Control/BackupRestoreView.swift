@@ -245,7 +245,23 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(getFileName(option: optionBackup, fileId: fileIdBackup))
-                if !FileManager.default.fileExists(atPath: fileURL.path) {
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    labelRestoring.text = "Restoring...".localized()
+                    restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
+                } else if FileEncryption.shared.isSecureExists(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
+                    do {
+                        if var data = try FileEncryption.shared.readSecure(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                            if dataDecrypt != nil {
+                                data = dataDecrypt!
+                            }
+                            try data.write(to: fileURL)
+                            restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
+                        }
+                    } catch {
+                        
+                    }
+                } else {
                     Download().startHTTP(forKey: getFileName(option: optionBackup, fileId: fileIdBackup), isImage: false) { (name, progress) in
                         DispatchQueue.main.async { [self] in
                             guard progress == 100 else {
@@ -253,12 +269,22 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                                 return
                             }
                             labelRestoring.text = "Restoring...".localized()
-                            restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
+                            if FileEncryption.shared.isSecureExists(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
+                                do {
+                                    if var data = try FileEncryption.shared.readSecure(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
+                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                        if dataDecrypt != nil {
+                                            data = dataDecrypt!
+                                        }
+                                        try data.write(to: fileURL)
+                                        restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
+                                    }
+                                } catch {
+                                    
+                                }
+                            }
                         }
                     }
-                } else {
-                    labelRestoring.text = "Restoring...".localized()
-                    restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
                 }
             }
         }
@@ -581,7 +607,6 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
         destinationURL.appendPathComponent("unzipItem\(Date().currentTimeMillis())")
         do {
             try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true, attributes: nil)
-//            try Zip.unzipFile(file, destination: destinationURL, overwrite: true, password: nil)
             try fileManager.unzipItem(at: file, to: destinationURL)
             
             let files = try FileManager.default.contentsOfDirectory(atPath: destinationURL.path)

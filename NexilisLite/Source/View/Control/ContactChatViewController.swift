@@ -208,7 +208,7 @@ class ContactChatViewController: UITableViewController {
         tableView.tableFooterView = UIView()
         
         pullBuddy()
-        getData()
+//        getData()
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -1181,13 +1181,7 @@ extension ContactChatViewController {
                     imageView.heightAnchor.constraint(equalToConstant: 55.0)
                 ])
                 var leadingAnchor = imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10.0)
-                if data.profile.isEmpty && data.pin != "-999" && data.pin != "-997" {
-                    if data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL {
-                        imageView.image = UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                    } else {
-                        imageView.image = UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                    }
-                } else if data.pin == "-997" {
+                if data.pin == "-997" {
                     imageView.frame = CGRect(x: 0, y: 0, width: 55.0, height: 55.0)
                     imageView.circle()
                     if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
@@ -1210,7 +1204,7 @@ extension ContactChatViewController {
                         }
                     }
                 } else {
-                    if !Utils.getIconDock().isEmpty && data.profile.isEmpty {
+                    if !Utils.getIconDock().isEmpty && data.official == "1" {
                         let urlString = Utils.getUrlDock()!
                         if let cachedImage = ImageCache.shared.image(forKey: urlString) {
                             let imageData = cachedImage
