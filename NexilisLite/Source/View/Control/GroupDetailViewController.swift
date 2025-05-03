@@ -9,7 +9,7 @@ import UIKit
 import NotificationBannerSwift
 import nuSDKService
 
-class GroupDetailViewController: UITableViewController {
+class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     
     enum Flag {
         case edit
@@ -57,6 +57,9 @@ class GroupDetailViewController: UITableViewController {
     private let idSubGroup = Date().currentTimeMillis().toHex()
     
     var fromNotification = false
+    
+    var alertTextFieldSubGroup: UITextField?
+    var alertTextFieldTopic: UITextField?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -157,6 +160,8 @@ class GroupDetailViewController: UITableViewController {
         self.textFields.removeAll()
         self.alert2?.addTextField{ (texfield) in
             texfield.placeholder = "Group's Name".localized()
+            texfield.delegate = self
+            self.alertTextFieldSubGroup = texfield
             texfield.addTarget(self, action: #selector(self.alertTextFieldDidChange(_:)), for: UIControl.Event.editingChanged)
         }
         let submitAction = UIAlertAction(title: "Create".localized(), style: .default, handler: { (action) -> Void in
@@ -195,6 +200,19 @@ class GroupDetailViewController: UITableViewController {
         self.alert2?.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
         
         self.present(self.alert2!, animated: true, completion: nil)
+    }
+    
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        if textField == alertTextFieldSubGroup || textField == alertTextFieldTopic {
+            guard let currentText = textField.text,
+                  let stringRange = Range(range, in: currentText) else {
+                return false
+            }
+
+            let updatedText = currentText.replacingCharacters(in: stringRange, with: string)
+            return updatedText.count <= (textField == alertTextFieldSubGroup ? 100 : 50)
+        }
+        return false
     }
     
     func edit() {
@@ -404,6 +422,8 @@ class GroupDetailViewController: UITableViewController {
                     self.alert2?.addTextField{ (texfield) in
                         texfield.text = topic.title
                         texfield.placeholder = "Topic's Name"
+                        texfield.delegate = self
+                        self.alertTextFieldTopic = texfield
                         texfield.addTarget(self, action: #selector(self.alertTextFieldDidChange(_:)), for: UIControl.Event.editingChanged)
                     }
                     let submitAction = UIAlertAction(title: "Rename".localized(), style: .default, handler: { (action) -> Void in
@@ -465,10 +485,8 @@ class GroupDetailViewController: UITableViewController {
                                 data["topicId"] = topic.chatId
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onTopic"), object: nil, userInfo: data)
                                 DispatchQueue.main.async {
-                                    tableView.beginUpdates()
                                     tableView.deleteRows(at: [indexPath], with: .none)
                                     g.topics.remove(at: index)
-                                    tableView.endUpdates()
                                 }
                             }
                         }
@@ -574,10 +592,8 @@ class GroupDetailViewController: UITableViewController {
                             self.changePosition(pin: member.pin, isAdmin: member.position == "0") { result in
                                 if result {
                                     DispatchQueue.main.async {
-                                        tableView.beginUpdates()
                                         member.position = member.position == "1" ? "0" : "1"
                                         tableView.reloadRows(at: [indexPath], with: .none)
-                                        tableView.endUpdates()
                                     }
                                 }
                             }
@@ -594,10 +610,8 @@ class GroupDetailViewController: UITableViewController {
                             self.exitGroup(pin: member.pin) { result in
                                 if result, let index = g.members.firstIndex(of: member) {
                                     DispatchQueue.main.async {
-                                        tableView.beginUpdates()
                                         tableView.deleteRows(at: [indexPath], with: .none)
                                         g.members.remove(at: index)
-                                        tableView.endUpdates()
                                     }
                                 }
                             }
@@ -1068,7 +1082,10 @@ extension GroupDetailViewController: ImageVideoPickerDelegate {
                             return
                         }
                         do {
-                            try FileEncryption.shared.writeSecure(filename: fileDir.lastPathComponent)
+                            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                            let fileURL = documentsDirectory.appendingPathComponent(fileDir.lastPathComponent)
+                            try FileEncryption.shared.writeSecure(filename: fileDir.lastPathComponent, data: Data(contentsOf: fileURL))
+                            try FileManager.default.removeItem(atPath: fileURL.path)
                         } catch {
                             
                         }

@@ -851,7 +851,6 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                         if self.markerCounter != nil {
                             self.markerCounter = nil
                         }
-                        self.tableChatView.beginUpdates()
                         let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
                         if indexMessage != nil {
                             let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"] as! String)
@@ -860,7 +859,6 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                             }
                         }
-                        self.tableChatView.endUpdates()
                     }
                     else if self.currentIndexpath == nil {
                         self.counter = 0
@@ -873,7 +871,6 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                         if !self.indicatorCounterBSTB.isDescendant(of: self.view) && self.buttonScrollToBottom.isDescendant(of: self.view) {
                             self.markerCounter = row["message_id"] as? String
                             self.addCounterAtButttonScrollToBottom()
-                            self.tableChatView.beginUpdates()
                             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
                             if indexMessage != nil {
                                 let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"] as! String)
@@ -882,7 +879,6 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                                 }
                             }
-                            self.tableChatView.endUpdates()
                         } else if self.indicatorCounterBSTB.isDescendant(of: self.view) {
                             self.labelCounter.text = "\(self.counter)"
                         }

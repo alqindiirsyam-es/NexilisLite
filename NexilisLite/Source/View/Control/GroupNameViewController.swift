@@ -7,7 +7,7 @@
 
 import UIKit
 
-class GroupNameViewController: UITableViewController {
+class GroupNameViewController: UITableViewController, UITextFieldDelegate {
 
     @IBOutlet weak var textField: UITextField!
     
@@ -27,9 +27,16 @@ class GroupNameViewController: UITableViewController {
         navigationItem.rightBarButtonItem?.isEnabled = false
         
         textField.text = name
+        textField.delegate = self
         textField.addTarget(self, action: #selector(didChanged(sender:)), for: .editingChanged)
         textField.placeholder = "Name".localized()
         
+    }
+    
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        guard let currentText = textField.text else { return true }
+        let newLength = currentText.count + string.count - range.length
+        return newLength <= 100
     }
 
     @objc func didChanged(sender: Any) {
@@ -44,7 +51,7 @@ class GroupNameViewController: UITableViewController {
         if let text = textField.text {
             DispatchQueue.global().async {
                 if let resp = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChangeGroupInfo(p_group_id: self.data, p_name: text)) {
-                    if resp.isOk() {
+                    if resp.isOk() && !self.data.isEmpty {
                         Database.shared.database?.inTransaction({ fmdb, rollback in
                             do {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "GROUPZ", cvalues: ["f_name": text], _where: "group_id = '\(self.data)'")

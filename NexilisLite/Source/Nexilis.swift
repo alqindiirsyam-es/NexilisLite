@@ -244,6 +244,11 @@ public class Nexilis: NSObject {
                         })
                     } else if isShowForceSignIn && !Utils.getForceAnonymous() && !Utils.getSetProfile() {
                         DispatchQueue.main.async {
+                            do {
+                                try _ = MasterKeyUtil.shared.getMasterKey()
+                            } catch {
+                                
+                            }
                             showForceSignIn()
                         }
                     }
@@ -285,14 +290,6 @@ public class Nexilis: NSObject {
                         dialog.modalTransitionStyle = .crossDissolve
                         dialog.modalPresentationStyle = .overCurrentContext
                         UIApplication.shared.visibleViewController?.present(dialog, animated: true)
-                    }
-                    DispatchQueue.global().async {
-                        if let vers = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.checkVersion()) {
-                            let dataVersion = vers.getBody(key: CoreMessage_TMessageKey.DATA)
-                            if dataVersion == "1" {
-                                APIS.showExpiredVersion()
-                            }
-                        }
                     }
                 }
             } catch {

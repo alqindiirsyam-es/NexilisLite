@@ -7,7 +7,7 @@
 
 import UIKit
 
-class GroupTopicViewController: UITableViewController {
+class GroupTopicViewController: UITableViewController, UITextFieldDelegate {
 
     @IBOutlet weak var topic: UITextField!
     
@@ -26,6 +26,13 @@ class GroupTopicViewController: UITableViewController {
         
         topic.addTarget(self, action: #selector(didChanged(sender:)), for: .editingChanged)
         topic.placeholder = "Name".localized()
+        topic.delegate = self
+    }
+    
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        guard let currentText = textField.text else { return true }
+        let newLength = currentText.count + string.count - range.length
+        return newLength <= 50
     }
 
     @objc func didChanged(sender: Any) {

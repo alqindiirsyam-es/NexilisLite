@@ -413,7 +413,10 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
                 if result1 {
                     if progress == 100 {
                         do {
-                            try FileEncryption.shared.writeSecure(filename: String(self.thumbId))
+                            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                            let fileURL = documentsDirectory.appendingPathComponent(self.thumbId)
+                            try FileEncryption.shared.writeSecure(filename: self.thumbId, data: Data(contentsOf: fileURL))
+                            try FileManager.default.removeItem(atPath: fileURL.path)
                         } catch {
                             
                         }
@@ -422,7 +425,10 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
                                 if progress == 100 {
                                     self.sendMsg(startTime: startTime, endTime: endTime)
                                     do {
-                                        try FileEncryption.shared.writeSecure(filename: self.fileId)
+                                        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                        let fileURL = documentsDirectory.appendingPathComponent(self.fileId)
+                                        try FileEncryption.shared.writeSecure(filename: self.fileId, data: Data(contentsOf: fileURL))
+                                        try FileManager.default.removeItem(atPath: fileURL.path)
                                     } catch {
                                         
                                     }
@@ -438,7 +444,10 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
                     if progress == 100 {
                         self.sendMsg(startTime: startTime, endTime: endTime)
                         do {
-                            try FileEncryption.shared.writeSecure(filename: self.fileId)
+                            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                            let fileURL = documentsDirectory.appendingPathComponent(self.fileId)
+                            try FileEncryption.shared.writeSecure(filename: self.fileId, data: Data(contentsOf: fileURL))
+                            try FileManager.default.removeItem(atPath: fileURL.path)
                         } catch {
                             
                         }

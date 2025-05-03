@@ -898,7 +898,10 @@ extension ProfileViewController: ImageVideoPickerDelegate {
                             return
                         }
                         do {
-                            try FileEncryption.shared.writeSecure(filename: fileDir.lastPathComponent)
+                            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                            let fileURL = documentsDirectory.appendingPathComponent(fileDir.lastPathComponent)
+                            try FileEncryption.shared.writeSecure(filename: fileDir.lastPathComponent, data: Data(contentsOf: fileURL))
+                            try FileManager.default.removeItem(atPath: fileURL.path)
                         } catch {
                             
                         }

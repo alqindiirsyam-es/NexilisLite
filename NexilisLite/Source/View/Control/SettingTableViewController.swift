@@ -324,7 +324,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             Item(icon: UIImage(systemName: "message"), title: "Notification Message(s)".localized()),
             Item(icon: UIImage(systemName: "message"), title: "Notification Message(s) Group".localized()),
             Item(icon: UIImage(systemName: "iphone.homebutton.radiowaves.left.and.right"), title: "Vibrate Mode".localized()),
-            Item(icon: UIImage(systemName: "photo.on.rectangle.angled"), title: "Save to Gallery".localized()),
+//            Item(icon: UIImage(systemName: "photo.on.rectangle.angled"), title: "Save to Gallery".localized()),
             Item(icon: UIImage(systemName: "arrow.down.square"), title: "Auto Download".localized()),
         ]
         Item.menus["Version"] = [

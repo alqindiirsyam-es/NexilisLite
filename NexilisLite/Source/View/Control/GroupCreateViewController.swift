@@ -7,7 +7,7 @@
 
 import UIKit
 
-class GroupCreateViewController: UITableViewController {
+class GroupCreateViewController: UITableViewController, UITextFieldDelegate {
 
     @IBOutlet weak var name: UITextField!
     @IBOutlet weak var subGroup: UITextField!
@@ -34,8 +34,16 @@ class GroupCreateViewController: UITableViewController {
         navigationItem.rightBarButtonItem?.isEnabled = false
         name.placeholder = "Title".localized() + "*"
         subGroup.placeholder = "Sub Group".localized() + " " + "(" + "Optional".localized() + ")"
+        name.delegate = self
+        subGroup.delegate = self
         
         name.addTarget(self, action: #selector(onTextChanged(sender:)), for: .editingChanged)
+    }
+    
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        guard let currentText = textField.text else { return true }
+        let newLength = currentText.count + string.count - range.length
+        return newLength <= 100
     }
     
     func submit(completion: @escaping (Bool) -> ()) {

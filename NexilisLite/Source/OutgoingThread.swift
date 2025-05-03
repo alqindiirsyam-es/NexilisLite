@@ -167,7 +167,10 @@ class OutgoingThread {
                     if result, progress == 100 {
                         do {
                             do{
-                                try FileEncryption.shared.writeSecure(filename: fileName)
+                                let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                let fileURL = documentsDirectory.appendingPathComponent(fileName)
+                                try FileEncryption.shared.writeSecure(filename: fileName, data: Data(contentsOf: fileURL))
+                                try FileManager.default.removeItem(atPath: fileURL.path)
                                 if var data = try FileEncryption.shared.readSecure(filename: fileName) {
                                     let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
                                     if dataDecrypt != nil {
@@ -186,7 +189,6 @@ class OutgoingThread {
                                 }
                                 if progress == 100 {
                                     if let response = Nexilis.writeSync(message: message) {
-                                        print("sendChat", response.toLogString())
                                         let messageId = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
                                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                                             do {
@@ -200,7 +202,10 @@ class OutgoingThread {
                                             }
                                         })
                                         do {
-                                            try FileEncryption.shared.writeSecure(filename: fileName)
+                                            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                            let fileURL = documentsDirectory.appendingPathComponent(fileName)
+                                            try FileEncryption.shared.writeSecure(filename: fileName, data: Data(contentsOf: fileURL))
+                                            try FileManager.default.removeItem(atPath: fileURL.path)
                                         } catch {
                                             
                                         }
@@ -240,7 +245,10 @@ class OutgoingThread {
                                     }
                                 })
                                 do{
-                                    try FileEncryption.shared.writeSecure(filename: fileName)
+                                    let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                    let fileURL = documentsDirectory.appendingPathComponent(fileName)
+                                    try FileEncryption.shared.writeSecure(filename: fileName, data: Data(contentsOf: fileURL))
+                                    try FileManager.default.removeItem(atPath: fileURL.path)
                                 } catch {
                                     
                                 }

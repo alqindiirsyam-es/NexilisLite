@@ -552,7 +552,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if onGoingCC {
             SecureUserDefaults.shared.set(self.fPinContacCenter, forKey: "inEditorPersonal")
         } else {
-            SecureUserDefaults.shared.set(dataPerson["f_pin"]!, forKey: "inEditorPersonal")
+            SecureUserDefaults.shared.set(dataPerson["f_pin"] ?? "", forKey: "inEditorPersonal")
         }
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataPerson["f_pin"]!!])
         
@@ -1061,7 +1061,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     if tempData.count != 0 && (dataMessages.firstIndex(where: { $0["message_id"] as? String == tempData[0]["message_id"] as? String }) == nil) {
                         let lastIndex = tempData.count - 1
                         for i in 0..<tempData.count {
-                            tableChatView.beginUpdates()
                             dataMessages.insert(tempData[lastIndex - i], at: 0)
                             if dataMessages.firstIndex(where: { $0["chat_date"] as? String == tempData[lastIndex - i]["chat_date"] as? String }) != nil {
                                 tableChatView.insertRows(at: [IndexPath(row: 0, section: currentIndexpath!.section)], with: .top)
@@ -1069,7 +1068,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 tableChatView.insertSections(IndexSet(integer: 0), with: .top)
                                 tableChatView.insertRows(at: [IndexPath(row: 0, section: 0)], with: .top)
                             }
-                            tableChatView.endUpdates()
                         }
                     }
                     cursorData.close()
@@ -1748,7 +1746,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         if self.markerCounter != nil {
                             self.markerCounter = nil
                         }
-                        self.tableChatView.beginUpdates()
                         let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
                         if indexMessage != nil {
                             let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
@@ -1757,7 +1754,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                             }
                         }
-                        self.tableChatView.endUpdates()
                     }
                     else if self.currentIndexpath == nil {
                         self.counter = 0
@@ -1770,7 +1766,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         if !self.indicatorCounterBSTB.isDescendant(of: self.view) && self.buttonScrollToBottom.isDescendant(of: self.view) {
                             self.markerCounter = row["message_id"] as? String
                             self.addCounterAtButttonScrollToBottom()
-                            self.tableChatView.beginUpdates()
                             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
                             if indexMessage != nil {
                                 let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
@@ -1779,7 +1774,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                                 }
                             }
-                            self.tableChatView.endUpdates()
                         } else if self.indicatorCounterBSTB.isDescendant(of: self.view) {
                             self.labelCounter.text = "\(self.counter)"
                         }
@@ -2806,7 +2800,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if self.markerCounter != nil {
             let lastMarkerCounter = self.markerCounter
             self.markerCounter = nil
-            self.tableChatView.beginUpdates()
             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
             if indexMessage != nil {
                 let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
@@ -2815,7 +2808,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                 }
             }
-            self.tableChatView.endUpdates()
         }
 //        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
 //            self.timerFakeProgress = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
@@ -3010,10 +3002,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     let categoryCC = dataMessages[dataMessages.count - 2]["category_cc"] as! [CategoryCC]
                     self.nowSelectedCategoryCC = categoryCC[0].parent
                 }
-                tableChatView.beginUpdates()
                 tableChatView.deleteRows(at: [IndexPath(row: dataMessages.count - 1, section: 0)], with: .none)
                 dataMessages.remove(at: dataMessages.count - 1)
-                tableChatView.endUpdates()
             } else {
                 return
             }
@@ -4705,7 +4695,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             
             let tapGesture = ObjectGesture(target: self, action: #selector(dismissEditVC))
             tapGesture.message_id = oldText
-            view.addGestureRecognizer(tapGesture)
+            blurView.addGestureRecognizer(tapGesture)
             
             editTextView = CustomTextView()
             editTextView.layer.cornerRadius = textFieldSend.maxCornerRadius()
@@ -7922,11 +7912,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.file_id)
                 if FileManager.default.fileExists(atPath: fileURL.path) {
                     self.previewItem = fileURL as NSURL
-                    let previewController = QLPreviewController()
-                    let rightBarButton = UIBarButtonItem()
-                    previewController.navigationItem.rightBarButtonItem = rightBarButton
+                    let previewController = CustomQLPreviewController()
+//                    let rightBarButton = UIBarButtonItem()
+//                    previewController.navigationItem.rightBarButtonItem = rightBarButton
                     previewController.dataSource = self
-                    previewController.modalPresentationStyle = .custom
+//                    previewController.modalPresentationStyle = .custom
                     
                     self.present(previewController, animated: true)
                 } else if FileEncryption.shared.isSecureExists(filename: sender.file_id) {
@@ -7940,11 +7930,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                             let tempPath = cachesDirectory.appendingPathComponent(sender.file_id)
                             try docData.write(to: tempPath)
                             self.previewItem = tempPath as NSURL
-                            let previewController = QLPreviewController()
-                            let rightBarButton = UIBarButtonItem()
-                            previewController.navigationItem.rightBarButtonItem = rightBarButton
+                            let previewController = CustomQLPreviewController()
+//                            let rightBarButton = UIBarButtonItem()
+//                            previewController.navigationItem.rightBarButtonItem = rightBarButton
                             previewController.dataSource = self
-                            previewController.modalPresentationStyle = .custom
+//                            previewController.modalPresentationStyle = .custom
                             self.present(previewController,animated: true)
                         }
                     }
@@ -8523,4 +8513,21 @@ public class TypeDataMessage {
     public static let gif_id = "gif_id"
     public static let is_forwarded = "is_forwarded"
     public static let is_secret = "is_secret"
+}
+
+public final class CustomQLPreviewController: QLPreviewController {
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.rightBarButtonItem = UIBarButtonItem()
+    }
+
+    public override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        (children[0] as? UINavigationController)?.setToolbarHidden(true, animated: false)
+    }
+
+    public override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        (children[0] as? UINavigationController)?.setToolbarHidden(true, animated: false)
+    }
 }

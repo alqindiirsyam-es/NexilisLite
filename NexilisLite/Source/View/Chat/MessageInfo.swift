@@ -300,7 +300,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             })
                             
                             content.text = dataProfile["name"]!
-                            if dataLocation.count > 0 {
+                            if dataLocation.count > 0 && indexPath.row <= dataLocation.count - 1 {
                                 content.text = dataProfile["name"]! + " at (\(dataLocation[indexPath.row]))"
                             }
                             
@@ -1145,7 +1145,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     }
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        if !data.isEmpty && data["read_receipts"] as? String == "8" {
+        if !data.isEmpty && data["read_receipts"] as? String == "8" && indexPath.section == 1 && indexPath.row <= dataLocation.count - 1 {
             if !isPersonal {
                 if let latitude = CLLocationDegrees(dataStatus[indexPath.row]["latitude"] as? String ?? "") {
                     if let longitude = CLLocationDegrees(dataStatus[indexPath.row]["longitude"] as? String ?? "") {

@@ -1550,6 +1550,19 @@ public class APIS: NSObject {
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        DispatchQueue.global().async {
+            while API.nGetCLXConnState() == 0 {
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            if let vers = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.checkVersion()) {
+                let dataVersion = vers.getBody(key: CoreMessage_TMessageKey.DATA)
+                if dataVersion != "1" {
+                    DispatchQueue.main.async {
+                        showExpiredVersion()
+                    }
+                }
+            }
+        }
 //        afterEnterForeground = true
     }
     
@@ -1602,15 +1615,15 @@ public class APIS: NSObject {
     }
     
     public static func showExpiredVersion() {
-        guard !isAlertPresented else { return }
-        isAlertPresented = true
         let alertController = LibAlertController(
             title: "Update Available".localized(),
             message: "A new version is now available. Please update to the latest version to enjoy new features and important improvements.".localized(),
             preferredStyle: .alert
         )
         
-        alertController.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: { _ in
+        alertController.addAction(UIAlertAction(title: "Later".localized(), style: .cancel, handler: nil))
+        
+        alertController.addAction(UIAlertAction(title: "Update Now".localized(), style: .default, handler: { _ in
             if APIS.appNm == "OneApp" {
                 let appStoreURL = URL(string: "https://apps.apple.com/app/id6741251571")!
                 UIApplication.shared.open(appStoreURL)

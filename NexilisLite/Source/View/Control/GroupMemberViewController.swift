@@ -66,6 +66,7 @@ class GroupMemberViewController: UITableViewController {
     }
     
     @objc func add(sender: Any) {
+        Nexilis.showLoader()
         DispatchQueue.global().async {
             Database.shared.database?.inTransaction({ fmdb, rollback in
                 do {
@@ -101,11 +102,15 @@ class GroupMemberViewController: UITableViewController {
                     
                     DispatchQueue.main.async {
                         if self.userSelected.count == result {
-                            self.navigationController?.dismiss(animated: true, completion: {
-                                self.isDismiss?()
-                            })
+                            Nexilis.hideLoader() {
+                                self.navigationController?.dismiss(animated: true, completion: {
+                                    self.isDismiss?()
+                                })
+                            }
                         } else {
-                            self.view.makeToast("Server busy, please try again later".localized(), duration: 3)
+                            Nexilis.hideLoader() {
+                                self.view.makeToast("Server busy, please try again later".localized(), duration: 3)
+                            }
                         }
                     }
                 } catch {

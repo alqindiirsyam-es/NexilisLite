@@ -37,6 +37,7 @@ class QmeraVideoViewController: UIViewController {
     var isPresent = false
     var callFCM = true
     var isNavigationHidden = false
+    var rotateMyView = false
     var listRemoteViewFix: [UIImageView] = [
         UIImageView(),
         UIImageView(),
@@ -1287,8 +1288,12 @@ class QmeraVideoViewController: UIViewController {
             }
         } else if (state == Nexilis.VIDEO_CALL_ZOOM) && self.dataPerson.count > 1 {
             DispatchQueue.main.async {
-                if arrayMessage[0] != arrayMessage[3] {
+                if arrayMessage[0] != arrayMessage[3] && !self.rotateMyView {
                     self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
+                    self.zoomView.contentMode = .scaleAspectFit
+                } else {
+                    self.rotateMyView = true
+                    self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
                     self.zoomView.contentMode = .scaleAspectFit
                 }
             }
@@ -1623,6 +1628,7 @@ class QmeraVideoViewController: UIViewController {
                     
                     if self.dataPerson.count == 1 {
                         self.transformZoomAfterNewUserMore2 = false
+                        self.rotateMyView = false
 //                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
                         
                         if !self.users[0].isConnected {

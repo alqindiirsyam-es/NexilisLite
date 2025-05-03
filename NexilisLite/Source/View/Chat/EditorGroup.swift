@@ -1187,7 +1187,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         if self.markerCounter != nil {
                             self.markerCounter = nil
                         }
-                        self.tableChatView.beginUpdates()
                         let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
                         if indexMessage != nil {
                             let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
@@ -1196,7 +1195,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                             }
                         }
-                        self.tableChatView.endUpdates()
                     }
                     else if self.currentIndexpath == nil {
                         self.counter = 0
@@ -1209,7 +1207,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         if !self.indicatorCounterBSTB.isDescendant(of: self.view) && self.buttonScrollToBottom.isDescendant(of: self.view) {
                             self.markerCounter = row["message_id"] as? String
                             self.addCounterAtButttonScrollToBottom()
-                            self.tableChatView.beginUpdates()
                             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
                             if indexMessage != nil {
                                 let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
@@ -1218,7 +1215,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                                 }
                             }
-                            self.tableChatView.endUpdates()
                         } else if self.indicatorCounterBSTB.isDescendant(of: self.view) {
                             self.labelCounter.text = "\(self.counter)"
                         }
@@ -1957,7 +1953,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         if self.markerCounter != nil {
             let lastMarkerCounter = self.markerCounter
             self.markerCounter = nil
-            self.tableChatView.beginUpdates()
             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
             if indexMessage != nil {
                 let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
@@ -1966,7 +1961,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                 }
             }
-            self.tableChatView.endUpdates()
         }
     }
     
@@ -2701,6 +2695,9 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         
         if listMentionInTextField.count > 0 {
             for j in 0..<listMentionInTextField.count {
+                if j > listMentionInTextField.count - 1{
+                    break
+                }
                 let name = (listMentionInTextField[j].firstName + " " + listMentionInTextField[j].lastName).trimmingCharacters(in: .whitespaces)
                 if !textView.text.contains("@\(name)") {
                     listMentionInTextField.remove(at: j)
@@ -4461,46 +4458,38 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
             let fulltextForMention = nowTextField.text.substring(from: 0, to: lastPositionCursorMention - 1)
             let diff = nowTextField.text.count - fulltextForMention.count
-            var indexLastMention = fulltextForMention.lastIndex(of: "@")
-            if indexLastMention == nil {
-                if let spaceIndex = fulltextForMention.lastIndex(of: " ") {
-                    indexLastMention = fulltextForMention.index(after: spaceIndex)
-                } else if let breakIndex = fulltextForMention.lastIndex(of: "\n") {
-                    indexLastMention = fulltextForMention.index(after: breakIndex)
-                } else {
-                    indexLastMention = fulltextForMention.firstIndex(of: fulltextForMention.first!)
+            let lines = fulltextForMention.split(separator: "\n")
+            if let lastLineIndex = lines.lastIndex(where: { !$0.isEmpty }) {
+                let words = lines[lastLineIndex].split(separator: " ")
+                if let lastWordIndex = words.lastIndex(where: { !$0.isEmpty }) {
+                    let lastWord = words[lastWordIndex]
+                    if let rangeLastWord = fulltextForMention.range(of: lastWord, options: .backwards) {
+                        listMentionInTextField.append(listMentionWithText[indexPath.row])
+                        
+                        var addSpaceAfterReplacement = ""
+                        if diff == 0 {
+                            addSpaceAfterReplacement = " "
+                        }
+                        
+                        var text = nowTextField.text ?? ""
+                        let nameMention = (listMentionWithText[indexPath.row].firstName + " " + listMentionWithText[indexPath.row].lastName).trimmingCharacters(in: .whitespaces)
+                        let replacementText = "@\(nameMention)"
+                        
+                        // Replace the old text with the new text using the replaceSubrange(_:with:) method
+                        text.replaceSubrange(rangeLastWord, with: replacementText + addSpaceAfterReplacement)
+                        
+                        nowTextField.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
+                        
+                        let newPosition = nowTextField.position(from: nowTextField.beginningOfDocument, offset: nowTextField.text.count - diff)
+                        nowTextField.selectedTextRange = nowTextField.textRange(from: newPosition!, to: newPosition!)
+                        
+                        listMentionInTextField.last?.ex_block = "\(nowTextField.text.count - diff - addSpaceAfterReplacement.count)" //upperBound
+                        
+                        hideMention()
+                        return
+                    }
                 }
             }
-            if let indexLastMention = indexLastMention {
-                listMentionInTextField.append(listMentionWithText[indexPath.row])
-                let indexIntMention = fulltextForMention.distance(from: fulltextForMention.startIndex, to: indexLastMention)
-                let rangeReplacement = NSRange(location: indexIntMention, length: lastPositionCursorMention - indexIntMention)
-                
-                var addSpaceAfterReplacement = ""
-                if diff == 0 {
-                    addSpaceAfterReplacement = " "
-                }
-                
-                var text = nowTextField.text ?? ""
-                let nameMention = (listMentionWithText[indexPath.row].firstName + " " + listMentionWithText[indexPath.row].lastName).trimmingCharacters(in: .whitespaces)
-                let replacementText = "@\(nameMention)"
-                
-                // Replace the old text with the new text using the replaceSubrange(_:with:) method
-                if let startIndex = text.index(text.startIndex, offsetBy: rangeReplacement.location, limitedBy: text.endIndex),
-                   let endIndex = text.index(startIndex, offsetBy: rangeReplacement.length, limitedBy: text.endIndex) {
-                    text.replaceSubrange(startIndex..<endIndex, with: replacementText + addSpaceAfterReplacement)
-                }
-                
-                nowTextField.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
-                
-                let newPosition = nowTextField.position(from: nowTextField.beginningOfDocument, offset: nowTextField.text.count - diff)
-                nowTextField.selectedTextRange = nowTextField.textRange(from: newPosition!, to: newPosition!)
-                
-                listMentionInTextField.last?.ex_block = "\(nowTextField.text.count - diff - addSpaceAfterReplacement.count)" //upperBound
-                
-                hideMention()
-            }
-            return
         }
         let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
         if copySession || forwardSession || deleteSession {
@@ -6517,13 +6506,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.file_id)
                 if FileManager.default.fileExists(atPath: fileURL.path) {
                     self.previewItem = fileURL as NSURL
-                    let previewController = QLPreviewController()
-                    let rightBarButton = UIBarButtonItem()
-                    previewController.navigationItem.rightBarButtonItem = rightBarButton
+                    let previewController = CustomQLPreviewController()
+//                            let rightBarButton = UIBarButtonItem()
+//                            previewController.navigationItem.rightBarButtonItem = rightBarButton
                     previewController.dataSource = self
-                    previewController.modalPresentationStyle = .custom
-                    
-                    self.present(previewController, animated: true)
+//                            previewController.modalPresentationStyle = .custom
+                    self.present(previewController,animated: true)
                 } else if FileEncryption.shared.isSecureExists(filename: sender.file_id) {
                     do {
                         if var docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
@@ -6535,11 +6523,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             let tempPath = cachesDirectory.appendingPathComponent(sender.file_id)
                             try docData.write(to: tempPath)
                             self.previewItem = tempPath as NSURL
-                            let previewController = QLPreviewController()
-                            let rightBarButton = UIBarButtonItem()
-                            previewController.navigationItem.rightBarButtonItem = rightBarButton
+                            let previewController = CustomQLPreviewController()
+//                            let rightBarButton = UIBarButtonItem()
+//                            previewController.navigationItem.rightBarButtonItem = rightBarButton
                             previewController.dataSource = self
-                            previewController.modalPresentationStyle = .custom
+//                            previewController.modalPresentationStyle = .custom
                             self.present(previewController,animated: true)
                         }
                     }

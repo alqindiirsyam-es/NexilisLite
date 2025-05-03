@@ -448,13 +448,11 @@ extension NSObject {
                             }
                         }
                         guard let tableView = tableView else { return }
-                        tableView.beginUpdates()
                         if let indexPath = indexPath,
                            indexPath.section < tableView.numberOfSections,
                            indexPath.row < tableView.numberOfRows(inSection: indexPath.section) {
                             tableView.reloadRows(at: [indexPath], with: .none)
                         }
-                        tableView.endUpdates()
                     }
                 }
             }
@@ -467,13 +465,11 @@ extension NSObject {
                 
                 DispatchQueue.main.async {
                     guard let tableView = tableView else { return }
-                    tableView.beginUpdates()
                     if let indexPath = indexPath,
                        indexPath.section < tableView.numberOfSections,
                        indexPath.row < tableView.numberOfRows(inSection: indexPath.section) {
                         tableView.reloadRows(at: [indexPath], with: .none)
                     }
-                    tableView.endUpdates()
                 }
             }
         }
@@ -577,7 +573,7 @@ extension UIColor {
     }
     
     public static var mentionColor: UIColor {
-        return UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? renderColor(hex: "#f6fcae") : renderColor(hex: "#25D366")
+        return UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? renderColor(hex: "#f6fcae") : renderColor(hex: "#22C55E")
     }
     
     public static var blueBubbleColor: UIColor {
@@ -868,7 +864,10 @@ extension String {
             let username = (text.string as NSString).substring(with: range)
             if isEditing {
                 if let _ = listMentionInTextField.firstIndex(where: { $0.fullName == username }) {
-                    text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: match.range(at: 0))
+                    let fullRange = match.range(at: 0)
+                    text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.lowerBound, length: 1))
+                    text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: range)
+                    text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: fullRange)
                 }
             } else {
                 if let member = Member.getMember(f_pin: username) {
@@ -876,7 +875,9 @@ extension String {
                     text.replaceCharacters(in: range, with: fullName)
                     if !groupID.isEmpty, Member.getMemberInGroup(f_pin: username, group_id: groupID) != nil {
                         let newRange = (text.string as NSString).range(of: "@\(fullName)")
-                        text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: newRange)
+                        text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: newRange.lowerBound, length: 1))
+                        text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: newRange.lowerBound + 1, length: fullName.count))
+                        text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: newRange)
                     }
                 }
             }

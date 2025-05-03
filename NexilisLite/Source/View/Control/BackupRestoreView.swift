@@ -112,15 +112,11 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                     valueLastBackup = dayLastBackup.localized() + ", " + timeLastBackup
                     valuesizeBackup = Units(bytes: Int64(filesize)!).getReadableUnit()
                     
-                    tableView.beginUpdates()
                     tableView.reloadRows(at: [IndexPath(row: 0, section: 0)], with: .none)
-                    tableView.endUpdates()
                 } else {
                     valueLastBackup = "-"
                     valuesizeBackup = "-"
-                    tableView.beginUpdates()
                     tableView.reloadRows(at: [IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
-                    tableView.endUpdates()
                 }
             }
         }
@@ -199,9 +195,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             controller.selected = choosenOption
             controller.isSelected = { choosen in
                 self.choosenOption = choosen
-                tableView.beginUpdates()
                 tableView.reloadRows(at: [indexPath], with: .none)
-                tableView.endUpdates()
             }
             navigationController?.show(controller, sender: nil)
         } else if indexPath.section == 1 && indexPath.row == 1 {
@@ -217,10 +211,8 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             }
             isBackupStart = true
             labelPreparing.text = "Preparing...".localized();
-            tableView.beginUpdates()
             tableView.reloadRows(at: [indexPath], with: .none)
             tableView.reloadSections(IndexSet(integer: 2), with: .none)
-            tableView.endUpdates()
             animateBackup()
             backupData(indexPath: indexPath)
         } else if indexPath.section == 2 {
@@ -236,10 +228,8 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             }
             isRestoreStart = true
             labelRestoring.text = "Downloading...".localized();
-            tableView.beginUpdates()
             tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1)], with: .none)
             tableView.reloadSections(IndexSet(integer: 3), with: .none)
-            tableView.endUpdates()
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -664,10 +654,8 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 isRestoreStart = false
                 valueLastBackup = "-"
                 valuesizeBackup = "-"
-                tableView.beginUpdates()
                 tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1), IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
                 tableView.reloadSections(IndexSet(integer: 3), with: .none)
-                tableView.endUpdates()
             })
         } catch {
             //print(error)
@@ -679,10 +667,8 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 isRestoreStart = false
                 valueLastBackup = "-"
                 valuesizeBackup = "-"
-                tableView.beginUpdates()
                 tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1), IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
                 tableView.reloadSections(IndexSet(integer: 3), with: .none)
-                tableView.endUpdates()
             })
         }
     }
@@ -895,11 +881,14 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
     //                    self.labelPreparing.text = "Preparing...".localized() + " \(progress * 100)%"
     //                })
                     let unzipProgress = Progress()
-                    let observation = unzipProgress.observe(\.fractionCompleted) { progress, _ in
-                        self.labelPreparing.text = "Preparing...".localized() + " \(progress.fractionCompleted * 100)%"
+                    let _ = unzipProgress.observe(\.fractionCompleted) { progress, _ in
+                        DispatchQueue.main.async {
+                            self.labelPreparing.text = "Preparing...".localized() + " \(progress.fractionCompleted * 100)%"
+                        }
                     }
                     try fileManager.zipItem(at: file_message, to: zipFiles, progress: unzipProgress)
                     guard let archive = Archive(url: zipFiles, accessMode: .update) else  {
+                        print("Failed Archive")
                         return
                     }
                     do {
@@ -908,9 +897,11 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         try archive.addEntry(with: file_task_pic.lastPathComponent, relativeTo: file_task_pic.deletingLastPathComponent())
                         try archive.addEntry(with: file_task_detail.lastPathComponent, relativeTo: file_task_detail.deletingLastPathComponent())
                     } catch {
-                        //print("Adding entry to ZIP archive failed with error:\(error)")
+                        print("Adding entry to ZIP archive failed with error:\(error)")
                     }
-                    self.labelPreparing.text = "Uploading...".localized()
+                    DispatchQueue.main.async {
+                        self.labelPreparing.text = "Uploading...".localized()
+                    }
                     Network().uploadHTTP(fileUrl: zipFiles, completion: { result,progress in
                         if result {
                             DispatchQueue.main.async { [self] in
@@ -958,13 +949,20 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                                         labelPreparing.text = "Successfully Backup Data".localized()
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
                                             isBackupStart = false
-                                            tableView.beginUpdates()
                                             tableView.reloadRows(at: [indexPath, IndexPath(row: 0, section: 0)], with: .none)
                                             tableView.reloadSections(IndexSet(integer: 2), with: .none)
-                                            tableView.endUpdates()
                                         })
                                     } catch {}
                                 }
+                            }
+                        }  else {
+                            DispatchQueue.main.async { [self] in
+                                labelPreparing.text = "Failed Upload Backup Data".localized()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
+                                    isBackupStart = false
+                                    tableView.reloadRows(at: [indexPath, IndexPath(row: 0, section: 0)], with: .none)
+                                    tableView.reloadSections(IndexSet(integer: 2), with: .none)
+                                })
                             }
                         }
                     })
