@@ -485,8 +485,10 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                                 data["topicId"] = topic.chatId
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onTopic"), object: nil, userInfo: data)
                                 DispatchQueue.main.async {
+                                    tableView.beginUpdates()
                                     tableView.deleteRows(at: [indexPath], with: .none)
                                     g.topics.remove(at: index)
+                                    tableView.endUpdates()
                                 }
                             }
                         }
@@ -610,8 +612,10 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                             self.exitGroup(pin: member.pin) { result in
                                 if result, let index = g.members.firstIndex(of: member) {
                                     DispatchQueue.main.async {
+                                        tableView.beginUpdates()
                                         tableView.deleteRows(at: [indexPath], with: .none)
                                         g.members.remove(at: index)
+                                        tableView.endUpdates()
                                     }
                                 }
                             }

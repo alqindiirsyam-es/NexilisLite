@@ -493,8 +493,10 @@ public class CreateSeminarViewController: UITableViewController {
         switch sections[indexPath.section] {
         case .participants:
             if (editingStyle == .delete) {
+                tableView.beginUpdates()
                 users.remove(at: indexPath.row - 1)
                 tableView.deleteRows(at: [indexPath], with: .automatic)
+                tableView.endUpdates()
             }
         default:
             return

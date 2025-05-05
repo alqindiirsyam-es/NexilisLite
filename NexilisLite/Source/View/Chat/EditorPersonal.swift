@@ -1061,6 +1061,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     if tempData.count != 0 && (dataMessages.firstIndex(where: { $0["message_id"] as? String == tempData[0]["message_id"] as? String }) == nil) {
                         let lastIndex = tempData.count - 1
                         for i in 0..<tempData.count {
+                            self.tableChatView.beginUpdates()
                             dataMessages.insert(tempData[lastIndex - i], at: 0)
                             if dataMessages.firstIndex(where: { $0["chat_date"] as? String == tempData[lastIndex - i]["chat_date"] as? String }) != nil {
                                 tableChatView.insertRows(at: [IndexPath(row: 0, section: currentIndexpath!.section)], with: .top)
@@ -1068,6 +1069,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 tableChatView.insertSections(IndexSet(integer: 0), with: .top)
                                 tableChatView.insertRows(at: [IndexPath(row: 0, section: 0)], with: .top)
                             }
+                            self.tableChatView.endUpdates()
                         }
                     }
                     cursorData.close()
@@ -1510,7 +1512,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     self.changeAppBar()
                     self.setRightButtonItem()
                     self.dateStartCC = "\(Date().currentTimeMillis())"
+                    self.tableChatView.beginUpdates()
                     self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.count - 1, section: 0)], with: .none)
+                    self.tableChatView.endUpdates()
                     self.tableChatView.scrollToBottom()
                     SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
                     if dataMessage.getBody(key: CoreMessage_TMessageKey.CHANNEL) != "0" {
@@ -1676,8 +1680,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
                         self.listTimerCredential[row["message_id"]  as? String ?? ""] = 60
                     }
+                    self.tableChatView.beginUpdates()
                     self.dataMessages.append(row)
                     self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                    self.tableChatView.endUpdates()
                     if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
                         var timer = Timer()
                         var minute = 60
@@ -1952,8 +1958,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
                 }
                 row["chat_date"] = "Today".localized()
+                self.tableChatView.beginUpdates()
                 dataMessages.append(row)
                 self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                self.tableChatView.endUpdates()
                 cursorData.close()
             }
         })
@@ -2748,8 +2756,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             tableChatView.insertSections(IndexSet(integer: dataDates.count - 1), with: .none)
         }
         row["chat_date"] = "Today".localized()
+        self.tableChatView.beginUpdates()
         dataMessages.append(row)
         tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .none)
+        self.tableChatView.endUpdates()
         if credential == "1" {
             var timer = Timer()
             var minute = 60
@@ -2992,7 +3002,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             if dataMessages[Int(level)!]["attachment_flag"] == nil || dataMessages[Int(level)!]["attachment_flag"]  as? String ?? "" != "503" {
                 dataMessages.append(row)
                 self.nowSelectedCategoryCC = id!
+                self.tableChatView.beginUpdates()
                 tableChatView.insertRows(at: [IndexPath(row: dataMessages.count - 1, section: 0)], with: .none)
+                self.tableChatView.endUpdates()
             }
         } else {
             if id == self.nowSelectedCategoryCC {
@@ -3002,8 +3014,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     let categoryCC = dataMessages[dataMessages.count - 2]["category_cc"] as! [CategoryCC]
                     self.nowSelectedCategoryCC = categoryCC[0].parent
                 }
+                self.tableChatView.beginUpdates()
                 tableChatView.deleteRows(at: [IndexPath(row: dataMessages.count - 1, section: 0)], with: .none)
                 dataMessages.remove(at: dataMessages.count - 1)
+                self.tableChatView.endUpdates()
             } else {
                 return
             }
@@ -3078,7 +3092,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         row["category_cc"] = "Please wait while we connect you\nto one of our service representatives".localized()
         dataMessages.append(row)
         nowSelectedCategoryCC = "CantReturn"
+        self.tableChatView.beginUpdates()
         tableChatView.insertRows(at: [IndexPath(row: 0, section: 0)], with: .none)
+        self.tableChatView.endUpdates()
         requestContactCenter(channel: Int(channelContactCenter)!, service_id: serviceIdCC, row: row)
     }
     
@@ -3101,8 +3117,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         row["message_id"] = ""
         row["chat_date"] = "Today".localized()
         self.nowSelectedCategoryCC = "endCC"
+        self.tableChatView.beginUpdates()
         dataMessages.append(row)
         tableChatView.insertRows(at: [IndexPath(row: Int(level)!, section: 0)], with: .none)
+        self.tableChatView.endUpdates()
         self.tableChatView.scrollToBottom()
 //        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: {
 //            self.dismiss(animated: true)
@@ -3182,7 +3200,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     DispatchQueue.main.async {
                         self.dataMessages.append(row)
                         self.nowSelectedCategoryCC = "CantReturn"
+                        self.tableChatView.beginUpdates()
                         self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.count - 1, section: 0)], with: .none)
+                        self.tableChatView.endUpdates()
                         self.tableChatView.scrollToBottom()
                     }
                 }
@@ -3204,7 +3224,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             row["category_cc"] = data
                             self.dataMessages.append(row)
                             self.channelContactCenter = "\(channel)"
+                            self.tableChatView.beginUpdates()
                             self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.count - 1, section: 0)], with: .none)
+                            self.tableChatView.endUpdates()
                             self.tableChatView.scrollToBottom()
                         } else {
                             self.fPinContacCenter = data
@@ -3225,7 +3247,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row["category_cc"] = data
                         self.dataMessages.append(row)
                         self.channelContactCenter = "\(channel)"
+                        self.tableChatView.beginUpdates()
                         self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.count - 1, section: 0)], with: .none)
+                        self.tableChatView.endUpdates()
                         self.tableChatView.scrollToBottom()
                     }
                 }

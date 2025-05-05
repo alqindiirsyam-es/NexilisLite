@@ -1348,12 +1348,14 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             if idx != nil{
                 self.dataMessages[idx!]["is_stared"] = "0"
             }
+            self.tableChatView.beginUpdates()
             self.dataMessages.remove(at: idx!)
             self.tableChatView.deleteRows(at: [indexPath!], with: .fade)
             if self.dataMessages.filter({ $0["chat_date"] as! String == dataMessages[indexPath!.row]["chat_date"] as! String }).count == 0 {
                 self.dataDates.remove(at: indexPath!.section)
                 self.tableChatView.deleteSections(IndexSet(integer: indexPath!.section), with: .fade)
             }
+            self.tableChatView.endUpdates()
         })
         let forward = UIAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right.fill"), handler: {(_) in
             let navigationController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactChatNav") as! UINavigationController

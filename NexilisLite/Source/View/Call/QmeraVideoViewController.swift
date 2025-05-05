@@ -1322,7 +1322,38 @@ class QmeraVideoViewController: UIViewController {
 //                    } while (QmeraVideoViewController.isLoop)
 //                }
 //            })
-            self.setSpeaker()
+            if #available(iOS 15.0, *), Nexilis.firstCall {
+                DispatchQueue.main.async {
+                    self.buttonSpeaker.isEnabled = false
+                }
+                QmeraVideoViewController.isLoop = true
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var countLoop = 0
+                    repeat {
+                        Thread.sleep(forTimeInterval : 1)
+                        if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
+                            API.restartAudioEngine()
+                            Nexilis.firstCall = false
+                            self.setSpeaker()
+                            DispatchQueue.main.async {
+                                self.buttonSpeaker.isEnabled = true
+                            }
+                            break
+                        }
+                        countLoop = countLoop + 1
+                        if countLoop == 5 {
+                            Nexilis.firstCall = false
+                            self.setSpeaker()
+                            DispatchQueue.main.async {
+                                self.buttonSpeaker.isEnabled = true
+                            }
+                            break
+                        }
+                    } while (QmeraVideoViewController.isLoop)
+                }
+            } else {
+                self.setSpeaker()
+            }
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
             DispatchQueue.main.async {

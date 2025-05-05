@@ -863,15 +863,21 @@ extension String {
             let range = match.range(at: 1)
             let username = (text.string as NSString).substring(with: range)
             if isEditing {
-                if let _ = listMentionInTextField.firstIndex(where: { $0.fullName == username }) {
-                    let fullRange = match.range(at: 0)
-                    text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.lowerBound, length: 1))
-                    text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: range)
-                    text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: fullRange)
+                if let indexLM = listMentionInTextField.firstIndex(where: { $0.fullName.trimmingCharacters(in: .whitespaces).contains(username) }) {
+                    let fullNameText = listMentionInTextField[indexLM].fullName.trimmingCharacters(in: .whitespaces)
+                    let endRange = range.lowerBound + fullNameText.count
+                    if endRange <= text.string.count {
+                        let fullRange = match.range(at: 0)
+                        if fullRange.lowerBound == ((Int(listMentionInTextField[indexLM].ex_block ?? "0") ?? 0) - fullNameText.count){
+                            text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.lowerBound, length: 1))
+                            text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: range.lowerBound, length: fullNameText.count))
+                            text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: NSRange(location: fullRange.lowerBound, length: fullNameText.count))
+                        }
+                    }
                 }
             } else {
                 if let member = Member.getMember(f_pin: username) {
-                    let fullName = "\(member.firstName) \(member.lastName)".trimmingCharacters(in: .whitespaces)
+                    let fullName = "\(member.fullName)".trimmingCharacters(in: .whitespaces)
                     text.replaceCharacters(in: range, with: fullName)
                     if !groupID.isEmpty, Member.getMemberInGroup(f_pin: username, group_id: groupID) != nil {
                         let newRange = (text.string as NSString).range(of: "@\(fullName)")

@@ -18,7 +18,7 @@ import SDWebImage
 import CryptoKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.32"
+    public static var cpaasVersion = "5.0.34"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -128,6 +128,7 @@ public class Nexilis: NSObject {
     private static var ringbacktonePlayer: AVAudioPlayer?
     private static var busyPlayer: AVAudioPlayer?
     static var sharedAudioPlayer: AVAudioPlayer?
+    static var firstCall = true
     
     private func createDelegate() {
         //print("createDelegate...")

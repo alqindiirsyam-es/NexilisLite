@@ -111,7 +111,6 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                     
                     valueLastBackup = dayLastBackup.localized() + ", " + timeLastBackup
                     valuesizeBackup = Units(bytes: Int64(filesize)!).getReadableUnit()
-                    
                     tableView.reloadRows(at: [IndexPath(row: 0, section: 0)], with: .none)
                 } else {
                     valueLastBackup = "-"

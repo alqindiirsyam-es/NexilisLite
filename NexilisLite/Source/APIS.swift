@@ -1600,7 +1600,9 @@ public class APIS: NSObject {
             preferredStyle: .alert
         )
         
-        alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
+        alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: { _ in
+            isAlertPresented = false
+        }))
         
         alertController.addAction(UIAlertAction(title: "Go to Settings".localized(), style: .default, handler: { _ in
             isAlertPresented = false
@@ -1614,30 +1616,40 @@ public class APIS: NSObject {
         }
     }
     
+    private static var alertControllerExpired: LibAlertController!
     public static func showExpiredVersion() {
-        let alertController = LibAlertController(
-            title: "Update Available".localized(),
-            message: "A new version is now available. Please update to the latest version to enjoy new features and important improvements.".localized(),
-            preferredStyle: .alert
-        )
-        
-        alertController.addAction(UIAlertAction(title: "Later".localized(), style: .cancel, handler: nil))
-        
-        alertController.addAction(UIAlertAction(title: "Update Now".localized(), style: .default, handler: { _ in
-            if APIS.appNm == "OneApp" {
-                let appStoreURL = URL(string: "https://apps.apple.com/app/id6741251571")!
-                UIApplication.shared.open(appStoreURL)
+        func showAl() {
+            alertControllerExpired = LibAlertController(
+                title: "Update Available".localized(),
+                message: "A new version is now available. Please update to the latest version to enjoy new features and important improvements.".localized(),
+                preferredStyle: .alert
+            )
+            alertControllerExpired.addAction(UIAlertAction(title: "Later".localized(), style: .cancel, handler: nil))
+            
+            alertControllerExpired.addAction(UIAlertAction(title: "Update Now".localized(), style: .default, handler: { _ in
+                if APIS.appNm == "OneApp" {
+                    let appStoreURL = URL(string: "https://apps.apple.com/app/id6741251571")!
+                    UIApplication.shared.open(appStoreURL)
+                } else {
+                    let appStoreURL = URL(string: "https://apps.apple.com/app/")!
+                    UIApplication.shared.open(appStoreURL)
+                }
+            }))
+            
+            if UIApplication.shared.visibleViewController?.navigationController != nil {
+                UIApplication.shared.visibleViewController?.navigationController?.present(alertControllerExpired, animated: true, completion: nil)
             } else {
-                let appStoreURL = URL(string: "https://apps.apple.com/app/")!
-                UIApplication.shared.open(appStoreURL)
+                UIApplication.shared.visibleViewController?.present(alertControllerExpired, animated: true, completion: nil)
             }
-        }))
-        
-        if UIApplication.shared.visibleViewController?.navigationController != nil {
-            UIApplication.shared.visibleViewController?.navigationController?.present(alertController, animated: true, completion: nil)
-        } else {
-            UIApplication.shared.visibleViewController?.present(alertController, animated: true, completion: nil)
         }
+        if alertControllerExpired != nil {
+            alertControllerExpired.dismiss(animated: true) {
+                showAl()
+            }
+        } else {
+            showAl()
+        }
+        
     }
     
     private static func openAppSettings() {

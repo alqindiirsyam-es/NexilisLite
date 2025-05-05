@@ -1085,6 +1085,34 @@ class QmeraAudioViewController: UIViewController {
 //                    self.tempSpeaker = true
 //                    didSpeaker(sender: nil)
 //                }
+                if #available(iOS 15.0, *), Nexilis.firstCall {
+                    DispatchQueue.main.async {
+                        self.speaker.isEnabled = false
+                    }
+                    QmeraAudioViewController.isLoop = true
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        var countLoop = 0
+                        repeat {
+                            Thread.sleep(forTimeInterval : 0.5)
+                            if (QmeraAudioViewController.isLoop && !API.bAudioEngineIsRunning()) {
+                                API.restartAudioEngine()
+                                Nexilis.firstCall = false
+                                DispatchQueue.main.async {
+                                    self.speaker.isEnabled = true
+                                }
+                                break
+                            }
+                            countLoop = countLoop + 1
+                            if countLoop == 3 {
+                                Nexilis.firstCall = false
+                                DispatchQueue.main.async {
+                                    self.speaker.isEnabled = true
+                                }
+                                break
+                            }
+                        } while (QmeraAudioViewController.isLoop)
+                    }
+                }
             } else if state == Nexilis.AUDIO_CALL_RINGING || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_RINGING) {
                 if users.count == 1 && !autoAcceptAPN {
                     DispatchQueue.main.async {

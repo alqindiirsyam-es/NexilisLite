@@ -259,8 +259,10 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         }
         row["chat_date"] = "Today".localized()
         row["blog_id"] = "0"
+        self.tableChatView.beginUpdates()
         self.dataMessages.append(row)
         self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+        self.tableChatView.endUpdates()
         self.tableChatView.scrollToBottom()
     }
     
@@ -340,17 +342,23 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         }
         row["chat_date"] = "Today".localized()
         if loadingResponse {
+            self.tableChatView.beginUpdates()
             dataMessages.insert(row, at: dataMessages.count - 2)
             tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"] as! String == dataDates[dataDates.count - 1]}).count - 2, section: dataDates.count - 1)], with: .none)
+            self.tableChatView.endUpdates()
         } else {
             row["is_loading"] = false
+            self.tableChatView.beginUpdates()
             dataMessages.append(row)
             tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"] as! String == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .none)
+            self.tableChatView.endUpdates()
             row["is_loading"] = true
             row["f_pin"] = dataPerson["f_pin"]!!
             row["l_pin"] = idMe
+            self.tableChatView.beginUpdates()
             dataMessages.append(row)
             tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"] as! String == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .none)
+            self.tableChatView.endUpdates()
         }
         var gptRow : [String: String] = [:]
         gptRow["role"] = row["f_pin"] as! String == "-997" ? "assistant" : "user"
@@ -480,8 +488,10 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                 row["chat_date"] = "Today".localized()
                                 row["blog_id"] = "0"
                                 self.counter += 1
+                                self.tableChatView.beginUpdates()
                                 self.dataMessages.append(row)
                                 self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                                self.tableChatView.endUpdates()
                                 self.tableChatView.scrollToBottom()
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                                 self.loadingResponse = false
@@ -833,8 +843,10 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                     row["chat_date"] = "Today".localized()
                     row["blog_id"] = chatData[CoreMessage_TMessageKey.BLOG_ID]
                     self.counter += 1
+                    self.tableChatView.beginUpdates()
                     self.dataMessages.append(row)
                     self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"] as! String == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                    self.tableChatView.endUpdates()
                     if chatData[CoreMessage_TMessageKey.FORMAT] == "1" {
                         self.sendReadMessageStatus(chat_id: "", f_pin: chatData[CoreMessage_TMessageKey.F_PIN]!, message_scope_id: chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]!, message_id: chatData[CoreMessage_TMessageKey.MESSAGE_ID]!)
                         self.tableChatView.scrollToBottom()

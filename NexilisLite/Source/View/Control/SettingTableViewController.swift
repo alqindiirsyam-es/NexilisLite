@@ -189,7 +189,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                             
                                         }
                                     } else {
-                                        Download().start(forKey: image!) { (name, progress) in
+                                        Download().startHTTP(forKey: image!) { (name, progress) in
                                             guard progress == 100 else {
                                                 return
                                             }
@@ -261,7 +261,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                         
                                     }
                                 } else {
-                                    Download().start(forKey: imageSignIn) { (name, progress) in
+                                    Download().startHTTP(forKey: imageSignIn) { (name, progress) in
                                         guard progress == 100 else {
                                             return
                                         }
