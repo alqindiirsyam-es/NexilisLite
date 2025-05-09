@@ -549,12 +549,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             }
         }
         
+        let pinPerson: String = (dataPerson["f_pin"] ?? "") ?? ""
         if onGoingCC {
             SecureUserDefaults.shared.set(self.fPinContacCenter, forKey: "inEditorPersonal")
         } else {
-            SecureUserDefaults.shared.set(dataPerson["f_pin"] ?? "", forKey: "inEditorPersonal")
+            SecureUserDefaults.shared.set(pinPerson, forKey: "inEditorPersonal")
         }
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataPerson["f_pin"]!!])
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [pinPerson])
         
         if isContactCenter || fromNotification {
             let imageButton = UIImageView(frame: CGRect(x: -16, y: 0, width: 20, height: 44))
@@ -3014,10 +3015,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     let categoryCC = dataMessages[dataMessages.count - 2]["category_cc"] as! [CategoryCC]
                     self.nowSelectedCategoryCC = categoryCC[0].parent
                 }
-                self.tableChatView.beginUpdates()
-                tableChatView.deleteRows(at: [IndexPath(row: dataMessages.count - 1, section: 0)], with: .none)
                 dataMessages.remove(at: dataMessages.count - 1)
-                self.tableChatView.endUpdates()
+                tableChatView.deleteRows(at: [IndexPath(row: dataMessages.count - 1, section: 0)], with: .none)
+                tableChatView.reloadData()
             } else {
                 return
             }
@@ -3776,18 +3776,8 @@ extension EditorPersonal: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPr
             self.previewItem = (document as! [URL])[0] as NSURL
             let previewController = QLPreviewController()
             let navController = CustomNavigationController(rootViewController: previewController)
-            navController.navigationBar.tintColor = .white
-            navController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-            navController.navigationBar.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-            navController.navigationBar.isTranslucent = false
-            let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithDefaultBackground()
-            appearance.titleTextAttributes = attributes
-            appearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-            navController.navigationBar.standardAppearance = appearance
-            navController.navigationBar.scrollEdgeAppearance = appearance
-            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+            navController.navigationBar.tintColor = .black
+            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
             UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
             let leftBarButton = navigationQLPreviewDocument(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancelDocumentPreview))
             let rightBarButton = navigationQLPreviewDocument(title: "Send".localized(), style: .done, target: self, action: #selector(sendDocument))
@@ -5484,8 +5474,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if isContactCenter && indexPath.row == 0 && isRequestContactCenter {
             return
         }
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
         if copySession || forwardSession || deleteSession {
+            let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
+            guard indexPath.row < dataMessages.count else {
+                return
+            }
             if (dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" != "0" || dataMessages[indexPath.row]["lock"] as? String == "1") && !forwardSession && !deleteSession {
                 return
             }

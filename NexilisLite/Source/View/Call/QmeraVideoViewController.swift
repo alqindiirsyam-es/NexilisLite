@@ -1309,50 +1309,40 @@ class QmeraVideoViewController: UIViewController {
             }
         }
         else if state == Nexilis.STREAMING_SEMINAR_ENDED { // always call turnspeaker
-//            QmeraVideoViewController.isLoop = true
-//            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5, execute: {
-//                API.adjustVolume(fValue: 10.0)
-//                self.setSpeaker()
-//                DispatchQueue.global(qos: .userInitiated).async {
-//                    repeat {
-//                        Thread.sleep(forTimeInterval : 1)
-//                        if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
-//                            API.turnSpeakerPhone(bSPon: QmeraVideoViewController.bSpeakerPhone!)
-//                        }
-//                    } while (QmeraVideoViewController.isLoop)
-//                }
-//            })
-            if #available(iOS 15.0, *), Nexilis.firstCall {
-                DispatchQueue.main.async {
-                    self.buttonSpeaker.isEnabled = false
-                }
-                QmeraVideoViewController.isLoop = true
-                DispatchQueue.global(qos: .userInitiated).async {
-                    var countLoop = 0
-                    repeat {
-                        Thread.sleep(forTimeInterval : 1)
-                        if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
-                            API.restartAudioEngine()
-                            Nexilis.firstCall = false
-                            self.setSpeaker()
-                            DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                self.buttonSpeaker.isEnabled = false
+            }
+            QmeraVideoViewController.isLoop = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                var countLoop = 0
+                repeat {
+                    Thread.sleep(forTimeInterval : 0.5)
+                    if (QmeraVideoViewController.isLoop && !API.bAudioEngineIsRunning()) {
+                        API.restartAudioEngine()
+                        DispatchQueue.main.async {
+                            if !self.buttonSpeaker.isEnabled{
+                                self.setSpeaker()
+                                self.buttonSpeaker.isEnabled = true
+                            } else if QmeraVideoViewController.bSpeakerPhone {
+                                do {
+                                    let audioSession = AVAudioSession.sharedInstance()
+                                    try audioSession.overrideOutputAudioPort(.speaker)
+                                } catch {
+                                    
+                                }
+                            }
+                        }
+                    }
+                    countLoop = countLoop + 1
+                    if countLoop == 3 {
+                        DispatchQueue.main.async {
+                            if !self.buttonSpeaker.isEnabled{
+                                self.setSpeaker()
                                 self.buttonSpeaker.isEnabled = true
                             }
-                            break
                         }
-                        countLoop = countLoop + 1
-                        if countLoop == 5 {
-                            Nexilis.firstCall = false
-                            self.setSpeaker()
-                            DispatchQueue.main.async {
-                                self.buttonSpeaker.isEnabled = true
-                            }
-                            break
-                        }
-                    } while (QmeraVideoViewController.isLoop)
-                }
-            } else {
-                self.setSpeaker()
+                    }
+                } while (QmeraVideoViewController.isLoop)
             }
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {

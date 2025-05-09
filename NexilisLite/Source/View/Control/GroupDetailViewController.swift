@@ -485,10 +485,9 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                                 data["topicId"] = topic.chatId
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onTopic"), object: nil, userInfo: data)
                                 DispatchQueue.main.async {
-                                    tableView.beginUpdates()
-                                    tableView.deleteRows(at: [indexPath], with: .none)
                                     g.topics.remove(at: index)
-                                    tableView.endUpdates()
+                                    tableView.deleteRows(at: [indexPath], with: .none)
+                                    tableView.reloadData()
                                 }
                             }
                         }
@@ -612,10 +611,9 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                             self.exitGroup(pin: member.pin) { result in
                                 if result, let index = g.members.firstIndex(of: member) {
                                     DispatchQueue.main.async {
-                                        tableView.beginUpdates()
-                                        tableView.deleteRows(at: [indexPath], with: .none)
                                         g.members.remove(at: index)
-                                        tableView.endUpdates()
+                                        tableView.deleteRows(at: [indexPath], with: .automatic)
+                                        tableView.reloadData()
                                     }
                                 }
                             }
@@ -696,6 +694,10 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
             //print("No handler..")
             break
         }
+    }
+    
+    override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
+        return true
     }
     
     private func didTapAdd(_ pin: String) {

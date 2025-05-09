@@ -18,7 +18,7 @@ import SDWebImage
 import CryptoKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.34"
+    public static var cpaasVersion = "5.0.35"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -128,7 +128,7 @@ public class Nexilis: NSObject {
     private static var ringbacktonePlayer: AVAudioPlayer?
     private static var busyPlayer: AVAudioPlayer?
     static var sharedAudioPlayer: AVAudioPlayer?
-    static var firstCall = true
+//    static var firstCall = true
     
     private func createDelegate() {
         //print("createDelegate...")
@@ -860,7 +860,7 @@ public class Nexilis: NSObject {
                 let url = response?.url,
                 let httpResponse = response as? HTTPURLResponse,
                 let fields = httpResponse.allHeaderFields as? [String: String] else {
-                print("MASUK SINI0 \(url)")
+//                print("MASUK SINI0 \(url)")
                 semaphore.signal()
                 return
             }

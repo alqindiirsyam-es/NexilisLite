@@ -526,17 +526,15 @@ public class CreateConferenceCallController: UITableViewController {
         switch sections[indexPath.section] {
         case .users:
             if (editingStyle == .delete) {
-                tableView.beginUpdates()
                 users.remove(at: indexPath.row - 1)
                 tableView.deleteRows(at: [indexPath], with: .automatic)
-                tableView.endUpdates()
+                tableView.reloadData()
             }
         case .groups:
             if (editingStyle == .delete) {
-                tableView.beginUpdates()
                 groups.remove(at: indexPath.row - 1)
                 tableView.deleteRows(at: [indexPath], with: .automatic)
-                tableView.endUpdates()
+                tableView.reloadData()
             }
         default:
             return

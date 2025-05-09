@@ -427,11 +427,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             SecureUserDefaults.shared.set(dataGT, forKey: "inEditorGroup")
             
             if dataTopic["chat_id"]  as? String ?? "" == "" {
-                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataGroup["group_id"]  as? String ?? ""])
-                sendTyping(l_pin: dataGroup["group_id"]  as? String ?? "")
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [groupId])
+                sendTyping(l_pin: groupId)
             } else {
-                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [dataTopic["chat_id"]  as? String ?? ""])
-                sendTyping(l_pin: dataTopic["chat_id"]  as? String ?? "")
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [chatId])
+                sendTyping(l_pin: chatId)
             }
         } else {
             getOfficialGroup()
@@ -2444,18 +2444,8 @@ extension EditorGroup: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPrevi
             self.previewItem = (document as! [URL])[0] as NSURL
             let previewController = QLPreviewController()
             let navController = CustomNavigationController(rootViewController: previewController)
-            navController.navigationBar.tintColor = .white
-            navController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-            navController.navigationBar.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-            navController.navigationBar.isTranslucent = false
-            let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithDefaultBackground()
-            appearance.titleTextAttributes = attributes
-            appearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-            navController.navigationBar.standardAppearance = appearance
-            navController.navigationBar.scrollEdgeAppearance = appearance
-            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+            navController.navigationBar.tintColor = .black
+            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
             UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
             let leftBarButton = navigationQLPreviewDocument(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancelDocumentPreview))
             let rightBarButton = navigationQLPreviewDocument(title: "Send".localized(), style: .done, target: self, action: #selector(sendDocument))
@@ -2516,6 +2506,7 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
     
     public func textViewDidChangeSelection(_ textView: UITextView) {
         lastPositionCursorMention = textView.selectedRange.location
+        var isShowMention = false
 
         let fulltextForMention = textView.text.prefix(lastPositionCursorMention)
         
@@ -2528,9 +2519,14 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                 if lastChar != "\n" && lastChar != " " {
                     if mentionText.starts(with: "@") || (mentionText.count >= 2 && (self.textFieldSend.textColor != UIColor.lightGray || heightTableEditMention != nil)) {
                         showMention(text: mentionText.starts(with: "@") ? String(mentionText.dropFirst()) : String(mentionText))
+                        isShowMention = true
                     }
                 }
             }
+        }
+        
+        if !isShowMention {
+            hideMention()
         }
 
         var nowTextFieldSend = self.textFieldSend
@@ -4429,8 +4425,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 }
             }
         }
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
         if copySession || forwardSession || deleteSession {
+            let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
+            guard indexPath.row < dataMessages.count else {
+                return
+            }
             if copySession && dataMessages[indexPath.row]["f_pin"]  as? String ?? "" != "-999" {
                 return
             }

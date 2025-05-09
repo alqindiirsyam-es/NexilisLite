@@ -469,6 +469,76 @@ public class APIS: NSObject {
         }
     }
     
+    public static func createCommunity() {
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        let startedNewCommunity = UIViewController()
+        if let viewComm = startedNewCommunity.view {
+            viewComm.backgroundColor = .black.withAlphaComponent(0.1)
+            
+            let containerView = UIView()
+            viewComm.addSubview(containerView)
+            containerView.anchor(left: viewComm.leftAnchor, bottom: viewComm.bottomAnchor, right: viewComm.rightAnchor, minHeight: 40)
+            containerView.backgroundColor = .white
+            containerView.layer.cornerRadius = 15
+            containerView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            
+            let closeButton = UIButton(type: .close)
+            containerView.addSubview(closeButton)
+            closeButton.anchor(top: containerView.topAnchor, right: containerView.rightAnchor, paddingTop: 10, paddingRight: 10, width: 30, height: 30)
+            closeButton.layer.cornerRadius = 15
+            closeButton.clipsToBounds = true
+            closeButton.backgroundColor = .lightGray.withAlphaComponent(0.1)
+            let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
+            closeButton.actionHandle(controlEvents: .touchUpInside,
+                                     ForAction:{() -> Void in
+                startedNewCommunity.dismiss(animated: true)
+            })
+            
+            let imageComm = UIImageView(image: UIImage(named: "pb_community_social", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+            containerView.addSubview(imageComm)
+            imageComm.anchor(top: closeButton.bottomAnchor, paddingTop: -40, centerX: containerView.centerXAnchor, width: 380, height: 250)
+            
+            let titleComm = UILabel()
+            containerView.addSubview(titleComm)
+            titleComm.anchor(top: imageComm.bottomAnchor, left: containerView.leftAnchor, right: containerView.rightAnchor, paddingLeft: 20, paddingRight: 20)
+            titleComm.font = .boldSystemFont(ofSize: 30)
+            titleComm.textColor = .label
+            titleComm.numberOfLines = 0
+            titleComm.textAlignment = .center
+            titleComm.text = "Create a new community".localized()
+            
+            let descComm = UILabel()
+            containerView.addSubview(descComm)
+            descComm.anchor(top: titleComm.bottomAnchor, left: containerView.leftAnchor, right: containerView.rightAnchor, paddingTop: 8, paddingLeft: 20, paddingRight: 20)
+            descComm.font = .systemFont(ofSize: 16)
+            descComm.textColor = .label
+            descComm.numberOfLines = 0
+            descComm.textAlignment = .center
+            descComm.text = "Bring together a neighborhood, school or more. Create topic-based groups for members, and easily send them admin anouncements.".localized()
+            
+            let buttonComm = UIButton(type: .custom)
+            containerView.addSubview(buttonComm)
+            buttonComm.anchor(top: descComm.bottomAnchor, left: containerView.leftAnchor, bottom: containerView.bottomAnchor, right: containerView.rightAnchor, paddingTop: 20, paddingLeft: 20, paddingBottom: 20, paddingRight: 20, height: 45)
+            buttonComm.backgroundColor = .whatsappGreenColor
+            buttonComm.layer.cornerRadius = 15
+            buttonComm.clipsToBounds = true
+            buttonComm.setTitle("Get started".localized(), for: .normal)
+            buttonComm.setTitleColor(.white, for: .normal)
+            buttonComm.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        }
+        startedNewCommunity.modalPresentationStyle = .overCurrentContext
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(startedNewCommunity, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(startedNewCommunity, animated: true, completion: nil)
+        }
+    }
+    
     public static func openCreateGroup() {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
@@ -1363,7 +1433,6 @@ public class APIS: NSObject {
                                 navigationC.popViewController(animated: false)
                             }
                         }
-                        print("HUHU \(f_pin) \(l_pin) \(message_scope_id)")
                         showEditorOrCallFromAPN(pin, message_scope_id == "4" ? "1" : "0", "CL01")
                     }
                 }
@@ -1556,9 +1625,10 @@ public class APIS: NSObject {
             }
             if let vers = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.checkVersion()) {
                 let dataVersion = vers.getBody(key: CoreMessage_TMessageKey.DATA)
+                let type = vers.getBody(key: CoreMessage_TMessageKey.TYPE)
                 if dataVersion != "1" {
                     DispatchQueue.main.async {
-                        showExpiredVersion()
+                        showExpiredVersion(mandatory: type == "1")
                     }
                 }
             }
@@ -1617,14 +1687,16 @@ public class APIS: NSObject {
     }
     
     private static var alertControllerExpired: LibAlertController!
-    public static func showExpiredVersion() {
+    public static func showExpiredVersion(mandatory: Bool) {
         func showAl() {
             alertControllerExpired = LibAlertController(
                 title: "Update Available".localized(),
                 message: "A new version is now available. Please update to the latest version to enjoy new features and important improvements.".localized(),
                 preferredStyle: .alert
             )
-            alertControllerExpired.addAction(UIAlertAction(title: "Later".localized(), style: .cancel, handler: nil))
+            if !mandatory {
+                alertControllerExpired.addAction(UIAlertAction(title: "Later".localized(), style: .cancel, handler: nil))
+            }
             
             alertControllerExpired.addAction(UIAlertAction(title: "Update Now".localized(), style: .default, handler: { _ in
                 if APIS.appNm == "OneApp" {
@@ -1803,13 +1875,17 @@ public class APIS: NSObject {
                                            dataTemp[columnName] = value
                                            if let imageString = dataTemp[columnName] as? String, !imageString.isEmpty {
                                                do {
-                                                   let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                                   let file = documentDir.appendingPathComponent(imageString)
-                                                   if FileManager().fileExists(atPath: file.path) {
-                                                       if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
-                                                           let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
-                                                           if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
-                                                               try? FileManager.default.copyItem(at: file, to: sharedFileURL)
+                                                   if FileEncryption.shared.isSecureExists(filename: imageString) {
+                                                       if var data = try FileEncryption.shared.readSecure(filename: imageString) {
+                                                           let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                                           if dataDecrypt != nil {
+                                                               data = dataDecrypt!
+                                                           }
+                                                           if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
+                                                               let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
+                                                               if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
+                                                                   try? data.write(to: sharedFileURL)
+                                                               }
                                                            }
                                                        }
                                                    }
@@ -1840,13 +1916,17 @@ public class APIS: NSObject {
                                             dataTemp[columnName] = value
                                             if let imageString = dataTemp[columnName] as? String, !imageString.isEmpty {
                                                 do {
-                                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                                    let file = documentDir.appendingPathComponent(imageString)
-                                                    if FileManager().fileExists(atPath: file.path) {
-                                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
-                                                            let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
-                                                            if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
-                                                                try? FileManager.default.copyItem(at: file, to: sharedFileURL)
+                                                    if FileEncryption.shared.isSecureExists(filename: imageString) {
+                                                        if var data = try FileEncryption.shared.readSecure(filename: imageString) {
+                                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                                            if dataDecrypt != nil {
+                                                                data = dataDecrypt!
+                                                            }
+                                                            if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
+                                                                let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
+                                                                if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
+                                                                    try? data.write(to: sharedFileURL)
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -1877,13 +1957,17 @@ public class APIS: NSObject {
                                                     dataTempTopic[columnName] = "\(value)".isEmpty ? image_group : "\(value)"
                                                     if let imageString = dataTempTopic[columnName] as? String, !imageString.isEmpty {
                                                         do {
-                                                            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                                            let file = documentDir.appendingPathComponent(imageString)
-                                                            if FileManager().fileExists(atPath: file.path) {
-                                                                if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
-                                                                    let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
-                                                                    if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
-                                                                        try? FileManager.default.copyItem(at: file, to: sharedFileURL)
+                                                            if FileEncryption.shared.isSecureExists(filename: imageString) {
+                                                                if var data = try FileEncryption.shared.readSecure(filename: imageString) {
+                                                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                                                    if dataDecrypt != nil {
+                                                                        data = dataDecrypt!
+                                                                    }
+                                                                    if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
+                                                                        let sharedFileURL = appGroupURL.appendingPathComponent(imageString)
+                                                                        if !FileManager.default.fileExists(atPath: sharedFileURL.path) {
+                                                                            try? data.write(to: sharedFileURL)
+                                                                        }
                                                                     }
                                                                 }
                                                             }

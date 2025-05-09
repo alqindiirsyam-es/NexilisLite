@@ -573,7 +573,7 @@ extension UIColor {
     }
     
     public static var mentionColor: UIColor {
-        return UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? renderColor(hex: "#f6fcae") : renderColor(hex: "#22C55E")
+        return UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? renderColor(hex: "#f6fcae") : renderColor(hex: "#FFA500")
     }
     
     public static var blueBubbleColor: UIColor {
@@ -604,7 +604,7 @@ extension UIColor {
     }
     
     public static var whatsappGreenColor: UIColor {
-        return renderColor(hex: "#25D366")
+        return renderColor(hex: "#20A961")
     }
     
     public static var whatsappGreenTitleColor: UIColor {
@@ -871,7 +871,7 @@ extension String {
                         if fullRange.lowerBound == ((Int(listMentionInTextField[indexLM].ex_block ?? "0") ?? 0) - fullNameText.count){
                             text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.lowerBound, length: 1))
                             text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: range.lowerBound, length: fullNameText.count))
-                            text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: NSRange(location: fullRange.lowerBound, length: fullNameText.count))
+                            text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: NSRange(location: fullRange.lowerBound, length: fullNameText.count + 1))
                         }
                     }
                 }
@@ -1500,5 +1500,11 @@ extension NSAttributedString {
             throw NSError(domain: "Invalid HTML", code: 0, userInfo: nil)
         }
         try self.init(data: data, options: options, documentAttributes: nil)
+    }
+}
+
+extension Collection {
+    subscript(safe index: Index) -> Element? {
+        return indices.contains(index) ? self[index] : nil
     }
 }

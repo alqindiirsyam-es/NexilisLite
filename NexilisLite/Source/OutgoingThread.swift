@@ -102,7 +102,9 @@ class OutgoingThread {
     func getQueue() -> TMessage {
         while queue.isEmpty || queue.count == 0 {
             //print("QUEUE.wait")
-            semaphore.wait()
+//            DispatchQueue.global(qos: .background).async {
+                self.semaphore.wait()
+//            }
         }
         return queue.remove(at: 0)
     }
@@ -168,10 +170,10 @@ class OutgoingThread {
                         do {
                             do{
                                 let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                                let fileURL = documentsDirectory.appendingPathComponent(fileName)
-                                try FileEncryption.shared.writeSecure(filename: fileName, data: Data(contentsOf: fileURL))
+                                let fileURL = documentsDirectory.appendingPathComponent(CoreMessage_TMessageKey.THUMB_ID)
+                                try FileEncryption.shared.writeSecure(filename: CoreMessage_TMessageKey.THUMB_ID, data: Data(contentsOf: fileURL))
                                 try FileManager.default.removeItem(atPath: fileURL.path)
-                                if var data = try FileEncryption.shared.readSecure(filename: fileName) {
+                                if var data = try FileEncryption.shared.readSecure(filename: CoreMessage_TMessageKey.THUMB_ID) {
                                     let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
                                     if dataDecrypt != nil {
                                         data = dataDecrypt!

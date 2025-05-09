@@ -102,7 +102,9 @@ class InquiryThread {
     func getQueue() -> TMessage {
         while queue.isEmpty || queue.count == 0 {
             //print("QUEUE INQUIRY.wait")
-            semaphore.wait()
+//            DispatchQueue.global(qos: .background).async {
+                self.semaphore.wait()
+//            }
         }
         return queue.remove(at: 0)
     }

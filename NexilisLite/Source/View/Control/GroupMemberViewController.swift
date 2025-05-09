@@ -50,7 +50,12 @@ class GroupMemberViewController: UITableViewController {
         searchController.searchBar.delegate = self
         searchController.obscuresBackgroundDuringPresentation = false
         searchController.searchBar.updateHeight(height: 36, radius: 18)
-        searchController.searchBar.searchTextField.attributedPlaceholder = NSAttributedString(string: "Search".localized(), attributes: [NSAttributedString.Key.foregroundColor: UIColor.gray, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)])
+        if let searchTextField = searchController.searchBar.value(forKey: "searchField") as? UITextField {
+            if let leftIconView = searchTextField.leftView as? UIImageView {
+                leftIconView.tintColor = UIColor.white.withAlphaComponent(0.5)
+            }
+        }
+        searchController.searchBar.searchTextField.attributedPlaceholder = NSAttributedString(string: "Search".localized(), attributes: [NSAttributedString.Key.foregroundColor: UIColor.white.withAlphaComponent(0.5), NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)])
         
         definesPresentationContext = true
         
@@ -62,6 +67,13 @@ class GroupMemberViewController: UITableViewController {
             DispatchQueue.main.async {
                 self.tableView.reloadData()
             }
+        }
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        if let searchTextField = searchController.searchBar.value(forKey: "searchField") as? UITextField {
+            searchTextField.textColor = .white
+            searchTextField.tintColor = .white
         }
     }
     
