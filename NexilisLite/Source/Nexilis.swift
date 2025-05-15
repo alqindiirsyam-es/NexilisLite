@@ -232,7 +232,7 @@ public class Nexilis: NSObject {
                                     do {
                                         let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                                         let file = documentDir.appendingPathComponent(cursorData.string(forColumnIndex: 0)!)
-                                        if !FileManager().fileExists(atPath: file.path) || !FileEncryption.shared.isSecureExists(filename: cursorData.string(forColumnIndex: 0)!) {
+                                        if !FileManager().fileExists(atPath: file.path) && !FileEncryption.shared.isSecureExists(filename: cursorData.string(forColumnIndex: 0)!) {
                                             Download().startHTTP(forKey: cursorData.string(forColumnIndex: 0)!) { (name, progress) in}
                                         }
                                     } catch {}
@@ -2888,7 +2888,7 @@ extension Nexilis: MessageDelegate {
                                         
                                     }
                                 } else {
-                                    Download().startHTTP(forKey: file, isImage: false) { (name, progress) in
+                                    Download().startHTTP(forKey: file) { (name, progress) in
                                         DispatchQueue.main.async {
                                             guard progress == 100 else {
                                                 return

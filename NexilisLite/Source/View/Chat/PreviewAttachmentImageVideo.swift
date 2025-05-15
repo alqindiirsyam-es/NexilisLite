@@ -311,50 +311,60 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     
     @objc func sendTapped() {
         if (image != nil) || (imageVideoData != nil && imageVideoData![.mediaType] as! String == "public.image") {
-            var originalImageName = ""
-            if (fromCopy) {
-                originalImageName = "\(Date().currentTimeMillis())"
-            } else if (imageVideoData![.imageURL] == nil) {
-                originalImageName = "takeImage_\(Date().currentTimeMillis())"
-            } else {
-                let urlImage = (imageVideoData![.imageURL] as! NSURL).absoluteString
-                originalImageName = (urlImage! as NSString).lastPathComponent
-            }
-            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let compressedImageName = "Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName)"
-            let thumbName = "THUMB_Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName)"
-            let fileURL = documentsDirectory.appendingPathComponent(compressedImageName)
-            var compressedImage:Data?
-            if (image != nil) {
-                compressedImage = image!.jpegData(compressionQuality:  0.5)
-            } else {
-                compressedImage = (imageVideoData![.originalImage] as! UIImage).jpegData(compressionQuality:  0.5)
-            }
-            if let data = compressedImage,
-               !FileManager.default.fileExists(atPath: fileURL.path) {
-                do {
-                    try data.write(to: fileURL)
-                    //print("file saved")
-                } catch {
-                    //print("error saving file:", error)
+            Nexilis.showLoader()
+            DispatchQueue.global().async { [self] in
+                var originalImageName = ""
+                if (fromCopy) {
+                    originalImageName = "\(Date().currentTimeMillis())"
+                } else if (imageVideoData![.imageURL] == nil) {
+                    originalImageName = "takeImage_\(Date().currentTimeMillis())"
+                } else {
+                    let urlImage = (imageVideoData![.imageURL] as! NSURL).absoluteString
+                    originalImageName = (urlImage! as NSString).lastPathComponent
                 }
-            }
-            let thumbImage = UIImage(data: compressedImage!)
-            let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
-            if let dataThumb = thumbImage!.jpegData(compressionQuality:  0.25),
-               !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
-                do {
-                    try dataThumb.write(to: fileURLTHUMB)
-                    //print("thumb saved")
-                } catch {
-                    //print("error saving file:", error)
+                let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                let compressedImageName = "Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName.components(separatedBy: ".")[0]).jpeg"
+                let thumbName = "THUMB_Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName.components(separatedBy: ".")[0]).jpeg"
+                let fileURL = documentsDirectory.appendingPathComponent(compressedImageName)
+                var compressedImage:Data!
+                if (image != nil) {
+                    compressedImage = image!.jpeg ?? Data()
+                } else {
+                    compressedImage = (imageVideoData![.originalImage] as! UIImage).jpeg ?? Data()
                 }
-            }
-            self.dismiss(animated: true, completion: nil)
-            if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
-                delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self)
-            } else {
-                delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self)
+                if let compressed = compressImageLikeWhatsApp(UIImage(data: compressedImage) ?? UIImage()) {
+                    compressedImage = compressed
+                }
+                if let data = compressedImage,
+                   !FileManager.default.fileExists(atPath: fileURL.path) {
+                    do {
+                        try data.write(to: fileURL)
+                        //print("file saved")
+                    } catch {
+                        //print("error saving file:", error)
+                    }
+                }
+                let thumbImage = UIImage(data: compressedImage!)
+                let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
+                if let dataThumb = thumbImage!.jpegData(compressionQuality:  0.25),
+                   !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
+                    do {
+                        try dataThumb.write(to: fileURLTHUMB)
+                        //print("thumb saved")
+                    } catch {
+                        //print("error saving file:", error)
+                    }
+                }
+                DispatchQueue.main.async {
+                    Nexilis.hideLoader { [self] in
+                        self.dismiss(animated: true, completion: nil)
+                        if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
+                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self)
+                        } else {
+                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self)
+                        }
+                    }
+                }
             }
         } else {
             Nexilis.showLoader()
@@ -420,7 +430,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                         if (fromCopy && dataGIF != nil) {
                             originalVideoName = "\(Date().currentTimeMillis())_copyGif"
                             renamedVideoName = "Nexilis_gif_\(Date().currentTimeMillis())_\(originalVideoName)"
-                            thumbName = "THUMB_Nexilis_gif_\(Date().currentTimeMillis())_\(originalVideoName)"
+                            thumbName = "THUMB_Nexilis_gif_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).jpeg"
                         } else {
                             if imageVideoData != nil {
                                 urlVideo = (imageVideoData![.mediaURL] as! NSURL).absoluteString!
@@ -429,7 +439,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                             }
                             originalVideoName = (urlVideo as NSString).lastPathComponent
                             renamedVideoName = "Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName)"
-                            thumbName = "THUMB_Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName)"
+                            thumbName = "THUMB_Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).jpeg"
                         }
                         let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
                         if !FileManager.default.fileExists(atPath: fileURL.path) {
@@ -495,6 +505,38 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         exportSession.shouldOptimizeForNetworkUse = true
         exportSession.exportAsynchronously {
             handler(exportSession)
+        }
+    }
+    
+    func compressImageLikeWhatsApp(_ image: UIImage, maxFileSizeMB: Double = 1.0, maxDimension: CGFloat = 1280) -> Data? {
+        let resizedImage = resizeImage(image: image, maxDimension: maxDimension)
+        var compressedData = resizedImage.jpegData(compressionQuality: 0.7) ?? Data()
+        var imageSizeMB = Double(compressedData.count) / (1024.0 * 1024.0)
+        
+        while imageSizeMB > maxFileSizeMB {
+            guard let tempImage = UIImage(data: compressedData) else { break }
+            compressedData = tempImage.jpegData(compressionQuality: 0.5) ?? compressedData
+            imageSizeMB = Double(compressedData.count) / (1024.0 * 1024.0)
+            print("Compressed to: \(imageSizeMB) MB")
+        }
+        
+        return compressedData
+    }
+
+    func resizeImage(image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        let aspectRatio = size.width / size.height
+        
+        var newSize: CGSize
+        if aspectRatio > 1 {
+            newSize = CGSize(width: maxDimension, height: maxDimension / aspectRatio)
+        } else {
+            newSize = CGSize(width: maxDimension * aspectRatio, height: maxDimension)
+        }
+
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
         }
     }
     

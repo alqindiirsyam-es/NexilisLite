@@ -251,7 +251,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         
                     }
                 } else {
-                    Download().startHTTP(forKey: getFileName(option: optionBackup, fileId: fileIdBackup), isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: getFileName(option: optionBackup, fileId: fileIdBackup)) { (name, progress) in
                         DispatchQueue.main.async { [self] in
                             guard progress == 100 else {
                                 labelRestoring.text = "Downloading...".localized() + "  \(progress)%"

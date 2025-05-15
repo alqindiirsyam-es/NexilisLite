@@ -1097,7 +1097,7 @@ class QmeraAudioViewController: UIViewController {
                         countLoop = countLoop + 1
                         if countLoop == 3 {
                             DispatchQueue.main.async {
-                                if !self.speaker.isEnabled{
+                                if !self.speaker.isEnabled {
                                     self.speaker.isEnabled = true
                                 }
                             }

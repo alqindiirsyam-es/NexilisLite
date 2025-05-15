@@ -648,7 +648,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 if let dirPath = paths.first {
                     let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(data.audio)
                     if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: data.audio) {
-                        Download().startHTTP(forKey: data.audio, isImage: false) { (name, progress) in
+                        Download().startHTTP(forKey: data.audio) { (name, progress) in
                             guard progress == 100 else {
                                 return
                             }

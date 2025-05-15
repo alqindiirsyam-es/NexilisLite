@@ -46,14 +46,14 @@ public class Download {
     }
     
     public func startHTTP(forKey: String, downloadUrl: String, completion: @escaping (String, Double)->()) {
-        _ = startHTTP(filename: forKey, isImage: false, baseURL: downloadUrl, completion: completion)
+        startHTTP(filename: forKey, baseURL: downloadUrl, completion: completion)
     }
     
-    public func startHTTP(forKey: String, isImage: Bool = false, completion: @escaping (String, Double)->()) {
-        _ = startHTTP(filename: forKey, isImage: isImage, baseURL: DOWNLOAD_URL, completion: completion)
+    public func startHTTP(forKey: String, completion: @escaping (String, Double)->()) {
+        startHTTP(filename: forKey, baseURL: DOWNLOAD_URL, completion: completion)
     }
     
-    public func startHTTP(filename: String, isImage: Bool = true, baseURL: String, completion: @escaping (String, Double)->()) {
+    public func startHTTP(filename: String, baseURL: String, completion: @escaping (String, Double)->()) {
         let download = Nexilis.getDownload(forKey: filename)
         if download == nil {
             Nexilis.addDownload(forKey: filename, download: self)
@@ -76,9 +76,9 @@ public class Download {
                 "User-Agent": Utils.getUserAgent(),
                 "Cookie": Utils.getCookiesMobile()
             ]
-            //print("HEADER: \(headers)")
+            print("FULL URL: \(fullURL)")
             do {
-                let downloadRequest = SessionManager.shared.session.download(fullURL, headers: headers)
+                _ = SessionManager.shared.session.download(fullURL, headers: headers)
                 .downloadProgress(queue: downloadBufferQueue) { progress in
                     let frac = progress.fractionCompleted*100
                     if frac != 100.0 {
@@ -87,12 +87,8 @@ public class Download {
                 }
                 .responseData { result in
                     if let response = result.response, response.statusCode == 200, let successResponse = result.value {
-                        //print("Response success")
+                        print("Response success")
                         do {
-                            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                            let url = documentDir.appendingPathComponent(filename)
-//                            print("write file \(url.path)")
-//                            try successResponse.write(to: url)
                             let dResponse = FileEncryption.shared.decryptFileFromServer(data: successResponse)
                             if dResponse != nil {
                                 try FileEncryption.shared.writeSecure(filename: filename, data: dResponse!)
@@ -100,9 +96,9 @@ public class Download {
                                 try FileEncryption.shared.writeSecure(filename: filename, data: successResponse)
                             }
                             _ = Nexilis.removeDownload(forKey: filename)
-                            completion(filename,100)
                         }
                         catch {}
+                        completion(filename,100)
                     }
                     else {
 //                        let statusCode = result.response?.statusCode

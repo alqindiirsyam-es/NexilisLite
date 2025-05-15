@@ -8,6 +8,7 @@
 
 import Foundation
 import Alamofire
+import UniformTypeIdentifiers
 
 public class Network {
     let uploadGroup = DispatchGroup()
@@ -201,24 +202,12 @@ public class Network {
             do {
                 let fileManager = FileManager.default
                 let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                let tempDir = documentDir.appendingPathComponent("temp")
-                if !fileManager.fileExists(atPath: tempDir.path) {
-                    do {
-                        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
-                    } catch {
-                        print("Error creating directory: \(error)")
-                    }
-                }
                 for name in filename {
                     let fileDir = documentDir.appendingPathComponent(name)
                     let path = fileDir.path
                     if FileManager.default.fileExists(atPath: path) {
                         let fileURL = URL(fileURLWithPath: path)
-                        let filenameServer = "\(name)"
-                        let fileDirServer = tempDir.appendingPathComponent(filenameServer)
-                        let fileURLServer = URL(fileURLWithPath: fileDirServer.path)
                         filesIn.append(fileURL)
-                        filesTempServer.append(fileURLServer)
                     }
                 }
             }
@@ -254,12 +243,20 @@ public class Network {
             }
             
             for i in 0..<filesIn.count {
-                multipartFormData.append(filesIn[i], withName: "file\(i+1)", fileName: filesIn[i].lastPathComponent, mimeType: "application/octet-stream")
+                let mime = self.mimeType(for: filesIn[i])
+                multipartFormData.append(filesIn[i], withName: "file\(i+1)", fileName: filesIn[i].lastPathComponent, mimeType: mime)
                 Nexilis.putUploadFile(forKey: filesIn[i].lastPathComponent, uploader: self)
                 //print(multipartFormData)
             }
             
         }, to: endUrl, headers: headers)
+        .uploadProgress { progress in
+//            print("Response progress: \(progress.fractionCompleted*100)")
+            let frac = progress.fractionCompleted*100
+            if frac != 100.0 {
+                completion(!progress.isCancelled,frac)
+            }
+        }
         .responseJSON { result in
             if let response = result.response, response.statusCode == 200 {
                 //print("Response success")
@@ -271,19 +268,22 @@ public class Network {
             }
             else {
                 let statusCode = result.response?.statusCode
-                print("Response fail: \(statusCode) <><> \(result)")
+//                print("Response fail: \(statusCode) <><> \(result)")
                 completion(false,0)
-            }
-        }
-        .uploadProgress { progress in
-            //print("Response progress: \(progress.fractionCompleted*100)")
-            let frac = progress.fractionCompleted*100
-            if frac != 100.0 {
-                completion(!progress.isCancelled,frac)
             }
         }
         
         return uploadRequest
+    }
+    
+    func mimeType(for url: URL) -> String {
+        if #available(iOS 14.0, *) {
+            if let utType = UTType(filenameExtension: url.pathExtension),
+               let mimeType = utType.preferredMIMEType {
+                return mimeType
+            }
+        }
+        return "application/octet-stream"
     }
     
     public func cancel() {

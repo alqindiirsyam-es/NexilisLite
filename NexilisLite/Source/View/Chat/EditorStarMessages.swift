@@ -853,8 +853,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         if stringURl.lowercased().starts(with: "www.") {
             stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
         }
-        guard let url = URL(string: stringURl) else { return }
-        UIApplication.shared.open(url)
+        if Nexilis.checkingAccess(key: "secure_browser") {
+            APIS.openUrl(url: stringURl)
+        } else {
+            guard let url = URL(string: stringURl) else { return }
+            UIApplication.shared.open(url)
+        }
     }
     
     func getData() {
@@ -1122,7 +1126,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     imageDownload.centerYAnchor.constraint(equalTo: sender.imageView.centerYAnchor).isActive = true
                     imageDownload.widthAnchor.constraint(equalToConstant: 30).isActive = true
                     imageDownload.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    Download().startHTTP(forKey: sender.video_id, isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: sender.video_id) { (name, progress) in
                         DispatchQueue.main.async {
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
@@ -1227,7 +1231,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
                     imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
                     
-                    Download().startHTTP(forKey: sender.file_id, isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: sender.file_id) { (name, progress) in
                         DispatchQueue.main.async {
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
@@ -1582,21 +1586,39 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
     }
     
-    public func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
-            switch interaction {
-            case .invokeDefaultAction:
-                let gesture = ObjectGesture()
-                gesture.message_id = URL.absoluteString
-                tapMessageText(gesture)
-                return false
-            case .presentActions:
-                UIPasteboard.general.string = URL.absoluteString
-                self.view.makeToast("Link Copied".localized(), duration: 3)
-                return false
-            case .preview:
-                return true
-            @unknown default:
-                return true
+    public func textView(_ textView: UITextView, shouldInteractWith URL: URL?, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+        var urlString: String?
+
+        if let url = URL {
+            urlString = url.absoluteString
+        } else {
+            if let range = Range(characterRange, in: textView.text) {
+                let tappedText = String(textView.text[range])
+                urlString = tappedText
             }
         }
+        
+        guard let finalURL = urlString else {
+            return false
+        }
+
+        switch interaction {
+        case .invokeDefaultAction:
+            let gesture = ObjectGesture()
+            gesture.message_id = finalURL
+            tapMessageText(gesture)
+            return false
+
+        case .presentActions:
+            UIPasteboard.general.string = finalURL
+            self.view.makeToast("Link Copied".localized(), duration: 3)
+            return false
+
+        case .preview:
+            return true
+
+        @unknown default:
+            return true
+        }
+    }
 }

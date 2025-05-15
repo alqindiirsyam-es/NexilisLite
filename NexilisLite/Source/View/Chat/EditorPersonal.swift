@@ -131,6 +131,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var playingIndexPath: IndexPath?
     var timerSearch: Timer?
     
+    var downloadList: [String: IndexPath] = [:]
+    
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
         return CGFloat(fontSize)
@@ -572,7 +574,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             chatbot()
         }
         
-        let exblock = User.getData(pin: self.dataPerson["f_pin"]!!)?.ex_block
+        let exblock = User.getData(pin: pinPerson)?.ex_block
         blocking = exblock == nil ? "0" : exblock!.isEmpty ? "0" : exblock!
         
         changeAppBar()
@@ -1235,7 +1237,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 }
                             }
                         }
-                        if (dataMessages.count == 0 || dataMessages.last!["f_pin"]  as? String ?? "" == row["f_pin"]  as? String ?? "") && tempImages.count <= 30 && row["image_id"] != nil && !(row["image_id"]  as? String ?? "").isEmpty && (row["message_text"]  as? String ?? "").isEmpty && (row["reff_id"]  as? String ?? "").isEmpty && (row["credential"]  as? String ?? "") != "1" && (row["read_receipts"]  as? String ?? "") != "8" {
+                        if (dataMessages.count == 0 || dataMessages.last!["f_pin"]  as? String ?? "" == row["f_pin"]  as? String ?? "") && tempImages.count <= 30 && row["image_id"] != nil && !(row["image_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["message_text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["reff_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["credential"] as? String ?? "") != "1" && (row["read_receipts"] as? String ?? "") != "8" {
                             if tempImages.count != 0 && getSecondsDifferenceFromTwoDates(start: Date.init(milliseconds: Int64(tempImages.last!.time)!), end: Date.init(milliseconds: Int64(row["server_date"]  as? String ?? "")!))/60 >= 11 {
                                 if tempImages.count >= 4 {
                                     groupImages[tempImages[0].messageId] = tempImages
@@ -2196,6 +2198,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             case "image":
                 var config = PHPickerConfiguration()
                 config.filter = .images
+                config.preferredAssetRepresentationMode = .current
                 let picker = PHPickerViewController(configuration: config)
                 picker.delegate = self
                 if UIBarButtonItem.appearance().titleTextAttributes(for: .normal) != nil {
@@ -2209,6 +2212,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             case "video":
                 var config = PHPickerConfiguration()
                 config.filter = .videos
+                config.preferredAssetRepresentationMode = .current
                 let picker = PHPickerViewController(configuration: config)
                 picker.delegate = self
                 if UIBarButtonItem.appearance().titleTextAttributes(for: .normal) != nil {
@@ -3397,7 +3401,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         }
                     }
                 } else if dataMessages[index]["video_id"] as? String != nil && !((dataMessages[index]["video_id"] as? String)!.isEmpty){
-                    Download().startHTTP(forKey: dataMessages[index]["video_id"]  as? String ?? "", isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: dataMessages[index]["video_id"]  as? String ?? "") { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
@@ -3450,7 +3454,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     }
                 }
                 else if dataMessages[index]["file_id"] as? String != nil && !((dataMessages[index]["file_id"] as? String)!.isEmpty) {
-                    Download().startHTTP(forKey: dataMessages[index]["file_id"]  as? String ?? "", isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: dataMessages[index]["file_id"]  as? String ?? "") { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
@@ -3707,23 +3711,30 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
         } else if result.itemProvider.hasItemConformingToTypeIdentifier("public.image") {
             picker.dismiss(animated: true, completion: {
                 Nexilis.showLoader()
-                result.itemProvider.loadObject(ofClass: UIImage.self) { object, error in
-                    if let image = object as? UIImage {
-                        DispatchQueue.main.async {
-                            Nexilis.hideLoader {
-                                let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                                if (self.textFieldSend.textColor != .lightGray) {
-                                    previewImageVC.currentTextTextField = self.textFieldSend.text
+                result.itemProvider.loadFileRepresentation(forTypeIdentifier: "public.image") { url, error in
+                    if let url = url {
+                        do {
+                            let data = try Data(contentsOf: url)
+                            DispatchQueue.main.async {
+                                Nexilis.hideLoader {
+                                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                                    if (self.textFieldSend.textColor != .lightGray) {
+                                        previewImageVC.currentTextTextField = self.textFieldSend.text
+                                    }
+                                    previewImageVC.fromCopy = true
+                                    previewImageVC.image = UIImage(data: data)
+                                    previewImageVC.modalPresentationStyle = .custom
+                                    previewImageVC.delegate = self
+                                    previewImageVC.isAck = self.isAck
+                                    previewImageVC.isConfidential = self.isConfidential
+                                    self.present(previewImageVC, animated: true, completion: nil)
                                 }
-                                previewImageVC.fromCopy = true
-                                previewImageVC.image = image
-                                previewImageVC.modalPresentationStyle = .custom
-                                previewImageVC.delegate = self
-                                previewImageVC.isAck = self.isAck
-                                previewImageVC.isConfidential = self.isConfidential
-                                self.present(previewImageVC, animated: true, completion: nil)
                             }
+                        } catch {
+                            print("Error loading image data: \(error)")
                         }
+                    } else {
+                        print("Error: \(String(describing: error))")
                     }
                 }
             })
@@ -5474,8 +5485,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if isContactCenter && indexPath.row == 0 && isRequestContactCenter {
             return
         }
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
         if copySession || forwardSession || deleteSession {
-            let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
             guard indexPath.row < dataMessages.count else {
                 return
             }
@@ -6113,7 +6124,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
         }
         
-        if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" {
+        if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             let imageCredentialView = UIImageView()
             let imageCredential = UIImage(named: "confidential_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
             imageCredentialView.image = imageCredential
@@ -6554,7 +6565,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         activityIndicator.centerXAnchor.constraint(equalTo: playButtonAudio.centerXAnchor),
                         activityIndicator.centerYAnchor.constraint(equalTo: playButtonAudio.centerYAnchor)
                     ])
-                    Download().startHTTP(forKey: audioChat, isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: audioChat) { (name, progress) in
                         guard progress == 100 else {
                             return
                         }
@@ -6612,7 +6623,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 timeMessage.isHidden = true
                 statusMessage.isHidden = true
                 imageStared.isHidden = true
-                topMarginText.constant = topMarginText.constant + 225
+                topMarginText.constant = topMarginText.constant + 205
+                var constTop = 5.0
+                if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int != 0 {
+                    topMarginText.constant = topMarginText.constant + 10
+                    constTop = 35.0
+                }
                 let listImageThumb: [UIImageView] = [UIImageView(), UIImageView(), UIImageView(), UIImageView()]
                 for i in 0..<4 {
                     containerMessage.addSubview(listImageThumb[i])
@@ -6622,9 +6638,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     let widthHeightImage: CGFloat = 120
                     switch i {
                         case 0:
-                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, paddingTop: 5, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, paddingTop: constTop, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
                         case 1:
-                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingTop: 5, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingTop: constTop, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
                         case 2:
                             listImageThumb[i].anchor(left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingLeft: 5, paddingBottom: 5, width: widthHeightImage, height: widthHeightImage)
                         default:
@@ -6638,16 +6654,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         if FileManager.default.fileExists(atPath: thumbURL.path) {
                             DispatchQueue.main.async {
                                 let image : UIImage? =  {
-                                    if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
+                                    if let img = Nexilis.imageCache.object(forKey: listImages[i].thumbId as NSString) {
                                         return img
                                     }
                                     else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                            Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                                            Nexilis.imageCache.setObject(img, forKey: listImages[i].thumbId as NSString)
                                             return img
                                     }
                                     return nil
                                 }()
-                                imageThumb.image = image
+                                listImageThumb[i].image = image
                             }
                         } else if FileEncryption.shared.isSecureExists(filename: listImages[i].thumbId) {
                             do {
@@ -6667,11 +6683,18 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                                             }
                                             return nil
                                         }()
-                                        imageThumb.image = image
+                                        listImageThumb[i].image = image
                                     }
                                 }
                             } catch {
                                 
+                            }
+                        } else {
+                            Download().startHTTP(forKey: listImages[i].thumbId) { (name, progress) in
+                                guard progress == 100 else {
+                                    return
+                                }
+                                tableView.reloadRows(at: [indexPath], with: .none)
                             }
                         }
 
@@ -6820,6 +6843,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         } catch {
                             
                         }
+                    } else {
+                        Download().startHTTP(forKey: thumbChat) { (name, progress) in
+                            guard progress == 100 else {
+                                return
+                            }
+                            tableView.reloadRows(at: [indexPath], with: .none)
+                        }
                     }
                     let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
                     if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
@@ -6855,7 +6885,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     if let dirPath = paths.first {
                         let gifURL = URL(fileURLWithPath: dirPath).appendingPathComponent(gifChat)
                         if !FileManager.default.fileExists(atPath: gifURL.path) && !FileEncryption.shared.isSecureExists(filename: gifChat) {
-                            Download().startHTTP(forKey: gifChat, isImage: false) { (name, progress) in
+                            Download().startHTTP(forKey: gifChat) { (name, progress) in
                                 guard progress == 100 else {
                                     return
                                 }
@@ -6905,7 +6935,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     trackShape.path = circlePath.cgPath
                     trackShape.fillColor = UIColor.black.withAlphaComponent(0.3).cgColor
                     trackShape.lineWidth = 3
-                    trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
+                    trackShape.strokeColor = UIColor.mentionColor.withAlphaComponent(0.3).cgColor
                     container.backgroundColor = .clear
                     container.layer.addSublayer(trackShape)
                     let shapeLoading = CAShapeLayer()
@@ -6913,7 +6943,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     shapeLoading.fillColor = UIColor.clear.cgColor
                     shapeLoading.lineWidth = 3
                     shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.blueBubbleColor.cgColor
+                    shapeLoading.strokeColor = UIColor.mentionColor.cgColor
                     container.layer.addSublayer(shapeLoading)
                     let imageupload = UIImageView(image: UIImage(systemName: "arrow.up", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
                     imageupload.tintColor = .white
@@ -7040,14 +7070,14 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 trackShape.path = circlePath.cgPath
                 trackShape.fillColor = UIColor.clear.cgColor
                 trackShape.lineWidth = 5
-                trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
+                trackShape.strokeColor = UIColor.mentionColor.withAlphaComponent(0.3).cgColor
                 containerLoading.layer.addSublayer(trackShape)
                 let shapeLoading = CAShapeLayer()
                 shapeLoading.path = circlePath.cgPath
                 shapeLoading.fillColor = UIColor.clear.cgColor
                 shapeLoading.lineWidth = 3
                 shapeLoading.strokeEnd = 0
-                shapeLoading.strokeColor = UIColor.secondaryColor.cgColor
+                shapeLoading.strokeColor = UIColor.mentionColor.cgColor
                 containerLoading.layer.addSublayer(shapeLoading)
                 var imageupload = UIImageView(image: UIImage(systemName: "arrow.up", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
                 if dataMessages[indexPath.row]["f_pin"] as? String != idMe {
@@ -7418,7 +7448,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             containerForwarded.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
             containerForwarded.heightAnchor.constraint(equalToConstant: 20).isActive = true
             if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
-                containerForwarded.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
+                if groupImages[messageIdChat] == nil {
+                    containerForwarded.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
+                }
             } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                 containerForwarded.bottomAnchor.constraint(equalTo: containerViewFile.topAnchor, constant: -5).isActive = true
             } else if containerMessage.subviews.contains(containerLinkMessage) {
@@ -7790,12 +7822,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                                     }
                                 }
                             }
+                            DispatchQueue.main.async {
+                                activityIndicator.stopAnimating()
+                                self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
+                            }
                         } catch {
                             
-                        }
-                        DispatchQueue.main.async {
-                            activityIndicator.stopAnimating()
-                            self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
                         }
                     }
                 }
@@ -7853,6 +7885,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         
                     }
                 } else {
+                    if downloadList[sender.video_id] != nil && downloadList[sender.video_id] == sender.indexPath {
+                        return
+                    }
+                    downloadList[sender.video_id] = sender.indexPath
                     for view in sender.imageView.subviews {
                         if view is UIImageView {
                             view.removeFromSuperview()
@@ -7870,7 +7906,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     trackShape.path = circlePath.cgPath
                     trackShape.fillColor = UIColor.clear.cgColor
                     trackShape.lineWidth = 10
-                    trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
+                    trackShape.strokeColor = UIColor.mentionColor.withAlphaComponent(0.3).cgColor
                     container.backgroundColor = .clear
                     container.layer.addSublayer(trackShape)
                     let shapeLoading = CAShapeLayer()
@@ -7878,7 +7914,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     shapeLoading.fillColor = UIColor.clear.cgColor
                     shapeLoading.lineWidth = 10
                     shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.blueBubbleColor.cgColor
+                    shapeLoading.strokeColor = UIColor.mentionColor.cgColor
                     container.layer.addSublayer(shapeLoading)
                     let imageDownload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
                     imageDownload.tintColor = .white
@@ -7888,7 +7924,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     imageDownload.centerYAnchor.constraint(equalTo: sender.imageView.centerYAnchor).isActive = true
                     imageDownload.widthAnchor.constraint(equalToConstant: 30).isActive = true
                     imageDownload.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    Download().startHTTP(forKey: sender.video_id, isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: sender.video_id) { (name, progress) in
                         DispatchQueue.main.async {
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
@@ -7958,7 +7994,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     catch {
                         
                     }
-                }   else {
+                } else {
+                    if downloadList[sender.file_id] != nil && downloadList[sender.file_id] == sender.indexPath {
+                        return
+                    }
+                    downloadList[sender.file_id] = sender.indexPath
                     for view in sender.containerFile.subviews {
                         if !(view is UIImageView) && !(view is UILabel) {
                             view.removeFromSuperview()
@@ -7977,14 +8017,14 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     trackShape.path = circlePath.cgPath
                     trackShape.fillColor = UIColor.clear.cgColor
                     trackShape.lineWidth = 5
-                    trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
+                    trackShape.strokeColor = UIColor.mentionColor.withAlphaComponent(0.3).cgColor
                     containerLoading.layer.addSublayer(trackShape)
                     let shapeLoading = CAShapeLayer()
                     shapeLoading.path = circlePath.cgPath
                     shapeLoading.fillColor = UIColor.clear.cgColor
                     shapeLoading.lineWidth = 3
                     shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.blueBubbleColor.cgColor
+                    shapeLoading.strokeColor = UIColor.mentionColor.cgColor
                     containerLoading.layer.addSublayer(shapeLoading)
                     let imageupload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
                     imageupload.tintColor = .white
@@ -7993,7 +8033,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
                     imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
                     
-                    Download().startHTTP(forKey: sender.file_id, isImage: false) { (name, progress) in
+                    Download().startHTTP(forKey: sender.file_id) { (name, progress) in
                         DispatchQueue.main.async {
                             guard progress == 100 else {
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)

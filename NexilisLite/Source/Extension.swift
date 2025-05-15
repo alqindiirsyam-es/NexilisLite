@@ -862,17 +862,14 @@ extension String {
         for match in matches.reversed() {
             let range = match.range(at: 1)
             let username = (text.string as NSString).substring(with: range)
-            if isEditing {
-                if let indexLM = listMentionInTextField.firstIndex(where: { $0.fullName.trimmingCharacters(in: .whitespaces).contains(username) }) {
-                    let fullNameText = listMentionInTextField[indexLM].fullName.trimmingCharacters(in: .whitespaces)
-                    let endRange = range.lowerBound + fullNameText.count
-                    if endRange <= text.string.count {
-                        let fullRange = match.range(at: 0)
-                        if fullRange.lowerBound == ((Int(listMentionInTextField[indexLM].ex_block ?? "0") ?? 0) - fullNameText.count){
-                            text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.lowerBound, length: 1))
-                            text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: range.lowerBound, length: fullNameText.count))
-                            text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: NSRange(location: fullRange.lowerBound, length: fullNameText.count + 1))
-                        }
+            if isEditing && listMentionInTextField.count > 0 {
+                for mention in listMentionInTextField {
+                    let upper = (Int(mention.ex_block ?? "0") ?? 0)
+                    let lower = upper - mention.fullName.count
+                    if lower >= 0 {
+                        text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: lower, length: 1))
+                        text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: lower + 1, length: mention.fullName.count))
+                        text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: NSRange(location: lower, length: mention.fullName.count))
                     }
                 }
             } else {
@@ -1271,14 +1268,14 @@ public class ImageCache {
             return
         }
 
-        for (originalKey, sanitizedKey) in cacheKeyMap {
+        for (_, sanitizedKey) in cacheKeyMap {
             if let image = cache.object(forKey: sanitizedKey as NSString),
                let imageData = image.pngData() {
-                let filePath = directory.appendingPathComponent("\(sanitizedKey).png")
                 do {
-                    try imageData.write(to: filePath)
+                    try FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).png", data: imageData)
                 } catch {
                 }
+                
             }
         }
     }
@@ -1304,9 +1301,22 @@ public class ImageCache {
                 if fileURL.lastPathComponent == "keyMapping.json" { continue } // Skip mapping file
 
                 let sanitizedKey = fileURL.deletingPathExtension().lastPathComponent
-                if let imageData = try? Data(contentsOf: fileURL),
-                   let image = UIImage(data: imageData) {
-                    cache.setObject(image, forKey: sanitizedKey as NSString)
+                let imageName = "\(sanitizedKey).png"
+                if FileEncryption.shared.isSecureExists(filename: imageName) {
+                    do {
+                        if var data = try FileEncryption.shared.readSecure(filename: imageName) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                            if dataDecrypt != nil {
+                                data = dataDecrypt!
+                            }
+                            if let image = UIImage(data: data) {
+                                cache.setObject(image, forKey: sanitizedKey as NSString)
+                            }
+                        }
+                    }
+                    catch {
+                        print("Error reading secure file")
+                    }
                 }
             }
         } catch {

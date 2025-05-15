@@ -664,11 +664,12 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                 }
             }
         } else {
+            let imageUser = self.user != nil ? self.user!.thumb : self.picture
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
             if let dirPath = paths.first {
-                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.user!.thumb)
+                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageUser)
                 if FileManager.default.fileExists(atPath: imageURL.path) {
                     let image    = UIImage(contentsOfFile: imageURL.path)
                     let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
@@ -677,9 +678,9 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                     previewImageVC.modalPresentationStyle = .custom
                     previewImageVC.modalTransitionStyle  = .crossDissolve
                     self.present(previewImageVC, animated: true, completion: nil)
-                } else if FileEncryption.shared.isSecureExists(filename: self.user!.thumb) {
+                } else if FileEncryption.shared.isSecureExists(filename: imageUser) {
                     do {
-                        if var data = try FileEncryption.shared.readSecure(filename: self.user!.thumb) {
+                        if var data = try FileEncryption.shared.readSecure(filename: imageUser) {
                             let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
                             if dataDecrypt != nil {
                                 data = dataDecrypt!

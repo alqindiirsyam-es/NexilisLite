@@ -48,7 +48,7 @@ class ContactChatViewController: UITableViewController {
     var noData = false
     
     var loadingData = true
-    var waitingLoading = false
+    var timerReloadData = Timer()
     
     var noUCList = false
     
@@ -265,17 +265,11 @@ class ContactChatViewController: UITableViewController {
 //    }
     
     private func reloadAllData() {
-        DispatchQueue.global().async { [self] in
-            if waitingLoading {
-                return
-            }
-            waitingLoading = true
-            while loadingData {
-                Thread.sleep(forTimeInterval: 0.5)
-            }
-            waitingLoading = false
-            getData()
-        }
+        timerReloadData.invalidate()
+        timerReloadData = Timer.scheduledTimer(withTimeInterval: 1, repeats: false, block: {_ in
+            self.getData()
+        })
+        timerReloadData.fire()
     }
     
     @objc func onReloadTab(notification: NSNotification) {

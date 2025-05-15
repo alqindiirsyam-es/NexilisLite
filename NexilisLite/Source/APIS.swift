@@ -1433,7 +1433,7 @@ public class APIS: NSObject {
                                 navigationC.popViewController(animated: false)
                             }
                         }
-                        showEditorOrCallFromAPN(pin, message_scope_id == "4" ? "1" : "0", "CL01")
+                        showEditorOrCallFromAPN(pin, message_scope_id == "4" ? "1" : !message_scope_id.isEmpty ? "0" : "", "CL01")
                     }
                 }
             }
@@ -1442,6 +1442,9 @@ public class APIS: NSObject {
     }
     
     private static func showEditorOrCallFromAPN(_ id: String, _ type: String, _ callType: String) {
+        if type.isEmpty {
+            return
+        }
         if type == "0" {
             if User.getDataCanNil(pin: id) == nil && id != "-999" && id != "-997" {
                 return
@@ -1588,6 +1591,7 @@ public class APIS: NSObject {
 //            API.deinitConnection()
 //        }
         notifTimer.invalidate()
+        stopNotif = true
     }
     
     public static var notifTimer = Timer()

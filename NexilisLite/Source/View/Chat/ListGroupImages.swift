@@ -673,12 +673,7 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
                     }
                 }
                 if imagePath == nil {
-                    Download().startHTTP(forKey: image) { (name, progress) in
-                        guard progress == 100 else {
-                            return
-                        }
-                    }
-                    imagePath = UIImage(named: "Send-Image", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                    return CGSize(width: 100, height: 100)
                 }
             }
             catch {

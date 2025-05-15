@@ -1337,17 +1337,17 @@ class IncomingThread {
             } catch {
             }
         }
-        if (!thumb_id.isEmpty && media.count == 0) {
-            Download().startHTTP(forKey: thumb_id) { (file, progress) in
-                //print ("masuk download \(progress)")
-                if(progress == 100 || progress == -100) {
-                    Nexilis.saveMessage(message: message, withStatus: false)
-                    //print("save message incoming")
-                }
-            }
-        } else {
+//        if (!thumb_id.isEmpty && media.count == 0) {
+//            Download().startHTTP(forKey: thumb_id) { (file, progress) in
+//                //print ("masuk download \(progress)")
+//                if(progress == 100 || progress == -100) {
+//                    Nexilis.saveMessage(message: message, withStatus: false)
+//                    //print("save message incoming")
+//                }
+//            }
+//        } else {
             Nexilis.saveMessage(message: message, withStatus: false)
-        }
+//        }
 //        DispatchQueue.main.async { [self] in
 //            if APIS.checkAppStateisBackground() {
 //                APIS.addNotificationNexilis(message)

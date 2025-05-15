@@ -325,8 +325,9 @@ public class QmeraCreateStreamingViewController: UITableViewController {
                 guard let json = String(data: try! JSONSerialization.data(withJSONObject: data, options: []), encoding: String.Encoding.utf8) else {
                     return
                 }
-                
-                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.createLS(title: "0~\(data["title"] ?? "")", type: data["type"] as! String, category: "3", tagline: data["tagline"] as! String, notifType: data["broadcast_type"] as! String, blogId: data["blog"] as! String, data: json)) {
+                let title = data["title"] as? String ?? ""
+                let tagline = data["tagline"] as? String ?? ""
+                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.createLS(title: "0~\(title.toStupidString())", type: data["type"] as! String, category: "3", tagline: tagline.toStupidString(), notifType: data["broadcast_type"] as! String, blogId: data["blog"] as! String, data: json)) {
                     if response.getBody(key: CoreMessage_TMessageKey.ERRCOD) != "00" {
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
