@@ -655,7 +655,7 @@ public final class Utils {
         if let value: String = SecureUserDefaults.shared.value(forKey: "secure_folder_encrypt_key") {
             return value
         }
-        return "easySoftIndonesia"
+        return ""
     }
     
     public static func setSecureFolderEncryptIv(value: String){
@@ -666,7 +666,18 @@ public final class Utils {
         if let value: String = SecureUserDefaults.shared.value(forKey: "secure_folder_encrypt_key_iv") {
             return value
         }
-        return "easySoftIndonesia"
+        return ""
+    }
+    
+    public static func setSecureFolderOffline(value: String){
+        SecureUserDefaults.shared.set(value, forKey: "secure_folder_offline")
+    }
+    
+    public static func getSecureFolderOffline() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "secure_folder_offline") {
+            return value
+        }
+        return "1"
     }
     
     public static func fetchDataWithCookiesAndUserAgent(from url: URL, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {

@@ -584,7 +584,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     func getDataProfile(f_pin: String, message_id: String) -> [String: String]{
         var data: [String: String] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || last_name, image_id from BUDDY where f_pin = '\(f_pin)'"), c.next() {
                 data["name"] = c.string(forColumnIndex: 0)!.trimmingCharacters(in: .whitespacesAndNewlines)
                 data["image_id"] = c.string(forColumnIndex: 1)!
@@ -1426,7 +1426,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         let data:[AnyHashable : Any] = notification.userInfo!
         if data["code"]  as? String ?? "" == "A010" && data["groupId"]  as? String ?? "" == self.dataGroup["group_id"]  as? String ?? "" {
             DispatchQueue.main.async {
-                Database().database?.inTransaction({ fmdb, rollback in
+                Database.shared.database?.inTransaction({ fmdb, rollback in
                     if let c = Database().getRecords(fmdb: fmdb, query: "select f_name, image_id from GROUPZ where group_id = '\(self.dataGroup["group_id"]!!)'"), c.next() {
                         self.dataGroup["f_name"] = c.string(forColumnIndex: 0)!.trimmingCharacters(in: .whitespacesAndNewlines)
                         self.dataGroup["image_id"] = c.string(forColumnIndex: 1)!
@@ -1973,7 +1973,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     private func getCounter() {
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             var l_pin = self.dataGroup["group_id"] as? String ?? ""
             if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
                 l_pin = self.dataTopic["chat_id"]  as? String ?? ""
@@ -4026,7 +4026,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     
     private func queryMessageReply(message_id: String) -> [String: Any?] {
         var dataQuery: [String: Any] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, message_text, attachment_flag, thumb_id, image_id, video_id, file_id FROM MESSAGE where message_id='\(message_id)'"), c.next() {
                 dataQuery["message_id"] = c.string(forColumnIndex: 0)
                 dataQuery["f_pin"] = c.string(forColumnIndex: 1)
@@ -4232,7 +4232,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             
             self.reffId = nil
             UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
-                self.constraintTopTextField.constant = self.constraintTopTextField.constant - 50
+                self.constraintTopTextField.constant = self.constraintTopTextField.constant - 50 - (self.offset()*3)
                 if self.contraintBottomMention.constant > 0 {
                     self.contraintBottomMention.constant = self.contraintBottomMention.constant - 50
                 }
@@ -4899,7 +4899,6 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
 //            }
 //            editedText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
 //        }
-        topMarginText.isActive = true
         if dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "27" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "26" {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
             let imageLS = UIImageView()
@@ -4950,7 +4949,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if let attachmentFlag = dataMessages[indexPath.row]["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
             if attachmentFlag == "27" || attachmentFlag == "26" { // live streaming
                 if let json = try! JSONSerialization.jsonObject(with: textChat.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                    Database().database?.inTransaction({ fmdb, rollback in
+                    Database.shared.database?.inTransaction({ fmdb, rollback in
                         let title = json["title"]  as? String ?? ""
                         let description = json["description"]  as? String ?? ""
                         let start = json["time"] as! Int64
@@ -5171,7 +5170,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
-        if (thumbChat != "" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
+        if (!thumbChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             if let listImages = groupImages[messageIdChat] {
                 timeMessage.isHidden = true
                 statusMessage.isHidden = true
@@ -5523,7 +5522,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
-        if (fileChat != "" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
+        if (!fileChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             topMarginText.constant = topMarginText.constant + 55
             
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -5826,10 +5825,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
-        if (reffChat != "") {
+        if (!reffChat.isEmpty) {
             let data = queryMessageReply(message_id: reffChat)
             if data.count != 0 {
-                topMarginText.constant = topMarginText.constant + 55
                 
                 let containerReply = UIView()
                 containerMessage.addSubview(containerReply)
@@ -5848,7 +5846,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     containerReply.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 }
                 containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                containerReply.heightAnchor.constraint(equalToConstant: 50).isActive = true
+                let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
+                minHeightConstraint.priority = .defaultHigh
+                minHeightConstraint.isActive = true
                 containerReply.backgroundColor = .black.withAlphaComponent(0.2)
                 containerReply.layer.cornerRadius = 5
                 containerReply.clipsToBounds = true
@@ -5897,10 +5897,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 }
                 
                 let contentReply = UILabel()
+                contentReply.numberOfLines = 2
                 containerReply.addSubview(contentReply)
                 contentReply.translatesAutoresizingMaskIntoConstraints = false
                 contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                 contentReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor, constant: -10).isActive = true
+                let topConstraintContent = contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor)
+                topConstraintContent.priority = .defaultHigh
+                topConstraintContent.isActive = true
                 contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
                 let message_text = data["message_text"] as? String ?? ""
                 let attachment_flag = data["attachment_flag"] as? String  ?? ""
@@ -5912,13 +5916,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
                     contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
                 } else if (attachment_flag == "1" || image_chat != "") {
-                    if (message_text == "") {
+                    if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                         contentReply.text = "📷 Photo".localized()
                     } else {
                         contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
                     }
                 } else if (attachment_flag == "2" || video_chat != "") {
-                    if (message_text == "") {
+                    if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                         contentReply.text = "📹 Video".localized()
                     } else {
                         contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
@@ -6041,6 +6045,19 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             titleForwarded.font = .systemFont(ofSize: 15)
             let textForwarded = "Forwarded".localized()
             titleForwarded.attributedText = " $\(textForwarded)$".richText()
+        }
+        
+        if messageText.isDescendant(of: containerMessage) {
+            var addTopMargin = true
+            if !reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM {
+                let data = queryMessageReply(message_id: reffChat)
+                if data.count != 0 {
+                    addTopMargin = false
+                }
+            }
+            if addTopMargin{
+                topMarginText.isActive = true
+            }
         }
         
         return cellMessage
@@ -6677,7 +6694,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             return
         }
         UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
-            self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50
+            self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50 + (self.offset()*3)
             if self.contraintBottomMention.constant > 0 {
                 self.contraintBottomMention.constant = self.contraintBottomMention.constant + self.heightTextFieldSend.constant
             }
@@ -6736,6 +6753,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         contentReply.translatesAutoresizingMaskIntoConstraints = false
         contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
         contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
+        contentReply.trailingAnchor.constraint(equalTo: containerPreviewReply.trailingAnchor, constant: -20).isActive = true
         contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
         let message_text = dataMessages[indexPath.row]["message_text"]  as? String ?? ""
         let attachment_flag = dataMessages[indexPath.row]["attachment_flag"]  as? String ?? ""
@@ -6746,13 +6764,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if (attachment_flag == "0" && thumb_chat == "") {
             contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
         } else if (attachment_flag == "1" || image_chat != "") {
-            if (message_text == "") {
+            if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                 contentReply.text = "📷 Photo".localized()
             } else {
                 contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
             }
         } else if (attachment_flag == "2" || video_chat != "") {
-            if (message_text == "") {
+            if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                 contentReply.text = "📹 Video".localized()
             } else {
                 contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")

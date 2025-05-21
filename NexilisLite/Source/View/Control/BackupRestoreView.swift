@@ -134,7 +134,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             }
             return "\(User.getMyPin()!)_\(option)_\(fileId).zip"
         }
-        return "\(User.getMyPin()!).zip"
+        return "\(User.getMyPin()!)_\(option)_\(Date().currentTimeMillis())"
     }
     
     public func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
@@ -251,14 +251,23 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         
                     }
                 } else {
-                    Download().startHTTP(forKey: getFileName(option: optionBackup, fileId: fileIdBackup)) { (name, progress) in
+                    Download().startHTTP(forKey: getFileName(option: optionBackup, fileId: fileIdBackup), isBackup: true) { (name, progress) in
                         DispatchQueue.main.async { [self] in
                             guard progress == 100 else {
-                                labelRestoring.text = "Downloading...".localized() + "  \(progress)%"
+                                if progress != -100 {
+                                    labelRestoring.text = "Downloading...".localized() + "  \(progress)%"
+                                } else {
+                                    labelRestoring.text = "Failed Restored Data".localized()
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                                        self.isRestoreStart = false
+                                        tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1), IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
+                                        tableView.reloadSections(IndexSet(integer: 3), with: .none)
+                                    })
+                                }
                                 return
                             }
                             labelRestoring.text = "Restoring...".localized()
-                            if FileEncryption.shared.isSecureExists(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
+                            if FileEncryption.shared.isSecureExists(filename: fileIdBackup) {
                                 do {
                                     if var data = try FileEncryption.shared.readSecure(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
                                         let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
@@ -875,7 +884,8 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
     //            let listFiles: [URL] = [file_message, file_uc_list, file_form_data, file_task_pic, file_task_detail]
                 do {
                     try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true, attributes: nil)
-                    let zipFiles = destinationURL.appendingPathComponent(getFileName(option: choosenOption, fileId: fileIdBackup, withoutZIP: true)).appendingPathExtension("zip")
+                    let nameZip = getFileName(option: choosenOption, fileId: "", withoutZIP: true)
+                    let zipFiles = destinationURL.appendingPathComponent(nameZip).appendingPathExtension("zip")
     //                try Zip.zipFiles(paths: listFiles, zipFilePath: zipFiles, password: nil, progress: {progress in
     //                    self.labelPreparing.text = "Preparing...".localized() + " \(progress * 100)%"
     //                })
@@ -911,7 +921,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                                         let attrib = try FileManager.default.attributesOfItem(atPath: path)
                                         let fileSize = attrib[.size] as! Int64
                                         DispatchQueue.global().async { [self] in
-                                            _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupUploaded(option: choosenOption, fileid: fileIdBackup, filesize: String(fileSize), recordSize: String(recordSize)))
+                                            _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupUploaded(option: choosenOption, fileid: nameZip.components(separatedBy: "_")[2], filesize: String(fileSize), recordSize: String(recordSize)))
                                         }
                                         let date = Date()
                                         let calendar = Calendar.current

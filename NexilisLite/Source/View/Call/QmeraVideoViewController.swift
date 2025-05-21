@@ -433,7 +433,7 @@ class QmeraVideoViewController: UIViewController {
             myImage.contentMode = .scaleAspectFill
         }
 //        let idMe = User.getMyPin() as String?
-//        Database().database?.inTransaction({ fmdb, rollback in
+//        Database.shared.database?.inTransaction({ fmdb, rollback in
 //            if let c = Database().getRecords(fmdb: fmdb, query: "select image_id from BUDDY where f_pin = '\(idMe!)'"), c.next() {
 //                let image = c.string(forColumnIndex: 0)!
 //                if image.isEmpty {
@@ -1150,7 +1150,7 @@ class QmeraVideoViewController: UIViewController {
                 self.buttonSpeaker.tintColor = .mainColor
                 self.buttonSpeaker.setImage(UIImage(systemName: "speaker.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
             }
-            self.timerSpeaker = Timer.scheduledTimer(withTimeInterval: 1, repeats: false, block: {_ in
+            self.timerSpeaker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
                 if QmeraVideoViewController.bSpeakerPhone != self.tempSpeaker {
                     QmeraVideoViewController.bSpeakerPhone = !QmeraVideoViewController.bSpeakerPhone
                     self.tempSpeaker = QmeraVideoViewController.bSpeakerPhone

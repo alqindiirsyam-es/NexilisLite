@@ -23,7 +23,7 @@ Pod::Spec.new do |spec|
   spec.source_files = 'NexilisLite/Source/**/*'
   spec.resource_bundles = { 'NexilisLite' => ['NexilisLite/Resource/**/*']}
   spec.swift_version = '5.5.1'
-  spec.dependency 'FMDB', '~> 2.7.12'
+  spec.dependency 'FMDB/SQLCipher', '~> 2.7.12'
   spec.dependency 'nuSDKService', '4.0.22'
   spec.dependency 'NotificationBannerSwift'
   spec.dependency 'Alamofire', '~> 5.10.2'

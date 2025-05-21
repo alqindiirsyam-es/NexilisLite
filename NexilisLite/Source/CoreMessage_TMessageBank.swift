@@ -2530,6 +2530,20 @@ public class CoreMessage_TMessageBank {
         tmessage.mCode = CoreMessage_TMessageCode.FEATURE_ACCESS_ALL
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
         tmessage.mPIN = User.getMyPin() ?? ""
+        tmessage.mBodies[CoreMessage_TMessageKey.API] = Nexilis.sAPIKey
+        tmessage.mBodies[CoreMessage_TMessageKey.TYPE] = "1"
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
+        return tmessage
+    }
+    
+    public static func getFeatureAccessWithKey(key: [String]) -> TMessage {
+        let tmessage = TMessage()
+        tmessage.mCode = CoreMessage_TMessageCode.FEATURE_ACCESS_KEY
+        tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tmessage.mPIN = User.getMyPin() ?? ""
+        tmessage.mBodies[CoreMessage_TMessageKey.API] = Nexilis.sAPIKey
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
+        tmessage.mBodies[CoreMessage_TMessageKey.KEY] = "\(key)"
         return tmessage
     }
     

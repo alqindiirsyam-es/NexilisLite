@@ -782,7 +782,7 @@ class QmeraAudioViewController: UIViewController {
         timerSpeaker?.invalidate()
         tempSpeaker = !tempSpeaker
         speaker.isSelected = tempSpeaker
-        timerSpeaker = Timer.scheduledTimer(withTimeInterval: 1, repeats: false, block: {_ in
+        timerSpeaker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
             if QmeraAudioViewController.bSpeakerPhone != self.tempSpeaker {
                 QmeraAudioViewController.bSpeakerPhone = !QmeraAudioViewController.bSpeakerPhone
                 self.tempSpeaker = QmeraAudioViewController.bSpeakerPhone

@@ -359,7 +359,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         if let attachmentFlag = dataMessages[indexPath.row]["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
             if attachmentFlag == "27" || attachmentFlag == "26", let data = textChat { // live streaming
                 if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                    Database().database?.inTransaction({ fmdb, rollback in
+                    Database.shared.database?.inTransaction({ fmdb, rollback in
                         let title = json["title"] as! String
                         let description = json["description"] as! String
                         let start = json["time"] as! Int64
@@ -452,7 +452,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         let imageThumb = UIImageView()
         let containerViewFile = UIView()
         
-        if (thumbChat != "") {
+        if (!thumbChat.isEmpty) {
             topMarginText.constant = topMarginText.constant + 205
             
             containerMessage.addSubview(imageThumb)
@@ -544,7 +544,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             objectTap.indexPath = indexPath
         }
         
-        if (fileChat != "") {
+        if (!fileChat.isEmpty) {
             topMarginText.constant = topMarginText.constant + 55
             
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -1293,7 +1293,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     
     func getDataProfile(f_pin: String) -> [String: String]{
         var data: [String: String] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || last_name, image_id from BUDDY where f_pin = '\(f_pin)'"), c.next() {
                 data["name"] = c.string(forColumnIndex: 0)!.trimmingCharacters(in: .whitespacesAndNewlines)
                 data["image_id"] = c.string(forColumnIndex: 1)!
@@ -1313,7 +1313,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     
     private func getDataProfileFromMessageId(message_id: String) -> [String: String]{
         var data: [String: String] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "select f_display_name from MESSAGE where message_id = '\(message_id)'"), c.next() {
                 data["name"] = c.string(forColumnIndex: 0)!
                 c.close()

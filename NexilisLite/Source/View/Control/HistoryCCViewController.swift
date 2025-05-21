@@ -165,7 +165,7 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
     
     func getDataProfile(f_pin: String) -> [String: String]{
         var data: [String: String] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || last_name, image_id from BUDDY where f_pin = '\(f_pin)'"), c.next() {
                 data["name"] = c.string(forColumnIndex: 0)!.trimmingCharacters(in: .whitespacesAndNewlines)
                 data["image"] = c.string(forColumnIndex: 1)!

@@ -3479,7 +3479,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func getCounter() {
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "SELECT counter FROM MESSAGE_SUMMARY where l_pin='\(dataPerson["f_pin"]!!)'"), c.next() {
                 counter = Int(c.int(forColumnIndex: 0))
                 c.close()
@@ -5144,7 +5144,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
     
     private func getDataProfile(message_id: String) -> [String: String]{
         var data: [String: String] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "select f_display_name from MESSAGE where message_id = '\(message_id)'"), c.next() {
                 data["name"] = c.string(forColumnIndex: 0)!
                 c.close()
@@ -5163,7 +5163,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
     
     private func queryMessageReply(message_id: String) -> [String: Any?] {
         var dataQuery: [String: Any] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, message_text, attachment_flag, thumb_id, image_id, video_id, file_id FROM MESSAGE where message_id='\(message_id)'"), c.next() {
                 dataQuery["message_id"] = c.string(forColumnIndex: 0) ?? ""
                 dataQuery["f_pin"] = c.string(forColumnIndex: 1) ?? ""
@@ -5390,7 +5390,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             
             self.reffId = nil
             UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
-                self.constraintTopTextField.constant = self.constraintTopTextField.constant - 50
+                self.constraintTopTextField.constant = self.constraintTopTextField.constant - 50 - (self.offset()*3)
             }, completion: nil)
         }
     }
@@ -5588,7 +5588,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 conferenceNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
                 conferenceNav.navigationBar.isTranslucent = false
                 navigationController?.present(conferenceNav, animated: true, completion: nil)
-            } else if  message["message_scope_id"] as? String == "18" {
+            } else if  message["message_scope_id"] as? String == MessageScope.FORM {
                 let formView = FormEditor()
                 let messageText =  message["message_text"]  as? String ?? ""
                 formView.jsonData = messageText
@@ -6173,7 +6173,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         var textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
         var messageRequestFriend: String!
         if dataMessages[indexPath.row]["attachment_flag"] as? String == "27" || dataMessages[indexPath.row]["attachment_flag"] as? String == "26" ||
-            dataMessages[indexPath.row]["attachment_flag"] as? String == "25" || dataMessages[indexPath.row]["message_scope_id"] as? String == "18" {
+            dataMessages[indexPath.row]["attachment_flag"] as? String == "25" || dataMessages[indexPath.row]["message_scope_id"] as? String == MessageScope.FORM {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 85).isActive = true
             let imageLS = UIImageView()
             containerMessage.addSubview(imageLS)
@@ -6190,7 +6190,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageLS.image = UIImage(named: "pb_live_tv", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             } else if dataMessages[indexPath.row]["attachment_flag"] as! String == "25" {
                 imageLS.image = UIImage(named: "pb_vroom", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-            } else if dataMessages[indexPath.row]["message_scope_id"] as? String == "18" {
+            } else if dataMessages[indexPath.row]["message_scope_id"] as? String == MessageScope.FORM {
                 imageLS.image = UIImage(systemName: "doc.richtext.fill")
                 imageLS.tintColor = .mainColor
             }
@@ -6349,7 +6349,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 }
                 imageSticker.image = imageStickerBundle //resourcesMediaBundle
                 imageSticker.contentMode = .scaleAspectFit
-            } else if dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" == "18" {
+            } else if dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" == MessageScope.FORM {
                 let data = textChat
                 if let jsonForm = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
                     let form_title = jsonForm["form_title"]  as? String ?? ""
@@ -6968,7 +6968,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
         }
         
-        if (fileChat != "" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
+        if (!fileChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             topMarginText.constant = topMarginText.constant + 55
             
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -7262,11 +7262,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
         }
         
-        if (reffChat != "" && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != "18") {
+        if (!reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM) {
             let data = queryMessageReply(message_id: reffChat)
             if data.count != 0 {
-                topMarginText.constant = topMarginText.constant + 55
-                
                 let containerReply = UIView()
                 containerMessage.addSubview(containerReply)
                 containerReply.translatesAutoresizingMaskIntoConstraints = false
@@ -7284,7 +7282,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     containerReply.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 }
                 containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                containerReply.heightAnchor.constraint(equalToConstant: 50).isActive = true
+                let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
+                minHeightConstraint.priority = .defaultHigh
+                minHeightConstraint.isActive = true
                 containerReply.backgroundColor = .black.withAlphaComponent(0.2)
                 containerReply.layer.cornerRadius = 5
                 containerReply.clipsToBounds = true
@@ -7333,10 +7333,14 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 }
                 
                 let contentReply = UILabel()
+                contentReply.numberOfLines = 2
                 containerReply.addSubview(contentReply)
                 contentReply.translatesAutoresizingMaskIntoConstraints = false
                 contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                 contentReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor, constant: -10).isActive = true
+                let topConstraintContent = contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor)
+                topConstraintContent.priority = .defaultHigh
+                topConstraintContent.isActive = true
                 contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
                 let message_text = data["message_text"]  as? String ?? ""
                 let attachment_flag = data["attachment_flag"]  as? String ?? ""
@@ -7348,13 +7352,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
                     contentReply.attributedText = message_text.richText()
                 } else if (attachment_flag == "1" || image_chat != "") {
-                    if (message_text == "") {
+                    if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                         contentReply.text = "📷 Photo".localized()
                     } else {
                         contentReply.attributedText = message_text.richText()
                     }
                 } else if (attachment_flag == "2" || video_chat != "") {
-                    if (message_text == "") {
+                    if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                         contentReply.text = "📹 Video".localized()
                     } else {
                         contentReply.attributedText = message_text.richText()
@@ -7473,7 +7477,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             titleForwarded.attributedText = " $\(textForwarded)$".richText()
         }
         if messageText.isDescendant(of: containerMessage) {
-            topMarginText.isActive = true
+            var addTopMargin = true
+            if !reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM {
+                let data = queryMessageReply(message_id: reffChat)
+                if data.count != 0 {
+                    addTopMargin = false
+                }
+            }
+            if addTopMargin{
+                topMarginText.isActive = true
+            }
         }
 //        let panGestureRecognizer = UIPanGestureRecognizer(target: self, action: #selector(panGestureCellAction))
 //        panGestureRecognizer.delegate = self
@@ -8176,7 +8189,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             return
         }
         UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
-            self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50
+            self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50 + (self.offset()*3)
         }, completion: nil)
         if (self.currentIndexpath != nil) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
@@ -8231,6 +8244,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         self.containerPreviewReply.addSubview(contentReply)
         contentReply.translatesAutoresizingMaskIntoConstraints = false
         contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
+        contentReply.trailingAnchor.constraint(equalTo: containerPreviewReply.trailingAnchor, constant: -20).isActive = true
         contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
         contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
         let message_text = dataMessages[indexPath.row]["message_text"]  as? String ?? ""
@@ -8242,13 +8256,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if (attachment_flag == "0" && thumb_chat == "") {
             contentReply.attributedText = message_text.richText()
         } else if (attachment_flag == "1" || image_chat != "") {
-            if (message_text == "") {
+            if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                 contentReply.text = "📷 Photo".localized()
             } else {
                 contentReply.attributedText = message_text.richText()
             }
         } else if (attachment_flag == "2" || video_chat != "") {
-            if (message_text == "") {
+            if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                 contentReply.text = "📹 Video".localized()
             } else {
                 contentReply.attributedText = message_text.richText()

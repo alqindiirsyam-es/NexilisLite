@@ -16,9 +16,10 @@ import QuickLook
 import NotificationBannerSwift
 import SDWebImage
 import CryptoKit
+import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.35"
+    public static var cpaasVersion = "5.0.39"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -166,12 +167,41 @@ public class Nexilis: NSObject {
         imageCache.countLimit = 100
         imageCache.totalCostLimit = 1024 * 1024 * 200
         
-        UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
-        
         DispatchQueue.global().async {
             do {
+                func forceShowFB() {
+                    DispatchQueue.main.async {
+                        var viewController = UIApplication.shared.windows.first?.rootViewController
+                        var notNull = false
+                        while !notNull {
+                            viewController = UIApplication.shared.windows.first?.rootViewController
+                            if viewController != nil && Utils.getFinishInitPrefsr() {
+                                notNull = true
+                            }
+                        }
+                        if showButton {
+                            addFB(viewController: viewController!, fromMAB: fromMAB)
+                        }
+                        if let rootViewController = viewController {
+                            let isDarkMode = rootViewController.traitCollection.userInterfaceStyle == .dark
+                            if isDarkMode {
+                                UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
+                                let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+                            } else {
+                                UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
+                                let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+                            }
+                        }
+                    }
+                }
                 if Utils.getFinishInitPrefsr() {
                     Utils.setFinishInitPrefs(value: false)
+                }
+                if !Utils.getPrefTheme().isEmpty {
+                    forceShowFB()
+                    Utils.setFinishInitPrefs(value: true)
                 }
                 let address = Nexilis.getAddressNew(apiKey:apiKey)
                 if address.isEmpty {
@@ -212,7 +242,6 @@ public class Nexilis: NSObject {
                 
                 if let me = User.getMyPin() {
                     if Utils.getSetProfile() {
-                        _ = Database.shared.openDatabase()
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                             do {
                                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT * FROM BUDDY where f_pin = '\(me)' ") {
@@ -245,11 +274,6 @@ public class Nexilis: NSObject {
                         })
                     } else if isShowForceSignIn && !Utils.getForceAnonymous() && !Utils.getSetProfile() {
                         DispatchQueue.main.async {
-                            do {
-                                try _ = MasterKeyUtil.shared.getMasterKey()
-                            } catch {
-                                
-                            }
                             showForceSignIn()
                         }
                     }
@@ -257,31 +281,7 @@ public class Nexilis: NSObject {
                     getPullWorkingArea()
                     getPullGroupNoMember()
                     delegate.onSuccess(userId: me)
-                    DispatchQueue.main.async {
-                        var viewController = UIApplication.shared.windows.first?.rootViewController
-                        var notNull = false
-                        while !notNull {
-                            viewController = UIApplication.shared.windows.first?.rootViewController
-                            if viewController != nil && Utils.getFinishInitPrefsr() {
-                                notNull = true
-                            }
-                        }
-                        if showButton {
-                            addFB(viewController: viewController!, fromMAB: fromMAB)
-                        }
-                        if let rootViewController = viewController {
-                            let isDarkMode = rootViewController.traitCollection.userInterfaceStyle == .dark
-                            if isDarkMode {
-                                UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
-                                let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
-                            } else {
-                                UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
-                                let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
-                            }
-                        }
-                    }
+                    forceShowFB()
                     if (Utils.getSetProfile() && !Utils.getFinishInitPrefsr()) || (!Utils.getForceAnonymous() && !Utils.getFinishInitPrefsr()) {
                         Utils.setFinishInitPrefs(value: true)
                     }
@@ -499,17 +499,36 @@ public class Nexilis: NSObject {
         }
     }
     
-    private static func getFeatureAccess() {
+    static func getFeatureAccessWithKey(key: [String]) {
         DispatchQueue.global().async {
-            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "get_feature_access_new")!) { data, response, error in
-                let response = response as? HTTPURLResponse
-                if response?.statusCode != 200 || error != nil {
-                    return
-                }
-                if let data = data, let responseString = String(data: data, encoding: .utf8) {
-                    if let jsonArray = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-                        do {
+            if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getFeatureAccessWithKey(key: key), timeout: 5000) {
+                print("RESPOND: \(response.toLogString())")
+            } else {
+                print("ERROR")
+            }
+        }
+    }
+    
+    static func getFeatureAccess() {
+        DispatchQueue.global().async {
+//            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "get_feature_access_new")!) { data, response, error in
+//                let response = response as? HTTPURLResponse
+//                if response?.statusCode != 200 || error != nil {
+//                    return
+//                }
+//                if let data = data, let responseString = String(data: data, encoding: .utf8) {
+//                    if let jsonArray = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+//                    }
+//                }
+//            }
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getFeatureAccessAll(), timeout: 5000), response.isOk() {
+                let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
+                do {
+                    if let data = data.data(using: .utf8) {
+                        if let jsonArray = try JSONSerialization.jsonObject(with: data, options: []) as? [AnyObject] {
                             var jsonFA: [String: Any] = [:]
+                            var keyTemp = ""
+                            var keyIvTemp = ""
                             for jsonData in jsonArray {
                                 var tmp = jsonData as! [String: Any]
                                 tmp.removeValue(forKey: "action")
@@ -537,15 +556,36 @@ public class Nexilis: NSObject {
                                     Utils.setAuthenticationDuration(value: ad)
                                 }
                                 if jsonData["secure_folder_encrypt_key"]! != nil {
-                                    if let dataKey = Data(base64Encoded: jsonData["secure_folder_encrypt_key"] as! String, options: .ignoreUnknownCharacters) {
+                                    keyTemp = jsonData["secure_folder_encrypt_key"] as! String
+                                    if let dataKey = Data(base64Encoded: keyTemp, options: .ignoreUnknownCharacters) {
                                         FileEncryption.shared.aesKey = SymmetricKey(data: dataKey)
-                                        Utils.setSecureFolderEncrypt(value: jsonData["secure_folder_encrypt_key"] as! String)
+                                        if Utils.getSecureFolderOffline() == "0" {
+                                            Utils.setSecureFolderEncrypt(value: "")
+                                        } else {
+                                            Utils.setSecureFolderEncrypt(value: keyTemp)
+                                        }
                                     }
                                 }
                                 if jsonData["secure_folder_encrypt_key_iv"]! != nil {
-                                    if let dataKey = Data(base64Encoded: jsonData["secure_folder_encrypt_key_iv"] as! String, options: .ignoreUnknownCharacters) {
+                                    keyIvTemp = jsonData["secure_folder_encrypt_key_iv"] as! String
+                                    if let dataKey = Data(base64Encoded: keyIvTemp, options: .ignoreUnknownCharacters) {
                                         FileEncryption.shared.aesIV = dataKey
-                                        Utils.setSecureFolderEncryptIv(value: jsonData["secure_folder_encrypt_key_iv"] as! String)
+                                        if Utils.getSecureFolderOffline() == "0" {
+                                            Utils.setSecureFolderEncryptIv(value: "")
+                                        } else {
+                                            Utils.setSecureFolderEncryptIv(value: keyIvTemp)
+                                        }
+                                    }
+                                }
+                                if jsonData["secure_folder_offline"]! != nil {
+                                    let off = jsonData["secure_folder_offline"] as! String
+                                    Utils.setSecureFolderOffline(value: off)
+                                    if off == "0" {
+                                        Utils.setSecureFolderEncrypt(value: "")
+                                        Utils.setSecureFolderEncryptIv(value: "")
+                                    } else {
+                                        Utils.setSecureFolderEncrypt(value: keyTemp)
+                                        Utils.setSecureFolderEncryptIv(value: keyIvTemp)
                                     }
                                 }
                                 if jsonData["chatbot_greetings"]! != nil {
@@ -555,13 +595,22 @@ public class Nexilis: NSObject {
                                     }
                                 }
                             }
+                            keyTemp = ""
+                            keyIvTemp = ""
                             if let convertJsonFA = try? JSONSerialization.data(withJSONObject: jsonFA, options: .prettyPrinted) {
                                 if let jsonFAString = String(data: convertJsonFA, encoding: .utf8) {
                                     Utils.setFeatureAccess(value: jsonFAString)
                                 }
                             }
-                        } catch {
                         }
+                    }
+                } catch {
+                    print("gagal parsing data:")
+                }
+            } else {
+                if Utils.getSecureFolderOffline() == "0" || (Utils.getSecureFolderOffline() == "1" && !Utils.getSetProfile()) {
+                    DispatchQueue.main.async {
+                        APIS.showRestartApp()
                     }
                 }
             }
@@ -913,6 +962,15 @@ public class Nexilis: NSObject {
         return result
     }
     
+    public static func reloadCookies(webView: WKWebView) {
+        if !Utils.getCookiesMobileForStorage().isEmpty {
+            let cookies = convertJSONStringToCookies(jsonString: Utils.getCookiesMobileForStorage())
+            for cookie in cookies {
+                webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+            }
+        }
+    }
+    
     private static func convertCookiesToJSONString(cookies: [HTTPCookie]) -> String? {
         let cookiesArray = cookies.map { cookie -> [String: Any] in
             return [
@@ -1024,7 +1082,7 @@ public class Nexilis: NSObject {
     
     public static func write(message: TMessage, timeout: Int = 15 * 1000) -> String? {
         do {
-            if API.nGetCLXConnState() == 0 {
+            if !API.bInetConnAvailable() {
                 return nil
             }
             //print(">> SENDING MESSAGE >> ", message.toLogString())

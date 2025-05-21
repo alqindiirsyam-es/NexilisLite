@@ -117,8 +117,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
                                 Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
-                                Item(icon: UIImage(systemName: "photo"),
-                                     title: "Chat Wallpaper".localized()),
+//                                Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                                Item(icon: UIImage(systemName: "person.crop.rectangle"), title: "Change Admin / Internal Password".localized()),
                                 Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
@@ -130,8 +129,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
                                 Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
-                                Item(icon: UIImage(systemName: "photo"),
-                                     title: "Chat Wallpaper".localized()),
+//                                Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
                                 Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
                             ]
@@ -140,8 +138,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                     Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
                                 Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
-                                Item(icon: UIImage(systemName: "photo"),
-                                     title: "Chat Wallpaper".localized()),
+//                                Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
                                 Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                                Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                             ]
@@ -226,9 +223,8 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
                                 Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
                             Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
-                            Item(icon: UIImage(systemName: "photo"),
-                                 title: "Chat Wallpaper".localized()),
-                            Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
+//                            Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
+//                            Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                            Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                         ]
                         Item.menus["Personal"]?.append(Item(icon: UIImage(systemName: "arrow.up.and.person.rectangle.portrait"), title: "Sign-Up/Sign-In".localized()))

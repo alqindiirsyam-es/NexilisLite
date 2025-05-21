@@ -24,6 +24,7 @@ public class Download {
     var DOWNLOAD_BUFFER = [Data?]()
     var DOWNLOAD_SESSION = [Session]()
     var DOWNLOAD_URL = Utils.getURLBase() + "filepalio/image/"
+    var DOWNLOAD_URL_BACKUP = Utils.getURLBase() + "filepalio/backuprestore/"
     
     public func start(forKey: String, delegate: DownloadDelegate){
         self.delegate = delegate
@@ -49,8 +50,8 @@ public class Download {
         startHTTP(filename: forKey, baseURL: downloadUrl, completion: completion)
     }
     
-    public func startHTTP(forKey: String, completion: @escaping (String, Double)->()) {
-        startHTTP(filename: forKey, baseURL: DOWNLOAD_URL, completion: completion)
+    public func startHTTP(forKey: String, isBackup: Bool = false, completion: @escaping (String, Double)->()) {
+        startHTTP(filename: forKey, baseURL: isBackup ? DOWNLOAD_URL_BACKUP : DOWNLOAD_URL, completion: completion)
     }
     
     public func startHTTP(filename: String, baseURL: String, completion: @escaping (String, Double)->()) {
@@ -87,7 +88,7 @@ public class Download {
                 }
                 .responseData { result in
                     if let response = result.response, response.statusCode == 200, let successResponse = result.value {
-                        print("Response success")
+//                        print("Response success")
                         do {
                             let dResponse = FileEncryption.shared.decryptFileFromServer(data: successResponse)
                             if dResponse != nil {

@@ -15,12 +15,22 @@ public class Database {
     
     public init() {
         let databasePath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] + "/encrypted_db_es.db"
-        if FileManager.default.fileExists(atPath: databasePath) {
-            database = setupDatabaseQueue(withPath: databasePath)
+        if FileManager.default.fileExists(atPath: databasePath) && database == nil {
+            _ = FileEncryption.shared.encryptFileToServer(data: Data())
+            DispatchQueue.global().async {
+                while FileEncryption.shared.aesKey == nil {
+                    Thread.sleep(forTimeInterval: 1)
+                }
+                self.setDBInstance()
+            }
         }
     }
     
-    public static let shared = Database()
+    public static func recreateInstance() {
+        Database.shared = Database()
+    }
+    
+    public static var shared = Database()
     
     public var database: FMDatabaseQueue!
     
@@ -44,42 +54,57 @@ public class Database {
         
         return dbQueue
     }
+    
+    func setDBInstance() {
+        let databasePath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] + "/encrypted_db_es.db"
+        database = setupDatabaseQueue(withPath: databasePath)
+        database?.inDatabase({(fmdb) in
+            let p = Utils.getPassEncDB()
+            if p.isEmpty {
+                let pragmas = [
+                    "PRAGMA cipher_page_size = 1024",
+                    "PRAGMA kdf_iter = 64000",
+                    "PRAGMA cipher_hmac_algorithm = HMAC_SHA512",
+                    "PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA512",
+                    "PRAGMA cipher = 'aes-256-gcm'"
+                ]
+                
+                for pragma in pragmas {
+                    if !fmdb.executeStatements(pragma) {
+                        print("Failed to set pragma: \(pragma)")
+                    }
+                }
+                let key = FileEncryption.shared.aesKey?.withUnsafeBytes { Data($0) }
+                let keyIv = FileEncryption.shared.aesIV
+                var keyString = ""
+                if key != nil {
+                    keyString = key!.base64EncodedString()
+                }
+                if keyIv != nil {
+                    keyString += keyIv!.base64EncodedString()
+                }
+                fmdb.setKey(keyString)
+            }
+            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+        })
+    }
 
     
     func openDatabase() -> Int {
-        if let key = Utils.getPasswordDB() {
-            let databasePath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] + "/encrypted_db_es.db"
-            database = setupDatabaseQueue(withPath: databasePath)
-            
-            database?.inDatabase({(fmdb) in
-                fmdb.setKey(key)
-//                print("Open Done")
-            })
-            database?.inTransaction({(fmdb, rollback) in
-                do {
-                    try createDatabase(fmdb: fmdb)
+        setDBInstance()
+        var result = 0
+        database?.inTransaction({(fmdb, rollback) in
+            do {
+                try createDatabase(fmdb: fmdb)
+                result = 1
 //                    print("Create Done")
-                } catch {
-                }
-            })
-            return 1
-        }
-        return 0
+            } catch {
+            }
+        })
+        return result
     }
     
     func createDatabase(fmdb:FMDatabase) throws -> Void{
-        let pragmas = [
-            "PRAGMA cipher_page_size = 1024;",
-            "PRAGMA kdf_iter = 64000;",
-            "PRAGMA cipher_hmac_algorithm = 'HMAC_SHA512';",
-            "PRAGMA cipher_kdf_algorithm = 'PBKDF2_HMAC_SHA512';",
-            "PRAGMA cipher = 'aes-256-gcm';"
-        ]
-        
-        for pragma in pragmas {
-            fmdb.executeUpdate(pragma, withArgumentsIn: [])
-        }
-        
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'BUDDY' (" +
                                 "'_id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL," +
                                 "'f_pin' text NOT NULL UNIQUE," +

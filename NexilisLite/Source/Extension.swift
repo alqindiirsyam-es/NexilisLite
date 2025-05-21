@@ -1281,8 +1281,6 @@ public class ImageCache {
     }
     
     func loadCacheFromDisk(directory: URL) {
-        let fileManager = FileManager.default
-
         // Load mapping
         let mappingFilePath = directory.appendingPathComponent("keyMapping.json")
         guard let jsonData = try? Data(contentsOf: mappingFilePath),
@@ -1295,32 +1293,24 @@ public class ImageCache {
         }
 
         // Load images
-        do {
-            let fileURLs = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            for fileURL in fileURLs {
-                if fileURL.lastPathComponent == "keyMapping.json" { continue } // Skip mapping file
-
-                let sanitizedKey = fileURL.deletingPathExtension().lastPathComponent
-                let imageName = "\(sanitizedKey).png"
-                if FileEncryption.shared.isSecureExists(filename: imageName) {
-                    do {
-                        if var data = try FileEncryption.shared.readSecure(filename: imageName) {
-                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                            if dataDecrypt != nil {
-                                data = dataDecrypt!
-                            }
-                            if let image = UIImage(data: data) {
-                                cache.setObject(image, forKey: sanitizedKey as NSString)
-                            }
+        for cacheKey in cacheKeyMap {
+            let imageName = "\(cacheKey.value).png"
+            if FileEncryption.shared.isSecureExists(filename: imageName) {
+                do {
+                    if var data = try FileEncryption.shared.readSecure(filename: imageName) {
+                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                        if dataDecrypt != nil {
+                            data = dataDecrypt!
+                        }
+                        if let image = UIImage(data: data) {
+                            cache.setObject(image, forKey: cacheKey.value as NSString)
                         }
                     }
-                    catch {
-                        print("Error reading secure file")
-                    }
+                }
+                catch {
+                    print("Error reading secure file")
                 }
             }
-        } catch {
-//            print("Failed to load cache from disk: \(error)")
         }
     }
     

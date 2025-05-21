@@ -19,6 +19,7 @@ public class Network {
     private var progress = 0.0
     private var CHUNK_SIZE = 200 * 1024
     private var UPLOAD_URL = Utils.getURLBase() + "uploader"
+    private var UPLOAD_URL_BACKUP = Utils.getURLBase() + "uploader_bkp"
     
     public init() {}
     
@@ -190,7 +191,7 @@ public class Network {
     }
     
     public func uploadHTTP(fileUrl: URL, completion: @escaping (Bool, Double)->()) {
-        _ = uploadHTTP(UPLOAD_URL, files: [fileUrl], completion: completion)
+        _ = uploadHTTP(UPLOAD_URL_BACKUP, files: [fileUrl], completion: completion)
     }
     
     public func uploadHTTP(_ endUrl: String, files: [URL] = [], filename: [String] = [], parameters: [String : Any] = [:], completion: @escaping (Bool, Double)->()) -> UploadRequest {
@@ -243,9 +244,17 @@ public class Network {
             }
             
             for i in 0..<filesIn.count {
-                let mime = self.mimeType(for: filesIn[i])
-                multipartFormData.append(filesIn[i], withName: "file\(i+1)", fileName: filesIn[i].lastPathComponent, mimeType: mime)
-                Nexilis.putUploadFile(forKey: filesIn[i].lastPathComponent, uploader: self)
+                let urlFile = filesIn[i]
+                do {
+                    var dataToUpload = try Data(contentsOf: urlFile)
+                    if Nexilis.checkingAccess(key: "secure_folder_encrypt"){
+                        dataToUpload = FileEncryption.shared.encryptFileToServer(data: dataToUpload) ?? Data()
+                    }
+                    let mime = self.mimeType(for: filesIn[i])
+                    multipartFormData.append(dataToUpload, withName: "file\(i+1)", fileName: filesIn[i].lastPathComponent, mimeType: mime)
+                    Nexilis.putUploadFile(forKey: filesIn[i].lastPathComponent, uploader: self)
+                } catch {
+                }
                 //print(multipartFormData)
             }
             

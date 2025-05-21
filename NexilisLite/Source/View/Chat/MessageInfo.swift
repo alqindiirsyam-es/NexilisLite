@@ -63,7 +63,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     private func getData() {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, status, time_delivered, time_read, time_ack, longitude, latitude FROM MESSAGE_STATUS where message_id='\(data["message_id"]!!)' ORDER BY time_delivered DESC, time_read DESC, time_ack DESC") {
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, status, time_delivered, time_read, time_ack, longitude, latitude FROM MESSAGE_STATUS where message_id='\(data["message_id"]!!)' ORDER BY time_ack DESC, time_read DESC, time_delivered DESC") {
                     var listStatus: [Int] = []
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
@@ -685,7 +685,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 if attachmentFlag == "27" || attachmentFlag == "26" { // live streaming
                     let data = textChat
                     if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                        Database().database?.inTransaction({ fmdb, rollback in
+                        Database.shared.database?.inTransaction({ fmdb, rollback in
                             let title = json["title"] as? String ?? ""
                             let description = json["description"] as? String ?? ""
                             let start = json["time"] as? Int64 ?? 0
@@ -707,7 +707,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 else if attachmentFlag == "25" {
                     let data = textChat
                     if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                        Database().database?.inTransaction({ fmdb, rollback in
+                        Database.shared.database?.inTransaction({ fmdb, rollback in
                             var stringLS = ""
                             let title = json["title"] as? String ?? ""
                             let blog = json["blog"] as? String ?? ""
@@ -1219,7 +1219,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     
     private func queryMessageReply(message_id: String) -> [String: Any?] {
         var dataQuery: [String: Any] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, message_text, attachment_flag, thumb_id, image_id, video_id, file_id FROM MESSAGE where message_id='\(message_id)'"), c.next() {
                 dataQuery["message_id"] = c.string(forColumnIndex: 0)
                 dataQuery["f_pin"] = c.string(forColumnIndex: 1)
@@ -1237,7 +1237,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     
     private func getDataProfile(f_pin: String, message_id: String) -> [String: String]{
         var data: [String: String] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || last_name, image_id from BUDDY where f_pin = '\(f_pin)'"), c.next() {
                 data["name"] = c.string(forColumnIndex: 0)!.trimmingCharacters(in: .whitespacesAndNewlines)
                 data["image_id"] = c.string(forColumnIndex: 1)!

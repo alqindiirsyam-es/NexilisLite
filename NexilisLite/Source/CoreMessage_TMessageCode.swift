@@ -778,6 +778,7 @@ public class CoreMessage_TMessageCode {
     public static let CANCEL_CALL_NOTIFICATION = "CCN";
     
     public static let FEATURE_ACCESS_ALL = "FA02";
+    public static let FEATURE_ACCESS_KEY = "FA03";
     
     public static let PAYMENT_NOTIFICATION = "PAY";
     

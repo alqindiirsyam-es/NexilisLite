@@ -1592,11 +1592,16 @@ public class APIS: NSObject {
 //        }
         notifTimer.invalidate()
         stopNotif = true
+        if Utils.getSecureFolderOffline() == "0" {
+            Database.shared.database = nil
+            FileEncryption.shared.aesKey = nil
+            FileEncryption.shared.aesIV = nil
+        }
     }
     
     public static var notifTimer = Timer()
     public static var stopNotif = false
-//    public static var afterEnterForeground = false
+    public static var afterEnterBackground = false
     public static func enterForeground() {
         APIS.checkNotificationPermission(completion: { isAllowed in
             if !isAllowed {
@@ -1637,7 +1642,18 @@ public class APIS: NSObject {
                 }
             }
         }
-//        afterEnterForeground = true
+        if Utils.getSecureFolderOffline() == "0" && afterEnterBackground && Database.shared.database == nil && Utils.getSetProfile() {
+            Database.recreateInstance()
+            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil, userInfo: nil)
+            if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
+                if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
+                    navigationC.popViewController(animated: true)
+                }
+            }
+//            Nexilis.getFeatureAccessWithKey(key: ["secure_folder_encrypt_key", "secure_folder_encrypt_iv", "secure_folder_offline"])
+            Nexilis.getFeatureAccess()
+        }
+        afterEnterBackground = true
     }
     
     public static func willEnterForeground() {
@@ -1687,6 +1703,24 @@ public class APIS: NSObject {
             UIApplication.shared.visibleViewController?.navigationController?.present(alertController, animated: true, completion: nil)
         } else {
             UIApplication.shared.visibleViewController?.present(alertController, animated: true, completion: nil)
+        }
+    }
+    
+    static func showRestartApp() {
+        alertControllerExpired = LibAlertController(
+            title: "Restart Required".localized(),
+            message: "Oops! Something went wrong. Please restart the app to continue.".localized(),
+            preferredStyle: .alert
+        )
+        
+        alertControllerExpired.addAction(UIAlertAction(title: "Ok".localized(), style: .default, handler: { _ in
+            exit(0)
+        }))
+        
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(alertControllerExpired, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(alertControllerExpired, animated: true, completion: nil)
         }
     }
     

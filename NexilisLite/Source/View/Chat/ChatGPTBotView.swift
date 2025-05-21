@@ -1530,7 +1530,7 @@ extension ChatGPTBotView: UIContextMenuInteractionDelegate {
     
     private func getDataProfile(message_id: String) -> [String: String]{
         var data: [String: String] = [:]
-        Database().database?.inTransaction({ fmdb, rollback in
+        Database.shared.database?.inTransaction({ fmdb, rollback in
             if let c = Database().getRecords(fmdb: fmdb, query: "select f_display_name from MESSAGE where message_id = '\(message_id)'"), c.next() {
                 data["name"] = c.string(forColumnIndex: 0)!
                 c.close()

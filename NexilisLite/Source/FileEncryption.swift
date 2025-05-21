@@ -19,6 +19,9 @@ public class FileEncryption {
     private init() {}
     
     public func readSecure(filename: String) throws -> Data? {
+        if Utils.getFeatureAccess().isEmpty {
+            return nil
+        }
         let fileManager = FileManager.default
         let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let fileURL = documentDir.appendingPathComponent("Secure").appendingPathComponent(filename)
@@ -31,26 +34,35 @@ public class FileEncryption {
     }
     
     public func writeSecure(filename: String? = nil, data: Data? = nil) throws {
-        let fileManager = FileManager.default
+        DispatchQueue.global().async {
+            do {
+                while Utils.getFeatureAccess().isEmpty {
+                    Thread.sleep(forTimeInterval: 1)
+                }
+                let fileManager = FileManager.default
 
-        // Get the app's Documents directory
-        let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                // Get the app's Documents directory
+                let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
 
-        // Optional: Create a "Secure" subdirectory
-        let secureDir = documentDir.appendingPathComponent("Secure", isDirectory: true)
-        if !fileManager.fileExists(atPath: secureDir.path) {
-            try fileManager.createDirectory(at: secureDir, withIntermediateDirectories: true)
+                // Optional: Create a "Secure" subdirectory
+                let secureDir = documentDir.appendingPathComponent("Secure", isDirectory: true)
+                if !fileManager.fileExists(atPath: secureDir.path) {
+                    try fileManager.createDirectory(at: secureDir, withIntermediateDirectories: true)
+                }
+
+                // Create the file URL
+                let fileURL = secureDir.appendingPathComponent(filename ?? "")
+
+                // Encrypt the data
+                let sealedBox = try AES.GCM.seal(data ?? Data(), using: MasterKeyUtil.shared.getMasterKey())
+                let encryptedData = sealedBox.combined!
+
+                // Write encrypted data to file
+                try encryptedData.write(to: fileURL)
+            } catch {
+                
+            }
         }
-
-        // Create the file URL
-        let fileURL = secureDir.appendingPathComponent(filename ?? "")
-
-        // Encrypt the data
-        let sealedBox = try AES.GCM.seal(data ?? Data(), using: MasterKeyUtil.shared.getMasterKey())
-        let encryptedData = sealedBox.combined!
-
-        // Write encrypted data to file
-        try encryptedData.write(to: fileURL)
     }
     
     public func isSecureExists(filename: String) -> Bool {
@@ -66,10 +78,10 @@ public class FileEncryption {
     
     public func decryptFileFromServer(data: Data) -> Data? {
         do {
-            if aesKey == nil {
+            if aesKey == nil && !Utils.getSecureFolderEncrypt().isEmpty {
                 aesKey = try getAESKey()
             }
-            if aesIV == nil {
+            if aesIV == nil && !Utils.getSecureFolderEncryptIv().isEmpty {
                 aesIV = try getAESIV()
             }
         } catch {
@@ -95,10 +107,10 @@ public class FileEncryption {
     
     func encryptFileToServer(data: Data) -> Data? {
         do {
-            if aesKey == nil {
+            if aesKey == nil && !Utils.getSecureFolderEncrypt().isEmpty {
                 aesKey = try getAESKey()
             }
-            if aesIV == nil {
+            if aesIV == nil && !Utils.getSecureFolderEncryptIv().isEmpty {
                 aesIV = try getAESIV()
             }
         } catch {

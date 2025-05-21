@@ -48,7 +48,7 @@ class ContactChatViewController: UITableViewController {
     var noData = false
     
     var loadingData = true
-    var timerReloadData = Timer()
+    var timerReloadData: Timer?
     
     var noUCList = false
     
@@ -203,6 +203,7 @@ class ContactChatViewController: UITableViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(onReloadTab(notification:)), name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onReload(notification:)), name: NSNotification.Name(rawValue: "onUpdatePersonInfo"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onReloadTab(notification:)), name: NSNotification.Name(rawValue: "onTopic"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onDisconnected(notification:)), name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil)
         
         tableView.tableHeaderView = segment
         tableView.tableFooterView = UIView()
@@ -265,11 +266,26 @@ class ContactChatViewController: UITableViewController {
 //    }
     
     private func reloadAllData() {
-        timerReloadData.invalidate()
-        timerReloadData = Timer.scheduledTimer(withTimeInterval: 1, repeats: false, block: {_ in
-            self.getData()
-        })
-        timerReloadData.fire()
+        DispatchQueue.main.async { [weak self] in
+            self?.timerReloadData?.invalidate()
+            self?.timerReloadData = nil
+            self?.timerReloadData = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+                self?.getData()
+                self?.timerReloadData = nil
+            }
+        }
+    }
+    
+    @objc func onDisconnected(notification: NSNotification) {
+        DispatchQueue.main.async {
+            self.loadingData = true
+            self.chatGroupMaps.removeAll()
+            self.chats.removeAll()
+            self.contacts.removeAll()
+            self.groups.removeAll()
+            self.tableView.reloadData()
+            self.reloadAllData()
+        }
     }
     
     @objc func onReloadTab(notification: NSNotification) {
@@ -436,18 +452,18 @@ class ContactChatViewController: UITableViewController {
     
     private func getContacts(completion: @escaping ()->()) {
         self.contacts.removeAll()
-        if self.isChooser == nil {
-            let gptUser = User(pin: "-997",
-                            firstName: "GPT SmartBot",
-                            lastName: "",
-                            thumb: "",
-                            userType: "0",
-                            official: "1")
-            contacts.append(gptUser)
-        }
         DispatchQueue.global().async {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
+                    if self.isChooser == nil {
+                        let gptUser = User(pin: "-997",
+                                        firstName: "GPT SmartBot",
+                                        lastName: "",
+                                        thumb: "",
+                                        userType: "0",
+                                        official: "1")
+                        self.contacts.append(gptUser)
+                    }
                     if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name, last_name, image_id, official_account, user_type FROM BUDDY where f_pin <> '\(User.getMyPin()!)' order by 5 desc, 2 collate nocase asc") {
                         while cursorData.next() {
                             let user = User(pin: cursorData.string(forColumnIndex: 0) ?? "",

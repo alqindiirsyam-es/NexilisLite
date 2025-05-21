@@ -359,7 +359,7 @@ class VideoConferenceViewController: UIViewController {
             myImage.contentMode = .scaleAspectFill
         }
 //        let idMe = User.getMyPin() as String?
-//        Database().database?.inTransaction({ fmdb, rollback in
+//        Database.shared.database?.inTransaction({ fmdb, rollback in
 //            if let c = Database().getRecords(fmdb: fmdb, query: "select image_id from BUDDY where f_pin = '\(idMe!)'"), c.next() {
 //                let image = c.string(forColumnIndex: 0)!
 //                if image.isEmpty {

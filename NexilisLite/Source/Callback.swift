@@ -139,6 +139,7 @@ class NetworkMonitor {
     private var isMonitoring = false
     var isConnected: Bool = false
     var fromDisconnect = false
+    var timerReloadData: Timer?
     
     private init() {}
     
@@ -152,20 +153,40 @@ class NetworkMonitor {
                 OutgoingThread.default.set(wait: !connected)
                 if !connected {
                     fromDisconnect = true
-                    DispatchQueue.main.async {
+                    DispatchQueue.main.async { [self] in
                         let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
                         banner.show()
+                        if Utils.getSecureFolderEncrypt().isEmpty && Database.shared.database != nil {
+                            timerReloadData?.invalidate()
+                            timerReloadData = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) {_ in
+                                Database.shared.database = nil
+                                FileEncryption.shared.aesKey = nil
+                                FileEncryption.shared.aesIV = nil
+                                Database.recreateInstance()
+                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil, userInfo: nil)
+                                if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
+                                    if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
+                                        navigationC.popViewController(animated: true)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 if connected && fromDisconnect {
                     fromDisconnect = false
                     DispatchQueue.main.async {
+                        self.timerReloadData?.invalidate()
+                        self.timerReloadData = nil
                         let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "You're Connected".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
                         banner.show()
+                    }
+                    if Database.shared.database == nil {
+                        Nexilis.getFeatureAccess()
                     }
                 }
             })
