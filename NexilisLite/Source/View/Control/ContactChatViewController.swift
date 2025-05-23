@@ -267,11 +267,15 @@ class ContactChatViewController: UITableViewController {
     
     private func reloadAllData() {
         DispatchQueue.main.async { [weak self] in
-            self?.timerReloadData?.invalidate()
-            self?.timerReloadData = nil
-            self?.timerReloadData = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+            if self?.timerReloadData == nil {
                 self?.getData()
+            } else {
+                self?.timerReloadData?.invalidate()
                 self?.timerReloadData = nil
+                self?.timerReloadData = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+                    self?.getData()
+                    self?.timerReloadData = nil
+                }
             }
         }
     }

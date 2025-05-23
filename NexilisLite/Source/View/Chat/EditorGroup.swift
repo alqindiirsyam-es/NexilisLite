@@ -2109,6 +2109,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             return
         }
         DispatchQueue.global().async {
+            while API.nGetCLXConnState() == 0 || !API.bInetConnAvailable() {
+                Thread.sleep(forTimeInterval: 1)
+            }
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
@@ -6222,7 +6225,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if dataMessages[indexPath.row]["status"]  as? String ?? "" == "8" {
             return
         }
-        if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
+        if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)

@@ -574,8 +574,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             chatbot()
         }
         
-        let exblock = User.getData(pin: pinPerson)?.ex_block
-        blocking = exblock == nil ? "0" : exblock!.isEmpty ? "0" : exblock!
+        let dataUser = User.getData(pin: pinPerson)
+        if dataUser == nil {
+            blocking = "0"
+        } else {
+            let exblock = dataUser!.ex_block
+            blocking = exblock!.isEmpty ? "0" : exblock!
+        }
         
         changeAppBar()
         getData()
@@ -3270,6 +3275,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             return
         }
         DispatchQueue.global().async {
+            while API.nGetCLXConnState() == 0 || !API.bInetConnAvailable() {
+                Thread.sleep(forTimeInterval: 1)
+            }
             if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
                 let valueListGroupImages = listGroupImages.value
                 for i in 0..<valueListGroupImages.count {

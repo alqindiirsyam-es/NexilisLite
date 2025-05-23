@@ -16,8 +16,8 @@ public class Database {
     public init() {
         let databasePath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] + "/encrypted_db_es.db"
         if FileManager.default.fileExists(atPath: databasePath) && database == nil {
-            _ = FileEncryption.shared.encryptFileToServer(data: Data())
             DispatchQueue.global().async {
+                _ = FileEncryption.shared.encryptFileToServer(data: Data())
                 while FileEncryption.shared.aesKey == nil {
                     Thread.sleep(forTimeInterval: 1)
                 }

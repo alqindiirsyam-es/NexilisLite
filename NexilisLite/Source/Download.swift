@@ -77,7 +77,7 @@ public class Download {
                 "User-Agent": Utils.getUserAgent(),
                 "Cookie": Utils.getCookiesMobile()
             ]
-            print("FULL URL: \(fullURL)")
+//            print("FULL URL: \(fullURL)")
             do {
                 _ = SessionManager.shared.session.download(fullURL, headers: headers)
                 .downloadProgress(queue: downloadBufferQueue) { progress in

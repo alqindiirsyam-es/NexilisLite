@@ -21,6 +21,8 @@ class IncomingThread {
     
     private var dispatchQueue = DispatchQueue(label: "IncomingThread")
     
+    static var dispatch: DispatchGroup?
+    
     private var queue = [TMessage]()
     
     func addQueue(message: TMessage) {
@@ -1305,6 +1307,21 @@ class IncomingThread {
     }
     
     private func receiveMessage(message: TMessage) -> Void {
+        if Utils.getSecureFolderOffline() == "0" {
+            if API.nGetCLXConnState() == 0 {
+                do {
+                    let id = Utils.getConnectionID()
+                    try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+                } catch {}
+            }
+            if FileEncryption.shared.aesKey == nil {
+                IncomingThread.dispatch = DispatchGroup()
+                IncomingThread.dispatch?.enter()
+                Nexilis.getFeatureAccess()
+                IncomingThread.dispatch?.wait()
+                IncomingThread.dispatch = nil
+            }
+        }
         guard let _: String = SecureUserDefaults.shared.value(forKey: "status") else {
             //print("App not ready!!! skip receive message \(message_id)")
             ack(message: message)

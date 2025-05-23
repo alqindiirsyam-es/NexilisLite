@@ -677,7 +677,7 @@ public final class Utils {
         if let value: String = SecureUserDefaults.shared.value(forKey: "secure_folder_offline") {
             return value
         }
-        return "1"
+        return "0"
     }
     
     public static func fetchDataWithCookiesAndUserAgent(from url: URL, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {

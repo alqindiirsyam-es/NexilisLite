@@ -1148,35 +1148,46 @@ public class APIS: NSObject {
     
     private static func getMessageById(id: String) {
         DispatchQueue.global().async {
-//            Nexilis.sendStateToServer(s: "send ack from apn")
-            DispatchQueue.global().async {
-                let parameter: [String : Any] = [
-                    "pin": User.getMyPin() ?? "",
-                    "message_id": id
-                ]
-                Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
-                    if let data = data {
-                        do {
-                            if let dataString = String(data: data, encoding: .utf8) {
-                                if let jsonObj = try JSONSerialization.jsonObject(with: dataString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
-                                    let dataObj = jsonObj["data"] as? String ?? ""
-                                    let message = TMessage(data: dataObj)
-                                    Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
-                                    ackAPN(id: id)
+            let parameter: [String : Any] = [
+                "pin": User.getMyPin() ?? "",
+                "message_id": id
+            ]
+            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
+                if let data = data {
+                    do {
+                        if let dataString = String(data: data, encoding: .utf8) {
+                            if let jsonObj = try JSONSerialization.jsonObject(with: dataString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
+                                let dataObj = jsonObj["data"] as? String ?? ""
+                                let message = TMessage(data: dataObj)
+                                if Utils.getSecureFolderOffline() == "0" && IncomingThread.dispatch == nil {
+                                    if API.nGetCLXConnState() == 0 {
+                                        do {
+                                            let id = Utils.getConnectionID()
+                                            try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+                                        } catch {}
+                                    }
+                                    if FileEncryption.shared.aesKey == nil {
+                                        IncomingThread.dispatch = DispatchGroup()
+                                        IncomingThread.dispatch?.enter()
+                                        Nexilis.getFeatureAccess()
+                                        IncomingThread.dispatch?.wait()
+                                        IncomingThread.dispatch = nil
+                                    }
+                                }
+                                print("save from APIS")
+                                Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
+                                ackAPN(id: id)
+                                DispatchQueue.main.async {
+                                    UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
                                 }
                             }
-                        } catch {
-                            
                         }
+                    } catch {
+                        
                     }
-                    DispatchQueue.main.async {
-                        UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
-                    }
-                }
-                DispatchQueue.main.async {
-                    UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
                 }
             }
+//            Nexilis.sendStateToServer(s: "send ack from apn")
 //            do {
 //                if API.nGetCLXConnState() == 0 {
 //                    let id = Utils.getConnectionID()
@@ -1201,13 +1212,13 @@ public class APIS: NSObject {
 //                                print("message: \(message.toLogString())")
 //                            }
 //                        } else {
-//                            
+//
 //                        }
 //                    } else {
 //                    }
 //                }
 //            } catch {
-//                
+//
 //            }
         }
     }

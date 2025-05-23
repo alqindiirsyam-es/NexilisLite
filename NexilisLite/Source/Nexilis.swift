@@ -509,8 +509,14 @@ public class Nexilis: NSObject {
         }
     }
     
+    static var isGettingFeatureAccess: Bool = false
     static func getFeatureAccess() {
-        DispatchQueue.global().async {
+        if isGettingFeatureAccess {
+            return
+        }
+        isGettingFeatureAccess = true
+        print("getFeatureAccess")
+        DispatchQueue.global(qos: .background).async {
 //            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "get_feature_access_new")!) { data, response, error in
 //                let response = response as? HTTPURLResponse
 //                if response?.statusCode != 200 || error != nil {
@@ -534,22 +540,21 @@ public class Nexilis: NSObject {
                                 tmp.removeValue(forKey: "action")
                                 tmp.removeValue(forKey: "alert_title")
                                 tmp.removeValue(forKey: "alert_message")
-                                jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
+                                if Array(tmp.keys)[0] != "secure_folder_encrypt_key" && Array(tmp.keys)[0] != "secure_folder_encrypt_key_iv" {
+                                    jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
+                                }
                                 if jsonData["upload_max_retry"]! != nil {
                                     let umr = jsonData["upload_max_retry"] as! String
                                     Utils.setMaxRetryUpload(value: umr)
-                                    jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
                                 }
                                 if jsonData["upload_max_time"]! != nil {
                                     let umt = jsonData["upload_max_time"] as! String
                                     Utils.setMaxRetryTimeUpload(value: umt)
-                                    jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
                                 }
                                 if jsonData["default_fb"]! != nil {
                                     if !Utils.getAfterConfigFB() {
                                         Utils.setConfigModeFB(value: jsonData["default_fb"] as! String)
                                     }
-                                    jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
                                 }
                                 if jsonData["authentication_duration"]! != nil {
                                     let ad = jsonData["authentication_duration"] as! String
@@ -564,6 +569,10 @@ public class Nexilis: NSObject {
                                         } else {
                                             Utils.setSecureFolderEncrypt(value: keyTemp)
                                         }
+                                    }
+                                    if let dispatch = IncomingThread.dispatch {
+                                        Database.recreateInstance()
+                                        dispatch.leave()
                                     }
                                 }
                                 if jsonData["secure_folder_encrypt_key_iv"]! != nil {
@@ -602,15 +611,22 @@ public class Nexilis: NSObject {
                                     Utils.setFeatureAccess(value: jsonFAString)
                                 }
                             }
+                            isGettingFeatureAccess = false
                         }
                     }
                 } catch {
                     print("gagal parsing data:")
                 }
             } else {
+                print("gagal getfeatureaccess:")
+                isGettingFeatureAccess = false
                 if Utils.getSecureFolderOffline() == "0" || (Utils.getSecureFolderOffline() == "1" && !Utils.getSetProfile()) {
                     DispatchQueue.main.async {
-                        APIS.showRestartApp()
+                        if !APIS.checkAppStateisBackground() {
+                            APIS.showRestartApp()
+                        } else {
+                            getFeatureAccess()
+                        }
                     }
                 }
             }
