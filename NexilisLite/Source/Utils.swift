@@ -895,6 +895,9 @@ public final class Utils {
                     if Array(json.keys)[i] == "default_sound_rbt" {
                         Utils.setDefaultIncomingRBT(value: Array(json.values)[i] as? String ?? "")
                     }
+                    if Array(json.keys)[i] == "icon_size" {
+                        Utils.setIconDockSize(value: Array(json.values)[i] as? String ?? "")
+                    }
                 }
                 Utils.setFinishInitPrefs(value: true)
                 DispatchQueue.main.async {
@@ -1490,7 +1493,7 @@ public final class Utils {
         if let lastAuthTime: Date = SecureUserDefaults.shared.value(forKey: "lastAuthenticationTime") {
             let elapsedTime = Date().timeIntervalSince(lastAuthTime)
             let durationAuth = Double(Utils.getAuthenticationDuration()) ?? 5
-            print("durationAuth \(durationAuth)")
+//            print("durationAuth \(durationAuth)")
             return elapsedTime > durationAuth
         }
         return true

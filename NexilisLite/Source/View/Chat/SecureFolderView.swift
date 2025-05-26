@@ -10,7 +10,7 @@ import AVFoundation
 import AVKit
 import QuickLook
 
-class SecureFolderViewController: UIViewController, UISearchBarDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, QLPreviewControllerDataSource {
+public class SecureFolderViewController: UIViewController, UISearchBarDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, QLPreviewControllerDataSource {
     
     var directoryPath: URL!
     var files: [SecureFolderItem] = []
@@ -29,28 +29,53 @@ class SecureFolderViewController: UIViewController, UISearchBarDelegate, UIColle
         layout.minimumInteritemSpacing = 10
         
         let cv = UICollectionView(frame: .zero, collectionViewLayout: layout)
-        cv.backgroundColor = .white
+        cv.backgroundColor = .clear
         cv.register(FileCell.self, forCellWithReuseIdentifier: "FileCell")
         return cv
     }()
     
-    override func viewDidLoad() {
+    public override func viewDidLoad() {
         super.viewDidLoad()
-        self.title = "Secure Folder"
-        view.backgroundColor = .white
-        let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
-        let navBarAppearance = UINavigationBarAppearance()
-        navBarAppearance.configureWithOpaqueBackground()
-        navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
-        navBarAppearance.titleTextAttributes = attributes
-        navigationController?.navigationBar.standardAppearance = navBarAppearance
-        navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
-        
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
-        
+        self.navigationController?.navigationController?.setNavigationBarHidden(true, animated: false)
+//        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        tapGesture.cancelsTouchesInView = false
+        view.addGestureRecognizer(tapGesture)
         setupSubviews()
         loadFiles()
         filteredFiles = files
+    }
+    
+    @objc func dismissKeyboard() {
+        searchBar.resignFirstResponder()
+    }
+    
+    public override func viewWillAppear(_ animated: Bool) {
+        self.navigationController?.navigationController?.setNavigationBarHidden(true, animated: false)
+        self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black]
+        let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]
+        let navBarAppearance = UINavigationBarAppearance()
+        navBarAppearance.configureWithTransparentBackground()
+        navBarAppearance.titleTextAttributes = attributes
+        navigationController?.navigationBar.standardAppearance = navBarAppearance
+        navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
+        let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+        UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+        navigationController?.navigationBar.backgroundColor = .clear
+        navigationController?.navigationBar.setBackgroundImage(UIImage(), for: .default)
+        navigationController?.navigationBar.shadowImage = UIImage()
+        navigationController?.navigationBar.isTranslucent = true
+        navigationController?.setNavigationBarHidden(false, animated: false)
+        navigationController?.navigationBar.overrideUserInterfaceStyle = self.traitCollection.userInterfaceStyle == .dark ? .dark : .light
+        navigationController?.navigationBar.barStyle = .default
+        navigationController?.navigationBar.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        tabBarController?.navigationItem.leftBarButtonItem = nil
+        tabBarController?.navigationItem.searchController = nil
+    }
+    
+    public override func viewDidAppear(_ animated: Bool) {
+        self.navigationController?.navigationBar.topItem?.title = "Secure Folder".localized()
+        self.navigationController?.navigationBar.setNeedsLayout()
     }
     
     @objc func cancel(sender: Any) {
@@ -143,18 +168,18 @@ class SecureFolderViewController: UIViewController, UISearchBarDelegate, UIColle
 
     // MARK: Search Bar Delegate
     
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+    public func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         filteredFiles = searchText.isEmpty ? files : files.filter { $0.filename.contains(searchText) }
         collectionView.reloadData()
     }
     
     // MARK: Collection View Data Source
     
-    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+    public func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         return filteredFiles.count
     }
     
-    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+    public func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FileCell", for: indexPath) as! FileCell
         let fileItem = filteredFiles[indexPath.item]
         cell.label.text = fileItem.filename
@@ -173,14 +198,14 @@ class SecureFolderViewController: UIViewController, UISearchBarDelegate, UIColle
     
     // MARK: Collection View Delegate Flow Layout
     
-    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+    public func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
         let padding: CGFloat = 10
         let collectionViewSize = collectionView.frame.size.width - padding
         let width = collectionViewSize / 2
         return CGSize(width: width, height: width)
     }
     
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+    public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         let fileItem = filteredFiles[indexPath.item]
         if fileItem.imageId != "" {
             print("this image")

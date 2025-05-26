@@ -85,7 +85,7 @@ public class MasterKeyUtil {
     }
     
     func getMasterKey() throws -> SymmetricKey {
-        if (Nexilis.checkingAccess(key: "authentication") && isDeviceNotSecure()) {
+        if Nexilis.checkingAccess(key: "authentication") && isDeviceNotSecure() && Nexilis.dispatch == nil {
             var result = false
             Nexilis.dispatch = DispatchGroup()
             Nexilis.dispatch?.enter()

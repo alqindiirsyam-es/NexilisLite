@@ -149,6 +149,8 @@ public class Nexilis: NSObject {
         
         Nexilis.showButtonFB = showButton
         
+        SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
+        
         do {
             try MasterKeyUtil.shared.generateAndStoreMasterKey()
             try MasterKeyUtil.shared.generateAndStorePrefsKey()
@@ -410,7 +412,7 @@ public class Nexilis: NSObject {
     
     private static func getPullPrefs() {
         DispatchQueue.global().async {
-            let urlString = Utils.getBEId().isEmpty ? Utils.getDomainOpr() + "nexilis/logics/get_baseurl_new?key=\(Nexilis.sAPIKey)" : Utils.getDomainOpr() + "nexilis/logics/get_prefs?be=\(Utils.getBEId())&appId=\(APIS.getAppNm())"
+            let urlString = Utils.getBEId().isEmpty ? Utils.getDomainOpr() + "nexilis/logics/get_baseurl_new?key=\(Nexilis.sAPIKey)" : Utils.getDomainOpr() + "nexilis/logics/get_prefs?be=\(Utils.getBEId())&appId=\(APIS.getAppNm().toStupidString())"
             Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
                 if let data = data, let responseString = String(data: data, encoding: .utf8) {
                     if let json = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any?] {
@@ -687,7 +689,7 @@ public class Nexilis: NSObject {
         }
     }
     
-    public static func showForceSignIn() {
+    public static func showForceSignIn(completion: (() -> Void)? = nil) {
         let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "changeDevice") as! ChangeDeviceViewController
         controller.forceLogin = true
         let navigationController = CustomNavigationController(rootViewController: controller)
@@ -703,7 +705,7 @@ public class Nexilis: NSObject {
         navigationController.navigationBar.titleTextAttributes = textAttributes
         navigationController.modalPresentationStyle = .fullScreen
         navigationController.modalTransitionStyle = .crossDissolve
-        UIApplication.shared.visibleViewController?.present(navigationController, animated: true)
+        UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: completion)
     }
     
     public static func destroyAll() {
