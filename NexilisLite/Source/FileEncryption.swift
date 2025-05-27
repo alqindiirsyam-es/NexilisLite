@@ -34,34 +34,29 @@ public class FileEncryption {
     }
     
     public func writeSecure(filename: String? = nil, data: Data? = nil) throws {
-        DispatchQueue.global().async {
-            do {
-                while Utils.getFeatureAccess().isEmpty {
-                    Thread.sleep(forTimeInterval: 1)
-                }
-                let fileManager = FileManager.default
+        do {
+            let fileManager = FileManager.default
 
-                // Get the app's Documents directory
-                let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            // Get the app's Documents directory
+            let documentDir = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
 
-                // Optional: Create a "Secure" subdirectory
-                let secureDir = documentDir.appendingPathComponent("Secure", isDirectory: true)
-                if !fileManager.fileExists(atPath: secureDir.path) {
-                    try fileManager.createDirectory(at: secureDir, withIntermediateDirectories: true)
-                }
-
-                // Create the file URL
-                let fileURL = secureDir.appendingPathComponent(filename ?? "")
-
-                // Encrypt the data
-                let sealedBox = try AES.GCM.seal(data ?? Data(), using: MasterKeyUtil.shared.getMasterKey())
-                let encryptedData = sealedBox.combined!
-
-                // Write encrypted data to file
-                try encryptedData.write(to: fileURL)
-            } catch {
-                
+            // Optional: Create a "Secure" subdirectory
+            let secureDir = documentDir.appendingPathComponent("Secure", isDirectory: true)
+            if !fileManager.fileExists(atPath: secureDir.path) {
+                try fileManager.createDirectory(at: secureDir, withIntermediateDirectories: true)
             }
+
+            // Create the file URL
+            let fileURL = secureDir.appendingPathComponent(filename ?? "")
+
+            // Encrypt the data
+            let sealedBox = try AES.GCM.seal(data ?? Data(), using: MasterKeyUtil.shared.getMasterKey())
+            let encryptedData = sealedBox.combined!
+
+            // Write encrypted data to file
+            try encryptedData.write(to: fileURL)
+        } catch {
+            
         }
     }
     

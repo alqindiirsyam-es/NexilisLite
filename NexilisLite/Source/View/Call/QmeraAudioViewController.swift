@@ -383,7 +383,7 @@ class QmeraAudioViewController: UIViewController {
 //                }
                 if callFCM {
                     DispatchQueue.global().async {
-                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: u.pin, type: "1"), timeout: 30 * 1000) {
+                        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getCalling(fPin: u.pin, type: "1"), timeout: 30 * 1000) {
                             if response.isOk() {
                                 DispatchQueue.main.async {
                                     self.status.text = "Waiting for answer".localized()
@@ -800,6 +800,16 @@ class QmeraAudioViewController: UIViewController {
     }
     
     @objc func didInvite(sender: Any?) {
+        if !Nexilis.checkingAccess(key: "audio_call_add") {
+            if Nexilis.checkingAccessAlert(key: "audio_call_add") != "|" && !Nexilis.checkingAccessAlert(key: "audio_call_add").isEmpty {
+                let title = Nexilis.checkingAccessAlert(key: "audio_call_add").components(separatedBy: "|")[0]
+                let message = Nexilis.checkingAccessAlert(key: "audio_call_add").components(separatedBy: "|")[1]
+                APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+            } else {
+                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            }
+            return
+        }
         let controller = QmeraCallContactViewController()
         controller.isDismiss = { user in
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
@@ -814,7 +824,7 @@ class QmeraAudioViewController: UIViewController {
                 self.users.append(user)
                 if self.callFCM {
                     DispatchQueue.global().async {
-                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: user.pin, type: "1"), timeout: 30 * 1000) {
+                        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getCalling(fPin: user.pin, type: "1"), timeout: 30 * 1000) {
                             if response.isOk() {
                             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
                                 API.initiateCCall(sParty: user.pin)

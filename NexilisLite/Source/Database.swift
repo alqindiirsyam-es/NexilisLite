@@ -91,7 +91,9 @@ public class Database {
 
     
     func openDatabase() -> Int {
-        setDBInstance()
+        if FileEncryption.shared.aesKey != nil {
+            setDBInstance()
+        }
         var result = 0
         database?.inTransaction({(fmdb, rollback) in
             do {

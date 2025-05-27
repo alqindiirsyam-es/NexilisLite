@@ -213,7 +213,9 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             tableView.reloadRows(at: [indexPath], with: .none)
             tableView.reloadSections(IndexSet(integer: 2), with: .none)
             animateBackup()
-            backupData(indexPath: indexPath)
+            DispatchQueue.global().async {
+                self.backupData(indexPath: indexPath)
+            }
         } else if indexPath.section == 2 {
             if isBackupStart || isRestoreStart || valueLastBackup == "-" {
                 return
@@ -234,10 +236,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(getFileName(option: optionBackup, fileId: fileIdBackup))
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    labelRestoring.text = "Restoring...".localized()
-                    restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
-                } else if FileEncryption.shared.isSecureExists(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
+                if FileEncryption.shared.isSecureExists(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
                     do {
                         if var data = try FileEncryption.shared.readSecure(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
                             let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
@@ -245,7 +244,9 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                                 data = dataDecrypt!
                             }
                             try data.write(to: fileURL)
-                            restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
+                            DispatchQueue.global().async {
+                                self.restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
+                            }
                         }
                     } catch {
                         
@@ -267,7 +268,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                                 return
                             }
                             labelRestoring.text = "Restoring...".localized()
-                            if FileEncryption.shared.isSecureExists(filename: fileIdBackup) {
+                            if FileEncryption.shared.isSecureExists(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
                                 do {
                                     if var data = try FileEncryption.shared.readSecure(filename: getFileName(option: optionBackup, fileId: fileIdBackup)) {
                                         let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
@@ -275,7 +276,9 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                                             data = dataDecrypt!
                                         }
                                         try data.write(to: fileURL)
-                                        restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
+                                        DispatchQueue.global().async {
+                                            self.restoreData(file: fileURL, dirPath: dirPath, indexPath: indexPath)
+                                        }
                                     }
                                 } catch {
                                     
@@ -487,18 +490,6 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                     }
                 }
                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: cValues, replace: true)
-                if !(cValues["thumb_id"] as? String ?? "").isEmpty {
-                    let thumbId = cValues["thumb_id"] as! String
-                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                    if let dirPath = paths.first {
-                        let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumbId)
-                        if !FileManager.default.fileExists(atPath: thumbURL.path) {
-                            Download().startHTTP(forKey: thumbId) { (name, progress) in}
-                        }
-                    }
-                }
                 recordSizeRestore += 1
             } catch {
                 rollback.pointee = true
@@ -620,32 +611,52 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "MESSAGE" {
                     let nameColumn = valueText[0].components(separatedBy: separator)
                     for i in 1..<valueText.count - 1 {
+                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
                         let dataMessage = valueText[i].components(separatedBy: separator)
                         restoreMessage(nameColumn: nameColumn, message: dataMessage)
+                        DispatchQueue.main.async { [self] in
+                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                        }
                     }
                 } else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "UC_LIST" {
                     for i in 1..<valueText.count - 1 {
+                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
                         let dataUcList = valueText[i].components(separatedBy: separator)
                         restoreUcList(dataUcList: dataUcList)
+                        DispatchQueue.main.async { [self] in
+                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                        }
                     }
                 } else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "FORM_DATA" {
                     let nameColumn = valueText[0].components(separatedBy: separator)
                     for i in 1..<valueText.count - 1 {
+                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
                         let dataFormData = valueText[i].components(separatedBy: separator)
                         restoreFormData(nameColumn: nameColumn, data: dataFormData)
+                        DispatchQueue.main.async { [self] in
+                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                        }
                     }
                 } else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "TASK_PIC" {
                     let nameColumn = valueText[0].components(separatedBy: separator)
                     for i in 1..<valueText.count - 1 {
+                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
                         let dataTaskPIC = valueText[i].components(separatedBy: separator)
                         restoreTaskPIC(nameColumn: nameColumn, data: dataTaskPIC)
+                        DispatchQueue.main.async { [self] in
+                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                        }
                     }
                 }
                 else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "TASK_DETAIL" {
                     let nameColumn = valueText[0].components(separatedBy: separator)
                     for i in 1..<valueText.count - 1 {
+                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
                         let dataTaskDetail = valueText[i].components(separatedBy: separator)
                         restoreTaskDetail(nameColumn: nameColumn, data: dataTaskDetail)
+                        DispatchQueue.main.async { [self] in
+                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                        }
                     }
                 }
             }
@@ -653,7 +664,9 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 labelRestoring.text = "Backup files are corrupted".localized()
                 tableView.reloadSections(IndexSet(integer: 3), with: .none)
             } else {
-                labelRestoring.text = "Successfully Restored Data".localized()
+                DispatchQueue.main.async { [self] in
+                    labelRestoring.text = "Successfully Restored Data".localized()
+                }
             }
 //            DispatchQueue.global().async { [self] in
 //                _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupRestored(option: optionBackup, fileid: fileIdBackup))
@@ -955,6 +968,13 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                                         valueLastBackup = dayLastBackup.localized() + ", " + timeLastBackup
                                         valuesizeBackup = Units(bytes: fileSize).getReadableUnit()
                                         
+                                        do {
+                                            try FileEncryption.shared.writeSecure(filename: getFileName(option: optionBackup, fileId: fileIdBackup), data: Data(contentsOf: zipFiles))
+                                            try FileManager.default.removeItem(atPath: zipFiles.path)
+                                        } catch {
+                                            
+                                        }
+                                        
                                         labelPreparing.text = "Successfully Backup Data".localized()
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
                                             isBackupStart = false
@@ -985,6 +1005,20 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
         })
     }
 
+}
+
+func formatPercentage(numerator: Int64, denominator: Int64) -> String {
+    guard denominator != 0 else { return "NaN" }
+
+    let value = Double(numerator) / Double(denominator)
+
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .percent
+    formatter.minimumFractionDigits = 1
+    formatter.maximumFractionDigits = 1
+    formatter.locale = Locale(identifier: "fr_FR") // uses comma as decimal separator
+
+    return formatter.string(from: NSNumber(value: value)) ?? "NaN"
 }
 
 extension String {

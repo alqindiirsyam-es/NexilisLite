@@ -382,7 +382,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         }
         DispatchQueue.global().async {
             do {
-                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.requestGPTBot(message: mesage)) {
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.requestGPTBot(message: mesage)) {
                     if response.isOk() {
                         let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
                         if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any?] {

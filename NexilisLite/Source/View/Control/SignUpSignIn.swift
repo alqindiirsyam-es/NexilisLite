@@ -268,6 +268,7 @@ public class SignUpSignIn: UIViewController {
             return
         }
         if Database.shared.openDatabase() == 0 {
+            APIS.showRestartApp()
             return
         }
         Nexilis.showLoader()

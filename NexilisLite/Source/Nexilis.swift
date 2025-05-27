@@ -117,6 +117,8 @@ public class Nexilis: NSObject {
     public static let IDX_SIGNUP_OR_IN_PAGE = 23
     public static let IDX_SECURE_FOLDER = 29
     public static let IDX_SETTING = 32
+    public static let IDX_WALLET = 72
+    public static let IDX_PPOB = 73
     public static let IDX_POST = 99
     public static let IDX_SELF_ACT = 100
     public static let IDX_SOCIAL_COMMERCE = 101
@@ -517,7 +519,6 @@ public class Nexilis: NSObject {
             return
         }
         isGettingFeatureAccess = true
-        print("getFeatureAccess")
         DispatchQueue.global(qos: .background).async {
 //            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "get_feature_access_new")!) { data, response, error in
 //                let response = response as? HTTPURLResponse
@@ -529,17 +530,24 @@ public class Nexilis: NSObject {
 //                    }
 //                }
 //            }
+            while Nexilis.isProcessWriteSync {
+                Thread.sleep(forTimeInterval: 0.5)
+            }
             if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getFeatureAccessAll(), timeout: 5000), response.isOk() {
                 let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
                 do {
                     if let data = data.data(using: .utf8) {
                         if let jsonArray = try JSONSerialization.jsonObject(with: data, options: []) as? [AnyObject] {
                             var jsonFA: [String: Any] = [:]
+                            var jsonFAWithAlert: [[String: Any]] = []
                             var keyTemp = ""
                             var keyIvTemp = ""
                             for jsonData in jsonArray {
                                 var tmp = jsonData as! [String: Any]
                                 tmp.removeValue(forKey: "action")
+                                if !tmp.keys.contains("secure_folder_encrypt_key") && !tmp.keys.contains("secure_folder_encrypt_key_iv") {
+                                    jsonFAWithAlert.append(tmp)
+                                }
                                 tmp.removeValue(forKey: "alert_title")
                                 tmp.removeValue(forKey: "alert_message")
                                 if Array(tmp.keys)[0] != "secure_folder_encrypt_key" && Array(tmp.keys)[0] != "secure_folder_encrypt_key_iv" {
@@ -613,6 +621,11 @@ public class Nexilis: NSObject {
                                     Utils.setFeatureAccess(value: jsonFAString)
                                 }
                             }
+                            if let convertJsonFAAlert = try? JSONSerialization.data(withJSONObject: jsonFAWithAlert, options: .prettyPrinted) {
+                                if let jsonFAString = String(data: convertJsonFAAlert, encoding: .utf8) {
+                                    Utils.setFeatureAccessAlert(value: jsonFAString)
+                                }
+                            }
                             isGettingFeatureAccess = false
                         }
                     }
@@ -655,6 +668,18 @@ public class Nexilis: NSObject {
             }
         }
         return false
+    }
+    
+    public static func checkingAccessAlert(key: String) -> String {
+        let dataAccess = Utils.getFeatureAccessAlert()
+        if let jsonArray = try? JSONSerialization.jsonObject(with: dataAccess.data(using: String.Encoding.utf8)!, options: []) as? [[String: Any]] {
+            if let indexKey = jsonArray.firstIndex(where: { $0.keys.contains(key) }) {
+                let title = jsonArray[indexKey]["alert_title"] as? String ?? ""
+                let message = jsonArray[indexKey]["alert_message"] as? String ?? ""
+                return "\(title)|\(message)"
+            }
+        }
+        return ""
     }
     
     private static func getPullWorkingArea() {
@@ -1082,13 +1107,15 @@ public class Nexilis: NSObject {
     
     public static var isProcessWriteSync = false
     public static func writeSync(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
+        if !API.bInetConnAvailable() {
+            return nil
+        }
         isProcessWriteSync = true
         do {
 //            print(">> SENDING MESSAGE >> ", message.toLogString())
             if let data = try API.sGetResponse(sRequest: message.pack(), lTimeout: timeout, bKeepTOResp: true) {
                 let response = TMessage(data: data)
-//                print(">> RESPONSE WRITESYNC >> ")
-//                print("<< RESPONSE MESSAGE << ", response.toLogString())
+//                print("<< RESPONSE MESSAGE << ", data)
                 isProcessWriteSync = false
                 return response
             }
@@ -1174,7 +1201,31 @@ public class Nexilis: NSObject {
 
     public static func buttonClicked(index: Int, id: String = "") {
         //print("BTNCLICK \(index) \(id)")
-        if index == IDX_QUEUE_SYSTEM || index == IDX_NEWS || index == IDX_SOCIAL_COMMERCE {
+        if index == IDX_QUEUE_SYSTEM || index == IDX_NEWS || index == IDX_SOCIAL_COMMERCE || index == IDX_WALLET || index == IDX_PPOB {
+            if index == IDX_WALLET {
+                if !Nexilis.checkingAccess(key: "wallet") {
+                    if Nexilis.checkingAccessAlert(key: "wallet") != "|" && !Nexilis.checkingAccessAlert(key: "wallet").isEmpty {
+                        let title = Nexilis.checkingAccessAlert(key: "wallet").components(separatedBy: "|")[0]
+                        let message = Nexilis.checkingAccessAlert(key: "wallet").components(separatedBy: "|")[1]
+                        APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+                    } else {
+                        UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                    }
+                    return
+                }
+            }
+            if index == IDX_PPOB {
+                if !Nexilis.checkingAccess(key: "ppob") {
+                    if Nexilis.checkingAccessAlert(key: "ppob") != "|" && !Nexilis.checkingAccessAlert(key: "ppob").isEmpty {
+                        let title = Nexilis.checkingAccessAlert(key: "ppob").components(separatedBy: "|")[0]
+                        let message = Nexilis.checkingAccessAlert(key: "ppob").components(separatedBy: "|")[1]
+                        APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+                    } else {
+                        UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                    }
+                    return
+                }
+            }
             if id == "fb\(index)"{
                 APIS.openUrl(url: "https://google.com/")
             } else {
@@ -1344,21 +1395,22 @@ public class Nexilis: NSObject {
         loadingAlert.dismiss(animated: true, completion: completion)
     }
     
-    private static var groupWait = DispatchGroup()
-    
+    private static var listDispatchGroups = [String: DispatchGroup]()
     private static var waitQueue = [String: TMessage]()
     
-    private static var onDispatchGroupLeave = ""
-    
     public static func writeAndWait(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
-        groupWait.enter()
-        _ = write(message: message, timeout: timeout)
+        listDispatchGroups[message.getStatus()] = DispatchGroup()
+        let groupWait = listDispatchGroups[message.getStatus()]
+        groupWait?.enter()
         waitQueue[message.getStatus()] = message
-        if groupWait.wait(timeout: .now() + 15) == .timedOut {
+        _ = write(message: message, timeout: timeout)
+        if groupWait?.wait(timeout: .now() + 15) == .timedOut {
             waitQueue.removeValue(forKey: message.getStatus())
-            groupWait.leave()
+            listDispatchGroups.removeValue(forKey: message.getStatus())
+            groupWait?.leave()
             return nil
         }
+        listDispatchGroups.removeValue(forKey: message.getStatus())
         return waitQueue.removeValue(forKey: message.getStatus())
     }
     
@@ -1411,13 +1463,10 @@ public class Nexilis: NSObject {
         if let _ = waitQueue[message.getStatus()] {
             //print("MESSAGE INCOMING DATA \(message.toLogString())")
             if message.mBodies.keys.contains(CoreMessage_TMessageKey.ERRCOD) {
-                if onDispatchGroupLeave != message.getStatus() {
-                    onDispatchGroupLeave = message.getStatus()
-                    //print("LEAVE GROUP INCOMING DATA")
-                    waitQueue[message.getStatus()] = message
-                    groupWait.leave()
-                    return
-                }
+                waitQueue[message.getStatus()] = message
+                let groupWait = listDispatchGroups[message.getStatus()]
+                groupWait?.leave()
+                return
             }
         }
         IncomingThread.default.addQueue(message: message)

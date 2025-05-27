@@ -264,7 +264,7 @@ class QmeraVideoViewController: UIViewController {
                 while API.nGetCLXConnState() == 0 {
                     Thread.sleep(forTimeInterval : 0.3)
                 }
-                _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: self.fPin, lPin: User.getMyPin()!, type: "2"))
+                _ = Nexilis.write(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: self.fPin, lPin: User.getMyPin()!, type: "2"))
             }
         }
         self.timeStartCall = String(Date().currentTimeMillis())
@@ -500,7 +500,7 @@ class QmeraVideoViewController: UIViewController {
                 Nexilis.playRingbacktoneCall()
                 if callFCM {
                     DispatchQueue.global().async {
-                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
+                        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getCalling(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
                             if response.isOk() {
                                 DispatchQueue.main.async {
                                     self.labelIncomingOutgoing.text = "Waiting for answer".localized()
@@ -1167,6 +1167,16 @@ class QmeraVideoViewController: UIViewController {
     }
     
     @objc func didTapAddParticipantButton(sender: AnyObject){
+        if !Nexilis.checkingAccess(key: "video_call_add") {
+            if Nexilis.checkingAccessAlert(key: "video_call_add") != "|" && !Nexilis.checkingAccessAlert(key: "video_call_add").isEmpty {
+                let title = Nexilis.checkingAccessAlert(key: "video_call_add").components(separatedBy: "|")[0]
+                let message = Nexilis.checkingAccessAlert(key: "video_call_add").components(separatedBy: "|")[1]
+                APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+            } else {
+                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            }
+            return
+        }
         if let contactViewController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactSID") as? ContactCallViewController {
             contactViewController.isAddParticipantVideo = true
             contactViewController.connectedCall = dataPerson
@@ -1182,7 +1192,7 @@ class QmeraVideoViewController: UIViewController {
                 } else {
                     if self.callFCM {
                         DispatchQueue.global().async {
-                            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: data["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
+                            if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getCalling(fPin: data["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
                                 if response.isOk() {
                                 } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
                                     self.dataPerson.append(data)

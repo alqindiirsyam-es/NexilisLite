@@ -86,6 +86,16 @@ public class APIS: NSObject {
             APIS.showChangeProfile()
             return
         }
+        if !Nexilis.checkingAccess(key: "call_center") {
+            if Nexilis.checkingAccessAlert(key: "call_center") != "|" && !Nexilis.checkingAccessAlert(key: "call_center").isEmpty {
+                let title = Nexilis.checkingAccessAlert(key: "call_center").components(separatedBy: "|")[0]
+                let message = Nexilis.checkingAccessAlert(key: "call_center").components(separatedBy: "|")[1]
+                APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+            } else {
+                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            }
+            return
+        }
         if User.isCallCenter(userType: (User.getData(pin: User.getMyPin())?.userType)!) {
             let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "myHistoryCC") as! HistoryCCViewController
             controller.isOfficer = true
@@ -166,6 +176,10 @@ public class APIS: NSObject {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
+            return
+        }
+        if !Nexilis.checkingAccess(key: "notification_center") {
+            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
             return
         }
         let controller = HistoryBroadcastViewController()
@@ -267,6 +281,16 @@ public class APIS: NSObject {
             APIS.showChangeProfile()
             return
         }
+        if !Nexilis.checkingAccess(key: "live_streaming") {
+            if Nexilis.checkingAccessAlert(key: "live_streaming") != "|" && !Nexilis.checkingAccessAlert(key: "live_streaming").isEmpty {
+                let title = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[0]
+                let message = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[1]
+                APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+            } else {
+                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            }
+            return
+        }
         let navigationController = CustomNavigationController(rootViewController: QmeraCreateStreamingViewController())
         navigationController.defaultStyle()
         if UIApplication.shared.visibleViewController?.navigationController != nil {
@@ -280,6 +304,16 @@ public class APIS: NSObject {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
+            return
+        }
+        if !Nexilis.checkingAccess(key: "vconf_room") {
+            if Nexilis.checkingAccessAlert(key: "vconf_room") != "|" && !Nexilis.checkingAccessAlert(key: "vconf_room").isEmpty {
+                let title = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[0]
+                let message = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[1]
+                APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+            } else {
+                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            }
             return
         }
         let navigationController = CustomNavigationController(rootViewController: CreateSeminarViewController())
@@ -297,6 +331,10 @@ public class APIS: NSObject {
             APIS.showChangeProfile()
             return
         }
+        if !Nexilis.checkingAccess(key: "audio_call") {
+            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            return
+        }
         let callContact = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactSID") as! ContactCallViewController
         callContact.onlyAudioOrVideo = 1
         let navigationController = CustomNavigationController(rootViewController: callContact)
@@ -311,6 +349,10 @@ public class APIS: NSObject {
     public static func startAudioCall(name: String) {
         if name.isEmpty {
             UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
+            return
+        }
+        if !Nexilis.checkingAccess(key: "audio_call") {
+            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
@@ -342,6 +384,10 @@ public class APIS: NSObject {
             APIS.showChangeProfile()
             return
         }
+        if !Nexilis.checkingAccess(key: "video_call") {
+            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            return
+        }
         let callContact = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactSID") as! ContactCallViewController
         callContact.onlyAudioOrVideo = 2
         let navigationController = CustomNavigationController(rootViewController: callContact)
@@ -356,6 +402,10 @@ public class APIS: NSObject {
     public static func startVideoCall(name: String) {
         if name.isEmpty {
             UIApplication.shared.visibleViewController?.view.makeToast("92:Username is empty".localized(), duration: 3)
+            return
+        }
+        if !Nexilis.checkingAccess(key: "video_call") {
+            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
             return
         }
         let user = User.getDataFromNameCanNil(name: name)
@@ -393,6 +443,10 @@ public class APIS: NSObject {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
+            return
+        }
+        if !Nexilis.checkingAccess(key: "broadcast_message") {
+            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
             return
         }
         let controller = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "broadcastNav")
@@ -494,14 +548,13 @@ public class APIS: NSObject {
             closeButton.backgroundColor = .lightGray.withAlphaComponent(0.1)
             let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
             closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
-            closeButton.actionHandle(controlEvents: .touchUpInside,
-                                     ForAction:{() -> Void in
+            closeButton.addAction(UIAction { _ in
                 startedNewCommunity.dismiss(animated: true)
-            })
+            }, for: .touchUpInside)
             
             let imageComm = UIImageView(image: UIImage(named: "pb_community_social", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
             containerView.addSubview(imageComm)
-            imageComm.anchor(top: closeButton.bottomAnchor, paddingTop: -40, centerX: containerView.centerXAnchor, width: 380, height: 250)
+            imageComm.anchor(top: closeButton.bottomAnchor, paddingTop: -40, centerX: containerView.centerXAnchor, width: 350, height: 250)
             
             let titleComm = UILabel()
             containerView.addSubview(titleComm)
@@ -530,6 +583,12 @@ public class APIS: NSObject {
             buttonComm.setTitle("Get started".localized(), for: .normal)
             buttonComm.setTitleColor(.white, for: .normal)
             buttonComm.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+            buttonComm.addAction(UIAction { _ in
+                startedNewCommunity.dismiss(animated: true) {
+                    let navigationController = UINavigationController(rootViewController: CommunityNew())
+                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                }
+            }, for: .touchUpInside)
         }
         startedNewCommunity.modalPresentationStyle = .overCurrentContext
         if UIApplication.shared.visibleViewController?.navigationController != nil {
@@ -1608,6 +1667,7 @@ public class APIS: NSObject {
             FileEncryption.shared.aesKey = nil
             FileEncryption.shared.aesIV = nil
         }
+        FloatingButton.datePull = nil
     }
     
     public static var notifTimer = Timer()
@@ -1639,20 +1699,20 @@ public class APIS: NSObject {
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-        DispatchQueue.global().async {
-            while API.nGetCLXConnState() == 0 {
-                Thread.sleep(forTimeInterval: 0.5)
-            }
-            if let vers = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.checkVersion()) {
-                let dataVersion = vers.getBody(key: CoreMessage_TMessageKey.DATA)
-                let type = vers.getBody(key: CoreMessage_TMessageKey.TYPE)
-                if dataVersion != "1" {
-                    DispatchQueue.main.async {
-                        showExpiredVersion(mandatory: type == "1")
-                    }
-                }
-            }
-        }
+//        DispatchQueue.global().async {
+//            while API.nGetCLXConnState() == 0 {
+//                Thread.sleep(forTimeInterval: 0.5)
+//            }
+//            if let vers = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.checkVersion()) {
+//                let dataVersion = vers.getBody(key: CoreMessage_TMessageKey.DATA)
+//                let type = vers.getBody(key: CoreMessage_TMessageKey.TYPE)
+//                if dataVersion != "1" {
+//                    DispatchQueue.main.async {
+//                        showExpiredVersion(mandatory: type == "1")
+//                    }
+//                }
+//            }
+//        }
         if Utils.getSecureFolderOffline() == "0" && afterEnterBackground && Database.shared.database == nil && Utils.getSetProfile() {
             Database.recreateInstance()
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil, userInfo: nil)
@@ -1690,6 +1750,25 @@ public class APIS: NSObject {
                 }
             }
         }
+    }
+    
+    public static func nexilisShowAlertWithHTMLMessage(on viewController: UIViewController, title: String, message: String = "<b>Bold</b> and <i>italic</i> text in an alert") {
+        let alert = UIAlertController(title: title, message: "", preferredStyle: .alert)
+        
+        let titleFont = UIFont.boldSystemFont(ofSize: 16)
+        let titleAttributes = [NSAttributedString.Key.font: titleFont]
+        alert.setValue(NSAttributedString(string: title, attributes: titleAttributes), forKey: "attributedTitle")
+        
+        var message = message
+        message = message.replacingOccurrences(of: "<b>", with: "*")
+        message = message.replacingOccurrences(of: "</b>", with: "*")
+        message = message.replacingOccurrences(of: "<i>", with: "_")
+        message = message.replacingOccurrences(of: "</i>", with: "_")
+        
+        alert.setValue(message.richText(fontSize: 14), forKey: "attributedMessage")
+        
+        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+        viewController.present(alert, animated: true, completion: nil)
     }
     
     private static func showEnableNotificationsAlert() {

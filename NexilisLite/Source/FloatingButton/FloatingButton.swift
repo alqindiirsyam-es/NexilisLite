@@ -33,7 +33,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
     let labelCounterFB = UILabel()
     let indicatorCounterFBBig = UIImageView()
     
-    var datePull: Date?
+    static var datePull: Date?
     var animationTimer = Timer()
     var configAnim: Int = Int(Utils.getFloatingAnim().components(separatedBy: "~")[0]) ?? 1
     var isLoopingAnim = (Int(Utils.getFloatingAnim().components(separatedBy: "~")[1]) ?? 1) == 1 ? true : false
@@ -331,9 +331,9 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
     }
     
     private func pullButton() {
-        if datePull == nil || Int(Date().timeIntervalSince(datePull!)) >= 60 {
-            datePull = Date()
-        } else if Int(Date().timeIntervalSince(datePull!)) < 60 {
+        if FloatingButton.datePull == nil || Int(Date().timeIntervalSince(FloatingButton.datePull!)) >= 60 {
+            FloatingButton.datePull = Date()
+        } else if Int(Date().timeIntervalSince(FloatingButton.datePull!)) < 60 {
             return
         }
         if groupView.subviews.count == 0 {
@@ -386,10 +386,10 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 if !Utils.getHistoryPullFB().isEmpty {
                     setFBFromPull()
                 }
-                while Nexilis.isProcessWriteSync {
-                    Thread.sleep(forTimeInterval: 0.5)
+                while API.nGetCLXConnState() == 0 || !API.bInetConnAvailable() {
+                    Thread.sleep(forTimeInterval: 1)
                 }
-                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullFloatingButton(), timeout: 30 * 1000){
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.pullFloatingButton(), timeout: 5000) {
                     if response.isOk() {
                         Utils.setHistoryPullFB(value: response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: ""))
                         setFBFromPull()

@@ -615,6 +615,18 @@ extension UIColor {
         return renderColor(hex: "#E5FCE4")
     }
     
+    public static var whatsappGrayPPColor: UIColor {
+        return renderColor(hex: "#a1a5b1")
+    }
+    
+    public static var waGrayLight: UIColor {
+        return renderColor(hex: "#eceaeb")
+    }
+    
+    public static var waGrayFont: UIColor {
+        return renderColor(hex: "#b7b5b6")
+    }
+    
     public class func renderColor(hex: String) -> UIColor {
         var cString:String = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 
@@ -647,6 +659,18 @@ extension UIView {
     
     public func maxCornerRadius() -> CGFloat {
         return (self.frame.width > self.frame.height) ? self.frame.height / 2 : self.frame.width / 2
+    }
+    
+    public func currentFirstResponder() -> UIView? {
+        if self.isFirstResponder {
+            return self
+        }
+        for subview in self.subviews {
+            if let responder = subview.currentFirstResponder() {
+                return responder
+            }
+        }
+        return nil
     }
     
 }
@@ -784,6 +808,7 @@ extension String {
     }
     
     public func richText(
+        fontSize: CGFloat = 12 + String.offset(),
         isEditing: Bool = false,
         isSearching: Bool = false,
         textSearch: String = "",
@@ -791,10 +816,10 @@ extension String {
         listMentionInTextField: [User] = []
     ) -> NSMutableAttributedString {
         
-        let font = UIFont.systemFont(ofSize: 12 + String.offset())
-        let boldFont = UIFont.boldSystemFont(ofSize: 12 + String.offset())
-        let italicFont = UIFont.italicSystemFont(ofSize: 12 + String.offset())
-        let boldItalicFont = UIFont.systemFont(ofSize: 12 + String.offset(), weight: .semibold)
+        let font = UIFont.systemFont(ofSize: fontSize)
+        let boldFont = UIFont.boldSystemFont(ofSize: fontSize)
+        let italicFont = UIFont.italicSystemFont(ofSize: fontSize)
+        let boldItalicFont = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
         
         let textUTF8 = self
         let finalText = NSMutableAttributedString(string: textUTF8, attributes: [.font: font])

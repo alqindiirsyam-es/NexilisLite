@@ -351,6 +351,17 @@ public final class Utils {
         }
         return ""
     }
+    
+    static func setFeatureAccessAlert(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_feature_access_alert")
+    }
+
+    static func getFeatureAccessAlert() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_feature_access_alert") {
+            return value
+        }
+        return ""
+    }
     static func setChatbotGreetings(value: String) {
         SecureUserDefaults.shared.set(value, forKey: "chatbot_greetings")
     }
