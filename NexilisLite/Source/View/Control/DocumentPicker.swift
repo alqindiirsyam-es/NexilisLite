@@ -41,7 +41,39 @@ open class DocumentPicker: NSObject {
     }
     
     public func present() {
-        let supportedTypes = [UTType.image, UTType.text, UTType.plainText, UTType.utf8PlainText, UTType.utf16ExternalPlainText, UTType.utf16PlainText,    UTType.delimitedText, UTType.commaSeparatedText, UTType.tabSeparatedText, UTType.utf8TabSeparatedText, UTType.rtf, UTType.pdf, UTType.webArchive, UTType.image, UTType.jpeg, UTType.tiff, UTType.gif, UTType.png, UTType.bmp, UTType.ico, UTType.rawImage, UTType.svg, UTType.livePhoto, UTType.movie, UTType.video, UTType.audio, UTType.quickTimeMovie, UTType.mpeg, UTType.mpeg2Video, UTType.mpeg2TransportStream, UTType.mp3, UTType.mpeg4Movie, UTType.mpeg4Audio, UTType.avi, UTType.aiff,    UTType.wav, UTType.midi, UTType.archive, UTType.gzip, UTType.bz2, UTType.zip, UTType.appleArchive, UTType.spreadsheet, UTType.epub, UTType.presentation]
+        var supportedTypes: [UTType] = [
+            // General text and images
+            .image, .text, .plainText, .utf8PlainText, .utf16ExternalPlainText, .utf16PlainText,
+            .delimitedText, .commaSeparatedText, .tabSeparatedText, .utf8TabSeparatedText,
+            .rtf, .pdf, .webArchive,
+            // Images
+            .jpeg, .tiff, .gif, .png, .bmp, .ico, .rawImage, .svg, .livePhoto,
+            // Media
+            .movie, .video, .audio, .quickTimeMovie, .mpeg, .mpeg2Video, .mpeg2TransportStream,
+            .mp3, .mpeg4Movie, .mpeg4Audio, .avi, .aiff, .wav, .midi,
+            // Archives
+            .archive, .gzip, .bz2, .zip, .appleArchive,
+            // Documents
+            .spreadsheet, .epub, .presentation,
+            // Code and script types
+            .sourceCode, .cSource, .objectiveCSource, .swiftSource, .cPlusPlusSource,
+            .objectiveCPlusPlusSource, .script, .shellScript, .pythonScript, .rubyScript,
+            .perlScript, .json, .xml, .html,
+            // Custom UTTypes via extension
+            UTType(filenameExtension: "java")!,     // Java
+            UTType(filenameExtension: "ts")!,       // TypeScript
+            UTType(filenameExtension: "yaml")!,     // YAML
+            UTType(filenameExtension: "yml")!,      // YAML
+            UTType(filenameExtension: "sql")!,      // SQL
+            UTType(filenameExtension: "csv")!,      // CSV
+            UTType(filenameExtension: "ini")!,      // INI
+            UTType(filenameExtension: "log")!,      // Log
+            UTType(filenameExtension: "js")!,       // JavaScript
+            UTType(filenameExtension: "md")!        // Markdown
+        ]
+        if #available(iOS 18.0, *){
+            supportedTypes.append(.css)
+        }
         self.pickerController = UIDocumentPickerViewController(forOpeningContentTypes: supportedTypes, asCopy: true)
 //        self.pickerController?.allowsMultipleSelection = true
         self.pickerController!.delegate = self

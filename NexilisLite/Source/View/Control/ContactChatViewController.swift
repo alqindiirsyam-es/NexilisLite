@@ -48,6 +48,7 @@ class ContactChatViewController: UITableViewController {
     var noData = false
     
     var loadingData = true
+    var isGettingData = false
     var timerReloadData: Timer?
     
     var noUCList = false
@@ -388,6 +389,10 @@ class ContactChatViewController: UITableViewController {
     // MARK: - Data source
     
     func getData() {
+        if self.isGettingData {
+            return
+        }
+        self.isGettingData = true
         getChats {
             self.getContacts {
                 self.getGroups { g1 in
@@ -404,6 +409,7 @@ class ContactChatViewController: UITableViewController {
                     }
                     DispatchQueue.main.async {
                         self.tableView.reloadData()
+                        self.isGettingData = false
                     }
                 }
             }

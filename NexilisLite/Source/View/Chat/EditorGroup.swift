@@ -2479,26 +2479,50 @@ extension EditorGroup: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPrevi
     }
     
     @objc private func sendDocument(sender: navigationQLPreviewDocument) {
-        sender.navigation.dismiss(animated: true, completion: nil)
-        do {
-            let dataFile = try Data(contentsOf: self.previewItem! as URL)
-            let urlFile = self.previewItem?.absoluteString
-            var originaFileName = (urlFile! as NSString).lastPathComponent
-            originaFileName = NSString(string: originaFileName).removingPercentEncoding!
-            let renamedNameFile = "Nexilis_\(Date().currentTimeMillis())_" + originaFileName
-            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let fileURL = documentsDirectory.appendingPathComponent(renamedNameFile)
-            if !FileManager.default.fileExists(atPath: fileURL.path) {
-                do {
-                    try dataFile.write(to: fileURL)
-                    //print("file saved")
-                } catch {
-                    //print("error saving file:", error)
+        DispatchQueue.global().async {
+            if Nexilis.checkingAccess(key: "content_inspection") {
+                DispatchQueue.main.async {
+                    Nexilis.showLoader(text: "Scanning File...".localized())
+                }
+                let result = (self.previewItem! as URL).validateFile()
+                DispatchQueue.main.async {
+                    Nexilis.hideLoader {
+                        sender.navigation.dismiss(animated: true, completion: {
+                            if result.matchesExtension {
+                                sendIt()
+                            } else {
+                                APIS.showWarningFile()
+                            }
+                        })
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    sendIt()
                 }
             }
-            sendChat(message_text: "\(originaFileName)|", attachment_flag: "6", file_id: renamedNameFile, viewController: self)
-        } catch {
             
+            func sendIt() {
+                sender.navigation.dismiss(animated: true, completion: nil)
+                do {
+                    let dataFile = try Data(contentsOf: self.previewItem! as URL)
+                    let urlFile = self.previewItem?.absoluteString
+                    var originaFileName = (urlFile! as NSString).lastPathComponent
+                    originaFileName = NSString(string: originaFileName).removingPercentEncoding!
+                    let renamedNameFile = "Nexilis_\(Date().currentTimeMillis())_" + originaFileName
+                    let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                    let fileURL = documentsDirectory.appendingPathComponent(renamedNameFile)
+                    if !FileManager.default.fileExists(atPath: fileURL.path) {
+                        do {
+                            try dataFile.write(to: fileURL)
+                        } catch {
+                        }
+                    }
+                    self.sendChat(message_text: "\(originaFileName)|", attachment_flag: "6", file_id: renamedNameFile, viewController: self)
+                } catch {
+                    
+                }
+            }
         }
     }
 }
@@ -2725,7 +2749,11 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                 var nowHeightTableMention = heightTableMention!
                 if isEditingMessage {
                     nowTableMention = tableMentionEdit
-                    nowHeightTableMention = heightTableEditMention
+                    if heightTableEditMention != nil {
+                        nowHeightTableMention = heightTableEditMention
+                    } else {
+                        return
+                    }
                 }
                 if listMentionWithText.count > 0 {
                     if listMentionWithText.count < 5 {

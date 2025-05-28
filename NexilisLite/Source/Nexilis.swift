@@ -1379,8 +1379,8 @@ public class Nexilis: NSObject {
         return true
     }
     
-    public static func showLoader() {
-        loadingAlert = LibAlertController(title: nil, message: "Please wait...".localized(), preferredStyle: .alert)
+    public static func showLoader(text: String = "Please wait...".localized()) {
+        loadingAlert = LibAlertController(title: nil, message: text, preferredStyle: .alert)
 
         let loadingIndicator = UIActivityIndicatorView(frame: CGRect(x: 10, y: 5, width: 50, height: 50))
         loadingIndicator.hidesWhenStopped = true

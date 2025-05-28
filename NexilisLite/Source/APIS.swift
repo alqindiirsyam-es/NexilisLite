@@ -1771,6 +1771,22 @@ public class APIS: NSObject {
         viewController.present(alert, animated: true, completion: nil)
     }
     
+    static func showWarningFile() {
+        alertControllerExpired = LibAlertController(
+            title: "⚠️ Suspicious File Detected".localized(),
+            message: "The file appears to have a mismatched name and extension, which may indicate a malicious file. Please verify the file’s source and format before uploading it.".localized(),
+            preferredStyle: .alert
+        )
+        
+        alertControllerExpired.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: nil))
+        
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(alertControllerExpired, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(alertControllerExpired, animated: true, completion: nil)
+        }
+    }
+    
     private static func showEnableNotificationsAlert() {
         guard !isAlertPresented else { return }
         isAlertPresented = true
@@ -1803,7 +1819,7 @@ public class APIS: NSObject {
             preferredStyle: .alert
         )
         
-        alertControllerExpired.addAction(UIAlertAction(title: "Ok".localized(), style: .default, handler: { _ in
+        alertControllerExpired.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: { _ in
             exit(0)
         }))
         

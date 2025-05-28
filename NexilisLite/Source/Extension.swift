@@ -12,6 +12,7 @@ import SDWebImage
 import ImageIO
 import MobileCoreServices
 import CommonCrypto
+import ZIPFoundation
 
 extension Date {
     
@@ -520,6 +521,98 @@ extension URL {
     
     static func palioImage(named: String) -> URL? {
         return URL(string: Utils.getURLBase() + "filepalio/image/\(named)")
+    }
+    
+    struct FileTypeSignature {
+        let magic: String
+        let extensions: [String]
+
+        static let knownSignatures: [FileTypeSignature] = [
+            FileTypeSignature(magic: "FFD8FF", extensions: ["jpg", "jpeg"]),
+            FileTypeSignature(magic: "89504E47", extensions: ["png"]),
+            FileTypeSignature(magic: "47494638", extensions: ["gif"]),
+            FileTypeSignature(magic: "25504446", extensions: ["pdf"]),
+            FileTypeSignature(magic: "504B0304", extensions: ["zip", "docx", "xlsx", "pptx"]),
+            FileTypeSignature(magic: "D0CF11E0", extensions: ["pptx", "docx", "xlsx", "xls", "doc", "ppt"]), // legacy/enc Office
+            FileTypeSignature(magic: "52617221", extensions: ["rar"]),
+            FileTypeSignature(magic: "00000018", extensions: ["mp4"]),
+        ]
+    }
+
+    func detectFileType(from data: Data) -> FileTypeSignature? {
+        let hexString = data.prefix(4).map { String(format: "%02X", $0) }.joined()
+        return FileTypeSignature.knownSignatures.first {
+            hexString.hasPrefix($0.magic)
+        }
+    }
+
+    func isLikelyTextFile(data: Data) -> Bool {
+        let sample = data.prefix(512)
+        for byte in sample {
+            if !(byte >= 0x09 && byte <= 0x0D) &&
+               !(byte >= 0x20 && byte <= 0x7E) {
+                return false
+            }
+        }
+        return true
+    }
+    
+    func isEncryptedPDF(data: Data) -> Bool {
+        if let content = String(data: data.prefix(2048), encoding: .ascii) {
+            return content.contains("/Encrypt")
+        }
+        return false
+    }
+
+    func isEncryptedOfficeFile(data: Data) -> Bool {
+        if let archive = Archive(data: data, accessMode: .read) {
+            if archive.contains(where: { $0.path.contains("EncryptedPackage") }) {
+                return true
+            }
+        }
+
+        // Check if it's OLE format (common for password-protected files)
+        let oleMagic = data.prefix(4).map { String(format: "%02X", $0) }.joined()
+        return oleMagic == "D0CF11E0"
+    }
+
+    func doesFileMatchExtension() -> Bool {
+        guard let fileExtension = self.pathExtension.lowercased().split(separator: "?").first,
+              let fileData = try? Data(contentsOf: self) else {
+            return false
+        }
+
+        if let detected = detectFileType(from: fileData) {
+            return detected.extensions.contains(String(fileExtension))
+        }
+
+        if isLikelyTextFile(data: fileData) {
+            return fileExtension == "txt"
+        }
+
+        return false
+    }
+
+    func validateFile() -> (matchesExtension: Bool, isEncrypted: Bool) {
+        guard let fileExtension = self.pathExtension.lowercased().split(separator: "?").first,
+              let fileData = try? Data(contentsOf: self) else {
+            return (false, false)
+        }
+
+        let matches = self.doesFileMatchExtension()
+        var isEncrypted = false
+
+        if matches {
+            if let type = detectFileType(from: fileData) {
+                if type.extensions.contains("pdf") {
+                    isEncrypted = isEncryptedPDF(data: fileData)
+                } else if type.extensions.contains(where: { ["pptx", "docx", "xlsx"].contains($0) }) {
+                    isEncrypted = isEncryptedOfficeFile(data: fileData)
+                }
+            }
+        }
+
+        return (matches, isEncrypted)
     }
     
 }
