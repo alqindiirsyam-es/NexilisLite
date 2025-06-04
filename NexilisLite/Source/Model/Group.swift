@@ -149,13 +149,13 @@ public class Member: User {
         var members: [Member] = []
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name from GROUPZ_MEMBER where group_id = '\(group_id)' OR group_id = (select group_id from DISCUSSION_FORUM where chat_id = '\(group_id)')") {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name, thumb_id, position from GROUPZ_MEMBER where group_id = '\(group_id)' OR group_id = (select group_id from DISCUSSION_FORUM where chat_id = '\(group_id)')") {
                     while cursor.next() {
                         members.append(Member(pin: cursor.string(forColumnIndex: 0) ?? "",
                                               firstName: cursor.string(forColumnIndex: 1) ?? "",
                                               lastName: cursor.string(forColumnIndex: 2) ?? "",
-                                              thumb: "",
-                                              position: ""))
+                                              thumb: cursor.string(forColumnIndex: 3) ?? "",
+                                              position: cursor.string(forColumnIndex: 4) ?? ""))
                     }
                     cursor.close()
                 }
@@ -171,13 +171,13 @@ public class Member: User {
         var member: Member?
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name from GROUPZ_MEMBER where f_pin = '\(f_pin)'") {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name, thumb_id, position from GROUPZ_MEMBER where f_pin = '\(f_pin)'") {
                     while cursor.next() {
                         member = Member(pin: cursor.string(forColumnIndex: 0) ?? "",
                                         firstName: cursor.string(forColumnIndex: 1) ?? "",
                                         lastName: cursor.string(forColumnIndex: 2) ?? "",
-                                        thumb: "",
-                                        position: "")
+                                        thumb: cursor.string(forColumnIndex: 3) ?? "",
+                                        position: cursor.string(forColumnIndex: 4) ?? "")
                     }
                     cursor.close()
                 }
@@ -193,13 +193,13 @@ public class Member: User {
         var member: Member?
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name from GROUPZ_MEMBER where f_pin = '\(f_pin)' AND (group_id = '\(group_id)' OR group_id = (select group_id from DISCUSSION_FORUM where chat_id = '\(group_id)'))") {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name, thumb_id, position from GROUPZ_MEMBER where f_pin = '\(f_pin)' AND (group_id = '\(group_id)' OR group_id = (select group_id from DISCUSSION_FORUM where chat_id = '\(group_id)'))") {
                     while cursor.next() {
                         member = Member(pin: cursor.string(forColumnIndex: 0) ?? "",
                                         firstName: cursor.string(forColumnIndex: 1) ?? "",
                                         lastName: cursor.string(forColumnIndex: 2) ?? "",
-                                        thumb: "",
-                                        position: "")
+                                        thumb: cursor.string(forColumnIndex: 3) ?? "",
+                                        position: cursor.string(forColumnIndex: 4) ?? "")
                     }
                     cursor.close()
                 }

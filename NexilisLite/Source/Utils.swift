@@ -706,7 +706,7 @@ public final class Utils {
         task.resume()
     }
     
-    public static func postDataWithCookiesAndUserAgent(from url: URL, parameter: [String: Any] = [:], parameters: [[String: Any]] = [], isFormData: Bool = false, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
+    public static func postDataWithCookiesAndUserAgent(from url: URL, parameter: [String: Any] = [:], parameters: [[String: Any]] = [], isFormData: Bool = false, isBackground: Bool = false, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
         let apiKey: String = SecureUserDefaults.shared.value(forKey: "apiKey") ?? ""
         var defaultParameter: [String : Any] = [
             "app_id": APIS.getAppNm(),
@@ -740,7 +740,10 @@ public final class Utils {
         }
         request.httpBody = jsonData
         //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
-        let urlConfig = URLSessionConfiguration.default
+        var urlConfig = URLSessionConfiguration.default
+        if isBackground{
+            urlConfig = URLSessionConfiguration.background(withIdentifier: "nexilis.backgroundSession")
+        }
         urlConfig.timeoutIntervalForRequest = 30.0
         urlConfig.timeoutIntervalForResource = 60.0
         let sessionDelegate = SelfSignedURLSessionDelegate()
@@ -2158,8 +2161,7 @@ public class DialogVerifyYou: UIViewController {
                                 if Nexilis.showFB {
                                     Nexilis.floatingButton.removeFromSuperview()
                                     Nexilis.floatingButton = FloatingButton()
-                                    let viewController = (UIApplication.shared.windows.first?.rootViewController)!
-                                    Nexilis.addFB(viewController: viewController, fromMAB: true)
+                                    Nexilis.addFB()
                                 }
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
                                 self.dismiss(animated: true)

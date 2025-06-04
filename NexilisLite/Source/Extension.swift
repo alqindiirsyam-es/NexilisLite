@@ -394,6 +394,55 @@ extension UIImage {
         }
     }
     
+    public func createCustomIconWithText(text: String, color: UIColor = .black) -> UIImage {
+        let size = CGSize(width: 60, height: 60)
+
+        UIGraphicsBeginImageContextWithOptions(size, false, 0)
+        defer { UIGraphicsEndImageContext() }
+
+        let iconRect = CGRect(x: 15, y: 5, width: 30, height: 30)
+        self.withRenderingMode(.alwaysTemplate).withTintColor(color).draw(in: iconRect)
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 14),
+            .paragraphStyle: paragraphStyle,
+            .foregroundColor: color
+        ]
+
+        let textRect = CGRect(x: 0, y: 38, width: 60, height: 20)
+        text.draw(in: textRect, withAttributes: attributes)
+
+        return UIGraphicsGetImageFromCurrentImageContext() ?? self
+    }
+    
+    public func rotateImage(byDegrees degrees: CGFloat) -> UIImage {
+        let radians = degrees * CGFloat.pi / 180
+        let newSize = CGRect(origin: .zero, size: CGSize(width: 15, height: 15))
+            .applying(CGAffineTransform(rotationAngle: radians))
+            .integral.size
+
+        UIGraphicsBeginImageContextWithOptions(newSize, false, self.scale)
+        guard let context = UIGraphicsGetCurrentContext() else { return self }
+
+        // Move origin to center
+        context.translateBy(x: newSize.width / 2, y: newSize.height / 2)
+        // Rotate context
+        context.rotate(by: radians)
+        // Draw the image at the center
+        self.draw(in: CGRect(x: -self.size.width / 2,
+                              y: -self.size.height / 2,
+                              width: self.size.width,
+                              height: self.size.height))
+
+        let rotatedImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+
+        return rotatedImage ?? self
+    }
+    
 }
 
 extension NSObject {
@@ -422,7 +471,7 @@ extension NSObject {
 //                FileEncryption.shared.wipeData(&tempData)
                 completion(true, true, isCircle ? image?.circleMasked : image)
             } else {
-                completion(false, false, placeholderImage)
+//                completion(false, false, placeholderImage)
                 Download().startHTTP(forKey: url) { (name, progress) in
                     guard progress == 100 else {
                         return
@@ -448,12 +497,6 @@ extension NSObject {
                                 }
                             }
                         }
-                        guard let tableView = tableView else { return }
-                        if let indexPath = indexPath,
-                           indexPath.section < tableView.numberOfSections,
-                           indexPath.row < tableView.numberOfRows(inSection: indexPath.section) {
-                            tableView.reloadRows(at: [indexPath], with: .none)
-                        }
                     }
                 }
             }
@@ -466,11 +509,7 @@ extension NSObject {
                 
                 DispatchQueue.main.async {
                     guard let tableView = tableView else { return }
-                    if let indexPath = indexPath,
-                       indexPath.section < tableView.numberOfSections,
-                       indexPath.row < tableView.numberOfRows(inSection: indexPath.section) {
-                        tableView.reloadRows(at: [indexPath], with: .none)
-                    }
+                    tableView.reloadData()
                 }
             }
         }
@@ -532,10 +571,30 @@ extension URL {
             FileTypeSignature(magic: "89504E47", extensions: ["png"]),
             FileTypeSignature(magic: "47494638", extensions: ["gif"]),
             FileTypeSignature(magic: "25504446", extensions: ["pdf"]),
-            FileTypeSignature(magic: "504B0304", extensions: ["zip", "docx", "xlsx", "pptx"]),
-            FileTypeSignature(magic: "D0CF11E0", extensions: ["pptx", "docx", "xlsx", "xls", "doc", "ppt"]), // legacy/enc Office
+            FileTypeSignature(magic: "504B0304", extensions: ["zip", "docx", "xlsx", "pptx", "jar", "odt", "ods", "odp", "apk", "ipa"]),
+            FileTypeSignature(magic: "D0CF11E0", extensions: ["doc", "xls", "ppt", "msg"]), // Legacy MS Office
             FileTypeSignature(magic: "52617221", extensions: ["rar"]),
+            FileTypeSignature(magic: "1F8B08", extensions: ["gz"]),
+            FileTypeSignature(magic: "425A68", extensions: ["bz2"]),
+            FileTypeSignature(magic: "377ABCAF271C", extensions: ["7z"]),
             FileTypeSignature(magic: "00000018", extensions: ["mp4"]),
+            FileTypeSignature(magic: "000001BA", extensions: ["mpg", "mpeg"]),
+            FileTypeSignature(magic: "000001B3", extensions: ["mpg"]),
+            FileTypeSignature(magic: "494433", extensions: ["mp3"]),
+            FileTypeSignature(magic: "4F676753", extensions: ["ogg"]),
+            FileTypeSignature(magic: "1A45DFA3", extensions: ["mkv", "webm"]),
+            FileTypeSignature(magic: "3026B2758E66CF11", extensions: ["wmv", "wma", "asf"]),
+            FileTypeSignature(magic: "57415645", extensions: ["wav"]),
+            FileTypeSignature(magic: "52494646", extensions: ["avi", "wav", "webp"]),
+            FileTypeSignature(magic: "3C3F786D6C", extensions: ["xml"]),
+            FileTypeSignature(magic: "68746D6C3E", extensions: ["html", "htm"]),
+            FileTypeSignature(magic: "7B5C727466", extensions: ["rtf"]),
+            FileTypeSignature(magic: "38425053", extensions: ["psd"]),
+            FileTypeSignature(magic: "49492A00", extensions: ["tif", "tiff"]),
+            FileTypeSignature(magic: "4D4D002A", extensions: ["tif", "tiff"]),
+            FileTypeSignature(magic: "00010000", extensions: ["ico"]),
+            FileTypeSignature(magic: "CAFEBABE", extensions: ["class"]),
+            FileTypeSignature(magic: "EFBBBF", extensions: ["txt"])
         ]
     }
 
@@ -544,17 +603,6 @@ extension URL {
         return FileTypeSignature.knownSignatures.first {
             hexString.hasPrefix($0.magic)
         }
-    }
-
-    func isLikelyTextFile(data: Data) -> Bool {
-        let sample = data.prefix(512)
-        for byte in sample {
-            if !(byte >= 0x09 && byte <= 0x0D) &&
-               !(byte >= 0x20 && byte <= 0x7E) {
-                return false
-            }
-        }
-        return true
     }
     
     func isEncryptedPDF(data: Data) -> Bool {
@@ -584,10 +632,6 @@ extension URL {
 
         if let detected = detectFileType(from: fileData) {
             return detected.extensions.contains(String(fileExtension))
-        }
-
-        if isLikelyTextFile(data: fileData) {
-            return fileExtension == "txt"
         }
 
         return false
@@ -1328,52 +1372,71 @@ public class ImageCache {
     private let cacheGif = NSCache<NSString, NSData>()
     private var cacheKeyMap: [String: String] = [:]
 
+    private let imageCacheDirectory: URL
+    private let gifCacheDirectory: URL
+
     private init() {
-        if let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let cacheDirectory = documentsDirectory.appendingPathComponent("fileCacheImage")
-            loadCacheFromDisk(directory: cacheDirectory)
-            
-            let cacheGifDirectory = documentsDirectory.appendingPathComponent("fileCacheGif")
-            loadCacheFromDisk(directory: cacheGifDirectory)
-        }
+        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+
+        imageCacheDirectory = documentsDirectory.appendingPathComponent("fileCacheImage")
+        gifCacheDirectory = documentsDirectory.appendingPathComponent("fileCacheGif")
+
+        loadCacheFromDisk(directory: imageCacheDirectory, isGif: false)
+        loadCacheFromDisk(directory: gifCacheDirectory, isGif: true)
     }
 
     public func save(image: UIImage, forKey key: String) {
         let sanitizedKey = sanitizeKey(key)
         cache.setObject(image, forKey: sanitizedKey as NSString)
         cacheKeyMap[key] = sanitizedKey
-        if let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let cacheDirectory = documentsDirectory.appendingPathComponent("fileCacheImage")
-            saveCacheToDisk(directory: cacheDirectory)
-        }
+        saveCacheToDisk(directory: imageCacheDirectory, isGif: false)
     }
-    
+
     public func saveGif(data: NSData, forKey key: String) {
         let sanitizedKey = sanitizeKey(key)
         cacheGif.setObject(data, forKey: sanitizedKey as NSString)
         cacheKeyMap[key] = sanitizedKey
-        if let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let cacheDirectory = documentsDirectory.appendingPathComponent("fileCacheGif")
-            saveCacheToDisk(directory: cacheDirectory)
-        }
+        saveCacheToDisk(directory: gifCacheDirectory, isGif: true)
     }
 
     public func image(forKey key: String) -> UIImage? {
         let sanitizedKey = sanitizeKey(key)
-        return cache.object(forKey: sanitizedKey as NSString)
+        if let image = cache.object(forKey: sanitizedKey as NSString) {
+            return image
+        }
+
+        // Try loading from disk if not in memory
+        let imageName = "\(sanitizedKey).png"
+        if FileEncryption.shared.isSecureExists(filename: imageName) {
+            do {
+                var data = try FileEncryption.shared.readSecure(filename: imageName)
+                if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data!) {
+                    data = decrypted
+                }
+                if let image = UIImage(data: data!) {
+                    cache.setObject(image, forKey: sanitizedKey as NSString)
+                    return image
+                }
+            } catch {
+                print("Failed to read or decrypt image from disk: \(error)")
+            }
+        }
+
+        return nil
     }
+
     public func imageGif(forKey key: String) -> NSData? {
         let sanitizedKey = sanitizeKey(key)
         return cacheGif.object(forKey: sanitizedKey as NSString)
     }
-    
-    func saveCacheToDisk(directory: URL) {
-        let fileManager = FileManager.default
 
+    private func saveCacheToDisk(directory: URL, isGif: Bool) {
+        let fileManager = FileManager.default
         if !fileManager.fileExists(atPath: directory.path) {
             do {
                 try fileManager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
             } catch {
+                print("Failed to create cache directory: \(error)")
                 return
             }
         }
@@ -1383,55 +1446,58 @@ public class ImageCache {
             let jsonData = try JSONSerialization.data(withJSONObject: cacheKeyMap, options: [])
             try jsonData.write(to: mappingFilePath)
         } catch {
+            print("Failed to write mapping file: \(error)")
             return
         }
 
         for (_, sanitizedKey) in cacheKeyMap {
-            if let image = cache.object(forKey: sanitizedKey as NSString),
-               let imageData = image.pngData() {
-                do {
-                    try FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).png", data: imageData)
-                } catch {
+            if isGif {
+                if let gifData = cacheGif.object(forKey: sanitizedKey as NSString) {
+                    try? FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).gif", data: gifData as Data)
                 }
-                
+            } else {
+                if let image = cache.object(forKey: sanitizedKey as NSString),
+                   let imageData = image.pngData() {
+                    try? FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).png", data: imageData)
+                }
             }
         }
     }
-    
-    func loadCacheFromDisk(directory: URL) {
-        // Load mapping
+
+    private func loadCacheFromDisk(directory: URL, isGif: Bool) {
         let mappingFilePath = directory.appendingPathComponent("keyMapping.json")
         guard let jsonData = try? Data(contentsOf: mappingFilePath),
               let loadedMapping = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] else {
             return
         }
 
-        if cacheKeyMap.count == 0 {
+        if cacheKeyMap.isEmpty {
             cacheKeyMap = loadedMapping
         }
 
-        // Load images
-        for cacheKey in cacheKeyMap {
-            let imageName = "\(cacheKey.value).png"
-            if FileEncryption.shared.isSecureExists(filename: imageName) {
-                do {
-                    if var data = try FileEncryption.shared.readSecure(filename: imageName) {
-                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                        if dataDecrypt != nil {
-                            data = dataDecrypt!
-                        }
-                        if let image = UIImage(data: data) {
-                            cache.setObject(image, forKey: cacheKey.value as NSString)
-                        }
-                    }
+        for (_, sanitizedKey) in loadedMapping {
+            let fileExtension = isGif ? "gif" : "png"
+            let fileName = "\(sanitizedKey).\(fileExtension)"
+
+            guard FileEncryption.shared.isSecureExists(filename: fileName) else { continue }
+
+            do {
+                var data = try FileEncryption.shared.readSecure(filename: fileName)
+                if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data!) {
+                    data = decrypted
                 }
-                catch {
-                    print("Error reading secure file")
+
+                if isGif {
+                    cacheGif.setObject(data! as NSData, forKey: sanitizedKey as NSString)
+                } else if let image = UIImage(data: data!) {
+                    cache.setObject(image, forKey: sanitizedKey as NSString)
                 }
+            } catch {
+                print("Error loading \(fileExtension) from disk: \(error)")
             }
         }
     }
-    
+
     private func sanitizeKey(_ key: String) -> String {
         let data = Data(key.utf8)
         var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))

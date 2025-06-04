@@ -256,8 +256,7 @@ class IncomingThread {
                             if Nexilis.showFB {
                                 Nexilis.floatingButton.removeFromSuperview()
                                 Nexilis.floatingButton = FloatingButton()
-                                let viewController = (UIApplication.shared.windows.first?.rootViewController)!
-                                Nexilis.addFB(viewController: viewController, fromMAB: true)
+                                Nexilis.addFB()
                             }
                             var dataImage: [AnyHashable : Any] = [:]
                             dataImage["name"] = ""

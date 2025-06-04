@@ -23,6 +23,9 @@ class ContactChatViewController: UITableViewController {
     
     var chats: [Chat] = []
     
+    var archivedChats: [Chat] = []
+    var listMaxArchived: [String: [String]] = [:]
+    
     var chatGroupMaps: [String: [Chat]] = [:]
     
     var contacts: [User] = []
@@ -392,7 +395,6 @@ class ContactChatViewController: UITableViewController {
         if self.isGettingData {
             return
         }
-        self.isGettingData = true
         getChats {
             self.getContacts {
                 self.getGroups { g1 in
@@ -418,42 +420,97 @@ class ContactChatViewController: UITableViewController {
     
     func getChats(completion: @escaping ()->()) {
         DispatchQueue.global().async {
+//            while self.isGettingData {
+//                Thread.sleep(forTimeInterval: 0.1)
+//            }
+            self.isGettingData = true
             self.chatGroupMaps.removeAll()
+            self.listMaxArchived.removeAll()
             let previousChat = self.chats
             let allChats = Chat.getData()
+            self.archivedChats = Chat.getData(isArchived: true)
             var tempChats: [Chat] = []
+            var lowestPinned = 0
+
             for singleChat in allChats {
-                if !singleChat.groupId.isEmpty {
-                    let chatParentInPreviousChats = previousChat.first(where: { $0.isParent && $0.groupId == singleChat.groupId })
-                    if self.chatGroupMaps[singleChat.groupId] != nil {
-                        self.chatGroupMaps[singleChat.groupId]!.insert(singleChat, at: 0)
-                        if let parentChat = tempChats.first(where: { $0.groupId == singleChat.groupId && $0.isParent }) {
-                            let counterParent = parentChat.counter
-                            parentChat.counter = "\(Int(counterParent)! + Int(singleChat.counter)!)"
+                guard !singleChat.groupId.isEmpty else {
+                    tempChats.append(singleChat)
+                    if singleChat.pinned > 0 {
+                        self.listMaxArchived[singleChat.pin] = [""]
+                    }
+                    continue
+                }
+                
+                let chatParentInPreviousChats = previousChat.first { $0.isParent && $0.groupId == singleChat.groupId }
+                
+                if var existingGroup = self.chatGroupMaps[singleChat.groupId] {
+                    existingGroup.insert(singleChat, at: 0)
+                    self.chatGroupMaps[singleChat.groupId] = existingGroup
+                    
+                    if let parentChatIndex = tempChats.firstIndex(where: { $0.groupId == singleChat.groupId && $0.isParent }) {
+                        if let counterParent = Int(tempChats[parentChatIndex].counter), let counterSingle = Int(singleChat.counter) {
+                            tempChats[parentChatIndex].counter = "\(counterParent + counterSingle)"
                         }
-                        if let parentExist = chatParentInPreviousChats, parentExist.isSelected {
-                            if let indexParent = tempChats.firstIndex(where: { $0.isParent && $0.groupId == singleChat.groupId }){
-                                tempChats.insert(singleChat, at: indexParent + self.chatGroupMaps[singleChat.groupId]!.count)
+                        if singleChat.pinned != 0 && (lowestPinned == 0 || lowestPinned > singleChat.pinned) {
+                            lowestPinned = singleChat.pinned
+                        }
+                        if singleChat.pinned != 0 {
+                            if !self.listMaxArchived.keys.contains(singleChat.groupId) {
+                                self.listMaxArchived[singleChat.groupId] = [singleChat.pin]
+                            } else {
+                                self.listMaxArchived[singleChat.groupId]?.append(singleChat.pin)
                             }
                         }
-                    } else {
-                        self.chatGroupMaps[singleChat.groupId] = [singleChat]
-                        let parentChat = Chat(profile: singleChat.profile, groupName: singleChat.groupName, counter: singleChat.counter, groupId: singleChat.groupId)
-                        parentChat.isParent = true
-                        if let parentExist = chatParentInPreviousChats, parentExist.isSelected {
-                            parentChat.isSelected = true
-                            tempChats.append(parentChat)
-                            tempChats.append(singleChat)
-                        } else {
-                            tempChats.append(parentChat)
+                        if tempChats[parentChatIndex].pinned < singleChat.pinned {
+                            tempChats[parentChatIndex].pinned = singleChat.pinned
+                        }
+                        if tempChats[parentChatIndex].pinned > 0 {
+                            if singleChat.pinned == 0 {
+                                singleChat.pinned = lowestPinned - 1
+                                singleChat.isFolPinned = true
+                            }
+                            tempChats.forEach { chat in
+                                if chat.groupId == singleChat.groupId && (chat.pinned == 0 || (chat.isFolPinned && chat.pinned != lowestPinned - 1)) {
+                                    chat.pinned = lowestPinned - 1
+                                    chat.isFolPinned = true
+                                }
+                            }
                         }
                     }
+                    
+                    if let parentExist = chatParentInPreviousChats, parentExist.isSelected,
+                       let indexParent = tempChats.firstIndex(where: { $0.isParent && $0.groupId == singleChat.groupId }) {
+                        tempChats.insert(singleChat, at: min(indexParent + existingGroup.count, tempChats.count))
+                    }
                 } else {
-                    tempChats.append(singleChat)
+                    lowestPinned = 0
+                    if singleChat.pinned != 0 {
+                        lowestPinned = singleChat.pinned
+                    }
+                    self.chatGroupMaps[singleChat.groupId] = [singleChat]
+                    let parentChat = Chat(profile: singleChat.profile, groupName: singleChat.groupName, counter: singleChat.counter, groupId: singleChat.groupId)
+                    parentChat.isParent = true
+                    
+                    if parentChat.pinned != singleChat.pinned {
+                        parentChat.pinned = singleChat.pinned
+                        self.listMaxArchived[singleChat.groupId] = [singleChat.pin]
+                    }
+                    
+                    if let parentExist = chatParentInPreviousChats, parentExist.isSelected {
+                        parentChat.isSelected = true
+                        tempChats.append(parentChat)
+                        tempChats.append(singleChat)
+                    } else {
+                        tempChats.append(parentChat)
+                    }
                 }
             }
             if self.isChooser != nil {
                 tempChats.removeAll(where: { $0.pin == "-997" })
+            }
+            tempChats.sort(by: { $0.pinned > $1.pinned })
+            if self.archivedChats.count > 0 {
+                tempChats.insert(Chat(pin: "Archived"), at: 0)
             }
             self.chats = tempChats
             completion()
@@ -700,6 +757,13 @@ extension ContactChatViewController {
                 } else {
                     data = chats[indexPath.row]
                 }
+                if self.archivedChats.count > 0 && indexPath.row == 0 {
+                    let controller = ArchivedChatView()
+                    controller.archivedChats = archivedChats
+                    controller.hidesBottomBarWhenPushed = true
+                    navigationController?.show(controller, sender: nil)
+                    return
+                }
                 if data.isParent {
                     expandCollapseChats(tableView: tableView, indexPath: indexPath)
                     return
@@ -784,6 +848,7 @@ extension ContactChatViewController {
                         } else {
                             chats.insert(dataSubChat, at: indexParent + 1)
                             indexParent+=1
+                            chats.sort(by: { $0.pinned > $1.pinned })
                         }
                     }
                     
@@ -1082,6 +1147,102 @@ extension ContactChatViewController {
         return value
     }
     
+    override func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        let data: Chat
+        if isFilltering {
+            data = fillteredData[indexPath.row] as! Chat
+        } else {
+            data = chats[indexPath.row]
+        }
+        if !data.isParent && segment.selectedSegmentIndex == 0 {
+            if self.archivedChats.count > 0 && indexPath.row == 0 {
+                return nil
+            }
+            let archiveAction = UIContextualAction(style: .normal, title: nil) { (_, _, completionHandler) in
+                DispatchQueue.global().async {
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        do {
+                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+                                "pinned" : 0,
+                                "archived" : Date().currentTimeMillis()
+                            ], _where: "l_pin = '\(data.pin)'")
+                        } catch {
+                            rollback.pointee = true
+                            print("Access database error: \(error.localizedDescription)")
+                        }
+                    })
+                }
+                self.chats.remove(at: indexPath.row)
+                tableView.deleteRows(at: [indexPath], with: .right)
+                self.getChats() {
+                    DispatchQueue.main.async {
+                        self.tableView.reloadData()
+                        self.isGettingData = false
+                    }
+                }
+                completionHandler(true)
+            }
+            archiveAction.backgroundColor = .mainColor
+            let archiveIcon = UIImage(systemName: "archivebox.fill")!.createCustomIconWithText(text: "Archive".localized())
+            archiveAction.image = archiveIcon
+
+            var textPinned = "Pin".localized()
+            var pinnedDate = Date().currentTimeMillis()
+            var imagePinned = UIImage(systemName: "pin.fill")!
+            if data.pinned != 0 && !data.isFolPinned {
+                textPinned = "Unpin".localized()
+                pinnedDate = 0
+                imagePinned = UIImage(systemName: "pin.slash.fill")!
+            }
+            let unpinAction = UIContextualAction(style: .normal, title: textPinned) { (_, _, completionHandler) in
+                if pinnedDate != 0 && ((self.listMaxArchived[data.groupId] != nil && self.listMaxArchived[data.groupId]!.count == 3) || (self.listMaxArchived.count == 3)) {
+                    let alertController = LibAlertController(
+                        title: "You can only pin 3 chats".localized(),
+                        message: nil,
+                        preferredStyle: .alert
+                    )
+                    
+                    alertController.addAction(UIAlertAction(title: "OK".localized(), style: .cancel, handler: nil))
+                    
+                    if UIApplication.shared.visibleViewController?.navigationController != nil {
+                        UIApplication.shared.visibleViewController?.navigationController?.present(alertController, animated: true, completion: nil)
+                    } else {
+                        UIApplication.shared.visibleViewController?.present(alertController, animated: true, completion: nil)
+                    }
+                } else {
+                    DispatchQueue.global().async {
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            do {
+                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+                                    "pinned" : pinnedDate
+                                ], _where: "l_pin = '\(data.pin)'")
+                            } catch {
+                                rollback.pointee = true
+                                print("Access database error: \(error.localizedDescription)")
+                            }
+                        })
+                    }
+                    self.chats.remove(at: indexPath.row)
+                    tableView.deleteRows(at: [indexPath], with: .right)
+                    self.getChats() {
+                        DispatchQueue.main.async {
+                            self.tableView.reloadData()
+                            self.isGettingData = false
+                        }
+                    }
+                }
+                completionHandler(true)
+            }
+            unpinAction.backgroundColor = .darkGray
+            let pinIcon = imagePinned.rotateImage(byDegrees: 45).createCustomIconWithText(text: textPinned, color: .white)
+            unpinAction.image = pinIcon
+
+            let configuration = UISwipeActionsConfiguration(actions: [archiveAction, unpinAction])
+            return configuration
+        }
+        return nil
+    }
+    
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         var cell: UITableViewCell!
         switch segment.selectedSegmentIndex {
@@ -1175,7 +1336,7 @@ extension ContactChatViewController {
                     cell.selectionStyle = .none
                     return cell
                 }
-                let data: Chat
+                var data: Chat
                 if isFilltering {
                     data = fillteredData[indexPath.row] as! Chat
                 } else {
@@ -1191,6 +1352,34 @@ extension ContactChatViewController {
                         return cell
                     }
                     data = chats[indexPath.row]
+                }
+                if self.archivedChats.count > 0 && indexPath.row == 0 {
+                    let imageView = UIImageView()
+                    content.addSubview(imageView)
+                    imageView.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        imageView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                        imageView.widthAnchor.constraint(equalToConstant: 20.0),
+                        imageView.heightAnchor.constraint(equalToConstant: 20.0),
+                        imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 25.0)
+                    ])
+                    imageView.image = UIImage(systemName: "archivebox")!
+                    imageView.tintColor = .darkGray
+                    
+                    let titleView = UILabel()
+                    content.addSubview(titleView)
+                    titleView.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 25.0),
+                        titleView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40.0),
+                        titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                    ])
+                    titleView.font = UIFont.boldSystemFont(ofSize: 14 + String.offset())
+                    titleView.text = "Archived".localized()
+                    titleView.textColor = .darkGray
+                    cell.backgroundColor = .clear
+                    cell.separatorInset = UIEdgeInsets(top: 0, left: 60.0, bottom: 0, right: 0)
+                    return cell
                 }
                 let imageView = UIImageView()
                 content.addSubview(imageView)
@@ -1268,6 +1457,7 @@ extension ContactChatViewController {
                 
                 let timeView = UILabel()
                 let viewCounter = UIView()
+                let viewPinned = UIImageView()
                 
                 if data.counter != "0" {
                     timeView.textColor = .systemRed
@@ -1299,6 +1489,17 @@ extension ContactChatViewController {
                     }
                     labelCounter.textColor = .secondaryColor
                     labelCounter.textAlignment = .center
+                }
+                
+                if data.pinned != 0 && !data.isFolPinned {
+                    viewPinned.image = UIImage(systemName: "pin.fill")!.rotateImage(byDegrees: 45).withRenderingMode(.alwaysTemplate)
+                    viewPinned.tintColor = .darkGray
+                    content.addSubview(viewPinned)
+                    viewPinned.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        viewPinned.widthAnchor.constraint(equalToConstant: 18),
+                        viewPinned.heightAnchor.constraint(equalToConstant: 18)
+                    ])
                 }
                 
                 if !data.isParent {
@@ -1419,6 +1620,20 @@ extension ContactChatViewController {
                         viewCounter.topAnchor.constraint(equalTo: timeView.bottomAnchor, constant: 5.0).isActive = true
                         viewCounter.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20).isActive = true
                     }
+                    if data.pinned != 0 && !data.isFolPinned {
+                        NSLayoutConstraint.activate([
+                            viewPinned.topAnchor.constraint(equalTo: timeView.bottomAnchor, constant: 5.0)
+                        ])
+                        if data.counter == "0" {
+                            NSLayoutConstraint.activate([
+                                viewPinned.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20)
+                            ])
+                        } else {
+                            NSLayoutConstraint.activate([
+                                viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor, constant: -5)
+                            ])
+                        }
+                    }
                 } else {
                     titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor).isActive = true
                     titleView.text = data.groupName
@@ -1438,6 +1653,20 @@ extension ContactChatViewController {
                     if data.counter != "0" {
                         viewCounter.trailingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: -5).isActive = true
                         viewCounter.centerYAnchor.constraint(equalTo: content.centerYAnchor).isActive = true
+                    }
+                    if data.pinned != 0 && !data.isFolPinned {
+                        NSLayoutConstraint.activate([
+                            viewPinned.centerYAnchor.constraint(equalTo: content.centerYAnchor)
+                        ])
+                        if data.counter == "0" {
+                            NSLayoutConstraint.activate([
+                                viewPinned.trailingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: -5)
+                            ])
+                        } else {
+                            NSLayoutConstraint.activate([
+                                viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor, constant: -5)
+                            ])
+                        }
                     }
                 }
             }
@@ -1658,12 +1887,16 @@ extension ContactChatViewController {
     
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0")
-        if fontSize == 4 {
-            return 85.0
-        } else if fontSize == 6 {
-            return 95.0
+        var finalHeight = 75.0
+        if self.archivedChats.count > 0 && indexPath.row == 0 {
+            finalHeight = 50.0
         }
-        return 75.0
+        if fontSize == 4 {
+            finalHeight += 10
+        } else if fontSize == 6 {
+            finalHeight += 20
+        }
+        return finalHeight
     }
     
     private func getRealStatus(messageId: String) -> String {

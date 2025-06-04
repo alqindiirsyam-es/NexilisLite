@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.39"
+    public static var cpaasVersion = "5.0.42"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -184,7 +184,7 @@ public class Nexilis: NSObject {
                             }
                         }
                         if showButton {
-                            addFB(viewController: viewController!, fromMAB: fromMAB)
+                            addFB()
                         }
                         if let rootViewController = viewController {
                             let isDarkMode = rootViewController.traitCollection.userInterfaceStyle == .dark
@@ -246,6 +246,9 @@ public class Nexilis: NSObject {
                 
                 if let me = User.getMyPin() {
                     if Utils.getSetProfile() {
+                        if Utils.getSecureFolderOffline() != "0" {
+                            _ = Database.shared.openDatabase()
+                        }
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                             do {
                                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT * FROM BUDDY where f_pin = '\(me)' ") {
@@ -393,16 +396,18 @@ public class Nexilis: NSObject {
         Nexilis.sharedAudioPlayer?.stop()
     }
     
-    public static func addFB(viewController: UIViewController, fromMAB: Bool) {
+    public static func addFB() {
         if let keyWindow = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) {
             keyWindow.addSubview(floatingButton)
         }
         if fromMAB {
-            var vc = viewController
-            if viewController is UINavigationController {
-                vc = (viewController as! UINavigationController).rootViewController!
+            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = scene.windows.first,
+               let rootVC = window.rootViewController {
+                if let navBar = rootVC as? UINavigationController {
+                    floatingButton.mySettingDelegate = navBar.rootViewController as? any SettingMABDelegate
+                }
             }
-            floatingButton.mySettingDelegate = vc as? any SettingMABDelegate
         }
     }
     
@@ -651,7 +656,7 @@ public class Nexilis: NSObject {
     public static func checkingAccess(key: String) -> Bool {
         let dataAccess = Utils.getFeatureAccess()
         if dataAccess.isEmpty {
-            if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" {
+            if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" {
                 return false
             } else {
                 return true
@@ -660,7 +665,7 @@ public class Nexilis: NSObject {
             if jsonArray[key] != nil {
                 return jsonArray[key] as! String == "1"
             } else {
-                if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" {
+                if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" {
                     return false
                 } else {
                     return true

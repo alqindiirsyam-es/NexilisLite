@@ -4472,9 +4472,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             guard indexPath.row < dataMessages.count else {
                 return
             }
-            if copySession && dataMessages[indexPath.row]["f_pin"]  as? String ?? "" != "-999" {
-                return
-            }
+//            if copySession && dataMessages[indexPath.row]["f_pin"]  as? String ?? "" != "-999" {
+//                return
+//            }
             if (dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" != "0" || dataMessages[indexPath.row]["lock"] as? String == "1") && !forwardSession && !deleteSession {
                 return
             }

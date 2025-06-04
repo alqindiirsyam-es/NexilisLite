@@ -325,12 +325,13 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             return 130.0
         }
         let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0")
+        var finalHeight = 75.0
         if fontSize == 4 {
-            return 85.0
+            finalHeight += 10
         } else if fontSize == 6 {
-            return 95.0
+            finalHeight += 20
         }
-        return 75.0
+        return finalHeight
     }
     
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {

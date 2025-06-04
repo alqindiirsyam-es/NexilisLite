@@ -118,8 +118,7 @@ public class ConfigureFloatingButton: UIViewController {
         DispatchQueue.main.async {
             Nexilis.floatingButton.removeFromSuperview()
             Nexilis.floatingButton = FloatingButton()
-            let viewController = (UIApplication.shared.windows.first?.rootViewController)!
-            Nexilis.addFB(viewController: viewController, fromMAB: Nexilis.fromMAB)
+            Nexilis.addFB()
             if Nexilis.fromMAB {
                 Nexilis.floatingButton.isHidden = true
             }

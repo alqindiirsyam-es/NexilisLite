@@ -161,8 +161,7 @@ public class ChangeDeviceViewController: UIViewController {
                                     if Nexilis.showFB {
                                         Nexilis.floatingButton.removeFromSuperview()
                                         Nexilis.floatingButton = FloatingButton()
-                                        let viewController = (UIApplication.shared.windows.first?.rootViewController)!
-                                        Nexilis.addFB(viewController: viewController, fromMAB: true)
+                                        Nexilis.addFB()
                                     }
                                     if self.fromChangeNamePass{
                                         var vc = self.navigationController?.presentingViewController
@@ -285,8 +284,7 @@ public class ChangeDeviceViewController: UIViewController {
                                 if Nexilis.showFB {
                                     Nexilis.floatingButton.removeFromSuperview()
                                     Nexilis.floatingButton = FloatingButton()
-                                    let viewController = (UIApplication.shared.windows.first?.rootViewController)!
-                                    Nexilis.addFB(viewController: viewController, fromMAB: true)
+                                    Nexilis.addFB()
                                 }
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
                                 if self.fromChangeNamePass{
@@ -327,8 +325,7 @@ public class ChangeDeviceViewController: UIViewController {
                                 if Nexilis.showFB {
                                     Nexilis.floatingButton.removeFromSuperview()
                                     Nexilis.floatingButton = FloatingButton()
-                                    let viewController = (UIApplication.shared.windows.first?.rootViewController)!
-                                    Nexilis.addFB(viewController: viewController, fromMAB: true)
+                                    Nexilis.addFB()
                                 }
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
                                 if self.fromChangeNamePass{

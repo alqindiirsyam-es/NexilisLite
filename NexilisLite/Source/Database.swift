@@ -98,12 +98,48 @@ public class Database {
         database?.inTransaction({(fmdb, rollback) in
             do {
                 try createDatabase(fmdb: fmdb)
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE_SUMMARY", columnName: "pinned", columnType: "INTEGER", defaultValue: "0")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE_SUMMARY", columnName: "archived", columnType: "INTEGER", defaultValue: "0")
                 result = 1
 //                    print("Create Done")
             } catch {
             }
         })
         return result
+    }
+    
+    func addColumnIfNeeded(database: FMDatabase, tableName: String, columnName: String, columnType: String, defaultValue: String? = nil) {
+        do {
+            // 1. Check if the column already exists
+            let rs = try database.executeQuery("PRAGMA table_info(\(tableName))", values: nil)
+            var columnExists = false
+            while rs.next() {
+                if let existingColumn = rs.string(forColumn: "name"), existingColumn == columnName {
+                    columnExists = true
+                    break
+                }
+            }
+            rs.close()
+
+            // 2. If it doesn't exist, add the column
+            if !columnExists {
+                var alterSQL = "ALTER TABLE \(tableName) ADD COLUMN \(columnName) \(columnType)"
+                if let defaultValue = defaultValue {
+                    // Wrap string values in single quotes, leave numeric unquoted
+                    if columnType.lowercased().contains("char") || columnType.lowercased().contains("text") {
+                        alterSQL += " DEFAULT '\(defaultValue)'"
+                    } else {
+                        alterSQL += " DEFAULT \(defaultValue)"
+                    }
+                }
+                try database.executeUpdate(alterSQL, values: nil)
+                print("Added column \(columnName)")
+            } else {
+                print("Column \(columnName) already exists")
+            }
+        } catch {
+            print("Error checking or adding column: \(error.localizedDescription)")
+        }
     }
     
     func createDatabase(fmdb:FMDatabase) throws -> Void{
@@ -394,6 +430,8 @@ public class Database {
                                 "'l_pin' text NOT NULL DEFAULT ''," +
                                 "'message_id' text NOT NULL," +
                                 "'counter' integer NOT NULL default 0," +
+                                "'pinned' integer NOT NULL default 0," +
+                                "'archived' integer NOT NULL default 0," +
                                 "PRIMARY KEY ('l_pin'))", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'OUTGOING' (" +

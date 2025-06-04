@@ -281,9 +281,10 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                                                 lastName: cursorMember.string(forColumnIndex: 2) ?? "",
                                                 thumb: cursorMember.string(forColumnIndex: 3) ?? "",
                                                 position: cursorMember.string(forColumnIndex: 4) ?? "")
-                                if let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT user_type, official_account FROM BUDDY where f_pin='\(member.pin)'"), cursorUser.next() {
+                                if let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT user_type, official_account, image_id FROM BUDDY where f_pin='\(member.pin)'"), cursorUser.next() {
                                     member.userType = cursorUser.string(forColumnIndex: 0)
                                     member.official = cursorUser.string(forColumnIndex: 1)
+                                    member.thumb = cursorUser.string(forColumnIndex: 2) ?? ""
                                     cursorUser.close()
                                 }
                                 group.members.append(member)
@@ -612,7 +613,7 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                                 if result, let index = g.members.firstIndex(of: member) {
                                     DispatchQueue.main.async {
                                         g.members.remove(at: index)
-                                        tableView.deleteRows(at: [indexPath], with: .automatic)
+                                        tableView.deleteRows(at: [indexPath], with: .right)
                                         tableView.reloadData()
                                     }
                                 }

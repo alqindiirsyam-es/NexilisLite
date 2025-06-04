@@ -1040,6 +1040,7 @@ public class APIS: NSObject {
     public static var uuidCall: UUID?
     public static var fpinCall: String?
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
+        print("MASUK SHOW NOTIFICATION NEXILIS: \(userInfo)")
         if checkAppStateisBackground() {
 //            Nexilis.sendStateToServer(s: "MASUK SHOW NOTIFICATION NEXILIS")
 //            print("MASUK SHOW NOTIFICATION NEXILIS: \(userInfo)")
@@ -1192,26 +1193,24 @@ public class APIS: NSObject {
     }
     
     private static func ackAPN(id: String) {
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .background).async {
 //            Nexilis.sendStateToServer(s: "send ack from apn")
-            DispatchQueue.global().async {
-                let parameter: [String : Any] = [
-                    "pin": User.getMyPin() ?? "",
-                    "message_id": id
-                ]
-                Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "ack_message")!, parameter: parameter, isFormData: true) { data, response, error in
-                }
+            let parameter: [String : Any] = [
+                "pin": User.getMyPin() ?? "",
+                "message_id": id
+            ]
+            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "ack_message")!, parameter: parameter, isFormData: true, isBackground: true) { data, response, error in
             }
         }
     }
     
     private static func getMessageById(id: String) {
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .background).async {
             let parameter: [String : Any] = [
                 "pin": User.getMyPin() ?? "",
                 "message_id": id
             ]
-            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
+            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true, isBackground: true) { data, response, error in
                 if let data = data {
                     do {
                         if let dataString = String(data: data, encoding: .utf8) {

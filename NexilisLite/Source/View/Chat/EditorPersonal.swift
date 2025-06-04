@@ -5321,10 +5321,13 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId })
                             if idx != nil {
                                 self.dataMessages.remove(at: idx!)
-                                if (idx == self.dataMessages.count - 1) {
-                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-                                }
+//                                if (idx == self.dataMessages.count - 1) {
+//                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+//                                }
                                 for i in 0..<dataDates.count {
+                                    if i > dataDates.count - 1 {
+                                        continue
+                                    }
                                     if self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[i] }).count == 0 {
                                         dataDates.remove(at: i)
                                     }
@@ -5337,10 +5340,13 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                         let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
                         if idx != nil {
                             self.dataMessages.remove(at: idx!)
-                            if (idx == self.dataMessages.count - 1) {
-                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-                            }
+//                            if (idx == self.dataMessages.count - 1) {
+//                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+//                            }
                             for i in 0..<dataDates.count {
+                                if i > dataDates.count - 1 {
+                                    continue
+                                }
                                 if self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[i] }).count == 0 {
                                     dataDates.remove(at: i)
                                 }
