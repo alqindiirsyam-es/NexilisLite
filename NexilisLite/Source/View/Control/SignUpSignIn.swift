@@ -364,6 +364,9 @@ public class SignUpSignIn: UIViewController {
                             Utils.setProfile(value: true)
                             // pos registration
                             _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
+                            DispatchQueue.global().asyncAfter(deadline: .now() + 2, execute: {
+                                Nexilis.getWhitelistFileExt()
+                            })
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
                                 Nexilis.hideLoader(completion: {
                                     let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
@@ -409,6 +412,7 @@ public class SignUpSignIn: UIViewController {
                             }
                         })
                         Utils.setProfile(value: true)
+                        Nexilis.getWhitelistFileExt()
     //                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "updateFifthTab"), object: nil, userInfo: nil)
                         DispatchQueue.main.async {
                             Nexilis.hideLoader(completion: {

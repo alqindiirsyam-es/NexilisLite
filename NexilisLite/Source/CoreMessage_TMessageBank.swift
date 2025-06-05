@@ -2715,4 +2715,15 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func getWhitelistFileExt() -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.GET_WHITELIST
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.API] = Nexilis.sAPIKey
+        tMessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
+        return tMessage
+    }
+    
 }

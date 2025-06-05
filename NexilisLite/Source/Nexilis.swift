@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.42"
+    public static var cpaasVersion = "5.0.43"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -287,6 +287,7 @@ public class Nexilis: NSObject {
                     getServiceBank()
                     getPullWorkingArea()
                     getPullGroupNoMember()
+                    getWhitelistFileExt()
                     delegate.onSuccess(userId: me)
                     forceShowFB()
                     if (Utils.getSetProfile() && !Utils.getFinishInitPrefsr()) || (!Utils.getForceAnonymous() && !Utils.getFinishInitPrefsr()) {
@@ -685,6 +686,16 @@ public class Nexilis: NSObject {
             }
         }
         return ""
+    }
+    
+    static func getWhitelistFileExt() {
+        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getWhitelistFileExt(), timeout: 5000), response.isOk() {
+            let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
+//            print("SUCCESS getWhitelistFileExt: \(data)")
+            Utils.setWhitelistFileExt(value: data)
+        } else {
+//            print("GAGAL getWhitelistFileExt")
+        }
     }
     
     private static func getPullWorkingArea() {
@@ -1625,15 +1636,23 @@ public class Nexilis: NSObject {
                             queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(chat_id.isEmpty ? pin : l_pin)' AND chat_id = '\(chat_id)' AND message_scope_id = '\(MessageScope.GROUP)' order by server_date desc LIMIT 1"
                         }
                         var messageId = ""
+                        var pinned = 0
+                        var archived = 0
                         if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: queryGetLastMessageId), cursorData.next() {
                             messageId = cursorData.string(forColumnIndex: 0) ?? ""
                             cursorData.close()
+                        }
+                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                            pinned = Int(cursor.int(forColumnIndex: 0))
+                            archived = Int(cursor.int(forColumnIndex: 1))
                         }
                         if !messageId.isEmpty {
                             _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                                 "l_pin" : pin,
                                 "message_id" : messageId,
-                                "counter" : counter ?? 0
+                                "counter" : counter ?? 0,
+                                "pinned" : pinned,
+                                "archived" : archived
                             ], replace: true)
                         }
                     } catch {
@@ -1713,10 +1732,14 @@ public class Nexilis: NSObject {
         })
         let pin = "-999"
         var counter : Int? = nil
+        var pinned = 0
+        var archived = 0
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select counter from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select counter, pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
                     counter = Int(cursor.int(forColumnIndex: 0))
+                    pinned = Int(cursor.int(forColumnIndex: 1))
+                    archived = Int(cursor.int(forColumnIndex: 2))
                     counter! += 1
                     cursor.close()
                     //print("select db message summary")
@@ -1735,7 +1758,9 @@ public class Nexilis: NSObject {
                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                     "l_pin" : pin,
                     "message_id" : message_id,
-                    "counter" : counter!
+                    "counter" : counter!,
+                    "pinned" : pinned,
+                    "archived" : archived
                 ], replace: true)
             } catch {
                 rollback.pointee = true
@@ -1796,12 +1821,20 @@ public class Nexilis: NSObject {
             }
         })
         let pin = lPin == me ? fPin : lPin
+        var pinned = 0
+        var archived = 0
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                    pinned = Int(cursor.int(forColumnIndex: 0))
+                    archived = Int(cursor.int(forColumnIndex: 1))
+                }
                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                     "l_pin" : pin,
                     "message_id" : idCall,
-                    "counter" : 0
+                    "counter" : 0,
+                    "pinned" : pinned,
+                    "archived" : archived
                 ], replace: true)
             } catch {
                 rollback.pointee = true

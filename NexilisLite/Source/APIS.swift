@@ -1199,7 +1199,7 @@ public class APIS: NSObject {
                 "pin": User.getMyPin() ?? "",
                 "message_id": id
             ]
-            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "ack_message")!, parameter: parameter, isFormData: true, isBackground: true) { data, response, error in
+            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "ack_message")!, parameter: parameter, isFormData: true) { data, response, error in
             }
         }
     }
@@ -1210,7 +1210,7 @@ public class APIS: NSObject {
                 "pin": User.getMyPin() ?? "",
                 "message_id": id
             ]
-            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true, isBackground: true) { data, response, error in
+            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
                 if let data = data {
                     do {
                         if let dataString = String(data: data, encoding: .utf8) {
@@ -1770,10 +1770,10 @@ public class APIS: NSObject {
         viewController.present(alert, animated: true, completion: nil)
     }
     
-    static func showWarningFile() {
+    static func showWarningFile(type: Int) {
         alertControllerExpired = LibAlertController(
-            title: "⚠️ Suspicious File Detected".localized(),
-            message: "The file appears to have a mismatched name and extension, which may indicate a malicious file. Please verify the file’s source and format before uploading it.".localized(),
+            title: type == -1 ? "⚠️ Suspicious File Detected".localized() : "⚠️ Unrecognized File Type".localized(),
+            message: type == -1 ? "The file appears to have a mismatched name and extension, which may indicate a malicious file. Please verify the file’s source and format before uploading it.".localized() : "The selected item is not listed in the system dashboard.".localized(),
             preferredStyle: .alert
         )
         

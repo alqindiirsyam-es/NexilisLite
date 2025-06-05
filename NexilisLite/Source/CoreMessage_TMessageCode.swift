@@ -807,4 +807,5 @@ public class CoreMessage_TMessageCode {
     
     public static let GET_PUSH_PREFS = "GPR";
     public static let UPDATE_VERSION = "UPV";
+    public static let GET_WHITELIST = "GWL";
 }

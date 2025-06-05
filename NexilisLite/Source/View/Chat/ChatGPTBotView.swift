@@ -219,12 +219,20 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             }
         })
         let pin = "-997"
+        var pinned = 0
+        var archived = 0
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                    pinned = Int(cursor.int(forColumnIndex: 0))
+                    archived = Int(cursor.int(forColumnIndex: 1))
+                }
                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                     "l_pin" : pin,
                     "message_id" : message_id,
-                    "counter" : 0
+                    "counter" : 0,
+                    "pinned" : pinned,
+                    "archived" : archived
                 ], replace: true)
             } catch {
                 rollback.pointee = true
@@ -447,12 +455,20 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                     }
                                 })
                                 let pin = "-997"
+                                var pinned = 0
+                                var archived = 0
                                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                                     do {
+                                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                                            pinned = Int(cursor.int(forColumnIndex: 0))
+                                            archived = Int(cursor.int(forColumnIndex: 1))
+                                        }
                                         _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                                             "l_pin" : pin,
                                             "message_id" : message_id,
-                                            "counter" : 0
+                                            "counter" : 0,
+                                            "pinned" : pinned,
+                                            "archived" : archived
                                         ], replace: true)
                                     } catch {
                                         rollback.pointee = true

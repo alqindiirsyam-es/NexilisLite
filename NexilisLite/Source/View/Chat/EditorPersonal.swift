@@ -3826,10 +3826,10 @@ extension EditorPersonal: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPr
                 DispatchQueue.main.async {
                     Nexilis.hideLoader {
                         sender.navigation.dismiss(animated: true, completion: {
-                            if result.matchesExtension {
+                            if result == 1 {
                                 sendIt()
                             } else {
-                                APIS.showWarningFile()
+                                APIS.showWarningFile(type: result)
                             }
                         })
                     }

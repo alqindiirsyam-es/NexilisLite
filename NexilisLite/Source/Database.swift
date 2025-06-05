@@ -85,7 +85,7 @@ public class Database {
                 }
                 fmdb.setKey(keyString)
             }
-            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "databaseOpened"), object: nil, userInfo: nil)
         })
     }
 
@@ -133,9 +133,9 @@ public class Database {
                     }
                 }
                 try database.executeUpdate(alterSQL, values: nil)
-                print("Added column \(columnName)")
+//                print("Added column \(columnName)")
             } else {
-                print("Column \(columnName) already exists")
+//                print("Column \(columnName) already exists")
             }
         } catch {
             print("Error checking or adding column: \(error.localizedDescription)")

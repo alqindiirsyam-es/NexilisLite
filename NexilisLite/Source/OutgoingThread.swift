@@ -414,6 +414,8 @@ class OutgoingThread {
                         if !chat.isEmpty {
                             pin = chat
                         }
+                        var pinned = 0
+                        var archived = 0
                         var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND message_scope_id = '\(MessageScope.WHISPER)' order by server_date desc LIMIT 1"
                         if scope == "4" {
                             queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(chat.isEmpty ? pin : l_pin)' AND chat_id = '\(chat)' AND message_scope_id = '\(MessageScope.GROUP)' order by server_date desc LIMIT 1"
@@ -423,11 +425,17 @@ class OutgoingThread {
                             messageId = cursorData.string(forColumnIndex: 0) ?? ""
                             cursorData.close()
                         }
+                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                            pinned = Int(cursor.int(forColumnIndex: 0))
+                            archived = Int(cursor.int(forColumnIndex: 1))
+                        }
                         if !messageId.isEmpty {
                             _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                                 "l_pin" : pin,
                                 "message_id" : messageId,
-                                "counter" : 0
+                                "counter" : 0,
+                                "pinned" : pinned,
+                                "archived" : archived
                             ], replace: true)
                         }
                         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)

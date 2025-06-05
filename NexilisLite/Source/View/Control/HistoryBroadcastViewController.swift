@@ -236,7 +236,7 @@ class HistoryBroadcastViewController: UIViewController, UITableViewDelegate, UIT
                     labelCounter.trailingAnchor.constraint(equalTo: viewCounter.trailingAnchor, constant: -2),
                 ])
                 labelCounter.font = UIFont.systemFont(ofSize: 11)
-                if Int(data.counter)! > 99 {
+                if Int(data.counter) ?? 0 > 99 {
                     labelCounter.text = "99+"
                 } else {
                     labelCounter.text = data.counter

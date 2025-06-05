@@ -332,6 +332,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 Item.menus["Version"]?.insert(Item(icon: UIImage(systemName: "rectangle.portrait.and.arrow.right"), title: "Sign-Out".localized()), at: 0)
             }
         }
+        tableView.reloadData()
     }
     
     override public func viewWillAppear(_ animated: Bool) {
@@ -505,7 +506,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                     dataImage["name"] = imageName
                     NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
                     self.makeMenu()
-                    self.tableView.reloadData()
                 }
                 navigationController?.show(controller, sender: nil)
             }
@@ -572,7 +572,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 self.navigationController?.navigationBar.topItem?.title = "Settings".localized();
                 self.navigationController?.navigationBar.setNeedsLayout()
                 self.makeMenu()
-                self.tableView.reloadData()
             }))
             self.present(alert, animated: true, completion: nil)
         } else if item.title == "Chat Font Size".localized() {
@@ -610,7 +609,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 self.navigationController?.navigationBar.topItem?.title = "Settings".localized();
                 self.navigationController?.navigationBar.setNeedsLayout()
                 self.makeMenu()
-                self.tableView.reloadData()
             }))
             self.present(alert, animated: true, completion: nil)
         } else if item.title == "Chat Wallpaper".localized() {
@@ -675,7 +673,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                     NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
                                     NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                                     self.makeMenu()
-                                    self.tableView.reloadData()
                                     
                                     if !Utils.getForceAnonymous() {
                                         Nexilis.showForceSignIn()
@@ -901,7 +898,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             DispatchQueue.main.async {
                                 Nexilis.hideLoader {
                                     self.makeMenu()
-                                    self.tableView.reloadData()
                                     let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Successfully Sign-In Admin".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
@@ -920,7 +916,6 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             DispatchQueue.main.async {
                                 Nexilis.hideLoader {
                                     self.makeMenu()
-                                    self.tableView.reloadData()
                                     let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                                     imageView.tintColor = .white
                                     let banner = FloatingNotificationBanner(title: "Successfully Sign-In Internal Team".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)

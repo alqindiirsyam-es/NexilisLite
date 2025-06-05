@@ -504,7 +504,9 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                     "l_pin" : dataUcList[0],
                     "message_id" : dataUcList[1],
-                    "counter" : 0
+                    "counter" : 0,
+                    "pinned" : 0,
+                    "archived" : 0
                 ], replace: true)
                 recordSizeRestore += 1
             } catch {

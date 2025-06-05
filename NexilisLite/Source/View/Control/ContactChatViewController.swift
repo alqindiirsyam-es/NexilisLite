@@ -208,6 +208,7 @@ class ContactChatViewController: UITableViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(onReload(notification:)), name: NSNotification.Name(rawValue: "onUpdatePersonInfo"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onReloadTab(notification:)), name: NSNotification.Name(rawValue: "onTopic"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onDisconnected(notification:)), name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onDatabaseOpened(notification:)), name: NSNotification.Name(rawValue: "databaseOpened"), object: nil)
         
         tableView.tableHeaderView = segment
         tableView.tableFooterView = UIView()
@@ -270,16 +271,27 @@ class ContactChatViewController: UITableViewController {
 //    }
     
     private func reloadAllData() {
+//        print("reloadAllData")
         DispatchQueue.main.async { [weak self] in
-            if self?.timerReloadData == nil {
+            if self?.timerReloadData == nil && !self!.isGettingData {
                 self?.getData()
             } else {
                 self?.timerReloadData?.invalidate()
                 self?.timerReloadData = nil
-                self?.timerReloadData = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
-                    self?.getData()
-                    self?.timerReloadData = nil
+                self?.timerReloadData = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+                    if !self!.isGettingData {
+                        self?.getData()
+                        self?.timerReloadData = nil
+                    }
                 }
+            }
+        }
+    }
+    
+    @objc func onDatabaseOpened(notification: NSNotification) {
+        DispatchQueue.main.async {
+            if self.loadingData {
+                self.reloadAllData()
             }
         }
     }
@@ -430,7 +442,7 @@ class ContactChatViewController: UITableViewController {
             let allChats = Chat.getData()
             self.archivedChats = Chat.getData(isArchived: true)
             var tempChats: [Chat] = []
-            var lowestPinned = 0
+            var lowestPinned: [String: Int] = [:]
 
             for singleChat in allChats {
                 guard !singleChat.groupId.isEmpty else {
@@ -451,8 +463,8 @@ class ContactChatViewController: UITableViewController {
                         if let counterParent = Int(tempChats[parentChatIndex].counter), let counterSingle = Int(singleChat.counter) {
                             tempChats[parentChatIndex].counter = "\(counterParent + counterSingle)"
                         }
-                        if singleChat.pinned != 0 && (lowestPinned == 0 || lowestPinned > singleChat.pinned) {
-                            lowestPinned = singleChat.pinned
+                        if singleChat.pinned != 0 && (lowestPinned[singleChat.groupId] == 0 || lowestPinned[singleChat.groupId]! > singleChat.pinned) {
+                            lowestPinned[singleChat.groupId] = singleChat.pinned
                         }
                         if singleChat.pinned != 0 {
                             if !self.listMaxArchived.keys.contains(singleChat.groupId) {
@@ -466,12 +478,12 @@ class ContactChatViewController: UITableViewController {
                         }
                         if tempChats[parentChatIndex].pinned > 0 {
                             if singleChat.pinned == 0 {
-                                singleChat.pinned = lowestPinned - 1
+                                singleChat.pinned = lowestPinned[singleChat.groupId]! - 1
                                 singleChat.isFolPinned = true
                             }
                             tempChats.forEach { chat in
-                                if chat.groupId == singleChat.groupId && (chat.pinned == 0 || (chat.isFolPinned && chat.pinned != lowestPinned - 1)) {
-                                    chat.pinned = lowestPinned - 1
+                                if chat.groupId == singleChat.groupId && (chat.pinned == 0 || (chat.isFolPinned && chat.pinned != lowestPinned[singleChat.groupId]! - 1)) {
+                                    chat.pinned = lowestPinned[singleChat.groupId]! - 1
                                     chat.isFolPinned = true
                                 }
                             }
@@ -483,9 +495,11 @@ class ContactChatViewController: UITableViewController {
                         tempChats.insert(singleChat, at: min(indexParent + existingGroup.count, tempChats.count))
                     }
                 } else {
-                    lowestPinned = 0
+                    if lowestPinned[singleChat.groupId] == nil {
+                        lowestPinned[singleChat.groupId] = 0
+                    }
                     if singleChat.pinned != 0 {
-                        lowestPinned = singleChat.pinned
+                        lowestPinned[singleChat.groupId] = singleChat.pinned
                     }
                     self.chatGroupMaps[singleChat.groupId] = [singleChat]
                     let parentChat = Chat(profile: singleChat.profile, groupName: singleChat.groupName, counter: singleChat.counter, groupId: singleChat.groupId)
@@ -1482,7 +1496,7 @@ extension ContactChatViewController {
                         labelCounter.trailingAnchor.constraint(equalTo: viewCounter.trailingAnchor, constant: -2),
                     ])
                     labelCounter.font = UIFont.systemFont(ofSize: 11 + String.offset())
-                    if Int(data.counter)! > 99 {
+                    if Int(data.counter) ?? 0 > 99 {
                         labelCounter.text = "99+"
                     } else {
                         labelCounter.text = data.counter

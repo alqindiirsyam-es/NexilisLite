@@ -13,6 +13,7 @@ import ImageIO
 import MobileCoreServices
 import CommonCrypto
 import ZIPFoundation
+import PDFKit
 
 extension Date {
     
@@ -563,51 +564,55 @@ extension URL {
     }
     
     struct FileTypeSignature {
-        let magic: String
-        let extensions: [String]
-
-        static let knownSignatures: [FileTypeSignature] = [
-            FileTypeSignature(magic: "FFD8FF", extensions: ["jpg", "jpeg"]),
-            FileTypeSignature(magic: "89504E47", extensions: ["png"]),
-            FileTypeSignature(magic: "47494638", extensions: ["gif"]),
-            FileTypeSignature(magic: "25504446", extensions: ["pdf"]),
-            FileTypeSignature(magic: "504B0304", extensions: ["zip", "docx", "xlsx", "pptx", "jar", "odt", "ods", "odp", "apk", "ipa"]),
-            FileTypeSignature(magic: "D0CF11E0", extensions: ["doc", "xls", "ppt", "msg"]), // Legacy MS Office
-            FileTypeSignature(magic: "52617221", extensions: ["rar"]),
-            FileTypeSignature(magic: "1F8B08", extensions: ["gz"]),
-            FileTypeSignature(magic: "425A68", extensions: ["bz2"]),
-            FileTypeSignature(magic: "377ABCAF271C", extensions: ["7z"]),
-            FileTypeSignature(magic: "00000018", extensions: ["mp4"]),
-            FileTypeSignature(magic: "000001BA", extensions: ["mpg", "mpeg"]),
-            FileTypeSignature(magic: "000001B3", extensions: ["mpg"]),
-            FileTypeSignature(magic: "494433", extensions: ["mp3"]),
-            FileTypeSignature(magic: "4F676753", extensions: ["ogg"]),
-            FileTypeSignature(magic: "1A45DFA3", extensions: ["mkv", "webm"]),
-            FileTypeSignature(magic: "3026B2758E66CF11", extensions: ["wmv", "wma", "asf"]),
-            FileTypeSignature(magic: "57415645", extensions: ["wav"]),
-            FileTypeSignature(magic: "52494646", extensions: ["avi", "wav", "webp"]),
-            FileTypeSignature(magic: "3C3F786D6C", extensions: ["xml"]),
-            FileTypeSignature(magic: "68746D6C3E", extensions: ["html", "htm"]),
-            FileTypeSignature(magic: "7B5C727466", extensions: ["rtf"]),
-            FileTypeSignature(magic: "38425053", extensions: ["psd"]),
-            FileTypeSignature(magic: "49492A00", extensions: ["tif", "tiff"]),
-            FileTypeSignature(magic: "4D4D002A", extensions: ["tif", "tiff"]),
-            FileTypeSignature(magic: "00010000", extensions: ["ico"]),
-            FileTypeSignature(magic: "CAFEBABE", extensions: ["class"]),
-            FileTypeSignature(magic: "EFBBBF", extensions: ["txt"])
-        ]
+        let magic: [String]
+        let extensions: String
     }
 
     func detectFileType(from data: Data) -> FileTypeSignature? {
         let hexString = data.prefix(4).map { String(format: "%02X", $0) }.joined()
-        return FileTypeSignature.knownSignatures.first {
-            hexString.hasPrefix($0.magic)
+        let extUploadedFile = self.absoluteString.split(separator: ".").last ?? ""
+        let dataPrefs = Utils.getWhitelistFileExt()
+        guard !dataPrefs.isEmpty,
+              let jsonData = dataPrefs.data(using: .utf8) else {
+            return nil
         }
+        do {
+            if let jsonArray = try JSONSerialization.jsonObject(with: jsonData, options: []) as? [[String: Any]] {
+                guard let _ = jsonArray.firstIndex(where: { $0["ext"] as? String ?? "" == extUploadedFile }) else {
+                    return nil
+                }
+                if let idxRealFile = jsonArray.firstIndex(where: {
+                    guard let magicArray = $0["magic"] as? [String] else { return false }
+                    return magicArray.contains(where: { magicItem in
+                        if magicItem.contains("~") {
+                            return magicItem.split(separator: "~").contains { $0 == hexString }
+                        } else {
+                            return magicItem == hexString
+                        }
+                    })
+                }) {
+                    let jsonRealFile = jsonArray[idxRealFile]
+                    return FileTypeSignature(magic: jsonRealFile["magic"] as? [String] ?? [], extensions: jsonRealFile["ext"] as? String ?? "")
+                }
+            }
+        } catch {
+            print("Error parsing JSON: \(error)")
+        }
+        
+        return nil
     }
     
     func isEncryptedPDF(data: Data) -> Bool {
-        if let content = String(data: data.prefix(2048), encoding: .ascii) {
-            return content.contains("/Encrypt")
+        guard let document = PDFDocument(data: data) else {
+            return false
+        }
+        
+        if document.isEncrypted {
+            if document.isLocked {
+                return true
+            } else {
+                return false
+            }
         }
         return false
     }
@@ -623,40 +628,44 @@ extension URL {
         let oleMagic = data.prefix(4).map { String(format: "%02X", $0) }.joined()
         return oleMagic == "D0CF11E0"
     }
-
-    func doesFileMatchExtension() -> Bool {
+    
+    func doesFileMatchExtension() -> (result: Int, realFileType: FileTypeSignature?) {
         guard let fileExtension = self.pathExtension.lowercased().split(separator: "?").first,
               let fileData = try? Data(contentsOf: self) else {
-            return false
+            return (-1, nil)
         }
 
         if let detected = detectFileType(from: fileData) {
-            return detected.extensions.contains(String(fileExtension))
-        }
-
-        return false
-    }
-
-    func validateFile() -> (matchesExtension: Bool, isEncrypted: Bool) {
-        guard let fileExtension = self.pathExtension.lowercased().split(separator: "?").first,
-              let fileData = try? Data(contentsOf: self) else {
-            return (false, false)
-        }
-
-        let matches = self.doesFileMatchExtension()
-        var isEncrypted = false
-
-        if matches {
-            if let type = detectFileType(from: fileData) {
-                if type.extensions.contains("pdf") {
-                    isEncrypted = isEncryptedPDF(data: fileData)
-                } else if type.extensions.contains(where: { ["pptx", "docx", "xlsx"].contains($0) }) {
-                    isEncrypted = isEncryptedOfficeFile(data: fileData)
-                }
+            if detected.extensions == String(fileExtension) {
+                return (1, detected)
+            } else {
+                return (-1, detected)
             }
         }
 
-        return (matches, isEncrypted)
+        return (0, nil)
+    }
+
+    func validateFile() -> Int {
+        guard let fileData = try? Data(contentsOf: self) else {
+            return -1
+        }
+
+        let matches = self.doesFileMatchExtension()
+        
+        func isDoc(type: String) -> Bool {
+            return type == "ppt" || type == "doc" || type == "xls"
+        }
+
+        if (matches.result == -1 && matches.realFileType != nil) {
+            if isDoc(type: matches.realFileType!.extensions) && isEncryptedOfficeFile(data: fileData) {
+                return 1
+            } else if matches.realFileType!.extensions == "pdf" && isEncryptedPDF(data: fileData) {
+                return 1
+            }
+        }
+
+        return matches.result
     }
     
 }

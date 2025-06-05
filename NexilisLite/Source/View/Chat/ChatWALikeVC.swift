@@ -765,7 +765,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 labelCounter.trailingAnchor.constraint(equalTo: viewCounter.trailingAnchor, constant: -2),
             ])
             labelCounter.font = UIFont.systemFont(ofSize: 11 + String.offset())
-            if Int(data.counter)! > 99 {
+            if Int(data.counter) ?? 0 > 99 {
                 labelCounter.text = "99+"
             } else {
                 labelCounter.text = data.counter
