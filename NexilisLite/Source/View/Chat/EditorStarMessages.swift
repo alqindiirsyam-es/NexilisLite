@@ -11,6 +11,8 @@ import AVFoundation
 import QuickLook
 import Photos
 import SwiftLinkPreview
+import nuSDKService
+import NotificationBannerSwift
 
 public class EditorStarMessages: UIViewController, UITableViewDataSource, UITableViewDelegate, UIContextMenuInteractionDelegate, QLPreviewControllerDataSource, UITextViewDelegate {
     @IBOutlet var tableChatView: UITableView!
@@ -22,6 +24,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     var showMenuContext = false
     var touchedSubview = UIView()
     var lastTouchPoint: CGPoint = .zero
+    
+    var downloadList: [String: IndexPath] = [:]
+    var transitioningDelegateRef: ZoomTransitioningDelegate?
     
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
@@ -536,10 +541,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
             
             let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
+            let sfs = (dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String) ?? ""
             imageThumb.isUserInteractionEnabled = true
             imageThumb.addGestureRecognizer(objectTap)
             objectTap.image_id = imageChat
             objectTap.video_id = videoChat
+            objectTap.specFile = sfs
             objectTap.imageView = imageThumb
             objectTap.indexPath = indexPath
         }
@@ -666,10 +673,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 nameFile.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5).isActive = true
             }
             let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
+            let sfs = (dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String) ?? ""
             containerViewFile.addGestureRecognizer(objectTap)
             objectTap.containerFile = containerViewFile
             objectTap.labelFile = nameFile
             objectTap.file_id = fileChat
+            objectTap.specFile = sfs
             objectTap.indexPath = indexPath
         }
         
@@ -833,7 +842,95 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
         }
         
+        let imageAckView = UIImageView()
+        if dataMessages[indexPath.row]["read_receipts"] as? String == "8" {
+            var imageAck = UIImage(named: "ack_icon_gray", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
+            if dataMessages[indexPath.row]["status"] as? String == "8" {
+                imageAck = UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
+            }
+            imageAckView.image = imageAck
+            cellMessage.contentView.addSubview(imageAckView)
+            imageAckView.translatesAutoresizingMaskIntoConstraints = false
+            imageAckView.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            imageAckView.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            imageAckView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
+            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                imageAckView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 30).isActive = true
+            } else {
+                imageAckView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
+                let tap = ObjectGesture(target: self, action: #selector(tapAck(_:)))
+                tap.indexPath = indexPath
+                imageAckView.addGestureRecognizer(tap)
+                imageAckView.isUserInteractionEnabled = true
+            }
+        }
+        
+        if !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+            let imageSpecFileView = UIImageView()
+            let imageSpecFile = UIImage(named: "pb_ic_attach_spc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
+            imageSpecFileView.image = imageSpecFile
+            cellMessage.contentView.addSubview(imageSpecFileView)
+            imageSpecFileView.translatesAutoresizingMaskIntoConstraints = false
+            imageSpecFileView.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            imageSpecFileView.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            imageSpecFileView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
+            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                if imageAckView.isDescendant(of: cellMessage.contentView) {
+                    imageSpecFileView.leadingAnchor.constraint(equalTo: imageAckView.trailingAnchor, constant: 5).isActive = true
+                } else {
+                    imageSpecFileView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 30).isActive = true
+                }
+            } else {
+                if imageAckView.isDescendant(of: cellMessage.contentView) {
+                    imageSpecFileView.trailingAnchor.constraint(equalTo: imageAckView.leadingAnchor, constant: -5).isActive = true
+                } else {
+                    imageSpecFileView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
+                }
+            }
+        }
+        
         return cellMessage
+    }
+    
+    @objc func tapAck(_ sender: ObjectGesture) {
+        let indexPath = sender.indexPath
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        if dataMessages[indexPath.row]["status"]  as? String ?? "" == "8" {
+            return
+        }
+        if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
+            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+            imageView.tintColor = .white
+            let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+            banner.show()
+            return
+        }
+        DispatchQueue.global().async {
+            let result = Nexilis.write(message: CoreMessage_TMessageBank.getAckLocationMessage(f_pin: dataMessages[indexPath.row]["f_pin"]  as? String ?? "", message_id: dataMessages[indexPath.row]["message_id"]  as? String ?? "", l_pin: dataMessages[indexPath.row]["l_pin"]  as? String ?? "", server_date: "\(Date().currentTimeMillis())", message_scope_id: dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "", longitude: "", latitude: "", description: ""))
+            if result != nil {
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    do {
+                        _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                            "status" : "8"
+                        ], _where: "message_id = '\(dataMessages[indexPath.row]["message_id"]  as? String ?? "")'")
+                    } catch {
+                        rollback.pointee = true
+                        print("Access database error: \(error.localizedDescription)")
+                    }
+                })
+                DispatchQueue.main.async {
+                    if let index = self.dataMessages.firstIndex(where: {$0["message_id"] as? String == dataMessages[indexPath.row]["message_id"] as? String}) {
+                        self.dataMessages[index]["status"] = "8"
+                        let section = self.dataDates.firstIndex(of: self.dataMessages[index]["chat_date"]  as? String ?? "")
+                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[index]["message_id"]  as? String ?? ""})
+                        if row != nil && section != nil {
+                            self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                        }
+                        self.view.makeToast("Confirmation Success.".localized(), duration: 3)
+                    }
+                }
+            }
+        }
     }
 
     func highlightedText(for text: String, in range: Range<String.Index>, textView: UITextView) -> NSAttributedString {
@@ -867,7 +964,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id FROM MESSAGE where is_stared=1 order by server_date asc") {
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, attachment_speciality FROM MESSAGE where is_stared=1 order by server_date asc") {
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
                         row["message_id"] = cursorData.string(forColumnIndex: 0)
@@ -889,6 +986,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         row["lock"] = cursorData.string(forColumnIndex: 16)
                         row["is_stared"] = cursorData.string(forColumnIndex: 17)
                         row["blog_id"] = cursorData.string(forColumnIndex: 18)
+                        row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 19)
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as! String)'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -976,17 +1074,62 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+        func showMedia(data: Data? = nil, url: URL? = nil, type: Int = 0) {
+            let image = UIImage(data: data ?? Data())
+            let imageViewer = MediaViewerViewController()
+            if type == 0 {
+                imageViewer.media = .image(image ?? UIImage())
+            } else if type == 1 {
+                imageViewer.media = .video(url ?? URL(string: "")!)
+            } else if type == 2 {
+                imageViewer.media = .gif(UIImage.gifImageWithData(data ?? Data()) ?? UIImage())
+            }
+            
+            let navigationController = UINavigationController(rootViewController: imageViewer)
+            navigationController.defaultStyle()
+            navigationController.view.backgroundColor = .clear
+            navigationController.modalPresentationCapturesStatusBarAppearance = true
+            navigationController.modalPresentationStyle = .overFullScreen
+            
+            let backAction = UIAction { _ in
+                navigationController.dismiss(animated: true)
+            }
+            let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
+            imageViewer.navigationItem.leftBarButtonItem = backButton
+            if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
+                let shareAction = UIAction { _ in
+                    var activityViewController = UIActivityViewController(activityItems: [image ?? UIImage()], applicationActivities: nil)
+                    if type == 1 {
+                        activityViewController = UIActivityViewController(activityItems: [url ?? URL(string: "")!], applicationActivities: nil)
+                    }
+                    activityViewController.popoverPresentationController?.sourceView = imageViewer.view
+                    imageViewer.present(activityViewController, animated: true, completion: nil)
+                }
+                let shareButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "square.and.arrow.up"), primaryAction: shareAction, menu: nil)
+                imageViewer.navigationItem.rightBarButtonItem = shareButton
+            }
+            
+            let name = "Favorite Messages".localized()
+            imageViewer.title = name
+            
+            let transitionDelegate = ZoomTransitioningDelegate()
+            transitionDelegate.originImageView = sender.imageView
+            navigationController.transitioningDelegate = transitionDelegate
+            self.transitioningDelegateRef = transitionDelegate
+            
+            present(navigationController, animated: true) {
+                imageViewer.animateBackgroundIn()
+            }
+        }
         if (sender.image_id != "") {
             if let dirPath = paths.first {
                 let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.image_id)
                 if FileManager.default.fileExists(atPath: imageURL.path) {
-                    let image    = UIImage(contentsOfFile: imageURL.path)
-                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                    previewImageVC.image = image
-                    previewImageVC.isHiddenTextField = true
-                    previewImageVC.modalPresentationStyle = .custom
-                    previewImageVC.modalTransitionStyle  = .crossDissolve
-                    self.present(previewImageVC, animated: true, completion: nil)
+                    do {
+                        showMedia(data: try Data(contentsOf: imageURL))
+                    } catch {
+                        
+                    }
                 } else if FileEncryption.shared.isSecureExists(filename: sender.image_id) {
                     do {
                         if var data = try FileEncryption.shared.readSecure(filename: sender.image_id) {
@@ -994,13 +1137,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             if dataDecrypt != nil {
                                 data = dataDecrypt!
                             }
-                            let image = UIImage(data: data)
-                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                            previewImageVC.image = image
-                            previewImageVC.isHiddenTextField = true
-                            previewImageVC.modalPresentationStyle = .custom
-                            previewImageVC.modalTransitionStyle  = .crossDissolve
-                            self.present(previewImageVC, animated: true, completion: nil)
+                            showMedia(data: data)
                         }
                     }
                     catch {
@@ -1024,37 +1161,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             return
                         }
                         
-                        do {
-                            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                            if let dirPath = paths.first {
-                                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.image_id)
-                                if FileManager.default.fileExists(atPath: imageURL.path) {
-                                    let image    = UIImage(contentsOfFile: imageURL.path)
-                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                    if save {
-                                        UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-                                    }
-                                }
-                                else if FileEncryption.shared.isSecureExists(filename: sender.image_id) {
-                                    if var secureData = try FileEncryption.shared.readSecure(filename: sender.image_id) {
-                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
-                                        if dataDecrypt != nil {
-                                            secureData = dataDecrypt!
-                                        }
-                                        let image = UIImage(data: secureData)
-                                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                        if save {
-                                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-                                        }
-                                    }
-                                }
-                            }
-                        } catch {
-                            
-                        }
-                        
                         DispatchQueue.main.async {
                             activityIndicator.stopAnimating()
                             self.tableChatView.reloadData()
@@ -1062,15 +1168,35 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     }
                 }
             }
+        } else if (sender.gif_id != "") {
+            if let dirPath = paths.first {
+                let gifURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.gif_id)
+                if FileManager.default.fileExists(atPath: gifURL.path) {
+                    do {
+                        let data = try Data(contentsOf: gifURL)
+                        showMedia(data: data, type: 2)
+                    } catch {
+                        
+                    }
+                } else if FileEncryption.shared.isSecureExists(filename: sender.gif_id) {
+                    do {
+                        if var secureData = try FileEncryption.shared.readSecure(filename: sender.gif_id) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                            if dataDecrypt != nil {
+                                secureData = dataDecrypt!
+                            }
+                            showMedia(data: secureData, type: 2)
+                        }
+                    } catch {
+                        
+                    }
+                }
+            }
         } else if (sender.video_id != "") {
             if let dirPath = paths.first {
                 let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.video_id)
                 if FileManager.default.fileExists(atPath: videoURL.path) {
-                    let player = AVPlayer(url: videoURL as URL)
-                    let playerVC = AVPlayerViewController()
-                    playerVC.modalPresentationStyle = .custom
-                    playerVC.player = player
-                    self.present(playerVC, animated: true, completion: nil)
+                    showMedia(url: videoURL, type: 1)
                 } else if FileEncryption.shared.isSecureExists(filename: sender.video_id) {
                     do {
                         if var secureData = try FileEncryption.shared.readSecure(filename: sender.video_id) {
@@ -1081,11 +1207,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                             let tempPath = cachesDirectory.appendingPathComponent(sender.video_id)
                             try secureData.write(to: tempPath)
-                            let player = AVPlayer(url: tempPath as URL)
-                            let playerVC = AVPlayerViewController()
-                            playerVC.modalPresentationStyle = .custom
-                            playerVC.player = player
-                            self.present(playerVC, animated: true, completion: nil)
+                            showMedia(url: tempPath, type: 1)
                         }
                     } catch {
                         
@@ -1132,27 +1254,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
                                 return
                             }
-                            do {
-                                if var secureData = try FileEncryption.shared.readSecure(filename: sender.video_id) {
-                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
-                                    if dataDecrypt != nil {
-                                        secureData = dataDecrypt!
-                                    }
-                                    let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                                    let tempPath = cachesDirectory.appendingPathComponent(name)
-                                    try secureData.write(to: tempPath)
-                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                    if save {
-                                        PHPhotoLibrary.shared().performChanges({
-                                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempPath)
-                                        }) { saved, error in
-                                            
-                                        }
-                                    }
-                                }
-                            } catch {
-                                
-                            }
                             let idx = self.dataMessages.firstIndex(where: { $0["video_id"] as! String == sender.video_id})
                             if idx != nil {
                                 self.dataMessages[idx!]["progress"] = progress
@@ -1163,17 +1264,57 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 }
             }
         } else if (sender.file_id != "") {
+            func showFile(urlFile: URL) {
+                let previewController = QLPreviewController()
+                previewController.dataSource = self
+                let vcHandleFile = UIViewController()
+                let nc = UINavigationController(rootViewController: vcHandleFile)
+                let attributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
+                let navBarAppearance = UINavigationBarAppearance()
+                nc.defaultStyle()
+                navBarAppearance.configureWithOpaqueBackground()
+                navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
+                navBarAppearance.titleTextAttributes = attributes
+                nc.navigationBar.standardAppearance = navBarAppearance
+                nc.navigationBar.scrollEdgeAppearance = navBarAppearance
+                let backAction = UIAction { _ in
+                    nc.dismiss(animated: true)
+                }
+                let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
+                vcHandleFile.navigationItem.leftBarButtonItem = backButton
+                if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
+                    let shareAction = UIAction { _ in
+                        let fileManager = FileManager.default
+                        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(sender.labelFile.text ?? "")
+                        do {
+                            try fileManager.copyItem(at: urlFile, to: tempURL)
+                            let activityViewController = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+                            activityViewController.popoverPresentationController?.sourceView = vcHandleFile.view
+                            vcHandleFile.present(activityViewController, animated: true, completion: nil)
+                        } catch {
+                            
+                        }
+                    }
+                    let shareButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "square.and.arrow.up"), primaryAction: shareAction, menu: nil)
+                    vcHandleFile.navigationItem.rightBarButtonItem = shareButton
+                }
+                if let viewVc = vcHandleFile.view {
+                    vcHandleFile.title = sender.labelFile.text
+                    vcHandleFile.addChild(previewController)
+                    previewController.dataSource = self
+                    previewController.view.frame = CGRect(x: 0, y: 0, width: viewVc.bounds.size.width, height: viewVc.bounds.size.height)
+                    previewController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                    viewVc.addSubview(previewController.view)
+                    previewController.didMove(toParent: vcHandleFile)
+                    
+                    self.present(nc, animated: true)
+                }
+            }
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.file_id)
                 if FileManager.default.fileExists(atPath: fileURL.path) {
                     self.previewItem = fileURL as NSURL
-                    let previewController = QLPreviewController()
-                    let rightBarButton = UIBarButtonItem()
-                    previewController.navigationItem.rightBarButtonItem = rightBarButton
-                    previewController.dataSource = self
-                    previewController.modalPresentationStyle = .custom
-                    
-                    self.present(previewController, animated: true)
+                    showFile(urlFile: fileURL)
                 } else if FileEncryption.shared.isSecureExists(filename: sender.file_id) {
                     do {
                         if var docData = try FileEncryption.shared.readSecure(filename: sender.file_id) {
@@ -1185,18 +1326,17 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             let tempPath = cachesDirectory.appendingPathComponent(sender.file_id)
                             try docData.write(to: tempPath)
                             self.previewItem = tempPath as NSURL
-                            let previewController = QLPreviewController()
-                            let rightBarButton = UIBarButtonItem()
-                            previewController.navigationItem.rightBarButtonItem = rightBarButton
-                            previewController.dataSource = self
-                            previewController.modalPresentationStyle = .custom
+                            showFile(urlFile: tempPath)
                         }
-                    } catch {
+                    }
+                    catch {
                         
                     }
-                    
-                    
                 } else {
+                    if downloadList[sender.file_id] != nil && downloadList[sender.file_id] == sender.indexPath {
+                        return
+                    }
+                    downloadList[sender.file_id] = sender.indexPath
                     for view in sender.containerFile.subviews {
                         if !(view is UIImageView) && !(view is UILabel) {
                             view.removeFromSuperview()
@@ -1215,14 +1355,14 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     trackShape.path = circlePath.cgPath
                     trackShape.fillColor = UIColor.clear.cgColor
                     trackShape.lineWidth = 5
-                    trackShape.strokeColor = UIColor.mainColor.withAlphaComponent(0.3).cgColor
+                    trackShape.strokeColor = UIColor.mentionColor.withAlphaComponent(0.3).cgColor
                     containerLoading.layer.addSublayer(trackShape)
                     let shapeLoading = CAShapeLayer()
                     shapeLoading.path = circlePath.cgPath
                     shapeLoading.fillColor = UIColor.clear.cgColor
                     shapeLoading.lineWidth = 3
                     shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.mainColor.cgColor
+                    shapeLoading.strokeColor = UIColor.mentionColor.cgColor
                     containerLoading.layer.addSublayer(shapeLoading)
                     let imageupload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
                     imageupload.tintColor = .white
@@ -1237,7 +1377,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                 shapeLoading.strokeEnd = CGFloat(progress / 100)
                                 return
                             }
-                            let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as! String == sender.file_id})
+                            let idx = self.dataMessages.firstIndex(where: { $0["file_id"]  as? String ?? "" == sender.file_id})
                             if idx != nil {
                                 self.dataMessages[idx!]["progress"] = progress
                                 self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
@@ -1446,13 +1586,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
         })
         
-        var children: [UIMenuElement] = [star, forward, copy]
-//        let copyOption = self.copyOption(indexPath: indexPath!)
-        
-        if self.dataMessages[indexPath!.row]["f_pin"] as! String == "-999" {
+        var children: [UIMenuElement] = [star, copy]
+        if self.dataMessages[indexPath!.row]["f_pin"] as! String == "-999" || !(dataMessages[indexPath!.row]["image_id"] as! String).isEmpty || !(dataMessages[indexPath!.row]["video_id"] as! String).isEmpty || !(dataMessages[indexPath!.row]["file_id"] as! String).isEmpty || dataMessages[indexPath!.row]["attachment_flag"] as! String == "11" {
             children = [star]
-        } else if !(dataMessages[indexPath!.row]["image_id"] as! String).isEmpty || !(dataMessages[indexPath!.row]["video_id"] as! String).isEmpty || !(dataMessages[indexPath!.row]["file_id"] as! String).isEmpty || dataMessages[indexPath!.row]["attachment_flag"] as! String == "11" {
-            children = [star, forward]
+        }
+        if (Nexilis.checkingAccess(key: "secure_folder_forward") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && self.dataMessages[indexPath!.row]["f_pin"] as! String != "-999" {
+            children.insert(forward, at: 1)
         }
         
         return UIContextMenuConfiguration(identifier: nil,

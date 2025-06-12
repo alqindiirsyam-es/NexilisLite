@@ -572,27 +572,25 @@ extension URL {
         let hexString = data.prefix(4).map { String(format: "%02X", $0) }.joined()
         let extUploadedFile = self.absoluteString.split(separator: ".").last ?? ""
         let dataPrefs = Utils.getWhitelistFileExt()
+//        print("HOHOHO: \(extUploadedFile) <><>> \(hexString) <><><> \(dataPrefs)")
         guard !dataPrefs.isEmpty,
               let jsonData = dataPrefs.data(using: .utf8) else {
             return nil
         }
         do {
             if let jsonArray = try JSONSerialization.jsonObject(with: jsonData, options: []) as? [[String: Any]] {
-                guard let _ = jsonArray.firstIndex(where: { $0["ext"] as? String ?? "" == extUploadedFile }) else {
+                guard let _ = jsonArray.firstIndex(where: { $0["ext"] as? String ?? "" == extUploadedFile.lowercased() }) else {
                     return nil
                 }
-                if let idxRealFile = jsonArray.firstIndex(where: {
-                    guard let magicArray = $0["magic"] as? [String] else { return false }
-                    return magicArray.contains(where: { magicItem in
-                        if magicItem.contains("~") {
-                            return magicItem.split(separator: "~").contains { $0 == hexString }
-                        } else {
-                            return magicItem == hexString
-                        }
-                    })
-                }) {
+                
+                if let idxRealFile = jsonArray.firstIndex(where: { $0["ext"] as? String == extUploadedFile.lowercased()} ) {
                     let jsonRealFile = jsonArray[idxRealFile]
-                    return FileTypeSignature(magic: jsonRealFile["magic"] as? [String] ?? [], extensions: jsonRealFile["ext"] as? String ?? "")
+                    let magic = jsonRealFile["magic"] as! [String]
+                    if magic.contains(hexString) || magic.contains(where: { $0.components(separatedBy: "~").contains(hexString) }) {
+                        return FileTypeSignature(magic: jsonRealFile["magic"] as? [String] ?? [], extensions: jsonRealFile["ext"] as? String ?? "")
+                    } else if isMP4File(data) {
+                        return FileTypeSignature(magic: jsonRealFile["magic"] as? [String] ?? [], extensions: jsonRealFile["ext"] as? String ?? "")
+                    }
                 }
             }
         } catch {
@@ -600,6 +598,15 @@ extension URL {
         }
         
         return nil
+    }
+    
+    func isMP4File(_ data: Data) -> Bool {
+        guard data.count >= 12 else { return false }
+        
+        // Read bytes 4-7 (ftyp)
+        let ftyp = String(data: data.subdata(in: 4..<8), encoding: .ascii)
+        
+        return ftyp == "ftyp"
     }
     
     func isEncryptedPDF(data: Data) -> Bool {

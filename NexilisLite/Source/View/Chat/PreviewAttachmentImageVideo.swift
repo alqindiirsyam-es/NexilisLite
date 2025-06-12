@@ -11,7 +11,7 @@ import AVFoundation
 import SDWebImage
 
 protocol PreviewAttachmentImageVideoDelegate : NSObjectProtocol {
-    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, viewController: UIViewController)
+    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, viewController: UIViewController, specFile: String)
 }
 
 class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITextViewDelegate {
@@ -19,6 +19,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     @IBOutlet var buttonSend: UIButton!
     @IBOutlet var textFieldSend: UITextView!
     @IBOutlet var buttonCancel: UIButton!
+    @IBOutlet weak var buttonSpecFile: UIButton!
     @IBOutlet var constraintViewTextField: NSLayoutConstraint!
     @IBOutlet var heightTextFieldSend: NSLayoutConstraint!
     @IBOutlet var constraintButtonSend: NSLayoutConstraint!
@@ -40,6 +41,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     var isGroup = false
     var isCC = false
     var isGIF = false
+    var tableViewConfigFile: UITableView!
+    var specFileString = ""
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -162,6 +165,10 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         buttonCancel.circle()
         buttonCancel.backgroundColor = .secondaryColor.withAlphaComponent(0.4)
         buttonCancel.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        
+        buttonSpecFile.circle()
+        buttonSpecFile.backgroundColor = .secondaryColor.withAlphaComponent(0.4)
+        buttonSpecFile.addTarget(self, action: #selector(showSpecFile), for: .touchUpInside)
     }
     
     @objc func showChooserACKConfidential() {
@@ -359,15 +366,15 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                     Nexilis.hideLoader { [self] in
                         self.dismiss(animated: true, completion: nil)
                         if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
-                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self)
+                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self, specFile: specFileString)
                         } else {
-                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self)
+                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self, specFile: specFileString)
                         }
                     }
                 }
             }
         } else {
-            Nexilis.showLoader()
+            Nexilis.showLoader(text: "Compressing...".localized())
             DispatchQueue.global().async { [self] in
                 var dataVideo: Data?
                 if imageVideoData != nil || urlVideoPhpPicker != nil {
@@ -377,49 +384,32 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                         dataVideo = try? Data(contentsOf: urlVideoPhpPicker!)
                     }
                 }
-                if let dataVideotoCompress = dataVideo {
-                    let sizeInKB = Double(dataVideotoCompress.count) / 1024.0
-                    let sizeOfVideo = sizeInKB / 1024.0
-                    if (sizeOfVideo > 10.0) {
-                        Nexilis.dispatch = DispatchGroup()
-                        Nexilis.dispatch?.enter()
-                        let compressedURL = NSURL.fileURL(withPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
-                        compressVideo(inputURL: (imageVideoData != nil ? imageVideoData![.mediaURL] as? URL : urlVideoPhpPicker)!,
-                                      outputURL: compressedURL) { exportSession in
-                            guard let session = exportSession else {
-                                if let dispatch = Nexilis.dispatch {
-                                    dispatch.leave()
-                                }
+                if dataGIF == nil {
+                    Nexilis.dispatch = DispatchGroup()
+                    Nexilis.dispatch?.enter()
+                    let compressedURL = NSURL.fileURL(withPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
+                    compressVideo(inputURL: (imageVideoData != nil ? imageVideoData![.mediaURL] as? URL : urlVideoPhpPicker)!,
+                                  outputURL: compressedURL) { exportSession in
+                        guard let session = exportSession else {
+                            if let dispatch = Nexilis.dispatch {
+                                dispatch.leave()
+                            }
+                            return
+                        }
+                        
+                        if session.status == .completed {
+                            guard let compressedData = try? Data(contentsOf: compressedURL) else {
                                 return
                             }
-                            
-                            switch session.status {
-                            case .unknown:
-                                break
-                            case .waiting:
-                                break
-                            case .exporting:
-                                break
-                            case .completed:
-                                guard let compressedData = try? Data(contentsOf: compressedURL) else {
-                                    return
-                                }
-                                dataVideo = compressedData
-                                if let dispatch = Nexilis.dispatch {
-                                    dispatch.leave()
-                                }
-                            case .failed:
-                                break
-                            case .cancelled:
-                                break
-                            @unknown default:
-                                break
+                            dataVideo = compressedData
+                            if let dispatch = Nexilis.dispatch {
+                                dispatch.leave()
                             }
                         }
                     }
+                    Nexilis.dispatch?.wait()
+                    Nexilis.dispatch = nil
                 }
-                Nexilis.dispatch?.wait()
-                Nexilis.dispatch = nil
                 DispatchQueue.main.async {
                     Nexilis.hideLoader { [self] in
                         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -438,7 +428,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                                 urlVideo = (urlVideoPhpPicker! as NSURL).absoluteString!
                             }
                             originalVideoName = (urlVideo as NSString).lastPathComponent
-                            renamedVideoName = "Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName)"
+                            renamedVideoName = "Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).mp4"
                             thumbName = "THUMB_Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).jpeg"
                         }
                         let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
@@ -479,9 +469,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                         }
                         self.dismiss(animated: true, completion: nil)
                         if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
-                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self)
+                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self, specFile: specFileString)
                         } else {
-                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self)
+                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self, specFile: specFileString)
                         }
                     }
                 }
@@ -542,5 +532,136 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     
     @objc func cancelTapped() {
         self.dismiss(animated: true, completion: nil)
+    }
+    
+    @objc func showSpecFile() {
+        let modalVC = UIViewController()
+        if let viewModal = modalVC.view {
+            viewModal.backgroundColor = .whiteBubbleColor
+            
+            let closeButton = UIButton(type: .close)
+            viewModal.addSubview(closeButton)
+            closeButton.anchor(top: viewModal.topAnchor, right: viewModal.rightAnchor, paddingTop: 15, paddingRight: 15, width: 30, height: 30)
+            closeButton.layer.cornerRadius = 15
+            closeButton.clipsToBounds = true
+            closeButton.backgroundColor = .lightGray.withAlphaComponent(0.1)
+            let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
+            closeButton.addAction(UIAction { _ in
+                modalVC.dismiss(animated: true)
+            }, for: .touchUpInside)
+            
+            let imageSpec = UIButton(type: .custom)
+            viewModal.addSubview(imageSpec)
+            imageSpec.anchor(top: viewModal.topAnchor, left: viewModal.leftAnchor, paddingTop: 25, paddingLeft: 15, width: 40, height: 40)
+            imageSpec.layer.cornerRadius = 20
+            imageSpec.clipsToBounds = true
+            imageSpec.backgroundColor = .lightGray.withAlphaComponent(0.1)
+            imageSpec.setImage(UIImage(named: "pb_ic_attach_spc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal).resize(target: CGSize(width: 35, height: 35)), for: .normal)
+            
+            let title = UILabel()
+            title.text = "Option for Attachment".localized()
+            viewModal.addSubview(title)
+            title.anchor(top: viewModal.topAnchor, left: imageSpec.rightAnchor, paddingTop: 23, paddingLeft: 10)
+            title.textColor = .label
+            title.font = .boldSystemFont(ofSize: 16)
+            
+            let subtitle = UILabel()
+            subtitle.text = "Select option :".localized()
+            viewModal.addSubview(subtitle)
+            subtitle.anchor(top: title.bottomAnchor, left: imageSpec.rightAnchor, paddingLeft: 10)
+            subtitle.textColor = .gray
+            subtitle.font = .systemFont(ofSize: 14)
+            
+            tableViewConfigFile = UITableView()
+            viewModal.addSubview(tableViewConfigFile)
+            tableViewConfigFile.backgroundColor = .white
+            tableViewConfigFile.layer.cornerRadius = 8.0
+            tableViewConfigFile.clipsToBounds = true
+            tableViewConfigFile.anchor(top: imageSpec.bottomAnchor, left: viewModal.leftAnchor, bottom: viewModal.bottomAnchor, right: viewModal.rightAnchor, paddingTop: 15, paddingLeft: 15, paddingBottom: 80, paddingRight: 15)
+            tableViewConfigFile.register(UITableViewCell.self, forCellReuseIdentifier: "cellConfigFile")
+            tableViewConfigFile.dataSource = self
+            tableViewConfigFile.delegate = self
+            tableViewConfigFile.separatorStyle = .singleLine
+            tableViewConfigFile.tableFooterView = UIView()
+            if #available(iOS 15.0, *) {
+                tableViewConfigFile.sectionHeaderTopPadding = 0
+            }
+            
+            if #available(iOS 15.0, *) {
+                if let sheet = modalVC.sheetPresentationController {
+                    sheet.detents = [.medium()]
+                }
+            } else {
+                // Fallback on earlier versions
+            }
+        }
+        UIApplication.shared.visibleViewController?.present(modalVC, animated: true)
+    }
+}
+
+extension PreviewAttachmentImageVideo: UITableViewDelegate, UITableViewDataSource {
+    func numberOfSections(in tableView: UITableView) -> Int {
+        return 1
+    }
+    
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return 2
+    }
+    
+    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        return nil
+    }
+    
+    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        return 0
+    }
+    
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        var type = ""
+        if indexPath.row == 0 {
+            type = "share,download"
+        } else {
+            type = "forward"
+        }
+        if !specFileString.contains(type) {
+            if !specFileString.isEmpty {
+                specFileString += ","
+            }
+            specFileString += type
+        } else {
+            specFileString = specFileString.replacingOccurrences(of: type, with: "")
+            if specFileString == "," {
+                specFileString = ""
+            }
+        }
+        if specFileString.isEmpty {
+            buttonSpecFile.setImage(UIImage(named: "pb_ic_attach_spc_off", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal).resize(target: CGSize(width: 40, height: 40)), for: .normal)
+        } else {
+            buttonSpecFile.setImage(UIImage(named: "pb_ic_attach_spc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal).resize(target: CGSize(width: 40, height: 40)), for: .normal)
+        }
+        tableView.reloadData()
+    }
+    
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "cellConfigFile", for: indexPath as IndexPath)
+        var content = cell.defaultContentConfiguration()
+        content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+        content.textProperties.color = .label
+        content.secondaryTextProperties.font = .systemFont(ofSize: 14)
+        content.secondaryTextProperties.color = .gray
+        if indexPath.row == 0 {
+            content.text = "Can Share and Download".localized()
+            content.secondaryText = "The user, as the receiver, can share and download the attachment.".localized()
+            cell.accessoryType = specFileString.contains("share,download") ? .checkmark : .none
+        } else {
+            content.text = "Can Forward".localized()
+            content.secondaryText = "The user, as the receiver, can forward the attachment.".localized()
+            cell.accessoryType = specFileString.contains("forward") ? .checkmark : .none
+        }
+        cell.contentConfiguration = content
+        cell.tintColor = .black
+        return cell
     }
 }

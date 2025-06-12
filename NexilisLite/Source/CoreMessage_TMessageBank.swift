@@ -141,7 +141,7 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
-    public static func sendMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String, gif_id: String = "", isForwarded: String = "", isSecret: String = "") -> TMessage {
+    public static func sendMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String, gif_id: String = "", isForwarded: String = "", isSecret: String = "", specFile: String) -> TMessage {
         let me = User.getMyPin()!
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.SEND_CHAT
@@ -197,6 +197,7 @@ public class CoreMessage_TMessageBank {
         }
         tmessage.mBodies[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE] = isForwarded
         tmessage.mBodies[CoreMessage_TMessageKey.IS_SECRET] = isSecret
+        tmessage.mBodies[CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY] = specFile
         return tmessage
     }
     

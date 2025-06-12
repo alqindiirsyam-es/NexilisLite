@@ -319,7 +319,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         let idMe = User.getMyPin() as String?
         let opposite_pin = idMe ?? ""
         sendTyping(l_pin: l_pin, isTyping: true)
-        let message = CoreMessage_TMessageBank.sendMessage(l_pin: l_pin, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: chat_id, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin)
+        let message = CoreMessage_TMessageBank.sendMessage(l_pin: l_pin, message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: chat_id, is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin, specFile: "")
         Nexilis.saveMessage(message: message)
         let messageId = String(message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID]!)
         var row: [String: Any?] = [:]

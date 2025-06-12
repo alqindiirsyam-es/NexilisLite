@@ -100,6 +100,8 @@ public class Database {
                 try createDatabase(fmdb: fmdb)
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE_SUMMARY", columnName: "pinned", columnType: "INTEGER", defaultValue: "0")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE_SUMMARY", columnName: "archived", columnType: "INTEGER", defaultValue: "0")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "is_pinned", columnType: "TEXT", defaultValue: "0")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "attachment_speciality", columnType: "TEXT", defaultValue: "")
                 result = 1
 //                    print("Create Done")
             } catch {
@@ -309,7 +311,9 @@ public class Database {
                                 "'last_edited' INTEGER DEFAULT 0," +
                                 "'is_secret' INTEGER DEFAULT 0," +
                                 "'is_deleted_retention' INTEGER DEFAULT 0," +
-                                "'is_forwarded_message' INTEGER DEFAULT 0" +
+                                "'is_forwarded_message' INTEGER DEFAULT 0," +
+                                "'is_pinned' INTEGER DEFAULT 0," +
+                                "'attachment_speciality' TEXT" +
                                 ")", values: nil)
         
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_opposite on MESSAGE (opposite_pin, chat_id)", values: nil)

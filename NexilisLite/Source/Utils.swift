@@ -13,6 +13,7 @@ import nuSDKService
 import CoreLocation
 import CryptoKit
 import LocalAuthentication
+import AVFoundation
 //import var CommonCrypto.CC_MD5_DIGEST_LENGTH
 //import func CommonCrypto.CC_MD5
 //import typealias CommonCrypto.CC_LONG
@@ -2892,3 +2893,313 @@ public class MessageScope {
     public static let CHANNEL = "33";
 }
 
+class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, UIScrollViewDelegate {
+    
+    enum MediaType {
+        case image(UIImage)
+        case gif(UIImage)
+        case video(URL)
+    }
+
+    var media: MediaType!
+
+    public let backgroundView = UIView()
+    private let scrollView = UIScrollView()
+    private let imageView = UIImageView()
+    private var statusBarBackgroundView: UIView!
+    private var player: AVPlayer?
+    private var playerLayer: AVPlayerLayer?
+    private let playPauseButton = UIButton(type: .custom)
+    private var isVideoPlaying = false
+
+    var isNavigationBarHidden = false {
+        didSet { setNeedsStatusBarAppearanceUpdate() }
+    }
+
+    override var prefersStatusBarHidden: Bool {
+        return isNavigationBarHidden
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        view.backgroundColor = .clear
+
+        edgesForExtendedLayout = .all
+        extendedLayoutIncludesOpaqueBars = true
+        navigationController?.navigationBar.isTranslucent = true
+
+        // Background view
+        backgroundView.backgroundColor = .white
+        backgroundView.alpha = 0
+        backgroundView.frame = view.bounds
+        view.addSubview(backgroundView)
+
+        // ScrollView for zooming
+        scrollView.frame = view.bounds
+        scrollView.delegate = self
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = 3.0
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.bouncesZoom = true
+        view.addSubview(scrollView)
+
+        // Add imageView to scrollView
+        imageView.frame = scrollView.bounds
+        imageView.contentMode = .scaleAspectFit
+        scrollView.addSubview(imageView)
+
+        configureMedia()
+
+        // Tap gesture to toggle navigation bar
+        let tap = UITapGestureRecognizer(target: self, action: #selector(toggleNavigationBar))
+        tap.numberOfTapsRequired = 1
+        view.addGestureRecognizer(tap)
+
+        // Pan gesture for swipe-to-dismiss
+        let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        panGesture.delegate = self
+        view.addGestureRecognizer(panGesture)
+
+        // Status bar background view
+        let window = UIApplication.shared.windows.first
+        let statusBarHeight = window?.windowScene?.statusBarManager?.statusBarFrame.height ?? 44
+
+        statusBarBackgroundView = UIView(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: statusBarHeight))
+        statusBarBackgroundView.backgroundColor = .mainColor
+        statusBarBackgroundView.autoresizingMask = [.flexibleWidth, .flexibleBottomMargin]
+        view.addSubview(statusBarBackgroundView)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.setNavigationBarHidden(false, animated: false)
+        isNavigationBarHidden = false
+    }
+
+    func animateBackgroundIn() {
+        UIView.animate(withDuration: 0.25) {
+            self.backgroundView.alpha = 1
+        }
+    }
+
+    private func configureMedia() {
+        switch media! {
+        case .image(let img):
+            imageView.image = img
+
+        case .gif(let img):
+            imageView.image = img
+            imageView.animationRepeatCount = 0
+            imageView.startAnimating()
+
+        case .video(let url):
+            setupVideo(url: url)
+        }
+    }
+
+    private func setupVideo(url: URL) {
+        player = AVPlayer(url: url)
+        playerLayer = AVPlayerLayer(player: player)
+        playerLayer?.frame = scrollView.bounds
+        playerLayer?.videoGravity = .resizeAspect
+        scrollView.layer.addSublayer(playerLayer!)
+        
+        // Observe when video finished playing
+        NotificationCenter.default.addObserver(self, selector: #selector(videoDidFinish), name: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem)
+
+        // Add play/pause button
+        playPauseButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold, scale: .default)), for: .normal)
+        playPauseButton.tintColor = .white
+        playPauseButton.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
+        playPauseButton.backgroundColor = .black.withAlphaComponent(0.3)
+        playPauseButton.center = view.center
+        playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
+        view.addSubview(playPauseButton)
+        playPauseButton.circle()
+        
+        togglePlayPause()
+    }
+    
+    @objc private func videoDidFinish() {
+        isVideoPlaying = false
+        playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+    }
+
+    @objc private func togglePlayPause() {
+        guard let player = player else { return }
+
+        if isVideoPlaying {
+            player.pause()
+            playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+        } else {
+            if let currentItem = player.currentItem,
+               currentItem.currentTime() >= currentItem.duration {
+                player.seek(to: .zero)
+            }
+            player.play()
+            playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
+            DispatchQueue.global().async {
+                while self.statusBarBackgroundView == nil {
+                    Thread.sleep(forTimeInterval: 0.25)
+                }
+                DispatchQueue.main.async {
+                    self.toggleNavigationBar()
+                }
+            }
+        }
+        isVideoPlaying.toggle()
+    }
+
+    @objc private func toggleNavigationBar() {
+        guard let navController = navigationController else { return }
+
+        isNavigationBarHidden.toggle()
+
+        UIView.animate(withDuration: 0.25) {
+            navController.setNavigationBarHidden(self.isNavigationBarHidden, animated: true)
+            self.statusBarBackgroundView.alpha = self.isNavigationBarHidden ? 0 : 1
+            self.playPauseButton.alpha = self.isNavigationBarHidden ? 0 : 1
+        }
+    }
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard scrollView.zoomScale == 1.0 else { return }
+
+        let translation = gesture.translation(in: view)
+        let velocity = gesture.velocity(in: view)
+
+        switch gesture.state {
+        case .changed:
+            let transform = CGAffineTransform(translationX: translation.x, y: translation.y)
+            scrollView.transform = transform
+            
+            // Calculate percentage based on distance from center
+            let distance = hypot(translation.x, translation.y)
+            let maxDistance = view.bounds.height / 2.0
+            let progress = min(distance / maxDistance, 1.0)
+            self.backgroundView.alpha = 1.0 - progress
+
+        case .ended, .cancelled:
+            let distance = hypot(translation.x, translation.y)
+            let threshold: CGFloat = 120
+
+            if distance > threshold || abs(velocity.y) > 500 || abs(velocity.x) > 500 {
+                // Dismiss if far enough or fast swipe
+                dismiss(animated: true, completion: nil)
+            } else {
+                // Return to center if not far enough
+                UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0.8, options: [], animations: {
+                    self.scrollView.transform = .identity
+                    self.backgroundView.alpha = 1.0
+                }, completion: nil)
+            }
+        default:
+            break
+        }
+    }
+
+    // MARK: - UIScrollViewDelegate
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        return imageView
+    }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        let imageViewSize = imageView.frame.size
+        let scrollViewSize = scrollView.bounds.size
+        let verticalPadding = imageViewSize.height < scrollViewSize.height ? (scrollViewSize.height - imageViewSize.height) / 2 : 0
+        let horizontalPadding = imageViewSize.width < scrollViewSize.width ? (scrollViewSize.width - imageViewSize.width) / 2 : 0
+        scrollView.contentInset = UIEdgeInsets(top: verticalPadding, left: horizontalPadding, bottom: verticalPadding, right: horizontalPadding)
+    }
+}
+
+class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+    var isPresenting = true
+    var originImageView: UIImageView?
+
+    func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
+        return 0.45
+    }
+
+    func animateTransition(using transitionContext: UIViewControllerContextTransitioning) {
+        guard let fromVC = transitionContext.viewController(forKey: .from),
+              let toVC = transitionContext.viewController(forKey: .to),
+              let originImageView = originImageView else {
+            transitionContext.completeTransition(false)
+            return
+        }
+
+        let container = transitionContext.containerView
+        let imageViewSnapshot = UIImageView(image: originImageView.image)
+        imageViewSnapshot.contentMode = .scaleAspectFit
+        imageViewSnapshot.clipsToBounds = true
+        imageViewSnapshot.frame = container.convert(originImageView.bounds, from: originImageView)
+
+        if isPresenting {
+            toVC.view.alpha = 0
+            container.addSubview(toVC.view)
+            container.addSubview(imageViewSnapshot)
+
+            let finalFrame = toVC.view.frame
+
+            UIView.animate(withDuration: transitionDuration(using: transitionContext),
+                           delay: 0,
+                           usingSpringWithDamping: 0.85,
+                           initialSpringVelocity: 0.6,
+                           options: .curveEaseOut, animations: {
+
+                imageViewSnapshot.frame = finalFrame
+                toVC.view.alpha = 1
+
+            }) { _ in
+                imageViewSnapshot.removeFromSuperview()
+                transitionContext.completeTransition(true)
+            }
+
+        } else {
+            let navVC = fromVC as! UINavigationController
+            let fromImageVC = navVC.viewControllers.first as! MediaViewerViewController
+            let finalFrame = container.convert(originImageView.bounds, from: originImageView)
+
+            container.addSubview(imageViewSnapshot)
+            fromImageVC.view.alpha = 0
+            fromImageVC.backgroundView.alpha = 0 // fade background
+
+            UIView.animate(withDuration: transitionDuration(using: transitionContext),
+                           delay: 0,
+                           usingSpringWithDamping: 0.85,
+                           initialSpringVelocity: 0.6,
+                           options: .curveEaseOut, animations: {
+
+                imageViewSnapshot.frame = finalFrame
+
+            }) { _ in
+                imageViewSnapshot.removeFromSuperview()
+                transitionContext.completeTransition(true)
+            }
+        }
+    }
+}
+
+class ZoomTransitioningDelegate: NSObject, UIViewControllerTransitioningDelegate {
+    var originImageView: UIImageView?
+
+    func animationController(forPresented presented: UIViewController,
+                             presenting: UIViewController, source: UIViewController)
+        -> UIViewControllerAnimatedTransitioning? {
+            let animator = ZoomAnimator()
+            animator.isPresenting = true
+            animator.originImageView = originImageView
+            return animator
+    }
+
+    func animationController(forDismissed dismissed: UIViewController)
+        -> UIViewControllerAnimatedTransitioning? {
+            let animator = ZoomAnimator()
+            animator.isPresenting = false
+            animator.originImageView = originImageView
+            return animator
+    }
+}
