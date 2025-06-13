@@ -16,13 +16,22 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     var files: [SecureFolderItem] = []
     var filteredFiles: [SecureFolderItem] = []
     var previewItem: NSURL?
-    
+
+    var isGridView: Bool = true
+
     let searchBar: UISearchBar = {
         let sb = UISearchBar()
         sb.placeholder = "Search files"
         return sb
     }()
-    
+
+    let toggleButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Grid", for: .normal)
+        button.addTarget(nil, action: #selector(toggleViewMode), for: .touchUpInside)
+        return button
+    }()
+
     let collectionView: UICollectionView = {
         let layout = UICollectionViewFlowLayout()
         layout.minimumLineSpacing = 10
@@ -36,8 +45,6 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     
     public override func viewDidLoad() {
         super.viewDidLoad()
-        self.navigationController?.navigationController?.setNavigationBarHidden(true, animated: false)
-//        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tapGesture.cancelsTouchesInView = false
         view.addGestureRecognizer(tapGesture)
@@ -49,9 +56,16 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     @objc func dismissKeyboard() {
         searchBar.resignFirstResponder()
     }
+
+    @objc func toggleViewMode() {
+        isGridView.toggle()
+        toggleButton.setTitle(isGridView ? "Grid" : "List", for: .normal)
+        collectionView.collectionViewLayout.invalidateLayout()
+        collectionView.reloadData()
+    }
     
     public override func viewWillAppear(_ animated: Bool) {
-        self.navigationController?.navigationController?.setNavigationBarHidden(true, animated: false)
+//        self.navigationController?.navigationController?.setNavigationBarHidden(false, animated: false)
         self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black]
         let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black, NSAttributedString.Key.font : UIFont.boldSystemFont(ofSize: 16)]
         let navBarAppearance = UINavigationBarAppearance()
@@ -69,12 +83,22 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
         navigationController?.navigationBar.overrideUserInterfaceStyle = self.traitCollection.userInterfaceStyle == .dark ? .dark : .light
         navigationController?.navigationBar.barStyle = .default
         navigationController?.navigationBar.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        tabBarController?.navigationItem.leftBarButtonItem = nil
+//        tabBarController?.navigationItem.leftBarButtonItem = nil
         tabBarController?.navigationItem.searchController = nil
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "Back",
+            style: .plain,
+                target: self,
+                action: #selector(dismissSelf)
+            )
+    }
+    
+    @objc func dismissSelf() {
+        dismiss(animated: true)
     }
     
     public override func viewDidAppear(_ animated: Bool) {
-        self.navigationController?.navigationBar.topItem?.title = "Secure Folder".localized()
+        self.title = "Secure Folder".localized()
         self.navigationController?.navigationBar.setNeedsLayout()
     }
     
@@ -101,18 +125,24 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
         searchBar.delegate = self
         view.addSubview(searchBar)
         searchBar.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            searchBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            searchBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            searchBar.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-        
-        // Add collection view
+
+        toggleButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(toggleButton)
+
         collectionView.dataSource = self
         collectionView.delegate = self
         view.addSubview(collectionView)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
+            searchBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            searchBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            searchBar.trailingAnchor.constraint(equalTo: toggleButton.leadingAnchor),
+
+            toggleButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            toggleButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+            toggleButton.widthAnchor.constraint(equalToConstant: 60),
+            toggleButton.heightAnchor.constraint(equalTo: searchBar.heightAnchor),
+
             collectionView.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -169,7 +199,7 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     // MARK: Search Bar Delegate
     
     public func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        filteredFiles = searchText.isEmpty ? files : files.filter { $0.filename.contains(searchText) }
+        filteredFiles = searchText.isEmpty ? files : files.filter { $0.filename.lowercased().contains(searchText.lowercased()) }
         collectionView.reloadData()
     }
     
@@ -183,8 +213,22 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FileCell", for: indexPath) as! FileCell
         let fileItem = filteredFiles[indexPath.item]
         cell.label.text = fileItem.filename
+        cell.isGrid = isGridView
+        if !isGridView {
+            if let timestamp = Double(fileItem.serverDate) {
+                    let date = Date(timeIntervalSince1970: timestamp / 1000)
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "dd/MM/yy HH:mm"
+                    cell.dateLabel.text = formatter.string(from: date)
+                } else {
+                    cell.dateLabel.text = fileItem.serverDate
+                }
+        } else {
+            cell.dateLabel.text = nil
+        }
+        cell.dateLabel.isHidden = isGridView == true
         cell.imageView.tintColor = .black
-        cell.imageView.sizeThatFits(CGSize(width: 200.0, height: 200.0))
+        // cell.imageView.sizeThatFits(CGSize(width: 200.0, height: 200.0))
         var thumbnailImage = UIImage(systemName: "doc.text")?.withTintColor(.black)
         if fileItem.thumbId != "" {
             thumbnailImage = getThumbnail(for: fileItem.thumbId)
@@ -200,9 +244,17 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     
     public func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
         let padding: CGFloat = 10
-        let collectionViewSize = collectionView.frame.size.width - padding
-        let width = collectionViewSize / 2
-        return CGSize(width: width, height: width)
+        // let collectionViewSize = collectionView.frame.size.width - padding
+        // let width = collectionViewSize / 2
+        // return CGSize(width: width, height: width)
+        let width = collectionView.frame.width
+
+        if isGridView {
+            let itemWidth = (width - padding * 3) / 2
+            return CGSize(width: itemWidth, height: itemWidth)
+        } else {
+            return CGSize(width: width - padding * 2, height: 90)
+        }
     }
     
     public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -314,43 +366,96 @@ class FileCell: UICollectionViewCell {
     
     let imageView: UIImageView = {
         let iv = UIImageView()
-        iv.contentMode = .scaleAspectFit
+        iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
-        iv.image = UIImage(systemName: "doc") // Default placeholder image
+        iv.image = UIImage(systemName: "doc")
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        iv.layer.cornerRadius = 6
+        iv.layer.masksToBounds = true
         return iv
     }()
     
     let label: UILabel = {
         let lbl = UILabel()
-        lbl.textAlignment = .center
+        lbl.font = UIFont.systemFont(ofSize: 14)
         lbl.numberOfLines = 1
-        lbl.font = UIFont.systemFont(ofSize: 12)
+        lbl.translatesAutoresizingMaskIntoConstraints = false
         return lbl
     }()
-    
+
+    let dateLabel: UILabel = {
+        let lbl = UILabel()
+        lbl.font = UIFont.systemFont(ofSize: 12)
+        lbl.textColor = .gray
+        lbl.translatesAutoresizingMaskIntoConstraints = false
+        return lbl
+    }()
+
+    var isGrid: Bool = true {
+        didSet {
+            updateLayout()
+        }
+    }
+
+    private var gridConstraints: [NSLayoutConstraint] = []
+    private var listConstraints: [NSLayoutConstraint] = []
+
     override init(frame: CGRect) {
         super.init(frame: frame)
                 
         contentView.addSubview(imageView)
         contentView.addSubview(label)
-        
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        label.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(dateLabel)
+        setupConstraints()
+    }
 
-        NSLayoutConstraint.activate([
-            imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            imageView.heightAnchor.constraint(equalTo: contentView.heightAnchor, multiplier: 0.75),
+    private func setupConstraints() {
+        // Grid layout constraints
+        gridConstraints = [
+            imageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            imageView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            imageView.widthAnchor.constraint(equalTo: contentView.widthAnchor, multiplier: 0.6),
+            imageView.heightAnchor.constraint(equalTo: imageView.widthAnchor),
 
-            label.topAnchor.constraint(equalTo: imageView.bottomAnchor),
-            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            label.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
-        ])
-        
-        layer.borderWidth = 1.0
-        layer.borderColor = UIColor.black.cgColor
+            label.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 4),
+            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
+            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
+
+            dateLabel.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 2),
+            dateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
+            dateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
+            dateLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -4)
+        ]
+
+        // List layout constraints
+        listConstraints = [
+            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            imageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 60),
+            imageView.heightAnchor.constraint(equalToConstant: 60),
+
+            label.topAnchor.constraint(equalTo: imageView.topAnchor),
+            label.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+
+            dateLabel.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
+            dateLabel.leadingAnchor.constraint(equalTo: label.leadingAnchor),
+            dateLabel.trailingAnchor.constraint(equalTo: label.trailingAnchor)
+        ]
+    }
+
+    private func updateLayout() {
+        NSLayoutConstraint.deactivate(gridConstraints + listConstraints)
+
+        if isGrid {
+            NSLayoutConstraint.activate(gridConstraints)
+            label.textAlignment = .center
+            dateLabel.textAlignment = .center
+        } else {
+            NSLayoutConstraint.activate(listConstraints)
+            label.textAlignment = .left
+            dateLabel.textAlignment = .left
+        }
     }
     
     required init?(coder: NSCoder) {
