@@ -33,6 +33,7 @@ Pod::Spec.new do |spec|
   spec.dependency 'SwiftLinkPreview', '~> 3.4.0'
   spec.dependency 'KeychainAccess', '~> 4.2.2'
   spec.dependency 'Popover', '~> 1.3.0'
+  spec.dependency 'Firebase/Auth', '~> 11.14.0'
 # spec.static_framework = true
 # spec.dependency 'iOS-WebP'
 #  spec.vendored_frameworks = 'nuSDKService.framework'

@@ -52,9 +52,9 @@ public class ChangeNamePassswordViewController: UIViewController {
     }
     
     @objc func showLogin() {
-        let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "changeDevice") as! ChangeDeviceViewController
-        controller.fromChangeNamePass = true
-        navigationController?.show(controller, sender: nil)
+//        let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "changeDevice") as! ChangeDeviceViewController
+//        controller.fromChangeNamePass = true
+//        navigationController?.show(controller, sender: nil)
     }
     
     @objc func dismissKeyboard() {

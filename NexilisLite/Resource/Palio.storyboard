@@ -3129,7 +3129,7 @@
                                     <constraint firstAttribute="height" constant="2" id="0as-Zh-jRl"/>
                                 </constraints>
                             </view>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="pb_cd_person" translatesAutoresizingMaskIntoConstraints="NO" id="uMG-xq-HNf">
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="pb_user" translatesAutoresizingMaskIntoConstraints="NO" id="uMG-xq-HNf">
                                 <rect key="frame" x="87" y="136" width="240" height="128"/>
                                 <constraints>
                                     <constraint firstAttribute="width" constant="240" id="PBy-BT-r38"/>
@@ -3182,7 +3182,6 @@
                             <constraint firstItem="RRi-TQ-BYu" firstAttribute="trailing" secondItem="OGC-mO-8T0" secondAttribute="trailing" constant="20" id="P6s-86-sIR"/>
                             <constraint firstItem="Q4b-oV-sHi" firstAttribute="top" secondItem="uMG-xq-HNf" secondAttribute="bottom" constant="10" id="RzA-zE-Hrr"/>
                             <constraint firstItem="icL-yb-DMM" firstAttribute="leading" secondItem="RRi-TQ-BYu" secondAttribute="leading" constant="40" id="VGd-8t-NGv"/>
-                            <constraint firstItem="icL-yb-DMM" firstAttribute="top" secondItem="5jw-G4-iGy" secondAttribute="bottom" constant="30" id="i5h-FB-69z"/>
                             <constraint firstItem="RRi-TQ-BYu" firstAttribute="trailing" secondItem="5jw-G4-iGy" secondAttribute="trailing" constant="20" id="iNS-JR-wnP"/>
                             <constraint firstAttribute="trailingMargin" secondItem="Q4b-oV-sHi" secondAttribute="trailing" constant="20" id="kmp-rV-hmS"/>
                             <constraint firstItem="RRi-TQ-BYu" firstAttribute="trailing" secondItem="icL-yb-DMM" secondAttribute="trailing" constant="40" id="lPZ-ru-Zxi"/>
@@ -3191,6 +3190,7 @@
                             <constraint firstItem="OGC-mO-8T0" firstAttribute="leading" secondItem="RRi-TQ-BYu" secondAttribute="leading" constant="20" id="qxd-Nm-RjI"/>
                             <constraint firstItem="kwq-ci-Qkk" firstAttribute="leading" secondItem="RRi-TQ-BYu" secondAttribute="leading" constant="40" id="wUA-gp-1pR"/>
                             <constraint firstItem="uMG-xq-HNf" firstAttribute="centerX" secondItem="j0h-JE-i7E" secondAttribute="centerX" id="z3S-Pf-Oua"/>
+                            <constraint firstItem="icL-yb-DMM" firstAttribute="top" secondItem="OGC-mO-8T0" secondAttribute="bottom" constant="74" id="zNR-bd-1S8"/>
                         </constraints>
                     </view>
                     <connections>
@@ -3198,12 +3198,13 @@
                         <outlet property="descSignUpSignIn" destination="kwq-ci-Qkk" id="z3Q-k3-wbp"/>
                         <outlet property="passwordField" destination="5jw-G4-iGy" id="o5r-JE-N89"/>
                         <outlet property="showPasswordButton" destination="SAR-sw-Oq9" id="xhD-bu-DFc"/>
+                        <outlet property="topConstDesc" destination="zNR-bd-1S8" id="xlR-2H-KBg"/>
                         <outlet property="usernameField" destination="OGC-mO-8T0" id="kOP-TB-DFc"/>
                     </connections>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="mnb-fv-1Pu" userLabel="First Responder" customClass="UIResponder" sceneMemberID="firstResponder"/>
             </objects>
-            <point key="canvasLocation" x="4672" y="1443"/>
+            <point key="canvasLocation" x="4671.0144927536239" y="1442.4107142857142"/>
         </scene>
         <!--Seminar List View Controller-->
         <scene sceneID="9jc-wF-EYe">
@@ -3446,6 +3447,7 @@
         <image name="mic.slash.fill" catalog="system" width="108" height="128"/>
         <image name="pb_cd_person" width="512" height="512"/>
         <image name="pb_seminar_speaking" width="512" height="512"/>
+        <image name="pb_user" width="556" height="449"/>
         <image name="pdf-icon" width="860" height="901"/>
         <image name="pencil" catalog="system" width="128" height="113"/>
         <image name="person.badge.plus.fill" catalog="system" width="128" height="126"/>

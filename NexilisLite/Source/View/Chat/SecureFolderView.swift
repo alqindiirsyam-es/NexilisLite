@@ -258,6 +258,7 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     }
     
     public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FileCell", for: indexPath) as! FileCell
         let fileItem = filteredFiles[indexPath.item]
         if fileItem.imageId != "" {
             print("this image")
@@ -267,13 +268,7 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
                     if dataDecrypt != nil {
                         data = dataDecrypt!
                     }
-                    let image = UIImage(data: data)
-                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                    previewImageVC.image = image
-                    previewImageVC.isHiddenTextField = true
-                    previewImageVC.modalPresentationStyle = .custom
-                    previewImageVC.modalTransitionStyle  = .crossDissolve
-                    self.present(previewImageVC, animated: true, completion: nil)
+                    APIS.openImageNexilis(imageView: cell.imageView, data: data, isGIF: true)
                 }
             }
             catch {

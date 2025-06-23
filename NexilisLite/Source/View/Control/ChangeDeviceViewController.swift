@@ -17,7 +17,6 @@ public class ChangeDeviceViewController: UIViewController {
     
     public var isDismiss: ((String) -> ())?
     public var forceLogin = false
-    public var fromChangeNamePass = false
     
     public override func viewDidLoad() {
         super.viewDidLoad()
@@ -163,14 +162,7 @@ public class ChangeDeviceViewController: UIViewController {
                                         Nexilis.floatingButton = FloatingButton()
                                         Nexilis.addFB()
                                     }
-                                    if self.fromChangeNamePass{
-                                        var vc = self.navigationController?.presentingViewController
-                                        while vc?.presentingViewController != nil {
-                                            vc = vc?.presentingViewController
-                                        }
-                                        vc?.dismiss(animated: true, completion: nil)
-                                    }
-                                    else if !self.forceLogin {
+                                    if !self.forceLogin {
                                         self.navigationController?.popViewController(animated: true)
                                     } else {
                                         self.navigationController?.dismiss(animated: true)
@@ -287,14 +279,7 @@ public class ChangeDeviceViewController: UIViewController {
                                     Nexilis.addFB()
                                 }
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
-                                if self.fromChangeNamePass{
-                                    var vc = self.navigationController?.presentingViewController
-                                    while vc?.presentingViewController != nil {
-                                        vc = vc?.presentingViewController
-                                    }
-                                    vc?.dismiss(animated: true, completion: nil)
-                                }
-                                else if !self.forceLogin {
+                                if !self.forceLogin {
                                     self.navigationController?.popViewController(animated: true)
                                 } else {
                                     self.navigationController?.dismiss(animated: true)
@@ -328,14 +313,7 @@ public class ChangeDeviceViewController: UIViewController {
                                     Nexilis.addFB()
                                 }
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
-                                if self.fromChangeNamePass{
-                                    var vc = self.navigationController?.presentingViewController
-                                    while vc?.presentingViewController != nil {
-                                        vc = vc?.presentingViewController
-                                    }
-                                    vc?.dismiss(animated: true, completion: nil)
-                                }
-                                else if !self.forceLogin {
+                                if !self.forceLogin {
                                     self.navigationController?.popViewController(animated: true)
                                 } else {
                                     self.navigationController?.dismiss(animated: true)

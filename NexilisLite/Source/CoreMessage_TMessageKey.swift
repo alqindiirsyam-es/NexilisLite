@@ -502,4 +502,7 @@ public class CoreMessage_TMessageKey {
     public static let IS_DELETED_RETENTION = "idl";
     public static let IS_FORWARDED_MESSAGE = "ifm";
     
+    public static let FINGERPRINT = "FPR";
+    public static let SIGNATURE = "SIG";
+    public static let PUBLIC_KEY = "PUK";
 }

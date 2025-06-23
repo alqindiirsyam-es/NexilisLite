@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.44"
+    public static var cpaasVersion = "5.0.45"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -448,9 +448,6 @@ public class Nexilis: NSObject {
     }
     
     private static func getPullGroupNoMember() {
-        while Nexilis.isProcessWriteSync {
-            Thread.sleep(forTimeInterval: 0.5)
-        }
         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullGroupNoMember(), timeout: 30 * 1000), response.isOk() {
             let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
             if !data.isEmpty {
@@ -526,20 +523,7 @@ public class Nexilis: NSObject {
         }
         isGettingFeatureAccess = true
         DispatchQueue.global().async {
-//            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "get_feature_access_new")!) { data, response, error in
-//                let response = response as? HTTPURLResponse
-//                if response?.statusCode != 200 || error != nil {
-//                    return
-//                }
-//                if let data = data, let responseString = String(data: data, encoding: .utf8) {
-//                    if let jsonArray = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-//                    }
-//                }
-//            }
-            while Nexilis.isProcessWriteSync {
-                Thread.sleep(forTimeInterval: 0.5)
-            }
-            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getFeatureAccessAll(), timeout: 5000), response.isOk() {
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getFeatureAccessAll(), timeout: 10000), response.isOk() {
                 let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
                 do {
                     if let data = data.data(using: .utf8) {
@@ -657,7 +641,7 @@ public class Nexilis: NSObject {
     public static func checkingAccess(key: String) -> Bool {
         let dataAccess = Utils.getFeatureAccess()
         if dataAccess.isEmpty {
-            if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" {
+            if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
                 return false
             } else {
                 return true
@@ -666,7 +650,7 @@ public class Nexilis: NSObject {
             if jsonArray[key] != nil {
                 return jsonArray[key] as! String == "1"
             } else {
-                if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" {
+                if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_email" {
                     return false
                 } else {
                     return true
@@ -699,9 +683,6 @@ public class Nexilis: NSObject {
     }
     
     private static func getPullWorkingArea() {
-        while Nexilis.isProcessWriteSync {
-            Thread.sleep(forTimeInterval: 0.5)
-        }
         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getWorkingAreaContactCenter(), timeout: 30 * 1000), response.isOk() {
             let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
             if !data.isEmpty {
@@ -1126,12 +1107,15 @@ public class Nexilis: NSObject {
         if !API.bInetConnAvailable() {
             return nil
         }
+        while Nexilis.isProcessWriteSync {
+            Thread.sleep(forTimeInterval: 0.5)
+        }
         isProcessWriteSync = true
         do {
-//            print(">> SENDING MESSAGE >> ", message.toLogString())
+//            print(">> SENDING MESSAGE >> ", message.getCode())
             if let data = try API.sGetResponse(sRequest: message.pack(), lTimeout: timeout, bKeepTOResp: true) {
                 let response = TMessage(data: data)
-//                print("<< RESPONSE MESSAGE << ", data)
+//                print("<< RESPONSE MESSAGE << ", response.getCode())
                 isProcessWriteSync = false
                 return response
             }
@@ -1294,8 +1278,12 @@ public class Nexilis: NSObject {
         if !isChangeProfile {
             let alert = LibAlertController(title: "Set Profile".localized(), message: "You must set your profile to use this feature".localized(), preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {(_) in
-                let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
-                controller.forceLogin = true
+                guard let controller = APIS.getControllerSign() else { return }
+                if let controller = controller as? SignUpSignIn {
+                    controller.forceLogin = true
+                } else if let controller = controller as? SignInOption {
+                    controller.forceLogin = true
+                }
                 let navigationController = CustomNavigationController(rootViewController: controller)
                 navigationController.modalPresentationStyle = .fullScreen
                 navigationController.navigationBar.tintColor = .white
@@ -1364,8 +1352,12 @@ public class Nexilis: NSObject {
             alertChangeProfile = LibAlertController(title: "Set Profile".localized(), message: "You must set your profile to use this feature".localized(), preferredStyle: .alert)
             alertChangeProfile.addAction(UIAlertAction(title: "Cancel".localized(), style: .destructive, handler: nil))
             alertChangeProfile.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {(_) in
-                let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
-                controller.forceLogin = true
+                guard let controller = APIS.getControllerSign() else { return }
+                if let controller = controller as? SignUpSignIn {
+                    controller.forceLogin = true
+                } else if let controller = controller as? SignInOption {
+                    controller.forceLogin = true
+                }
                 let navigationController = CustomNavigationController(rootViewController: controller)
                 navigationController.modalPresentationStyle = .fullScreen
                 navigationController.navigationBar.tintColor = .white
@@ -1419,8 +1411,10 @@ public class Nexilis: NSObject {
         let groupWait = listDispatchGroups[message.getStatus()]
         groupWait?.enter()
         waitQueue[message.getStatus()] = message
+//        print("wandw req: \(message.getCode())")
         _ = write(message: message, timeout: timeout)
         if groupWait?.wait(timeout: .now() + 15) == .timedOut {
+//            print("wandw timedOut: \(message.getCode())")
             waitQueue.removeValue(forKey: message.getStatus())
             listDispatchGroups.removeValue(forKey: message.getStatus())
             groupWait?.leave()
@@ -1477,6 +1471,7 @@ public class Nexilis: NSObject {
         }
         message.mBodies[CoreMessage_TMessageKey.PACKET_ID] = packetId
         if let _ = waitQueue[message.getStatus()] {
+//            print("wandw resp: \(message.getCode())")
             //print("MESSAGE INCOMING DATA \(message.toLogString())")
             if message.mBodies.keys.contains(CoreMessage_TMessageKey.ERRCOD) {
                 waitQueue[message.getStatus()] = message
@@ -2925,16 +2920,10 @@ extension Nexilis: MessageDelegate {
                             if let dirPath = paths.first {
                                 let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(image)
                                 if FileManager.default.fileExists(atPath: imageURL.path) {
-                                    let image    = UIImage(contentsOfFile: imageURL.path)
-                                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                                    previewImageVC.image = image
-                                    previewImageVC.isHiddenTextField = true
-                                    previewImageVC.modalPresentationStyle = .overFullScreen
-                                    previewImageVC.modalTransitionStyle  = .crossDissolve
-                                    if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                        UIApplication.shared.visibleViewController?.navigationController?.present(previewImageVC, animated: true, completion: nil)
-                                    } else {
-                                        UIApplication.shared.visibleViewController?.present(previewImageVC, animated: true, completion: nil)
+                                    do {
+                                        APIS.openImageNexilis(imageView: imageBroadcast, data: try Data(contentsOf: imageURL))
+                                    } catch {
+                                        
                                     }
                                 } else if FileEncryption.shared.isSecureExists(filename: image) {
                                     do {
@@ -2943,17 +2932,7 @@ extension Nexilis: MessageDelegate {
                                             if dataDecrypt != nil {
                                                 data = dataDecrypt!
                                             }
-                                            let image = UIImage(data: data)
-                                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                                            previewImageVC.image = image
-                                            previewImageVC.isHiddenTextField = true
-                                            previewImageVC.modalPresentationStyle = .overFullScreen
-                                            previewImageVC.modalTransitionStyle  = .crossDissolve
-                                            if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                                UIApplication.shared.visibleViewController?.navigationController?.present(previewImageVC, animated: true, completion: nil)
-                                            } else {
-                                                UIApplication.shared.visibleViewController?.present(previewImageVC, animated: true, completion: nil)
-                                            }
+                                            APIS.openImageNexilis(imageView: imageBroadcast, data: data)
                                         }
                                     } catch {
                                         
@@ -2965,35 +2944,30 @@ extension Nexilis: MessageDelegate {
                                         }
                 
                                         DispatchQueue.main.async {
-                                            var image : UIImage?
+                                            var data : Data?
                                             if FileManager.default.fileExists(atPath: imageURL.path) {
-                                                image    = UIImage(contentsOfFile: imageURL.path)
+                                                do {
+                                                    data = try Data(contentsOf: imageURL)
+                                                } catch {
+                                                    
+                                                }
                                             }
                                             else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                                                 do {
                                                     if let imageData = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
-                                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
-                                                        if dataDecrypt == nil {
-                                                            image = UIImage(data: imageData)
-                                                        } else {
-                                                            image = UIImage(data: dataDecrypt!)
+                                                        if let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData) {
+                                                            if dataDecrypt == nil {
+                                                                data = imageData
+                                                            } else {
+                                                                data = dataDecrypt
+                                                            }
                                                         }
                                                     }
                                                 } catch {
                                                     
                                                 }
                                             }
-                                            
-                                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                                            previewImageVC.image = image
-                                            previewImageVC.isHiddenTextField = true
-                                            previewImageVC.modalPresentationStyle = .overFullScreen
-                                            previewImageVC.modalTransitionStyle  = .crossDissolve
-                                            if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                                UIApplication.shared.visibleViewController?.navigationController?.present(previewImageVC, animated: true, completion: nil)
-                                            } else {
-                                                UIApplication.shared.visibleViewController?.present(previewImageVC, animated: true, completion: nil)
-                                            }
+                                            APIS.openImageNexilis(imageView: imageBroadcast, data: data)
                                         }
                                     }
                                 }
@@ -4415,8 +4389,12 @@ extension Nexilis: MessageDelegate {
                                     if (cursorData.string(forColumnIndex: 0)! + " " + cursorData.string(forColumnIndex: 1)!).trimmingCharacters(in: .whitespaces) == "USR\(User.getMyPin()!)" {
                                         let alert = LibAlertController(title: "Set Profile".localized(), message: "You must set your profile to use this feature".localized(), preferredStyle: .alert)
                                         alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {(_) in
-                                            let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
-                                            controller.forceLogin = true
+                                            guard let controller = APIS.getControllerSign() else { return }
+                                            if let controller = controller as? SignUpSignIn {
+                                                controller.forceLogin = true
+                                            } else if let controller = controller as? SignInOption {
+                                                controller.forceLogin = true
+                                            }
                                             let navigationController = CustomNavigationController(rootViewController: controller)
                                             navigationController.modalPresentationStyle = .fullScreen
                                             navigationController.navigationBar.tintColor = .white

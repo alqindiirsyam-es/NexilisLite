@@ -96,19 +96,6 @@ class VideoConferenceViewController: UIViewController {
         return label
     }()
     
-    let qmeraLogo: UIButton = {
-        let image = UIImage(named: "Q-Button-PNG", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-        let button = UIButton()
-        button.setImage(image, for: .normal)
-        button.imageView?.contentMode = .scaleAspectFit
-        button.imageEdgeInsets = UIEdgeInsets(top: 2, left: 2, bottom: 2, right: 2)
-        button.contentVerticalAlignment = .fill
-        button.contentHorizontalAlignment = .fill
-//        button.frame.size.width = 30
-//        button.frame.size.height = 30
-        return button
-    }()
-    
     let nexilisLogo: UIButton = {
         let image = UIImage(named: "pb_powered_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
         let button = UIButton()

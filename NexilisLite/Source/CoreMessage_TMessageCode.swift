@@ -808,4 +808,8 @@ public class CoreMessage_TMessageCode {
     public static let GET_PUSH_PREFS = "GPR";
     public static let UPDATE_VERSION = "UPV";
     public static let GET_WHITELIST = "GWL";
+    
+    public static let AUTH_REQUEST = "AR01";
+    public static let CHECK_USER_MSISDN = "CUM1";
+
 }

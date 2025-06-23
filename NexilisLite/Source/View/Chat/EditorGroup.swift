@@ -6510,7 +6510,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 imageViewer.navigationItem.rightBarButtonItem = shareButton
             }
             
-            var name = (dataGroup["f_name"] as? String ?? "") + " (\(dataTopic["title"] as? String ?? ""))"
+            let name = (dataGroup["f_name"] as? String ?? "") + " (\(dataTopic["title"] as? String ?? ""))"
             imageViewer.title = name
             
             let transitionDelegate = ZoomTransitioningDelegate()

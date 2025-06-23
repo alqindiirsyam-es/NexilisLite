@@ -671,13 +671,11 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             if let dirPath = paths.first {
                 let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageUser)
                 if FileManager.default.fileExists(atPath: imageURL.path) {
-                    let image    = UIImage(contentsOfFile: imageURL.path)
-                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                    previewImageVC.image = image
-                    previewImageVC.isHiddenTextField = true
-                    previewImageVC.modalPresentationStyle = .custom
-                    previewImageVC.modalTransitionStyle  = .crossDissolve
-                    self.present(previewImageVC, animated: true, completion: nil)
+                    do {
+                        APIS.openImageNexilis(imageView: self.profile, data: try Data(contentsOf: imageURL))
+                    } catch {
+                        
+                    }
                 } else if FileEncryption.shared.isSecureExists(filename: imageUser) {
                     do {
                         if var data = try FileEncryption.shared.readSecure(filename: imageUser) {
@@ -685,13 +683,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                             if dataDecrypt != nil {
                                 data = dataDecrypt!
                             }
-                            let image = UIImage(data: data)
-                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                            previewImageVC.image = image
-                            previewImageVC.isHiddenTextField = true
-                            previewImageVC.modalPresentationStyle = .custom
-                            previewImageVC.modalTransitionStyle  = .crossDissolve
-                            self.present(previewImageVC, animated: true, completion: nil)
+                            APIS.openImageNexilis(imageView: self.profile, data: data)
                         }
                     }
                     catch {

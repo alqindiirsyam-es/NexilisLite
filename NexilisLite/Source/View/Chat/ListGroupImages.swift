@@ -358,37 +358,60 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
                         guard progress == 100 else {
                             return
                         }
-                        
-                        do {
-                            let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.listGroupingImages[indexPath.row].imageId)
-                            if FileManager.default.fileExists(atPath: imageURL.path){
-                                let image    = UIImage(contentsOfFile: imageURL.path)
-                                let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                if save {
-                                    UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-                                }
-                            }
-                            else if FileEncryption.shared.isSecureExists(filename: self.listGroupingImages[indexPath.row].imageId){
-                                if var imageData = try FileEncryption.shared.readSecure(filename: self.listGroupingImages[indexPath.row].imageId) {
-                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
-                                    if dataDecrypt != nil {
-                                        imageData = dataDecrypt!
-                                    }
-                                    let image    = UIImage(data: imageData)
-                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                    if save {
-                                        UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-                                    }
-                                }
-                            }
-                        } catch {
-                            
-                        }
-                        
                         DispatchQueue.main.async { [self] in
                             tableView.reloadRows(at: [indexPath], with: .none)
                             updateEditor!(listGroupingImages, [:], false)
                         }
+                    }
+                } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
+                    do {
+                        if var data = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                            if dataDecrypt != nil {
+                                data = dataDecrypt!
+                            }
+                            let image = UIImage(data: data ?? Data())
+                            let imageViewer = MediaViewerViewController()
+                            imageViewer.media = .image(image ?? UIImage())
+                            
+                            let navigationController = UINavigationController(rootViewController: imageViewer)
+                            navigationController.defaultStyle()
+                            navigationController.view.backgroundColor = .clear
+                            navigationController.modalPresentationCapturesStatusBarAppearance = true
+                            navigationController.modalPresentationStyle = .overFullScreen
+                            
+                            let backAction = UIAction { _ in
+                                navigationController.dismiss(animated: true)
+                            }
+                            let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
+                            imageViewer.navigationItem.leftBarButtonItem = backButton
+//                            if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
+//                                let shareAction = UIAction { _ in
+//                                    var activityViewController = UIActivityViewController(activityItems: [image ?? UIImage()], applicationActivities: nil)
+//                                    if type == 1 {
+//                                        activityViewController = UIActivityViewController(activityItems: [url ?? URL(string: "")!], applicationActivities: nil)
+//                                    }
+//                                    activityViewController.popoverPresentationController?.sourceView = imageViewer.view
+//                                    imageViewer.present(activityViewController, animated: true, completion: nil)
+//                                }
+//                                let shareButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "square.and.arrow.up"), primaryAction: shareAction, menu: nil)
+//                                imageViewer.navigationItem.rightBarButtonItem = shareButton
+//                            }
+//                            
+//                            let name = (dataGroup["f_name"] as? String ?? "") + " (\(dataTopic["title"] as? String ?? ""))"
+//                            imageViewer.title = name
+                            
+                            let transitionDelegate = ZoomTransitioningDelegate()
+//                            transitionDelegate.originImageView = sender.imageView
+                            navigationController.transitioningDelegate = transitionDelegate
+//                            self.transitioningDelegateRef = transitionDelegate
+                            
+                            present(navigationController, animated: true) {
+                                imageViewer.animateBackgroundIn()
+                            }
+                        }
+                    } catch{
+                        
                     }
                 }
             }

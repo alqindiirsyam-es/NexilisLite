@@ -20,7 +20,7 @@ import AVFoundation
 
 public final class Utils {
     public static let M_USER_ANDROID_ID = "UNK"
-    public static let CPAAS_VERSION = "UCPaaS-Nexilis.3.2.8"
+    public static let CPAAS_VERSION = "UCPaaS-Nexilis.\(Nexilis.cpaasVersion)"
     
     public static func getCurrentTime()->Int64 {
         return Int64(Date().timeIntervalSince1970)
@@ -399,6 +399,17 @@ public final class Utils {
 
     public static func getWhitelistFileExt() -> String {
         if let value: String = SecureUserDefaults.shared.value(forKey: "pb_whitelist_file_ext") {
+            return value
+        }
+        return ""
+    }
+    
+    public static func setUserMSISDN(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_user_msisdn")
+    }
+
+    public static func getUserMSISDN() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_user_msisdn") {
             return value
         }
         return ""

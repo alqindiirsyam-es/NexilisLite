@@ -1425,13 +1425,14 @@ public class ImageCache {
         let imageName = "\(sanitizedKey).png"
         if FileEncryption.shared.isSecureExists(filename: imageName) {
             do {
-                var data = try FileEncryption.shared.readSecure(filename: imageName)
-                if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data!) {
-                    data = decrypted
-                }
-                if let image = UIImage(data: data!) {
-                    cache.setObject(image, forKey: sanitizedKey as NSString)
-                    return image
+                if var data = try FileEncryption.shared.readSecure(filename: imageName) {
+                    if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) {
+                        data = decrypted
+                    }
+                    if let image = UIImage(data: data) {
+                        cache.setObject(image, forKey: sanitizedKey as NSString)
+                        return image
+                    }
                 }
             } catch {
                 print("Failed to read or decrypt image from disk: \(error)")
@@ -1498,15 +1499,16 @@ public class ImageCache {
             guard FileEncryption.shared.isSecureExists(filename: fileName) else { continue }
 
             do {
-                var data = try FileEncryption.shared.readSecure(filename: fileName)
-                if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data!) {
-                    data = decrypted
-                }
+                if var data = try FileEncryption.shared.readSecure(filename: fileName) {
+                    if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) {
+                        data = decrypted
+                    }
 
-                if isGif {
-                    cacheGif.setObject(data! as NSData, forKey: sanitizedKey as NSString)
-                } else if let image = UIImage(data: data!) {
-                    cache.setObject(image, forKey: sanitizedKey as NSString)
+                    if isGif {
+                        cacheGif.setObject(data as NSData, forKey: sanitizedKey as NSString)
+                    } else if let image = UIImage(data: data) {
+                        cache.setObject(image, forKey: sanitizedKey as NSString)
+                    }
                 }
             } catch {
                 print("Error loading \(fileExtension) from disk: \(error)")

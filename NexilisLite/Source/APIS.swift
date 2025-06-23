@@ -17,6 +17,7 @@ import Intents
 
 public class APIS: NSObject {
     private static var isAlertPresented = false
+    private static var transitioningDelegateRef: ZoomTransitioningDelegate?
     public static func connect(appName: String, apiKey: String, delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         Nexilis.connect(apiKey: apiKey, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
@@ -63,8 +64,12 @@ public class APIS: NSObject {
         let alert = LibAlertController(title: "Set Profile".localized(), message: "You must set your profile to use this feature".localized(), preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {(_) in
             isAlertPresented = false
-            let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
-            controller.forceLogin = true
+            guard let controller = APIS.getControllerSign() else { return }
+            if let controller = controller as? SignUpSignIn {
+                controller.forceLogin = true
+            } else if let controller = controller as? SignInOption {
+                controller.forceLogin = true
+            }
             let navigationController = CustomNavigationController(rootViewController: controller)
             navigationController.defaultStyle()
             if UIApplication.shared.visibleViewController?.navigationController != nil {
@@ -651,8 +656,12 @@ public class APIS: NSObject {
             APIS.showChangeProfile()
             return
         }
-        let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
-        controller.forceLogin = true
+        guard let controller = APIS.getControllerSign() else { return }
+        if let controller = controller as? SignUpSignIn {
+            controller.forceLogin = true
+        } else if let controller = controller as? SignInOption {
+            controller.forceLogin = true
+        }
         let navigationController = CustomNavigationController(rootViewController: controller)
         navigationController.defaultStyle()
         if UIApplication.shared.visibleViewController?.navigationController != nil {
@@ -1702,20 +1711,6 @@ public class APIS: NSObject {
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-//        DispatchQueue.global().async {
-//            while API.nGetCLXConnState() == 0 {
-//                Thread.sleep(forTimeInterval: 0.5)
-//            }
-//            if let vers = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.checkVersion()) {
-//                let dataVersion = vers.getBody(key: CoreMessage_TMessageKey.DATA)
-//                let type = vers.getBody(key: CoreMessage_TMessageKey.TYPE)
-//                if dataVersion != "1" {
-//                    DispatchQueue.main.async {
-//                        showExpiredVersion(mandatory: type == "1")
-//                    }
-//                }
-//            }
-//        }
         if Utils.getSecureFolderOffline() == "0" && afterEnterBackground && Database.shared.database == nil && Utils.getSetProfile() {
             Database.recreateInstance()
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil, userInfo: nil)
@@ -1726,6 +1721,22 @@ public class APIS: NSObject {
             }
 //            Nexilis.getFeatureAccessWithKey(key: ["secure_folder_encrypt_key", "secure_folder_encrypt_iv", "secure_folder_offline"])
             Nexilis.getFeatureAccess()
+        }
+        if FloatingButton.datePull == nil || !afterEnterBackground {
+            DispatchQueue.global().async {
+                while API.nGetCLXConnState() == 0 || User.getMyPin() == nil {
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+                if let vers = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.checkVersion()) {
+                    let dataVersion = vers.getBody(key: CoreMessage_TMessageKey.DATA)
+                    let type = vers.getBody(key: CoreMessage_TMessageKey.TYPE)
+                    if dataVersion != "1" {
+                        DispatchQueue.main.async {
+                            showExpiredVersion(mandatory: type == "1")
+                        }
+                    }
+                }
+            }
         }
         afterEnterBackground = true
     }
@@ -2280,18 +2291,43 @@ public class APIS: NSObject {
         nameGroupShared = name
     }
     
-    public static func openImageNexilis(image: UIImage, data: Data? = nil, isGIF: Bool = false) {
-        let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-        previewImageVC.image = image
-        previewImageVC.isHiddenTextField = true
-        previewImageVC.isGIF = isGIF
-        previewImageVC.dataGIF = data
-        previewImageVC.modalPresentationStyle = .custom
-        previewImageVC.modalTransitionStyle  = .crossDissolve
-        if UIApplication.shared.visibleViewController?.navigationController != nil {
-            UIApplication.shared.visibleViewController?.navigationController?.present(previewImageVC, animated: true, completion: nil)
+    public static func openImageNexilis(imageView: UIImageView, data: Data? = nil, isGIF: Bool = false) {
+        let image = UIImage(data: data ?? Data())
+        let imageViewer = MediaViewerViewController()
+        if !isGIF {
+            imageViewer.media = .image(image ?? UIImage())
         } else {
-            UIApplication.shared.visibleViewController?.present(previewImageVC, animated: true, completion: nil)
+            imageViewer.media = .gif(UIImage.gifImageWithData(data ?? Data()) ?? UIImage())
+        }
+        
+        let navigationController = UINavigationController(rootViewController: imageViewer)
+        navigationController.defaultStyle()
+        navigationController.view.backgroundColor = .clear
+        navigationController.modalPresentationCapturesStatusBarAppearance = true
+        navigationController.modalPresentationStyle = .overFullScreen
+        
+        let backAction = UIAction { _ in
+            navigationController.dismiss(animated: true)
+        }
+        let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
+        imageViewer.navigationItem.leftBarButtonItem = backButton
+        
+        let name = ""
+        imageViewer.title = name
+        
+        let transitionDelegate = ZoomTransitioningDelegate()
+        transitionDelegate.originImageView = imageView
+        navigationController.transitioningDelegate = transitionDelegate
+        self.transitioningDelegateRef = transitionDelegate
+        
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true) {
+                imageViewer.animateBackgroundIn()
+            }
+        } else {
+            UIApplication.shared.visibleViewController?.present(navigationController, animated: true) {
+                imageViewer.animateBackgroundIn()
+            }
         }
     }
     
@@ -2305,6 +2341,48 @@ public class APIS: NSObject {
         } else {
             UIApplication.shared.visibleViewController?.present(playerVC, animated: true, completion: nil)
         }
+    }
+    
+    public static func checkSignMethod() -> (Int, Int) {
+        var countMethod = 0
+        var typeMethod = 0
+        if Nexilis.checkingAccess(key: "sign_in_up_msisdn") {
+            countMethod+=1
+            typeMethod = 0
+        }
+        if Nexilis.checkingAccess(key: "sign_in_up_email") {
+            countMethod+=1
+            typeMethod = 1
+        }
+        if Nexilis.checkingAccess(key: "sign_in_up_username") {
+            countMethod+=1
+            typeMethod = 2
+        }
+        return (countMethod,typeMethod)
+    }
+    
+    public static func getControllerSign() -> UIViewController? {
+        let data = APIS.checkSignMethod()
+        let count = data.0
+        let type = data.1
+        if count > 0 {
+            var controller: UIViewController!
+            if count == 1 {
+                let vc = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
+                if type == 0 {
+                    vc.isMSISDN = true
+                    controller = vc
+                } else if type == 1 {
+                    vc.isEmail = true
+                }
+                controller = vc
+            } else {
+                let vc = SignInOption()
+                controller = vc
+            }
+            return controller
+        }
+        return nil
     }
     
     private static var appNm = "";

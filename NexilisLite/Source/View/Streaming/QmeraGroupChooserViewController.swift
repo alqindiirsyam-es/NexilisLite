@@ -176,7 +176,7 @@ class QmeraGroupStreamingViewController: UITableViewController {
             group = available[indexPath.row]
         }
         content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-        getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+        getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
             content.image = image
         }
         content.text = group.name

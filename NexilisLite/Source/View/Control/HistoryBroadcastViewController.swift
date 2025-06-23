@@ -146,7 +146,7 @@ class HistoryBroadcastViewController: UIViewController, UITableViewDelegate, UIT
                 if user != nil {
                     imageView.image = UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 } else {
-                    imageView.image = UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                    imageView.image = UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 }
             } else {
                 if !Utils.getIconDock().isEmpty {
@@ -169,7 +169,7 @@ class HistoryBroadcastViewController: UIViewController, UITableViewDelegate, UIT
                         }
                     }
                 } else {
-                    getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                    getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                         imageView.image = image
                         if !result {
                             imageView.tintColor = .mainColor

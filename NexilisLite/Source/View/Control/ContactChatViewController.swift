@@ -649,9 +649,6 @@ class ContactChatViewController: UITableViewController {
     }
     
     private func getOpenGroups(listGroups: [Group], completion: @escaping ([Group]) -> ()) {
-        while Nexilis.isProcessWriteSync {
-            Thread.sleep(forTimeInterval: 0.5)
-        }
         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getOpenGroups(p_account: "1,2,3,5,6,7", offset: "0", search: "")) {
             var dataGroups: [Group] = []
             if (response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "00") {
@@ -1448,12 +1445,12 @@ extension ContactChatViewController {
                         }
                     } else {
                         if data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL || data.isParent || data.pin == "-999" {
-                            getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : (data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL) ? "Profile---Purple" : "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                            getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : (data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL) ? "Profile---Purple" : "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                                 imageView.image = image
                             })
                         } else {
                             leadingAnchor = imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 40.0)
-                            let image = UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                            let image = UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                             imageView.image = image
                         }
                     }
@@ -1739,7 +1736,7 @@ extension ContactChatViewController {
                     cell.accessoryType = .none
                 }
                 content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-                getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
                     content.image = image
                 }
                 cell.contentConfiguration = content
@@ -1877,7 +1874,7 @@ extension ContactChatViewController {
                 cell.accessoryType = .none
             }
             content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-            getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+            getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
                 content.image = image
             }
             cell.contentConfiguration = content

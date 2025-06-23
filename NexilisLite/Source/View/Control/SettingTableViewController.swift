@@ -65,6 +65,15 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         switchVibrateMode.addTarget(self, action: #selector(vibrateModeSwitch), for: .valueChanged)
         switchSaveToGallery.addTarget(self, action: #selector(saveToGallerySwitch), for: .valueChanged)
         switchAutoDownload.addTarget(self, action: #selector(autoDownloadSwitch), for: .valueChanged)
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(onRefresh(notification:)), name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil)
+    }
+    
+    @objc func onRefresh(notification: NSNotification) {
+        DispatchQueue.main.async {
+            self.makeMenu()
+            self.tableView.reloadData()
+        }
     }
     
     @objc func didTapExit() {
@@ -621,11 +630,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             }
             navigationController?.show(controller, sender: nil)
         } else if item.title == "Sign-Up/Sign-In".localized() {
-            let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
-            controller.isDismiss = { newThumb in
-                self.makeMenu(imageSignIn: newThumb)
-                self.tableView.reloadData()
-            }
+            guard let controller = APIS.getControllerSign() else { return }
             navigationController?.show(controller, sender: nil)
         } else if item.title == "Sign-Out".localized() {
             let alert = LibAlertController(title: "Sign-Out".localized(), message: "Are you sure want to logout?".localized(), preferredStyle: .alert)

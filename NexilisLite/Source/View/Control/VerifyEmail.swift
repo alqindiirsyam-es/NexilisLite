@@ -11,6 +11,7 @@ import NotificationBannerSwift
 class VerifyEmail: UIViewController, UITextFieldDelegate, OTPTextFieldDelegate {
     var initialBounds: CGRect?
     var email = ""
+    var msisdn = ""
     let txtField1 = OTPTextField()
     let txtField2 = OTPTextField()
     let txtField3 = OTPTextField()
@@ -20,6 +21,7 @@ class VerifyEmail: UIViewController, UITextFieldDelegate, OTPTextFieldDelegate {
     var firstLoad = true
     var isDismiss: ((String) -> ())?
     var showWrongOTP = ""
+    var isMSISDN = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -44,6 +46,9 @@ class VerifyEmail: UIViewController, UITextFieldDelegate, OTPTextFieldDelegate {
         descVerify.numberOfLines = 0
         descVerify.textAlignment = .center
         descVerify.text = "Your verification code has been sent to".localized() + "\n" + email + "\n" + "Please check your email and enter the code sent".localized()
+        if isMSISDN {
+            descVerify.text = "Your verification code has been sent to".localized() + "\n" + msisdn + "\n" + "Please check in your message app and enter the code sent".localized()
+        }
         view.addSubview(descVerify)
         descVerify.anchor(top: titleVerify.bottomAnchor, paddingTop: 8, centerX: view.centerXAnchor)
         
@@ -126,7 +131,7 @@ class VerifyEmail: UIViewController, UITextFieldDelegate, OTPTextFieldDelegate {
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Expired OTP".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
                 banner.show()
-            } else if showWrongOTP == "4t" {
+            } else {
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
                 let banner = FloatingNotificationBanner(title: "Invalid OTP".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
