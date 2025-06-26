@@ -1722,7 +1722,7 @@ public class APIS: NSObject {
 //            Nexilis.getFeatureAccessWithKey(key: ["secure_folder_encrypt_key", "secure_folder_encrypt_iv", "secure_folder_offline"])
             Nexilis.getFeatureAccess()
         }
-        if FloatingButton.datePull == nil || !afterEnterBackground {
+        if (FloatingButton.datePull == nil || !afterEnterBackground) && Utils.getSetProfile() {
             DispatchQueue.global().async {
                 while API.nGetCLXConnState() == 0 || User.getMyPin() == nil {
                     Thread.sleep(forTimeInterval: 0.5)
@@ -2361,23 +2361,35 @@ public class APIS: NSObject {
         return (countMethod,typeMethod)
     }
     
-    public static func getControllerSign() -> UIViewController? {
+    public static func getControllerSign(forceSignIn: Bool = false) -> UIViewController? {
         let data = APIS.checkSignMethod()
         let count = data.0
         let type = data.1
         if count > 0 {
             var controller: UIViewController!
             if count == 1 {
-                let vc = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
-                if type == 0 {
-                    vc.isMSISDN = true
+                if forceSignIn {
+                    let vc = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "changeDevice") as! ChangeDeviceViewController
+                    if type == 0 {
+                        vc.isMSISDN = true
+                        controller = vc
+                    } else if type == 1 {
+                        vc.isEmail = true
+                    }
                     controller = vc
-                } else if type == 1 {
-                    vc.isEmail = true
+                } else {
+                    let vc = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
+                    if type == 0 {
+                        vc.isMSISDN = true
+                        controller = vc
+                    } else if type == 1 {
+                        vc.isEmail = true
+                    }
+                    controller = vc
                 }
-                controller = vc
             } else {
                 let vc = SignInOption()
+                vc.forceSignIn = forceSignIn
                 controller = vc
             }
             return controller

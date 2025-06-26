@@ -623,11 +623,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         } else if item.title == "Chat Wallpaper".localized() {
             APIS.openChatWallpaper()
         } else if item.title == "Sign-In".localized() {
-            let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "changeDevice") as! ChangeDeviceViewController
-            controller.isDismiss = { newThumb in
-                self.makeMenu(imageSignIn: newThumb)
-                self.tableView.reloadData()
-            }
+            guard let controller = APIS.getControllerSign(forceSignIn: true) else { return }
             navigationController?.show(controller, sender: nil)
         } else if item.title == "Sign-Up/Sign-In".localized() {
             guard let controller = APIS.getControllerSign() else { return }

@@ -111,6 +111,11 @@
 		CD1E72612A0BA86100BF871F /* CoreMessage_TMessageCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71B32A0BA86100BF871F /* CoreMessage_TMessageCode.swift */; };
 		CD1E72622A0BA86100BF871F /* IncomingThread.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71B42A0BA86100BF871F /* IncomingThread.swift */; };
 		CD1E72632A0BA86100BF871F /* CoreMessage_TMessageUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71B52A0BA86100BF871F /* CoreMessage_TMessageUtil.swift */; };
+		CD21CA552E0AA07700DA6B77 /* CommunityNew.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD21CA542E0AA07700DA6B77 /* CommunityNew.swift */; };
+		CD21CA562E0AA07700DA6B77 /* ArchivedChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD21CA522E0AA07700DA6B77 /* ArchivedChatView.swift */; };
+		CD21CA572E0AA07700DA6B77 /* CommunityList.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD21CA532E0AA07700DA6B77 /* CommunityList.swift */; };
+		CD21CA592E0AA0A200DA6B77 /* SignInOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD21CA582E0AA0A200DA6B77 /* SignInOption.swift */; };
+		CD21CA5B2E0AA0C600DA6B77 /* CommunityModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD21CA5A2E0AA0C600DA6B77 /* CommunityModel.swift */; };
 		CD2585C42D59DA60002AB416 /* Dutifully.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = CD2585B72D59DA60002AB416 /* Dutifully.mp3 */; };
 		CD2585C52D59DA60002AB416 /* Juntos.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = CD2585BB2D59DA60002AB416 /* Juntos.mp3 */; };
 		CD2585C62D59DA60002AB416 /* Light_Hearted.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = CD2585BC2D59DA60002AB416 /* Light_Hearted.mp3 */; };
@@ -326,7 +331,6 @@
 		CD1E716B2A0BA86100BF871F /* WorkingAreaPicker.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = WorkingAreaPicker.swift; sourceTree = "<group>"; };
 		CD1E716C2A0BA86100BF871F /* BNIBookingWebView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BNIBookingWebView.swift; sourceTree = "<group>"; };
 		CD1E716E2A0BA86100BF871F /* EditorStarMessages.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EditorStarMessages.swift; sourceTree = "<group>"; };
-		CD1E716F2A0BA86100BF871F /* PreviewAttachmentImageVideo.xib */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.xib; path = PreviewAttachmentImageVideo.xib; sourceTree = "<group>"; };
 		CD1E71702A0BA86100BF871F /* EditorPersonal.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EditorPersonal.swift; sourceTree = "<group>"; };
 		CD1E71712A0BA86100BF871F /* FormEditor.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FormEditor.swift; sourceTree = "<group>"; };
 		CD1E71722A0BA86100BF871F /* EditorGroup.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EditorGroup.swift; sourceTree = "<group>"; };
@@ -398,6 +402,11 @@
 		CD1E79142A0CA43600BF871F /* SDWebImage.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = SDWebImage.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD1E79152A0CA43600BF871F /* SnapKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = SnapKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD1E79162A0CA43600BF871F /* Toast_Swift.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = Toast_Swift.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD21CA522E0AA07700DA6B77 /* ArchivedChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchivedChatView.swift; sourceTree = "<group>"; };
+		CD21CA532E0AA07700DA6B77 /* CommunityList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityList.swift; sourceTree = "<group>"; };
+		CD21CA542E0AA07700DA6B77 /* CommunityNew.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityNew.swift; sourceTree = "<group>"; };
+		CD21CA582E0AA0A200DA6B77 /* SignInOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInOption.swift; sourceTree = "<group>"; };
+		CD21CA5A2E0AA0C600DA6B77 /* CommunityModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityModel.swift; sourceTree = "<group>"; };
 		CD2585B72D59DA60002AB416 /* Dutifully.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = Dutifully.mp3; sourceTree = "<group>"; };
 		CD2585B82D59DA60002AB416 /* Elegant.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = Elegant.mp3; sourceTree = "<group>"; };
 		CD2585B92D59DA60002AB416 /* Eventually.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = Eventually.mp3; sourceTree = "<group>"; };
@@ -680,6 +689,7 @@
 		CD1E715E2A0BA86100BF871F /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				CD21CA5A2E0AA0C600DA6B77 /* CommunityModel.swift */,
 				CD63125C2DA925960088964E /* CallModel.swift */,
 				CD1E71622A0BA86100BF871F /* CategoryCC.swift */,
 				CD1E71602A0BA86100BF871F /* Chat.swift */,
@@ -726,6 +736,9 @@
 		CD1E716D2A0BA86100BF871F /* Chat */ = {
 			isa = PBXGroup;
 			children = (
+				CD21CA522E0AA07700DA6B77 /* ArchivedChatView.swift */,
+				CD21CA532E0AA07700DA6B77 /* CommunityList.swift */,
+				CD21CA542E0AA07700DA6B77 /* CommunityNew.swift */,
 				CD7054E92AD39DE2003741BF /* ChatGPTBotView.swift */,
 				CD63125A2DA925320088964E /* ChatWALikeVC.swift */,
 				CD1E71742A0BA86100BF871F /* CustomTextView.swift */,
@@ -736,7 +749,6 @@
 				CD5A73AD2A77642D000541A5 /* ListGroupImages.swift */,
 				CD5A73AC2A77642D000541A5 /* MessageInfo.swift */,
 				CD1E71732A0BA86100BF871F /* PreviewAttachmentImageVideo.swift */,
-				CD1E716F2A0BA86100BF871F /* PreviewAttachmentImageVideo.xib */,
 				12C36CEA2D02995F0095BEC1 /* SecureFolderView.swift */,
 			);
 			path = Chat;
@@ -782,6 +794,7 @@
 		CD1E71892A0BA86100BF871F /* Control */ = {
 			isa = PBXGroup;
 			children = (
+				CD21CA582E0AA0A200DA6B77 /* SignInOption.swift */,
 				1258BCB52D82D71200EFF5BD /* ChatWallpaperViewController.swift */,
 				CD1E71AB2A0BA86100BF871F /* AddFriendTableViewController.swift */,
 				CD1E71AD2A0BA86100BF871F /* AudienceViewController.swift */,
@@ -1260,9 +1273,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite/Pods-NexilisLite-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite/Pods-NexilisLite-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1277,9 +1294,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1294,9 +1315,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-NexilisLite-NexilisLiteTests/Pods-NexilisLite-NexilisLiteTests-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1391,6 +1416,7 @@
 				CD1E72462A0BA86100BF871F /* GroupTopicViewController.swift in Sources */,
 				CD1E72472A0BA86100BF871F /* SettingTableViewController.swift in Sources */,
 				CD1E72172A0BA86100BF871F /* CategoryCC.swift in Sources */,
+				CD21CA5B2E0AA0C600DA6B77 /* CommunityModel.swift in Sources */,
 				CD1E72552A0BA86100BF871F /* BroadcastMembersTableViewController.swift in Sources */,
 				CD1E72152A0BA86100BF871F /* Chat.swift in Sources */,
 				CD1E72502A0BA86100BF871F /* BroadcastVariantViewController.swift in Sources */,
@@ -1398,6 +1424,7 @@
 				CD2B01242D43961E00C11B20 /* QRProfileController.swift in Sources */,
 				CD2B01252D43961E00C11B20 /* QRScannerController.swift in Sources */,
 				CD1E72252A0BA86100BF871F /* CustomTextView.swift in Sources */,
+				CD21CA592E0AA0A200DA6B77 /* SignInOption.swift in Sources */,
 				CD1E72602A0BA86100BF871F /* Callback.swift in Sources */,
 				CD1E724A2A0BA86100BF871F /* HistoryCCViewController.swift in Sources */,
 				CD1E722A2A0BA86100BF871F /* StreamingViewController.swift in Sources */,
@@ -1415,6 +1442,9 @@
 				CDDF467A2A2EF0A700049A19 /* ScreenSharingViewController.swift in Sources */,
 				CD1E72402A0BA86100BF871F /* ChangeNamePassswordViewController.swift in Sources */,
 				CD1E722E2A0BA86100BF871F /* AudioViewController.swift in Sources */,
+				CD21CA552E0AA07700DA6B77 /* CommunityNew.swift in Sources */,
+				CD21CA562E0AA07700DA6B77 /* ArchivedChatView.swift in Sources */,
+				CD21CA572E0AA07700DA6B77 /* CommunityList.swift in Sources */,
 				CD1E725E2A0BA86100BF871F /* TMessage.swift in Sources */,
 				CD1E72422A0BA86100BF871F /* ChangeDeviceViewController.swift in Sources */,
 				CD1E725B2A0BA86100BF871F /* AudienceViewController.swift in Sources */,

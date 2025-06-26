@@ -1434,6 +1434,10 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.EMAIL] = p_email
         tmessage.mBodies[CoreMessage_TMessageKey.OTP] = p_vercode
         tmessage.mBodies[CoreMessage_TMessageKey.PHONE_NUMBER] = number
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_ID] = Utils.M_USER_ANDROID_ID
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
+        tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
         if !deviceFingerprint.isEmpty {
             tmessage.mBodies[CoreMessage_TMessageKey.FINGERPRINT] = deviceFingerprint
         }

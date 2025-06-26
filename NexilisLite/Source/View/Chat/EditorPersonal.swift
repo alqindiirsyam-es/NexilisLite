@@ -2624,7 +2624,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 //                self.constraintViewTextField.constant = keyboardHeight - 60
                 self.constraintBottomAttachment.constant = keyboardHeight
                 if isSearching {
-                    self.constraintViewTextField.constant = self.constraintViewTextField.constant + 60
                     self.constraintBottomContainerMultpileSelectSession.constant = -keyboardHeight
                 }
                 UIView.animate(withDuration: TimeInterval(duration), animations: {
@@ -4787,7 +4786,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             forward.title = "Forward All".localized()
             delete.title = "Delete All".localized()
             children = [delete]
-            if Nexilis.checkingAccess(key: "secure_folder_forward") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+            if (Nexilis.checkingAccess(key: "secure_folder_forward") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" {
                 children.insert(forward, at: 0)
             }
         } else {
@@ -4796,7 +4795,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
                children = [reply, delete]
             }
-            if (Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty) || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+            if (Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty && dataMessages[indexPath!.row]["read_receipts"] as? String != "8") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
                 children.insert(forward, at: 2)
             }
             if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
@@ -6098,7 +6097,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         timeMessage.numberOfLines = 0
         cell.contentView.addSubview(timeMessage)
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
-        if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
+        if ((dataMessages[indexPath.row]["read_receipts"] as? String) == "8" ||
+            (dataMessages[indexPath.row]["credential"] as? String) == "1" ||
+            !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty) &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "2" &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
         } else {
             timeMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
@@ -6162,11 +6165,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         
         if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cell.contentView.leadingAnchor, constant: 60).isActive = true
-            if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
-            } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
-            }
             if isContactCenter {
                 containerMessage.topAnchor.constraint(equalTo: nameSender.bottomAnchor).isActive = true
                 containerMessage.trailingAnchor.constraint(equalTo: profileMessage.leadingAnchor, constant: -5).isActive = true
@@ -6260,11 +6258,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     containerMessage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 15).isActive = true
                 }
             }
-            if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
-            } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
-            }
             containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor, constant: -60).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
             if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2" {
@@ -6277,6 +6270,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             containerMessage.clipsToBounds = true
             
             timeMessage.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: 8).isActive = true
+        }
+        
+        if ((dataMessages[indexPath.row]["read_receipts"] as? String) == "8" ||
+            (dataMessages[indexPath.row]["credential"] as? String) == "1" ||
+            !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty) &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "2" &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+            containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
+        } else {
+            containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
         }
         
         let imageStared = UIImageView()
@@ -6299,7 +6302,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         
         let imageAckView = UIImageView()
         let imageCredentialView = UIImageView()
-        if dataMessages[indexPath.row]["read_receipts"] as? String == "8" {
+        if dataMessages[indexPath.row]["read_receipts"] as? String == "8" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             var imageAck = UIImage(named: "ack_icon_gray", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
             if dataMessages[indexPath.row]["status"] as? String == "8" {
                 imageAck = UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)

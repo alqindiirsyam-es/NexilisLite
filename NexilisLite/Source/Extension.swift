@@ -1047,7 +1047,7 @@ extension String {
                     if lower >= 0 {
                         text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: lower, length: 1))
                         text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: lower + 1, length: mention.fullName.count))
-                        text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: NSRange(location: lower, length: mention.fullName.count))
+                        text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: NSRange(location: lower, length: mention.fullName.count + 1))
                     }
                 }
             } else {

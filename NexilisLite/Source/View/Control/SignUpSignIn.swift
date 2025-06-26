@@ -296,7 +296,9 @@ public class SignUpSignIn: UIViewController {
                         if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: email, p_vercode: code, deviceFingerprint: df, publicKey: pk, signature: sign), timeout: 30 * 1000) {
                             if !response.isOk() {
                                 DispatchQueue.main.async {
-                                    self.showPageOTP(email: email, errCode: response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99"))
+                                    Nexilis.hideLoader {
+                                        self.showPageOTP(email: email, errCode: response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99"))
+                                    }
                                 }
                             } else {
                                 self.successSubmit(response: response, first: "", last: "", email: email)

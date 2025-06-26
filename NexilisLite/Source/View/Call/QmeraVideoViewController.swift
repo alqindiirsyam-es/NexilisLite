@@ -1276,7 +1276,11 @@ class QmeraVideoViewController: UIViewController {
         else if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
             DispatchQueue.main.async { [self] in
                 if self.dataPerson.count == 1 {
-                    if arrayMessage[1] == "1" {
+                    var param = arrayMessage[1]
+                    if arrayMessage[2] != "." {
+                        param = arrayMessage[2]
+                    }
+                    if param == "1" {
                         mutedZoom.isHidden = false
                     } else {
                         mutedZoom.isHidden = true

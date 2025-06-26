@@ -17,6 +17,7 @@ target 'NexilisLite' do
   pod 'SwiftLinkPreview', '~> 3.4.0'
   pod 'Popover', '~> 1.3.0'
   pod 'KeychainAccess', '~> 4.2.2'
+  pod 'Firebase/Auth', '~> 11.14.0'
 
   target 'NexilisLiteTests' do
     # Pods for testing

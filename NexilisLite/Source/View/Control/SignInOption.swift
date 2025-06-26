@@ -10,12 +10,17 @@ import Foundation
 
 public class SignInOption: UIViewController {
     public var forceLogin = false
+    public var forceSignIn = false
     
     private let containerView = UIStackView()
     
     public override func viewDidLoad() {
-        self.title = "Sign-Up/Sign-In Method".localized()
-        if forceLogin {
+        if forceSignIn {
+            self.title = "Sign-In Method".localized()
+        } else {
+            self.title = "Sign-Up/Sign-In Method".localized()
+        }
+        if forceLogin && !forceSignIn {
             navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapCancel(sender:)))
         }
         self.navigationController?.navigationBar.topItem?.backButtonTitle = ""
@@ -50,7 +55,11 @@ public class SignInOption: UIViewController {
         let title = UILabel()
         self.view.addSubview(title)
         title.anchor(top: iconIV.bottomAnchor, paddingTop: 10, centerX: iconIV.centerXAnchor)
-        title.text = "Choose your Sign-Up or Sign-In method :".localized()
+        if forceSignIn {
+            title.text = "Choose your Sign-In method :".localized()
+        } else {
+            title.text = "Choose your Sign-Up or Sign-In method :".localized()
+        }
         title.font = .systemFont(ofSize: 14)
         
         let bottomTitle = UILabel()
@@ -104,14 +113,25 @@ public class SignInOption: UIViewController {
     }
     
     @objc func didTapSignIn(sender: UIButton) {
-        let vc = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
-        if sender.tag == 0 {
-            vc.isMSISDN = true
-        } else if sender.tag == 1 {
-            vc.isEmail = true
+        if !forceSignIn {
+            let vc = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "signupsignin") as! SignUpSignIn
+            if sender.tag == 0 {
+                vc.isMSISDN = true
+            } else if sender.tag == 1 {
+                vc.isEmail = true
+            }
+            vc.forceLogin = self.forceLogin
+            self.show(vc, sender: nil)
+        } else {
+            let vc = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "changeDevice") as! ChangeDeviceViewController
+            if sender.tag == 0 {
+                vc.isMSISDN = true
+            } else if sender.tag == 1 {
+                vc.isEmail = true
+            }
+            vc.forceLogin = self.forceLogin
+            self.show(vc, sender: nil)
         }
-        vc.forceLogin = self.forceLogin
-        self.show(vc, sender: nil)
     }
     
     @objc func didTapCancel(sender: Any) {

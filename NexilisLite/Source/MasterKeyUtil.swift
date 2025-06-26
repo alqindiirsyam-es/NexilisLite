@@ -7,6 +7,7 @@
 
 import CryptoKit
 import LocalAuthentication
+import UIKit
 
 
 public class MasterKeyUtil {

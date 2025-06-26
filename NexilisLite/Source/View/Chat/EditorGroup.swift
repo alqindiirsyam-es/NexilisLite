@@ -93,6 +93,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var isAlwaysHideLinkPreview = false
     var timerCheckLink: Timer?
     var lastPositionCursorMention = 0
+    var lastTextLength = 0
     var timerFakeProgress: Timer?
     var showMenuContext = false
     var touchedSubview = UIView()
@@ -153,7 +154,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         if (self.dataTopic["chat_id"]  as? String ?? "" != "") {
             l_pin = self.dataTopic["chat_id"]  as? String ?? ""
         }
-        let data: [String: String] = ["text": self.textFieldSend.textColor != UIColor.lightGray ? self.textFieldSend.text! : "", "reffId": self.reffId ?? ""]
+        var data: [String: Any] = ["text": self.textFieldSend.textColor != UIColor.lightGray ? self.textFieldSend.text! : "", "reffId": self.reffId ?? ""]
+        if listMentionInTextField.count > 0 {
+            var dataMention: [[String: String]] = []
+            for list in listMentionInTextField {
+                var dataTemp: [String: String] = [:]
+                dataTemp["f_pin_mention"] = list.pin
+                dataTemp["upper"] = list.ex_block
+                dataMention.append(dataTemp)
+            }
+            data["list_mention"] = dataMention
+        }
         if let jsonData = try? JSONSerialization.data(withJSONObject: data, options: []),
            let jsonString = String(data: jsonData, encoding: .utf8) {
             SecureUserDefaults.shared.set(jsonString, forKey: "new_saved_\(l_pin)")
@@ -517,12 +528,29 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             if let dataSaved: String = SecureUserDefaults.shared.value(forKey: "new_saved_\(l_pin)") {
                 let data = dataSaved
                 if let jsonData = data.data(using: .utf8),
-                   let dataJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
-                    let last_m = dataJson["text"] ?? ""
-                    let last_r = dataJson["reffId"] ?? ""
+                   let dataJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: Any] {
+                    let last_m = dataJson["text"] as? String ?? ""
+                    let last_r = dataJson["reffId"] as? String ?? ""
+                    let list_m = dataJson["list_mention"] as? [[String: String]] ?? []
+                    
+                    if !last_m.isEmpty {
+                        textFieldSend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black
+                    }
+                    
+                    if list_m.count > 0 {
+                        for list in list_m {
+                            let f_pin = list["f_pin_mention"] ?? ""
+                            let upper = list["upper"] ?? ""
+                            let userFromBuddy = User.getData(pin: f_pin, lPin: l_pin)
+                            if userFromBuddy != nil {
+                                userFromBuddy!.ex_block = upper
+                                listMentionInTextField.append(userFromBuddy!)
+                            }
+                        }
+                    }
+                    
                     if !last_m.isEmpty {
                         textFieldSend.attributedText = last_m.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
-                        textFieldSend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black
                     }
                     
                     if !last_r.isEmpty {
@@ -1695,7 +1723,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 }
                 self.keyboardHeightForMention = keyboardHeight
                 if isSearching {
-                    self.constraintViewTextField.constant = self.constraintViewTextField.constant + 60
                     self.constraintBottomContainerMultpileSelectSession.constant = -keyboardHeight
                 }
                 UIView.animate(withDuration: TimeInterval(duration), animations: {
@@ -1910,6 +1937,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         row[TypeDataMessage.opposite_pin] = opposite_pin
         row[TypeDataMessage.spec_file] = specFileString
         specFileString = ""
+        lastTextLength = 0
         if !dataDates.contains("Today".localized()){
             dataDates.append("Today".localized())
             tableChatView.insertSections(IndexSet(integer: dataDates.count - 1), with: .fade)
@@ -2763,21 +2791,29 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
             self.checkLink(fullText: textView.text)
         })
         
-        if listMentionInTextField.count > 0 {
-            for j in 0..<listMentionInTextField.count {
-                if j > listMentionInTextField.count - 1{
-                    break
-                }
-                let name = (listMentionInTextField[j].firstName + " " + listMentionInTextField[j].lastName).trimmingCharacters(in: .whitespaces)
-                if !textView.text.contains("@\(name)") {
-                    listMentionInTextField.remove(at: j)
-                }
-            }
-        }
-        
         //indention code:
         let text = textView.text ?? ""
         let cursorPosition = textView.selectedRange.location
+        
+        let tempListMention = listMentionInTextField
+        if listMentionInTextField.count > 0 {
+            for j in 0..<listMentionInTextField.count {
+                var index = j
+                if tempListMention.count != listMentionInTextField.count {
+                    index = j - (tempListMention.count - listMentionInTextField.count)
+                }
+                var upper = (Int(listMentionInTextField[index].ex_block ?? "0") ?? 0)
+                if cursorPosition <= upper {
+                    upper += text.count - lastTextLength
+                    listMentionInTextField[index].ex_block = "\(upper)"
+                }
+                let lower = upper - listMentionInTextField[index].fullName.count
+                let name = listMentionInTextField[index].fullName.trimmingCharacters(in: .whitespaces)
+                if textView.text.substring(from: lower, to: upper) != "@\(name)" {
+                    listMentionInTextField.remove(at: index)
+                }
+            }
+        }
         
         // Handle Bullets (- [space] + letter → • )
         let bulletPattern = #"(?<=\n|^)- (\S)"#
@@ -2810,6 +2846,7 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         }
 
         handleRichText(textView)
+        lastTextLength = text.count
     }
     
     private func showMention(text: String) {
@@ -3111,7 +3148,6 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                            let endIndex = text.index(startIndex, offsetBy: rangeReplacement.length, limitedBy: text.endIndex) {
                             text.replaceSubrange(startIndex..<endIndex, with: replacementText)
                         }
-                        
                         listMentionInTextField.remove(at: i)
                         
                         textView.attributedText = text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
@@ -3564,7 +3600,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             forward.title = "Forward All".localized()
             delete.title = "Delete All".localized()
             children = [delete]
-            if Nexilis.checkingAccess(key: "secure_folder_forward") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+            if (Nexilis.checkingAccess(key: "secure_folder_forward") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" {
                 children.insert(forward, at: 0)
             }
         } else {
@@ -3576,7 +3612,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
                 children = [reply, delete]
             }
-            if (Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty) || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+            if (Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty && dataMessages[indexPath!.row]["read_receipts"] as? String != "8") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
                 children.insert(forward, at: 2)
             }
             if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
@@ -3650,6 +3686,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                 listMentionWithText.append(fixUser!)
                                 listMentionInTextField.append(fixUser!)
                                 oldTextForTextview = oldTextForTextview.replacingOccurrences(of: result, with: "@\(fixUser!.fullName)")
+                                lastTextLength = oldTextForTextview.count
                             }
                             cursor.close()
                         }
@@ -3768,6 +3805,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.isEditingMessage = false
                 self.listMentionWithText = self.tempListMentionWithText
                 self.listMentionInTextField = self.tempListMentionWithText
+                self.lastTextLength = self.textFieldSend.text?.count ?? 0
                 self.heightTableEditMention = nil
                 self.editVC.dismiss(animated: true)
              })
@@ -3833,10 +3871,11 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     
     @objc func dismissEditVC(_ sender: ObjectGesture) {
         if editTextView.text == sender.message_id {
-            self.isEditingMessage = false
-            self.listMentionWithText = self.tempListMentionWithText
-            self.listMentionInTextField = self.tempListMentionWithText
-            self.heightTableEditMention = nil
+            isEditingMessage = false
+            listMentionWithText = tempListMentionWithText
+            listMentionInTextField = tempListMentionWithText
+            lastTextLength = textFieldSend.text?.count ?? 0
+            heightTableEditMention = nil
             editVC.dismiss(animated: true)
         } else if self.isEditingMessage {
             let alert = LibAlertController(title: "".localized(), message: "Discard edit?".localized(), preferredStyle: .alert)
@@ -3845,11 +3884,13 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.isEditingMessage = false
                 self.listMentionWithText = self.tempListMentionWithText
                 self.listMentionInTextField = self.tempListMentionWithText
+                self.lastTextLength = self.textFieldSend.text?.count ?? 0
                 self.heightTableEditMention = nil
                 self.editVC.dismiss(animated: true)
             }))
             editVC.present(alert, animated: true, completion: nil)
         } else {
+            lastTextLength = self.textFieldSend.text?.count ?? 0
             editVC.dismiss(animated: true)
         }
     }
@@ -4589,6 +4630,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         nowTextField.selectedTextRange = nowTextField.textRange(from: newPosition!, to: newPosition!)
                         
                         hideMention()
+                        lastTextLength = nowTextField.text.count
                         return
                     }
                 }
@@ -4755,7 +4797,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         timeMessage.numberOfLines = 0
         cellMessage.contentView.addSubview(timeMessage)
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
-        if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
+        if ((dataMessages[indexPath.row]["read_receipts"] as? String) == "8" ||
+            (dataMessages[indexPath.row]["credential"] as? String) == "1" ||
+            !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty) &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "2" &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
         } else {
             timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
@@ -4855,11 +4901,6 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             
             containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cellMessage.contentView.leadingAnchor, constant: 60).isActive = true
-            if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
-            } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
-            }
             containerMessage.trailingAnchor.constraint(equalTo: profileMessage.leadingAnchor, constant: -5).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
             containerMessage.layer.cornerRadius = 10.0
@@ -4978,11 +5019,6 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
             
             containerMessage.leadingAnchor.constraint(equalTo: profileMessage.trailingAnchor, constant: 5).isActive = true
-            if (dataMessages[indexPath.row]["read_receipts"] as? String) == "8" || ((dataMessages[indexPath.row]["credential"] as? String) == "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
-            } else {
-                containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
-            }
             containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cellMessage.contentView.trailingAnchor, constant: -60).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
             if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "" && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2" {
@@ -5013,6 +5049,16 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             nameSender.textColor = .mainColor
         }
         
+        if ((dataMessages[indexPath.row]["read_receipts"] as? String) == "8" ||
+            (dataMessages[indexPath.row]["credential"] as? String) == "1" ||
+            !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty) &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "2" &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
+        } else {
+            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
+        }
+        
         let imageStared = UIImageView()
         let imageAckView = UIImageView()
         let imageCredentialView = UIImageView()
@@ -5033,7 +5079,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             imageStared.tintColor = .systemYellow
         }
         
-        if dataMessages[indexPath.row]["read_receipts"] as? String == "8" {
+        if dataMessages[indexPath.row]["read_receipts"] as? String == "8"  && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             var imageAck = UIImage(named: "ack_icon_gray", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
             cellMessage.contentView.addSubview(imageAckView)
             imageAckView.translatesAutoresizingMaskIntoConstraints = false

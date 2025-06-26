@@ -171,7 +171,15 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         let timeMessage = UILabel()
         cellMessage.contentView.addSubview(timeMessage)
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
-        timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
+        if ((dataMessages[indexPath.row]["read_receipts"] as? String) == "8" ||
+            (dataMessages[indexPath.row]["credential"] as? String) == "1" ||
+            !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty) &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "2" &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
+        } else {
+            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
+        }
         
         let messageText = UITextView()
         messageText.isEditable = false
@@ -210,7 +218,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             
             containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cellMessage.contentView.leadingAnchor, constant: 80).isActive = true
-            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
             containerMessage.trailingAnchor.constraint(equalTo: profileMessage.leadingAnchor, constant: -5).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
             if (dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "") {
@@ -286,7 +293,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             
             containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.leadingAnchor.constraint(equalTo: profileMessage.trailingAnchor, constant: 5).isActive = true
-            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5 - 20).isActive = true
             containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cellMessage.contentView.trailingAnchor, constant: -80).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
             if (dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "") {
@@ -312,6 +318,16 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             nameSender.textColor = .mainColor
         }
         
+        if ((dataMessages[indexPath.row]["read_receipts"] as? String) == "8" ||
+            (dataMessages[indexPath.row]["credential"] as? String) == "1" ||
+            !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty) &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "2" &&
+            (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
+        } else {
+            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
+        }
+        
         if (dataMessages[indexPath.row]["is_stared"] as? String == "1") {
             let imageStared = UIImageView()
             cellMessage.contentView.addSubview(imageStared)
@@ -328,6 +344,53 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             imageStared.image = UIImage(systemName: "star.fill")
             imageStared.backgroundColor = .clear
             imageStared.tintColor = .systemYellow
+        }
+        
+        let imageAckView = UIImageView()
+        if dataMessages[indexPath.row]["read_receipts"] as? String == "8" {
+            var imageAck = UIImage(named: "ack_icon_gray", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
+            if dataMessages[indexPath.row]["status"] as? String == "8" {
+                imageAck = UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
+            }
+            imageAckView.image = imageAck
+            cellMessage.contentView.addSubview(imageAckView)
+            imageAckView.translatesAutoresizingMaskIntoConstraints = false
+            imageAckView.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            imageAckView.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            imageAckView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
+            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                imageAckView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 30).isActive = true
+            } else {
+                imageAckView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
+                let tap = ObjectGesture(target: self, action: #selector(tapAck(_:)))
+                tap.indexPath = indexPath
+                imageAckView.addGestureRecognizer(tap)
+                imageAckView.isUserInteractionEnabled = true
+            }
+        }
+        
+        if !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+            let imageSpecFileView = UIImageView()
+            let imageSpecFile = UIImage(named: "pb_ic_attach_spc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
+            imageSpecFileView.image = imageSpecFile
+            cellMessage.contentView.addSubview(imageSpecFileView)
+            imageSpecFileView.translatesAutoresizingMaskIntoConstraints = false
+            imageSpecFileView.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            imageSpecFileView.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            imageSpecFileView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
+            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                if imageAckView.isDescendant(of: cellMessage.contentView) {
+                    imageSpecFileView.leadingAnchor.constraint(equalTo: imageAckView.trailingAnchor, constant: 5).isActive = true
+                } else {
+                    imageSpecFileView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 30).isActive = true
+                }
+            } else {
+                if imageAckView.isDescendant(of: cellMessage.contentView) {
+                    imageSpecFileView.trailingAnchor.constraint(equalTo: imageAckView.leadingAnchor, constant: -5).isActive = true
+                } else {
+                    imageSpecFileView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
+                }
+            }
         }
         topMarginText.isActive = true
         if dataMessages[indexPath.row]["attachment_flag"] as! String == "27" || dataMessages[indexPath.row]["attachment_flag"] as! String == "26" {
@@ -838,53 +901,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     })
                 } else {
                     showLink()
-                }
-            }
-        }
-        
-        let imageAckView = UIImageView()
-        if dataMessages[indexPath.row]["read_receipts"] as? String == "8" {
-            var imageAck = UIImage(named: "ack_icon_gray", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
-            if dataMessages[indexPath.row]["status"] as? String == "8" {
-                imageAck = UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
-            }
-            imageAckView.image = imageAck
-            cellMessage.contentView.addSubview(imageAckView)
-            imageAckView.translatesAutoresizingMaskIntoConstraints = false
-            imageAckView.widthAnchor.constraint(equalToConstant: 30).isActive = true
-            imageAckView.heightAnchor.constraint(equalToConstant: 30).isActive = true
-            imageAckView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                imageAckView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 30).isActive = true
-            } else {
-                imageAckView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
-                let tap = ObjectGesture(target: self, action: #selector(tapAck(_:)))
-                tap.indexPath = indexPath
-                imageAckView.addGestureRecognizer(tap)
-                imageAckView.isUserInteractionEnabled = true
-            }
-        }
-        
-        if !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
-            let imageSpecFileView = UIImageView()
-            let imageSpecFile = UIImage(named: "pb_ic_attach_spc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
-            imageSpecFileView.image = imageSpecFile
-            cellMessage.contentView.addSubview(imageSpecFileView)
-            imageSpecFileView.translatesAutoresizingMaskIntoConstraints = false
-            imageSpecFileView.widthAnchor.constraint(equalToConstant: 30).isActive = true
-            imageSpecFileView.heightAnchor.constraint(equalToConstant: 30).isActive = true
-            imageSpecFileView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                if imageAckView.isDescendant(of: cellMessage.contentView) {
-                    imageSpecFileView.leadingAnchor.constraint(equalTo: imageAckView.trailingAnchor, constant: 5).isActive = true
-                } else {
-                    imageSpecFileView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 30).isActive = true
-                }
-            } else {
-                if imageAckView.isDescendant(of: cellMessage.contentView) {
-                    imageSpecFileView.trailingAnchor.constraint(equalTo: imageAckView.leadingAnchor, constant: -5).isActive = true
-                } else {
-                    imageSpecFileView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
                 }
             }
         }
@@ -1590,7 +1606,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         if self.dataMessages[indexPath!.row]["f_pin"] as! String == "-999" || !(dataMessages[indexPath!.row]["image_id"] as! String).isEmpty || !(dataMessages[indexPath!.row]["video_id"] as! String).isEmpty || !(dataMessages[indexPath!.row]["file_id"] as! String).isEmpty || dataMessages[indexPath!.row]["attachment_flag"] as! String == "11" {
             children = [star]
         }
-        if (Nexilis.checkingAccess(key: "secure_folder_forward") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && self.dataMessages[indexPath!.row]["f_pin"] as! String != "-999" {
+        if (Nexilis.checkingAccess(key: "secure_folder_forward") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && self.dataMessages[indexPath!.row]["f_pin"] as! String != "-999" && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" {
             children.insert(forward, at: 1)
         }
         

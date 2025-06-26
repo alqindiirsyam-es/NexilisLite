@@ -35,7 +35,7 @@ class Callback : CallBack {
     }
     
     func callStateChanged(nState: Int!, sMessage: String!) -> Int {
-        //print(nState,"/",sMessage)
+        print(nState,"/",sMessage)
         if nState == Nexilis.AUDIO_CALL_INCOMING || nState == Nexilis.VIDEO_CALL_INCOMING {
             if let delegate = Nexilis.shared.callDelegate {
                 if !Nexilis.showLibraryNotification || Nexilis.callAPNActivated {

@@ -1054,7 +1054,7 @@ class QmeraAudioViewController: UIViewController {
             else if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
                 DispatchQueue.main.async { [self] in
                     if let pin = arrayMessage.first, let index = users.firstIndex(of: User(pin: String(pin))) {
-                        if arrayMessage[1] == "1" {
+                        if (arrayMessage.count == 2 && arrayMessage[1] == "1") ||  (arrayMessage.count > 2 && arrayMessage[2] == "1") {
                             users[index].isMuted = true
                             if let profile = profiles.subviews[index] as? ProfileView {
                                 profile.imageMuted.isHidden = false

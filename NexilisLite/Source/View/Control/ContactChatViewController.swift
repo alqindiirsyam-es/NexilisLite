@@ -279,7 +279,7 @@ class ContactChatViewController: UITableViewController {
                 self?.timerReloadData?.invalidate()
                 self?.timerReloadData = nil
                 self?.timerReloadData = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-                    if !self!.isGettingData {
+                    if self != nil && !self!.isGettingData {
                         self?.getData()
                         self?.timerReloadData = nil
                     }

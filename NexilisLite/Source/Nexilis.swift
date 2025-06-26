@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.45"
+    public static var cpaasVersion = "5.0.46"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -281,6 +281,7 @@ public class Nexilis: NSObject {
                         })
                     } else if isShowForceSignIn && !Utils.getForceAnonymous() && !Utils.getSetProfile() {
                         DispatchQueue.main.async {
+                            print("MASUK showForceSignIn")
                             showForceSignIn()
                         }
                     }
@@ -650,7 +651,7 @@ public class Nexilis: NSObject {
             if jsonArray[key] != nil {
                 return jsonArray[key] as! String == "1"
             } else {
-                if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_email" {
+                if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
                     return false
                 } else {
                     return true
@@ -712,8 +713,12 @@ public class Nexilis: NSObject {
     }
     
     public static func showForceSignIn(completion: (() -> Void)? = nil) {
-        let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "changeDevice") as! ChangeDeviceViewController
-        controller.forceLogin = true
+        guard let controller = APIS.getControllerSign(forceSignIn: true) else { return }
+        if let controller = controller as? ChangeDeviceViewController {
+            controller.forceLogin = true
+        } else if let controller = controller as? SignInOption {
+            controller.forceLogin = true
+        }
         let navigationController = CustomNavigationController(rootViewController: controller)
         navigationController.modalPresentationStyle = .fullScreen
         navigationController.navigationBar.tintColor = .white
@@ -1502,6 +1507,7 @@ public class Nexilis: NSObject {
                 })
                 if !messageExist {
                     Nexilis.saveMessageBot(textMessage: "*\(nameReq.trimmingCharacters(in: .whitespaces))*" + "~" + "has requested to be your friend", blog_id: nameFpin, attachment_type: "61")
+                    self.makeNotifRequestFriend(message: message)
                     NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                 }
             }
@@ -1671,6 +1677,135 @@ public class Nexilis: NSObject {
             }
         })
         
+    }
+    
+    private static func makeNotifRequestFriend(message: TMessage) {
+        let nameReq = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
+        let profile = message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)
+        print("HEHE: \(message.toLogString())")
+        DispatchQueue.main.async {
+            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+            let inEditorPersonal: String? = SecureUserDefaults.shared.value(forKey: "inEditorPersonal") ?? nil
+            if !onGoingCC.isEmpty {
+                return
+            }
+            if inEditorPersonal == "-999"{
+                return
+            }
+            let container = UIView()
+            container.backgroundColor = .gray
+            let profileImage = UIImageView()
+            profileImage.frame.size = CGSize(width: 60, height: 60)
+            container.addSubview(profileImage)
+            profileImage.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                profileImage.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8.0),
+                profileImage.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                profileImage.widthAnchor.constraint(equalToConstant: 60),
+                profileImage.heightAnchor.constraint(equalToConstant: 60),
+            ])
+            
+            let title = UILabel()
+            container.addSubview(title)
+            title.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                title.leadingAnchor.constraint(equalTo: profileImage.trailingAnchor, constant: 8.0),
+                title.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                title.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8.0)
+            ])
+            title.font = UIFont.systemFont(ofSize: 14)
+            title.text = nameReq.trimmingCharacters(in: .whitespaces) + " " + "has requested to be your friend".localized()
+            title.textColor = .white
+            title.numberOfLines = 0
+            
+            if Nexilis.shared.floating != nil {
+                Nexilis.shared.floating.dismiss()
+            }
+            Nexilis.shared.floating = FloatingNotificationBanner(customView: container)
+            Nexilis.shared.floating.bannerHeight = UIScreen.main.bounds.height / 6 - 10
+            Nexilis.shared.floating.transparency = 0.9
+            Nexilis.shared.floating.onTap = {
+                let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+                editorPersonalVC.hidesBottomBarWhenPushed = true
+                editorPersonalVC.unique_l_pin = "-999"
+                editorPersonalVC.fromNotification = true
+                let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
+                navigationController.modalPresentationStyle = .fullScreen
+                navigationController.navigationBar.tintColor = .white
+                navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                navigationController.navigationBar.isTranslucent = false
+                navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+                navigationController.navigationBar.barStyle = .black
+                let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+                let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+                navigationController.navigationBar.titleTextAttributes = textAttributes
+                if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
+                    editorPersonalVC.fromNotification = false
+                    UIApplication.shared.visibleViewController?.show(editorPersonalVC, sender: nil)
+                } else {
+                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                }
+            }
+            
+            if profile != "" {
+                profileImage.circle()
+                do {
+                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                    let file = documentDir.appendingPathComponent(profile)
+                    if FileManager().fileExists(atPath: file.path) {
+                        profileImage.image = UIImage(contentsOfFile: file.path)
+                        profileImage.backgroundColor = .clear
+                    } else if FileEncryption.shared.isSecureExists(filename: profile) {
+                        do {
+                            if var data = try FileEncryption.shared.readSecure(filename: profile) {
+                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                if dataDecrypt != nil {
+                                    data = dataDecrypt!
+                                }
+                                profileImage.image = UIImage(data: data)
+                                profileImage.backgroundColor = .clear
+                            }
+                        } catch {
+                            
+                        }
+                    } else {
+                        Download().startHTTP(forKey: profile) { (name, progress) in
+                            guard progress == 100 else {
+                                return
+                            }
+                            
+                            DispatchQueue.main.async {
+                                if FileEncryption.shared.isSecureExists(filename: profile) {
+                                    do {
+                                        if var data = try FileEncryption.shared.readSecure(filename: profile) {
+                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                            if dataDecrypt != nil {
+                                                data = dataDecrypt!
+                                            }
+                                            profileImage.image = UIImage(data: data)
+                                            profileImage.backgroundColor = .clear
+                                        }
+                                    } catch {
+                                        
+                                    }
+                                }
+                                Nexilis.shared.floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
+                                return
+                            }
+                        }
+                    }
+                } catch {}
+                profileImage.contentMode = .scaleAspectFill
+            } else {
+                profileImage.circle()
+                profileImage.image = UIImage(systemName: "person")
+                profileImage.contentMode = .scaleAspectFit
+                profileImage.backgroundColor = .lightGray
+                profileImage.tintColor = .white
+            }
+            Nexilis.shared.floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
+        }
     }
     
     public static func saveMessageBot(textMessage: String, blog_id: String, attachment_type:String)->Void{
