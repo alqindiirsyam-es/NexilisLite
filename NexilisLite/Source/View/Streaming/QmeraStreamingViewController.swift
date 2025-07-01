@@ -18,6 +18,14 @@ class QmeraStreamingViewController: UIViewController {
     
     var isLive: Bool = false
     
+    static private var isSpeakerPhone: Bool = false
+    
+    static private var lastVolume: Float = AVAudioSession.sharedInstance().outputVolume
+    
+    static private var nMaxSPOn: Float = 20.0
+    
+    static private var nMaxSPOff: Float = 20.0
+    
     private var textViewHeightConstraint: NSLayoutConstraint!
     
     private let keyboardLayoutGuide = UILayoutGuide()
@@ -163,6 +171,48 @@ class QmeraStreamingViewController: UIViewController {
         return count
     }()
     
+    lazy var buttonSpeaker: UIButton = {
+        let button = UIButton()
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.backgroundColor = .white.withAlphaComponent(0.2)
+        button.setImage(UIImage(systemName: "speaker.slash"), for: .normal)
+        button.tintColor = .white
+        button.layer.cornerRadius = 20
+        button.clipsToBounds = true
+        button.addTarget(self, action: #selector(didTapSpeakerButton(_:)), for: .touchUpInside)
+        return button
+    }()
+    
+    static func turnSpeakerOn() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.overrideOutputAudioPort(isSpeakerPhone ? .speaker : .none)
+        } catch {
+            print("Failed to set speaker mode: \(error)")
+        }
+
+        let volume = lastVolume * (isSpeakerPhone ? nMaxSPOn : nMaxSPOff)
+        API.adjustVolume(fValue: volume)
+    }
+    
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == "outputVolume" {
+            if let newVolume = change?[.newKey] as? Float {
+                QmeraStreamingViewController.lastVolume = newVolume
+                let adjustedVolume = newVolume * (QmeraStreamingViewController.isSpeakerPhone ? QmeraStreamingViewController.nMaxSPOn : QmeraStreamingViewController.nMaxSPOff)
+                API.adjustVolume(fValue: adjustedVolume)
+            }
+        }
+    }
+
+    
+    @objc func didTapSpeakerButton(_ sender: UIButton) {
+        QmeraStreamingViewController.isSpeakerPhone.toggle()
+        QmeraStreamingViewController.turnSpeakerOn()
+        let imageName = QmeraStreamingViewController.isSpeakerPhone ? "speaker.wave.2.fill" : "speaker.slash"
+        sender.setImage(UIImage(systemName: imageName), for: .normal)
+    }
+    
     var alert: UIAlertController?
     var textFields = [UITextField]()
     let statusView = UIView()
@@ -211,6 +261,10 @@ class QmeraStreamingViewController: UIViewController {
         addLikeView()
         if isLive {
             addCountViewerView()
+        }
+        else {
+            addSpeakerView()
+            AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: [.new], context: nil)
         }
         
         keyboardTopAnchorConstraint = view.layoutMarginsGuide.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor, constant: 0)
@@ -301,6 +355,17 @@ class QmeraStreamingViewController: UIViewController {
         viewCountViewer.addSubview(countViewer)
         countViewer.anchor(left: imageEye.rightAnchor, right:viewCountViewer.rightAnchor, paddingLeft: 5.0, paddingRight: 5.0, centerY: viewCountViewer.centerYAnchor)
         
+    }
+    
+    func addSpeakerView() {
+        view.addSubview(buttonSpeaker)
+
+        NSLayoutConstraint.activate([
+            buttonSpeaker.widthAnchor.constraint(equalToConstant: 40),
+            buttonSpeaker.heightAnchor.constraint(equalToConstant: 40),
+            buttonSpeaker.topAnchor.constraint(equalTo: count.superview!.bottomAnchor, constant: 10),
+            buttonSpeaker.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20)
+        ])
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -431,6 +496,10 @@ class QmeraStreamingViewController: UIViewController {
     }
     
     deinit {
+        if !isLive {
+            NotificationCenter.default.removeObserver(self)
+            AVAudioSession.sharedInstance().removeObserver(self, forKeyPath: "outputVolume")
+        }
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
     }
