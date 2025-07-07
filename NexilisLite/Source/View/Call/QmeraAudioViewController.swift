@@ -252,6 +252,17 @@ class QmeraAudioViewController: UIViewController {
         return button
     }()
     
+    let minimizeLogo: UIButton = {
+        let button = UIButton()
+        button.setImage(UIImage(systemName: "arrow.down.right.and.arrow.up.left")?.withTintColor(.white, renderingMode: .alwaysOriginal), for: .normal)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.setBackgroundColor(.gray.withAlphaComponent(0.4), for: .normal)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+        button.imageEdgeInsets = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+        return button
+    }()
+    
     static func turnSpeakerOn() {
 //        var bAudioEngineIsAvtive: Bool! = false
 //        API.turnSpeakerPhone(bSPon: bSpeakerPhone)
@@ -309,6 +320,17 @@ class QmeraAudioViewController: UIViewController {
         AVAudioSession.sharedInstance().removeObserver(self, forKeyPath: "outputVolume")
     }
     
+    func showCallBanner() {
+        guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else { return }
+
+        let bannerHeight: CGFloat = 60
+        let banner = CallBannerView(frame: CGRect(x: 0, y: 0, width: window.frame.width, height: bannerHeight))
+
+        banner.frame.origin.y = window.safeAreaInsets.top
+
+        window.addSubview(banner)
+    }
+    
     private func backToDefaultAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
@@ -340,6 +362,11 @@ class QmeraAudioViewController: UIViewController {
         view.addSubview(status)
         view.addSubview(profiles)
         view.addSubview(name)
+        
+        view.addSubview(minimizeLogo)
+        minimizeLogo.anchor(top: view.topAnchor, left: view.leftAnchor, paddingTop: 30, paddingLeft: 20, width: 40, height: 40)
+        minimizeLogo.addTarget(self, action: #selector(didMinimized(sender:)), for: .touchUpInside)
+        minimizeLogo.isHidden = true
         
         status.anchor(left: view.leftAnchor, bottom: profiles.topAnchor, right: view.rightAnchor, paddingBottom: 30, centerX: view.centerXAnchor)
         profiles.anchor(centerX: view.centerXAnchor, centerY: view.centerYAnchor, width: 150, height: 150)
@@ -396,10 +423,12 @@ class QmeraAudioViewController: UIViewController {
                                 }
                             }
                         } else {
-                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                            imageView.tintColor = .white
-                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            banner.show()
+                            DispatchQueue.main.async {
+                                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                banner.show()
+                            }
                         }
                     }
                 } else {
@@ -493,6 +522,7 @@ class QmeraAudioViewController: UIViewController {
         invite.circle()
         speaker.circle()
         mic.circle()
+        minimizeLogo.circle()
     }
     
     private func getUserData(completion: @escaping (User?) -> ()) {
@@ -820,10 +850,12 @@ class QmeraAudioViewController: UIViewController {
                                 Nexilis.stopRingbacktoneCall()
                             }
                         } else {
-                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                            imageView.tintColor = .white
-                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            banner.show()
+                            DispatchQueue.main.async {
+                                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                banner.show()
+                            }
                         }
                     }
                 } else {
@@ -835,6 +867,10 @@ class QmeraAudioViewController: UIViewController {
         }
         controller.selectedUser.append(contentsOf: users)
         present(CustomNavigationController(rootViewController: controller), animated: true, completion: nil)
+    }
+    
+    @objc func didMinimized(sender: Any?) {
+        
     }
     
     @objc func didPressEnd(sender: Any?) {

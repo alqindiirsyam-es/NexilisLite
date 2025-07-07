@@ -163,12 +163,12 @@ extension UIView {
         }
         if width != 0 || minWidth != 0 || maxWidth != 0 {
             if minWidth != 0 && maxWidth != 0 {
-                heightAnchor.constraint(greaterThanOrEqualToConstant: minWidth).isActive = true
-                heightAnchor.constraint(lessThanOrEqualToConstant: maxWidth).isActive = true
+                widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth).isActive = true
+                widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth).isActive = true
             } else if minWidth != 0 && maxWidth == 0 {
-                heightAnchor.constraint(greaterThanOrEqualToConstant: minWidth).isActive = true
+                widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth).isActive = true
             } else if minWidth == 0 && maxWidth != 0 {
-                heightAnchor.constraint(lessThanOrEqualToConstant: maxWidth).isActive = true
+                widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth).isActive = true
             } else {
                 widthAnchor.constraint(equalToConstant: width).isActive = true
             }

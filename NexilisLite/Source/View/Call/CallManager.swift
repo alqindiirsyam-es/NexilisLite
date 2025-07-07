@@ -37,6 +37,22 @@ public class CallManager: NSObject, ObservableObject {
         self.provider.setDelegate(self, queue: nil)
     }
     
+    func startCall(uuid: UUID, callerName: String, callerId: String, isVideo: Bool) {
+        let handle = CXHandle(type: .generic, value: callerId)
+        let startCallAction = CXStartCallAction(call: uuid, handle: handle)
+        startCallAction.isVideo = isVideo
+        
+        let transaction = CXTransaction(action: startCallAction)
+        
+        callController.request(transaction) { error in
+            if let error = error {
+                print("Error starting call: \(error.localizedDescription)")
+            } else {
+                print("Call started successfully")
+            }
+        }
+    }
+    
     public func reportIncomingCall(uuid: UUID, callerName: String, callerId: String, isVideo: Bool) {
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: callerId)

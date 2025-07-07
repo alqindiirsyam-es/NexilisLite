@@ -442,7 +442,7 @@ class ContactChatViewController: UITableViewController {
             let allChats = Chat.getData()
             self.archivedChats = Chat.getData(isArchived: true)
             var tempChats: [Chat] = []
-            var lowestPinned: [String: Int] = [:]
+            var lowestPinned: [String: Int64] = [:]
 
             for singleChat in allChats {
                 guard !singleChat.groupId.isEmpty else {
@@ -1159,6 +1159,9 @@ extension ContactChatViewController {
     }
     
     override func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        if segment.numberOfSegments != 3 || (segment.numberOfSegments == 3 && segment.selectedSegmentIndex != 0) {
+            return nil
+        }
         let data: Chat
         if isFilltering {
             data = fillteredData[indexPath.row] as! Chat
@@ -1583,7 +1586,7 @@ extension ContactChatViewController {
                                     stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                                 }
                                 stringMessage.append(("🚫 _"+"You were deleted this message".localized()+"_").richText())
-                            } else if data.messageScope != MessageScope.CALL && data.messageScope != MessageScope.MISSED_CALL {
+                            } else if data.messageScope != MessageScope.CALL && data.messageScope != MessageScope.MISSED_CALL && !data.messageId.contains("NTFPIN_") {
                                 let imageStatus = NSTextAttachment()
                                 let status = getRealStatus(messageId: data.messageId)
                                 if status == "0" {

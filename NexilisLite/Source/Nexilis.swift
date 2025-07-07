@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.46"
+    public static var cpaasVersion = "5.0.47"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1899,6 +1899,124 @@ public class Nexilis: NSObject {
             }
         })
         //print("insert db message summary \(message_id)")
+    }
+    
+    public static func saveMessageNotif(textMessage: String, fPin: String, lPin: String, chatId: String, scopeId: String, fmdb: FMDatabase? = nil) -> String {
+        guard let me = User.getMyPin() else {
+            return ""
+        }
+        let dataFpin = User.getData(pin: fPin, lPin: lPin, fmdb: fmdb)
+        let dataLpin = User.getData(pin: lPin, fmdb: fmdb)
+        let message_id = "NTFPIN_" + CoreMessage_TMessageUtil.getTID()
+        if fmdb == nil {
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                do {
+                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                        "message_id" : message_id,
+                        "f_pin" : fPin,
+                        "f_display_name" : dataFpin != nil ? dataFpin!.fullName : "",
+                        "l_pin" : lPin,
+                        "l_user_id" : dataLpin != nil ? dataLpin!.pin : "",
+                        "message_scope_id" : scopeId,
+                        "server_date" : Date().currentTimeMillis(),
+                        "status" : "3",
+                        "message_text" : textMessage,
+                        "audio_id" : "",
+                        "video_id" : "",
+                        "image_id" : "",
+                        "file_id" : "",
+                        "thumb_id" : "",
+                        "opposite_pin" : "",
+                        "format" : "",
+                        "blog_id" : "",
+                        "read_receipts" : "0",
+                        "chat_id" : chatId,
+                        "account_type" : "1",
+                        "credential" :"",
+                        "reff_id" : "",
+                        "message_large_text" : "",
+                        "attachment_flag" : "",
+                        "local_timestamp" : ""
+                    ], replace: true)
+                } catch {
+                    rollback.pointee = true
+                    print("Access database error: \(error.localizedDescription)")
+                }
+            })
+        } else {
+            do {
+                _ = try Database.shared.insertRecord(fmdb: fmdb!, table: "MESSAGE", cvalues: [
+                    "message_id" : message_id,
+                    "f_pin" : fPin,
+                    "f_display_name" : dataFpin != nil ? dataFpin!.fullName : "",
+                    "l_pin" : lPin,
+                    "l_user_id" : dataLpin != nil ? dataLpin!.pin : "",
+                    "message_scope_id" : scopeId,
+                    "server_date" : Date().currentTimeMillis(),
+                    "status" : "3",
+                    "message_text" : textMessage,
+                    "audio_id" : "",
+                    "video_id" : "",
+                    "image_id" : "",
+                    "file_id" : "",
+                    "thumb_id" : "",
+                    "opposite_pin" : "",
+                    "format" : "",
+                    "blog_id" : "",
+                    "read_receipts" : "0",
+                    "chat_id" : chatId,
+                    "account_type" : "1",
+                    "credential" :"",
+                    "reff_id" : "",
+                    "message_large_text" : "",
+                    "attachment_flag" : "",
+                    "local_timestamp" : ""
+                ], replace: true)
+            } catch {
+                print("Access database error: \(error.localizedDescription)")
+            }
+        }
+        let pin = lPin == me ? fPin : lPin
+        var pinned = 0
+        var archived = 0
+        if fmdb == nil {
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                do {
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                        pinned = Int(cursor.int(forColumnIndex: 0))
+                        archived = Int(cursor.int(forColumnIndex: 1))
+                    }
+                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+                        "l_pin" : pin,
+                        "message_id" : message_id,
+                        "counter" : 0,
+                        "pinned" : pinned,
+                        "archived" : archived
+                    ], replace: true)
+                } catch {
+                    rollback.pointee = true
+                    print("Access database error: \(error.localizedDescription)")
+                }
+            })
+        } else {
+            do {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb!, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                    pinned = Int(cursor.int(forColumnIndex: 0))
+                    archived = Int(cursor.int(forColumnIndex: 1))
+                }
+                _ = try Database.shared.insertRecord(fmdb: fmdb!, table: "MESSAGE_SUMMARY", cvalues: [
+                    "l_pin" : pin,
+                    "message_id" : message_id,
+                    "counter" : 0,
+                    "pinned" : pinned,
+                    "archived" : archived
+                ], replace: true)
+            } catch {
+                print("Access database error: \(error.localizedDescription)")
+            }
+        }
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+        return message_id
     }
     
     public static func saveMessageCall(idCall: String, textMessage: String, fPin: String, lPin: String, timeCall: String, attachment_type:String) {

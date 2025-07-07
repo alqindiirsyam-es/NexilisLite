@@ -2769,4 +2769,19 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func getPinMessage(f_pin: String, data: String, oppositePin: String, chatId: String, scopeId: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.UPDATE_MESSAGE
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.F_PIN] = f_pin
+        tMessage.mBodies[CoreMessage_TMessageKey.DATA] = data
+        tMessage.mBodies[CoreMessage_TMessageKey.OPPOSITE_PIN] = oppositePin
+        tMessage.mBodies[CoreMessage_TMessageKey.CHAT_ID] = chatId
+        tMessage.mBodies[CoreMessage_TMessageKey.SCOPE_ID] = scopeId
+        tMessage.mBodies[CoreMessage_TMessageKey.ITEM_CODE] = "pinorunpin"
+        return tMessage
+    }
+    
 }

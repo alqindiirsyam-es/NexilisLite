@@ -354,6 +354,7 @@ public class CoreMessage_TMessageKey {
     public static let SEARCH_MESSAGE_FLAG = "C05"
     public static let VIEW_MEDIA_FLAG = "C06"
     public static let IS_STARED_MESSAGE = "IS1"
+    public static let IS_PINNED_MESSAGE = "IS2"
     public static let FROM_WEB = "W01"
     public static let STATUS_FORM = "SF"
     public static let POP_HOST = "EM1"

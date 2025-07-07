@@ -195,6 +195,8 @@ class IncomingThread {
             showTransactionApprovalRequest(message: message)
         } else if message.getCode() == CoreMessage_TMessageCode.LOGOUT {
             logoutDevice(message: message)
+        } else if message.getCode() == CoreMessage_TMessageCode.UPDATE_MESSAGE {
+            updateMessage(message: message)
         } else {
             //print("unprocessed code", message.getCode())
             ack(message: message)
@@ -207,6 +209,47 @@ class IncomingThread {
     /**
      *
      */
+    
+    private func updateMessage(message: TMessage) -> Void {
+        let data = message.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
+        let item_code = message.getBody(key: CoreMessage_TMessageKey.ITEM_CODE, default_value: "")
+        let f_pin = message.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
+        let l_pin = message.getBody(key: CoreMessage_TMessageKey.OPPOSITE_PIN, default_value: "")
+        let chat_id = message.getBody(key: CoreMessage_TMessageKey.CHAT_ID, default_value: "")
+        let scope_id = message.getBody(key: CoreMessage_TMessageKey.SCOPE_ID, default_value: "")
+        if item_code == "pinorunpin" {
+            if !data.isEmpty {
+                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        do {
+                            for json in jsonArray {
+                                let pinned = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_PINNED_MESSAGE)
+                                let messageId = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MESSAGE_ID)
+                                var messageIdNotif = ""
+                                if pinned != "0" {
+                                    if let dataUser = User.getData(pin: f_pin, lPin: l_pin, fmdb: fmdb) {
+                                        messageIdNotif = Nexilis.saveMessageNotif(textMessage: dataUser.fullName + " " + "pinned a message".localized(), fPin: f_pin, lPin: l_pin, chatId: chat_id, scopeId: scope_id, fmdb: fmdb)
+                                    }
+                                }
+                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                    "is_pinned" : pinned
+                                ], _where: "message_id = '\(messageId)'")
+                                var dataMessage: [AnyHashable : Any] = [:]
+                                dataMessage["message_id"] = messageId
+                                dataMessage["message_id_notif"] = messageIdNotif
+                                dataMessage["is_pinned"] = pinned
+                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil, userInfo: dataMessage)
+                            }
+                            ack(message: message)
+                        } catch {
+                            rollback.pointee = true
+                            print("Access database error: \(error.localizedDescription)")
+                        }
+                    })
+                }
+            }
+        }
+    }
     
     private func sendUpdateLiveStream(message: TMessage) -> Void {
         var dataMessage: [AnyHashable : Any] = [:]

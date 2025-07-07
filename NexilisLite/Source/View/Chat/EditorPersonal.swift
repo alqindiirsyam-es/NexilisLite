@@ -78,6 +78,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     let viewSticker = UIView()
     let containerLink = UIView()
     let containerPreviewReply = UIView()
+    let containerPin = UIView()
+    let textPin = UILabel()
+    let signSelectedPin = UIStackView()
     var bottomAnchorPreviewReply = NSLayoutConstraint()
     var blocking = ""
     var timeoutCC = Timer()
@@ -93,6 +96,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var constraintBottomContainerMultpileSelectSession = NSLayoutConstraint()
     var titleSearchMatches: UILabel!
     var textSearch = ""
+    var nextPinShowed = 0
     var countMatchesSearch = 0
     var lastScrollIdxSearch = 0
     var buttonUp: UIButton!
@@ -277,6 +281,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         center.addObserver(self, selector: #selector(onTyping(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerTypingChat), object: nil)
         center.addObserver(self, selector: #selector(onFailedSendMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.failedSendMessage), object: nil)
         center.addObserver(self, selector: #selector(onRefreshCallLog(notification:)), name: NSNotification.Name(rawValue: "refreshCallLog"), object: nil)
+        center.addObserver(self, selector: #selector(onUpdatedMessage(notification:)), name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil)
         
         locationManager.delegate = self
         locationManager.requestWhenInUseAuthorization()
@@ -727,6 +732,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 })
             }
         }
+        let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+        pinAllMessages(dataMessages: dataMessagesPin)
     }
     
     private func chatbot() {
@@ -955,7 +962,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func addDataMessage() {
         multipleOffsetUp += 1
         let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0"
-        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
+        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
@@ -989,6 +996,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 24)
                         row[TypeDataMessage.is_forwarded] = Int(cursorData.int(forColumnIndex: 25))
                         row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 26)
+                        row[TypeDataMessage.is_pinned] = cursorData.string(forColumnIndex: 27)
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"]  as? String ?? "")'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -1100,7 +1108,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func getData() {
 //        let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0"
 //        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20 ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
-        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc"
+        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc"
         if isContactCenter {
             if complaintId.isEmpty {
                 query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc"
@@ -1159,15 +1167,16 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row["reff_id"] = cursorData.string(forColumnIndex: 15)
                         row["lock"] = cursorData.string(forColumnIndex: 16)
                         row["is_stared"] = cursorData.string(forColumnIndex: 17)
-                        row["blog_id"] = cursorData.string(forColumnIndex: 18)
-                        row["credential"] = cursorData.string(forColumnIndex: 19)
-                        row[TypeDataMessage.is_call_center] = cursorData.string(forColumnIndex: 20)
-                        row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 21)
-                        row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 22)
+                        row["blog_id"] = cursorData.string(forColumnIndex: 18) ?? ""
+                        row["credential"] = cursorData.string(forColumnIndex: 19) ?? ""
+                        row[TypeDataMessage.is_call_center] = cursorData.string(forColumnIndex: 20) ?? ""
+                        row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 21) ?? ""
+                        row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 22) ?? ""
                         row[TypeDataMessage.last_edit] = cursorData.longLongInt(forColumnIndex: 23)
-                        row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 24)
+                        row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 24) ?? ""
                         row[TypeDataMessage.is_forwarded] = Int(cursorData.int(forColumnIndex: 25))
-                        row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 26)
+                        row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 26) ?? ""
+                        row[TypeDataMessage.is_pinned] = cursorData.string(forColumnIndex: 27) ?? ""
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as? String ?? "")'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -1459,6 +1468,32 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     @objc func onUploadChat(notification: NSNotification) {
         let data:[AnyHashable : Any] = notification.userInfo!
         updateProgress(data)
+    }
+    
+    @objc func onUpdatedMessage(notification: NSNotification) {
+        DispatchQueue.main.async {
+            let data:[AnyHashable : Any] = notification.userInfo!
+            let messageId = data["message_id"]  as? String ?? ""
+            let messageIdNotif = data["message_id_notif"]  as? String ?? ""
+            let isPinned = data["is_pinned"]  as? String ?? ""
+            let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String ?? "" == messageId})
+            if idx != nil{
+                self.dataMessages[idx!][TypeDataMessage.is_pinned] = isPinned
+                let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
+                let row = self.dataMessages.filter({ $0["chat_date"] as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
+                if row != nil && section != nil  {
+                    DispatchQueue.main.async {
+                        self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                    }
+                }
+                let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                self.pinAllMessages(dataMessages: dataMessagesPin)
+                
+                if !messageIdNotif.isEmpty {
+                    self.appendNewMessage(messageId: messageIdNotif)
+                }
+            }
+        }
     }
     
     
@@ -1939,9 +1974,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func appendNewMessage(messageId: String) {
+        var row: [String: Any?] = [:]
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality from MESSAGE where message_id = '\(messageId)'"), cursorData.next() {
-                var row: [String: Any?] = [:]
+            if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned from MESSAGE where message_id = '\(messageId)'"), cursorData.next() {
                 row["message_id"] = cursorData.string(forColumnIndex: 0)
                 row["f_pin"] = cursorData.string(forColumnIndex: 1)
                 row["l_pin"] = cursorData.string(forColumnIndex: 2)
@@ -1969,6 +2004,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 row[TypeDataMessage.gif_id] = cursorData.string(forColumnIndex: 24)
                 row[TypeDataMessage.is_forwarded] = Int(cursorData.int(forColumnIndex: 25))
                 row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 26)
+                row[TypeDataMessage.is_pinned] = cursorData.string(forColumnIndex: 27)
                 row["progress"] = 0.0
                 row["isSelected"] = false
                 if !self.dataDates.contains("Today".localized()) {
@@ -1976,13 +2012,15 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
                 }
                 row["chat_date"] = "Today".localized()
-                self.tableChatView.beginUpdates()
-                dataMessages.append(row)
-                self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
-                self.tableChatView.endUpdates()
                 cursorData.close()
             }
         })
+        DispatchQueue.main.async {
+            self.tableChatView.beginUpdates()
+            self.dataMessages.append(row)
+            self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+            self.tableChatView.endUpdates()
+        }
     }
     
     private func updateStatusDelete(idx: Int?, chatData: [String: String]) {
@@ -4525,6 +4563,100 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 self.handleReply(indexPath: indexPath!)
             })
         })
+        var pin: UIAction
+        if (dataMessages[indexPath!.row][TypeDataMessage.is_pinned] as? String ?? "0" == "0") {
+            pin = UIAction(title: "Pin".localized(), image: UIImage(systemName: "pin"), handler: {(_) in
+                if self.removed {
+                    return
+                }
+                if self.isSearching {
+                    self.cancelAction()
+                }
+                var checkDataPinned = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: {
+                    if checkDataPinned.count == 3 {
+                        let alert = UIAlertController(title: "Replace oldest pin?".localized(),
+                                                      message: "Your pin will replace the oldest one.".localized(),
+                                                      preferredStyle: .alert)
+
+                        alert.addAction(UIAlertAction(title: "Continue", style: .default) { _ in
+                            proceedPinned(replace: true)
+                        })
+
+                        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+                        })
+                        self.present(alert, animated: true, completion: nil)
+                    } else {
+                        proceedPinned()
+                    }
+                })
+                func proceedPinned(replace: Bool = false) {
+                    if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
+                        DispatchQueue.main.async {
+                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                            banner.show()
+                        }
+                        return
+                    }
+                    if replace {
+                        checkDataPinned.sort {
+                            let firstPinned = Int64($0[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
+                            let secondPinned = Int64($1[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
+                            return firstPinned < secondPinned
+                        }
+                        self.proceedPinUnpinMessage(checkDataPinned: checkDataPinned[0], isPinned: false) { res1 in
+                            if res1 {
+                                self.proceedPinUnpinMessage(checkDataPinned: dataMessages[indexPath!.row], isPinned: true) { res2 in
+                                    if res2 {
+                                        let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                                        DispatchQueue.main.async {
+                                            self.pinAllMessages(dataMessages: dataMessagesPin)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        self.proceedPinUnpinMessage(checkDataPinned: dataMessages[indexPath!.row], isPinned: true) { res in
+                            if res {
+                                let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                                DispatchQueue.main.async {
+                                    self.pinAllMessages(dataMessages: dataMessagesPin)
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        } else {
+            pin = UIAction(title: "Unpin".localized(), image: UIImage(systemName: "pin.slash"), handler: {(_) in
+                if self.removed {
+                    return
+                }
+                if self.isSearching {
+                    self.cancelAction()
+                }
+                var checkDataPinned = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                checkDataPinned.sort {
+                    let firstPinned = Int64($0[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
+                    let secondPinned = Int64($1[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
+                    return firstPinned < secondPinned
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: {
+                    let indexUnpinned = checkDataPinned.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == dataMessages[indexPath!.row][TypeDataMessage.message_id] as? String })
+                    self.proceedPinUnpinMessage(checkDataPinned: dataMessages[indexPath!.row], isPinned: false) { res in
+                        if res {
+                            let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                            DispatchQueue.main.async {
+                                self.pinAllMessages(dataMessages: dataMessagesPin, isPinned: indexUnpinned ?? 0)
+                            }
+                        }
+                    }
+                })
+            })
+        }
         let forward = UIAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right"), handler: {(_) in
             if self.removed {
                 return
@@ -4768,7 +4900,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             Nexilis.addQueueMessage(message: message)
         })
         
-        var children: [UIMenuElement] = [star, reply, copy, delete]
+        var children: [UIMenuElement] = [star, reply, pin, copy, delete]
         var isMore = false
         let idMe = User.getMyPin() as String?
         if dataMessages[indexPath!.row]["status"]  as? String ?? "" == "0" {
@@ -4791,7 +4923,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
         } else {
             if !(dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty {
-               children = [star, reply ,delete]
+               children = [star, reply , pin, delete]
             } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
                children = [reply, delete]
             }
@@ -4822,6 +4954,67 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         return UIContextMenuConfiguration(identifier: nil,
                                           previewProvider: nil) { _ in
             return menuForShow
+        }
+    }
+    
+    func proceedPinUnpinMessage(checkDataPinned: [String: Any?], isPinned: Bool, completion: @escaping (Bool)-> Void) {
+        DispatchQueue.global().async {
+            var jaData = [[String: Any]]()
+            var jsonObject = [String: Any]()
+            jsonObject[CoreMessage_TMessageKey.MESSAGE_ID] = checkDataPinned["message_id"]  as? String ?? ""
+            jsonObject[CoreMessage_TMessageKey.IS_PINNED_MESSAGE] = isPinned ? "\(Date().currentTimeMillis())" : "0"
+            jaData.append(jsonObject)
+            if let jsonData = try? JSONSerialization.data(withJSONObject: jaData, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getPinMessage(f_pin: User.getMyPin() ?? "", data: jsonString, oppositePin: self.unique_l_pin, chatId: "", scopeId: MessageScope.WHISPER)) {
+                    if response.isOk() {
+                        if isPinned {
+                            let mId = Nexilis.saveMessageNotif(textMessage: "You".localized() + " " + "pinned a message".localized(), fPin: User.getMyPin() ?? "", lPin: self.unique_l_pin, chatId: "", scopeId: MessageScope.WHISPER)
+                            self.appendNewMessage(messageId: mId)
+                        }
+                        DispatchQueue.global().async {
+                            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                do {
+                                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                        "is_pinned" : isPinned ? "\(Date().currentTimeMillis())" : "0"
+                                    ], _where: "message_id = '\(checkDataPinned["message_id"]  as? String ?? "")'")
+                                } catch {
+                                    rollback.pointee = true
+                                    print("Access database error: \(error.localizedDescription)")
+                                }
+                            })
+                        }
+                        let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == checkDataPinned["message_id"]  as? String ?? ""})
+                        if idx != nil{
+                            self.dataMessages[idx!][TypeDataMessage.is_pinned] = isPinned ? "\(Date().currentTimeMillis())" : "0"
+                            let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
+                            let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
+                            if row != nil && section != nil  {
+                                DispatchQueue.main.async {
+                                    self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                                }
+                            }
+                        }
+                        completion(true)
+                    } else {
+                        DispatchQueue.main.async {
+                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Failed to pin or unpin message, make sure you are connected to internet".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                            banner.show()
+                        }
+                        completion(false)
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                        imageView.tintColor = .white
+                        let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                        banner.show()
+                    }
+                    completion(false)
+                }
+            }
         }
     }
     
@@ -6093,6 +6286,22 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         cell.contentView.addSubview(containerMessage)
         containerMessage.translatesAutoresizingMaskIntoConstraints = false
         
+        if messageIdChat.contains("NTFPIN_") {
+            containerMessage.backgroundColor = .orangeColor
+            containerMessage.anchor(top: cell.contentView.topAnchor, bottom: cell.contentView.bottomAnchor, paddingTop: 5, paddingBottom: 5, centerX: cell.contentView.centerXAnchor, minWidth: 40, maxWidth: UIScreen.main.bounds.width - 40)
+            containerMessage.layer.cornerRadius = 15
+            containerMessage.clipsToBounds = true
+            
+            let textMessage = UILabel()
+            containerMessage.addSubview(textMessage)
+            textMessage.textAlignment = .center
+            textMessage.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: 10, paddingLeft: 10, paddingBottom: 10, paddingRight: 10)
+            textMessage.font = .systemFont(ofSize: 14)
+            textMessage.text = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
+            textMessage.textColor = .white
+            return cell
+        }
+        
         let timeMessage = UILabel()
         timeMessage.numberOfLines = 0
         cell.contentView.addSubview(timeMessage)
@@ -6302,6 +6511,31 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         
         let imageAckView = UIImageView()
         let imageCredentialView = UIImageView()
+        let imagePinView = UIImageView()
+        if dataMessages[indexPath.row][TypeDataMessage.is_pinned] as? String != nil && dataMessages[indexPath.row][TypeDataMessage.is_pinned] as? String != "0" {
+            cell.contentView.addSubview(imagePinView)
+            imagePinView.translatesAutoresizingMaskIntoConstraints = false
+            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                if imageStared.isDescendant(of: cell.contentView){
+                    imagePinView.bottomAnchor.constraint(equalTo: imageStared.topAnchor).isActive = true
+                } else {
+                    imagePinView.bottomAnchor.constraint(equalTo: statusMessage.topAnchor).isActive = true
+                }
+                imagePinView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
+            } else {
+                if imageStared.isDescendant(of: cell.contentView){
+                    imagePinView.bottomAnchor.constraint(equalTo: imageStared.topAnchor).isActive = true
+                } else {
+                    imagePinView.bottomAnchor.constraint(equalTo: timeMessage.topAnchor).isActive = true
+                }
+                imagePinView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: 8).isActive = true
+            }
+            imagePinView.widthAnchor.constraint(equalToConstant: 15).isActive = true
+            imagePinView.heightAnchor.constraint(equalToConstant: 15).isActive = true
+            imagePinView.image = UIImage(systemName: "pin.fill")
+            imagePinView.backgroundColor = .clear
+            imagePinView.tintColor = .lightGray
+        }
         if dataMessages[indexPath.row]["read_receipts"] as? String == "8" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             var imageAck = UIImage(named: "ack_icon_gray", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
             if dataMessages[indexPath.row]["status"] as? String == "8" {
@@ -7494,6 +7728,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         
         if (!reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM) {
             let data = queryMessageReply(message_id: reffChat)
+            let chatGroup = Chat.getMessageFromId(message_id: reffChat)
             if data.count != 0 {
                 let containerReply = UIView()
                 containerMessage.addSubview(containerReply)
@@ -7537,29 +7772,36 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 titleReply.topAnchor.constraint(equalTo: containerReply.topAnchor, constant: 10).isActive = true
                 titleReply.trailingAnchor.constraint(lessThanOrEqualTo: containerReply.trailingAnchor, constant: -20).isActive = true
                 titleReply.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-                if (data["f_pin"] as? String == idMe) {
-                    titleReply.text = "You".localized()
-                    if dataMessages[indexPath.row]["f_pin"] as? String == idMe {
-                        titleReply.textColor = .white
-                        leftReply.backgroundColor = .white
+                let f_pin = chatGroup.count == 0 ? data["f_pin"] as? String : chatGroup[0].fpin
+                if f_pin == idMe {
+                    if chatGroup.count == 0 {
+                        titleReply.text = "You".localized()
                     } else {
-                        titleReply.textColor = .mainColor
-                        leftReply.backgroundColor = .mainColor
+                        if let dataPerson = User.getData(pin: f_pin) {
+                            titleReply.text = "You".localized() + " ● " + "\(chatGroup[0].groupName)(\(chatGroup[0].name))"
+                        }
                     }
                 } else {
                     if isContactCenter {
                         let user: [User] = users.filter({$0.pin == data["f_pin"] as? String})
                         titleReply.text = user.first!.fullName
                     } else {
-                        titleReply.text = self.dataPerson["name"]!!
+                        if chatGroup.count == 0 {
+                            titleReply.text = self.dataPerson["name"]!!
+                        } else {
+                            if let dataPerson = User.getData(pin: f_pin) {
+                                let namePerson = dataPerson.fullName
+                                titleReply.text = namePerson + " ● " + "\(chatGroup[0].groupName)(\(chatGroup[0].name))"
+                            }
+                        }
                     }
-                    if dataMessages[indexPath.row]["f_pin"] as? String == idMe {
-                        titleReply.textColor = .white
-                        leftReply.backgroundColor = .white
-                    } else {
-                        titleReply.textColor = .mainColor
-                        leftReply.backgroundColor = .mainColor
-                    }
+                }
+                if dataMessages[indexPath.row]["f_pin"] as? String == idMe {
+                    titleReply.textColor = .white
+                    leftReply.backgroundColor = .white
+                } else {
+                    titleReply.textColor = .mainColor
+                    leftReply.backgroundColor = .mainColor
                 }
                 
                 let contentReply = UILabel()
@@ -7572,12 +7814,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 topConstraintContent.priority = .defaultHigh
                 topConstraintContent.isActive = true
                 contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
-                let message_text = data["message_text"]  as? String ?? ""
-                let attachment_flag = data["attachment_flag"]  as? String ?? ""
-                let thumb_chat = data["thumb_id"]  as? String ?? ""
-                let image_chat = data["image_id"]  as? String ?? ""
-                let video_chat = data["video_id"]  as? String ?? ""
-                let file_chat = data["file_id"]  as? String ?? ""
+                let message_text = chatGroup.count == 0 ? (data["message_text"] as? String ?? "") : chatGroup[0].messageText
+                let attachment_flag = chatGroup.count == 0 ? (data["attachment_flag"] as? String ?? "") : chatGroup[0].attachmentFlag
+                let thumb_chat = chatGroup.count == 0 ? (data["thumb_id"] as? String ?? "") : chatGroup[0].thumb
+                let image_chat = chatGroup.count == 0 ? (data["image_id"] as? String ?? "") : chatGroup[0].image
+                let video_chat = chatGroup.count == 0 ? (data["video_id"] as? String ?? "") : chatGroup[0].video
+                let file_chat = chatGroup.count == 0 ? (data["file_id"] as? String ?? "") : chatGroup[0].file
                 if (attachment_flag == "0" && thumb_chat == "") {
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
                     contentReply.attributedText = message_text.richText()
@@ -8337,6 +8579,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 }
             }
         } else {
+            let chatGroup = Chat.getMessageFromId(message_id: sender.message_id)
+            if chatGroup.count > 0 && chatGroup[0].messageScope == "4" {
+                let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorGroupVC") as! EditorGroup
+                editorGroupVC.hidesBottomBarWhenPushed = true
+                editorGroupVC.unique_l_pin = chatGroup[0].pin == chatGroup[0].groupId ? chatGroup[0].groupId : chatGroup[0].pin
+                editorGroupVC.referenceMessageId = sender.message_id
+                editorGroupVC.referenceChatDate = chatDate(stringDate: chatGroup[0].serverDate)
+                navigationController?.show(editorGroupVC, sender: nil)
+                return
+            }
             DispatchQueue.main.async {
                 let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == sender.message_id})
                 if idx == nil {
@@ -8445,8 +8697,177 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
 //        return config
 //    }
     
+    private func pinAllMessages(dataMessages: [[String: Any?]], isPinned: Int = -1) {
+        var dataMessages = dataMessages
+        dataMessages.sort {
+            let firstPinned = Int64($0[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
+            let secondPinned = Int64($1[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
+            return firstPinned < secondPinned
+        }
+        if dataMessages.count != 0 {
+            if !self.containerPin.isDescendant(of: self.view) && dataMessages.count != 0 {
+                self.tableChatView.contentInset.top = 50
+                
+                self.view.addSubview(self.containerPin)
+                self.containerPin.isUserInteractionEnabled = true
+                let tapGesture = UITapGestureRecognizer(target: self, action: #selector(viewPinTapped))
+                self.containerPin.addGestureRecognizer(tapGesture)
+                self.containerPin.anchor(top: self.view.safeAreaLayoutGuide.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, height: 50)
+                self.containerPin.backgroundColor = .mainColor
+                
+                if dataMessages.count > 1 {
+                    self.containerPin.addSubview(self.signSelectedPin)
+                    self.signSelectedPin.anchor(left: self.containerPin.leftAnchor, paddingLeft: 8, centerY: self.containerPin.centerYAnchor, width: 2, height: 30)
+                    self.signSelectedPin.layer.cornerRadius = 1
+                    self.signSelectedPin.clipsToBounds = true
+                    self.signSelectedPin.alignment = .fill
+                    self.signSelectedPin.axis = .vertical
+                    self.signSelectedPin.distribution = .fill
+                    self.signSelectedPin.spacing = dataMessages.count == 3 ? 1.5 : 2
+                    
+                    let heightSign: CGFloat = CGFloat((30 / dataMessages.count) - 1)
+                    let widthSign: CGFloat = 2
+
+                    for i in 0..<dataMessages.count {
+                        let viewSign = UIView()
+                        viewSign.backgroundColor = (i == (dataMessages.count - 1)) ? .white : .gray
+                        viewSign.anchor(width: widthSign, height: heightSign)
+                        viewSign.layer.cornerRadius = 1
+                        viewSign.clipsToBounds = true
+                        self.signSelectedPin.addArrangedSubview(viewSign)
+                    }
+                    self.nextPinShowed = dataMessages.count - 1
+                }
+                
+                let contIconPin = UIImageView()
+                self.containerPin.addSubview(contIconPin)
+                contIconPin.anchor(left: self.containerPin.leftAnchor, paddingLeft: 15, centerY: self.containerPin.centerYAnchor, width: 30, height: 30)
+                contIconPin.layer.cornerRadius = 8
+                contIconPin.clipsToBounds = true
+                contIconPin.backgroundColor = .gray
+                contIconPin.image = UIImage(systemName: "pin.fill")?.imageWithInsets(insets: UIEdgeInsets(top: 5, left: 5, bottom: 5, right: 5))?.withTintColor(.waGrayLight)
+                
+                self.containerPin.addSubview(textPin)
+                self.textPin.anchor(left: contIconPin.rightAnchor, right: self.containerPin.rightAnchor, paddingLeft: 10, paddingRight: 10, centerY: self.containerPin.centerYAnchor)
+                self.textPin.attributedText = (dataMessages[dataMessages.count - 1][TypeDataMessage.message_text] as? String ?? "").richText(fontSize: 14)
+                self.textPin.numberOfLines = 1
+                self.textPin.textColor = .white
+            } else {
+                self.signSelectedPin.subviews.forEach({ $0.removeFromSuperview() })
+                self.signSelectedPin.removeFromSuperview()
+                var same = false
+                if dataMessages.count > 1 {
+                    self.containerPin.addSubview(self.signSelectedPin)
+                    self.signSelectedPin.anchor(left: self.containerPin.leftAnchor, paddingLeft: 8, centerY: self.containerPin.centerYAnchor, width: 2, height: 30)
+                    self.signSelectedPin.layer.cornerRadius = 1
+                    self.signSelectedPin.clipsToBounds = true
+                    self.signSelectedPin.alignment = .fill
+                    self.signSelectedPin.axis = .vertical
+                    self.signSelectedPin.distribution = .fill
+                    self.signSelectedPin.spacing = dataMessages.count == 3 ? 1.5 : 2
+                    
+                    let heightSign: CGFloat = CGFloat((30 / dataMessages.count) - 1)
+                    let widthSign: CGFloat = 2
+                    
+                    for i in 0..<dataMessages.count {
+                        let viewSign = UIView()
+                        viewSign.backgroundColor = (i == (dataMessages.count - 1)) ? .white : .gray
+                        viewSign.anchor(width: widthSign, height: heightSign)
+                        viewSign.layer.cornerRadius = 1
+                        viewSign.clipsToBounds = true
+                        self.signSelectedPin.addArrangedSubview(viewSign)
+                    }
+                    if isPinned == -1 {
+                        self.nextPinShowed = dataMessages.count - 1
+                    } else if self.nextPinShowed != 0 {
+                        if (self.nextPinShowed > isPinned) {
+                            self.nextPinShowed-=1
+                            same = true
+                        } else if self.nextPinShowed == isPinned && dataMessages.count == 3 {
+                            self.nextPinShowed-=2
+                        }
+                    } else if self.nextPinShowed != isPinned {
+                        same = true
+                    }
+                } else if self.nextPinShowed != isPinned {
+                    same = true
+                }
+                if !same{
+                    animateLabelTextChange(label: self.textPin, newText: dataMessages[dataMessages.count - 1][TypeDataMessage.message_text] as? String ?? "")
+                }
+            }
+        } else if self.containerPin.isDescendant(of: self.view) {
+            self.containerPin.subviews.forEach({ $0.removeFromSuperview() })
+            self.containerPin.removeFromSuperview()
+            self.tableChatView.contentInset.top = 0
+        }
+    }
+    
+    @objc func viewPinTapped() {
+        var dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+        dataMessagesPin.sort {
+            let firstPinned = Int64($0[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
+            let secondPinned = Int64($1[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
+            return firstPinned < secondPinned
+        }
+        let obj = ObjectGesture()
+        obj.message_id = dataMessagesPin[nextPinShowed][TypeDataMessage.message_id] as? String ?? ""
+        contentMessageTapped(obj)
+        
+        if nextPinShowed < dataMessagesPin.count - 1 {
+            nextPinShowed+=1
+        } else {
+            nextPinShowed = 0
+        }
+        
+        DispatchQueue.main.async {
+            self.signSelectedPin.subviews.forEach({ $0.removeFromSuperview() })
+            self.signSelectedPin.removeFromSuperview()
+            self.containerPin.addSubview(self.signSelectedPin)
+            self.signSelectedPin.anchor(left: self.containerPin.leftAnchor, paddingLeft: 8, centerY: self.containerPin.centerYAnchor, width: 2, height: 30)
+            self.signSelectedPin.layer.cornerRadius = 1
+            self.signSelectedPin.clipsToBounds = true
+            self.signSelectedPin.alignment = .fill
+            self.signSelectedPin.axis = .vertical
+            self.signSelectedPin.distribution = .fill
+            self.signSelectedPin.spacing = dataMessagesPin.count == 3 ? 1.5 : 2
+            
+            let heightSign: CGFloat = CGFloat((30 / dataMessagesPin.count) - 1)
+            let widthSign: CGFloat = 2
+
+            for i in 0..<dataMessagesPin.count {
+                let viewSign = UIView()
+                viewSign.backgroundColor = (i == self.nextPinShowed) ? .white : .gray
+                viewSign.anchor(width: widthSign, height: heightSign)
+                viewSign.layer.cornerRadius = 1
+                viewSign.clipsToBounds = true
+                self.signSelectedPin.addArrangedSubview(viewSign)
+            }
+            self.animateLabelTextChange(label: self.textPin, newText: dataMessagesPin[self.nextPinShowed][TypeDataMessage.message_text] as? String ?? "")
+        }
+    }
+    
+    func animateLabelTextChange(label: UILabel, newText: String) {
+        let animationDuration = 0.1
+        UIView.animate(withDuration: animationDuration, animations: {
+            label.transform = CGAffineTransform(translationX: 0, y: -10)
+            label.alpha = 0
+        }) { _ in
+            // Change text after fade out
+            label.attributedText = newText.richText(fontSize: 14)
+            label.transform = CGAffineTransform(translationX: 0, y: 10)
+            
+            // Animate back to original position and fade in
+            UIView.animate(withDuration: animationDuration) {
+                label.transform = .identity
+                label.alpha = 1
+            }
+        }
+    }
+    
     private func handleReply(indexPath: IndexPath, dataMessagesImage: [String: Any?] = [:], reffId: String = "") {
         var dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        var chatGroup: [Chat] = []
         if reffId.isEmpty {
             self.deleteReplyView()
             if dataMessagesImage.count != 0 {
@@ -8457,9 +8878,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             self.reffId = dataMessages[indexPath.row]["message_id"] as? String
         } else {
             dataMessages = self.dataMessages.filter({ $0["message_id"]  as? String ?? "" == reffId })
+            if dataMessages.count == 0  {
+                chatGroup = Chat.getMessageFromId(message_id: reffId)
+            }
             self.reffId = reffId
         }
-        if dataMessages.count == 0  {
+        if dataMessages.count == 0 && chatGroup.count == 0 {
             self.deleteReplyView()
             return
         }
@@ -8503,14 +8927,22 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         titleReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor, constant: 10).isActive = true
         titleReply.font = UIFont.systemFont(ofSize: 12 + offset()).bold
         let idMe = User.getMyPin() as String?
-        if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+        let f_pin = chatGroup.count == 0 ? (dataMessages[indexPath.row]["f_pin"] as? String ?? "") : chatGroup[0].fpin
+        if f_pin == idMe {
             titleReply.text = "You".localized()
         } else {
             if self.isContactCenter {
                 let user: [User] = self.users.filter({$0.pin == dataMessages[indexPath.row]["f_pin"] as? String})
                 titleReply.text = user.first!.fullName
             } else {
-                titleReply.text = self.dataPerson["name"]!!
+                if chatGroup.count == 0 {
+                    titleReply.text = self.dataPerson["name"]!!
+                } else {
+                    if let dataPerson = User.getData(pin: f_pin) {
+                        let namePerson = dataPerson.fullName
+                        titleReply.text = namePerson + " ● " + "\(chatGroup[0].groupName)(\(chatGroup[0].name))"
+                    }
+                }
             }
         }
         titleReply.textColor = .orangeColor
@@ -8522,12 +8954,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         contentReply.trailingAnchor.constraint(equalTo: containerPreviewReply.trailingAnchor, constant: -20).isActive = true
         contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
         contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
-        let message_text = dataMessages[indexPath.row]["message_text"]  as? String ?? ""
-        let attachment_flag = dataMessages[indexPath.row]["attachment_flag"]  as? String ?? ""
-        let thumb_chat = dataMessages[indexPath.row]["thumb_id"]  as? String ?? ""
-        let image_chat = dataMessages[indexPath.row]["image_id"]  as? String ?? ""
-        let video_chat = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
-        let file_chat = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
+        let message_text = chatGroup.count == 0 ? (dataMessages[indexPath.row]["message_text"] as? String ?? "") : chatGroup[0].messageText
+        let attachment_flag = chatGroup.count == 0 ? (dataMessages[indexPath.row]["attachment_flag"] as? String ?? "") : chatGroup[0].attachmentFlag
+        let thumb_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["thumb_id"] as? String ?? "") : chatGroup[0].thumb
+        let image_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["image_id"] as? String ?? "") : chatGroup[0].image
+        let video_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["video_id"] as? String ?? "") : chatGroup[0].video
+        let file_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["file_id"] as? String ?? "") : chatGroup[0].file
         if (attachment_flag == "0" && thumb_chat == "") {
             contentReply.attributedText = message_text.richText()
         } else if (attachment_flag == "1" || image_chat != "") {
@@ -8609,6 +9041,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             imageSticker.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
             imageSticker.widthAnchor.constraint(equalToConstant: 30).isActive = true
             imageSticker.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        }
+        if chatGroup.count > 0 {
+            self.textFieldSend.becomeFirstResponder()
         }
     }
     
@@ -8859,6 +9294,7 @@ public class TypeDataMessage {
     public static let last_edit = "last_edit"
     public static let gif_id = "gif_id"
     public static let is_forwarded = "is_forwarded"
+    public static let is_pinned = "is_pinned"
     public static let is_secret = "is_secret"
     public static let spec_file = "spec_file"
 }

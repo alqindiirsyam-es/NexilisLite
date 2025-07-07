@@ -33,7 +33,7 @@ public class Chat: Model {
     public let groupName: String
     public var isSelected: Bool
     public var isParent: Bool
-    public var pinned: Int
+    public var pinned: Int64
     public var isFolPinned: Bool
     
     public init(pin: String) {
@@ -94,7 +94,7 @@ public class Chat: Model {
         self.isFolPinned = false
     }
     
-    public init(fpin:String, pin: String, messageId: String, counter: String, messageText: String, serverDate: String, image: String, video: String, file: String, attachmentFlag: String, messageScope: String, name: String, profile: String, official: String, status: String, credential: String, lock: String, thumb: String = "", audio: String = "", gif: String = "", groupId: String = "", groupName: String = "", isSelected: Bool = false, isParent: Bool = false, pinned: Int = 0, isFolPinned: Bool = false) {
+    public init(fpin:String, pin: String, messageId: String, counter: String, messageText: String, serverDate: String, image: String, video: String, file: String, attachmentFlag: String, messageScope: String, name: String, profile: String, official: String, status: String, credential: String, lock: String, thumb: String = "", audio: String = "", gif: String = "", groupId: String = "", groupName: String = "", isSelected: Bool = false, isParent: Bool = false, pinned: Int64 = 0, isFolPinned: Bool = false) {
         self.fpin = fpin
         self.pin = pin
         self.messageId = messageId
@@ -157,7 +157,7 @@ public class Chat: Model {
         var messages: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                let query = "m.f_pin, m.l_pin, m.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE m, BUDDY b where m.l_pin = b.f_pin and m.is_call_center = 0 and message_text LIKE '%\(text)%'"
+                let query = "select m.f_pin, m.l_pin, m.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE m, BUDDY b where m.l_pin = b.f_pin and m.is_call_center = 0 and message_text LIKE '%\(text)%'"
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {
                         let data = cursorData.string(forColumnIndex: 0) ?? ""
@@ -183,6 +183,58 @@ public class Chat: Model {
                                         gif: cursorData.string(forColumnIndex: 18) ?? "",
                                         groupId: cursorData.string(forColumnIndex: 19) ?? "",
                                         groupName: cursorData.string(forColumnIndex: 20) ?? "")
+                        messages.append(chat)
+                    }
+                    cursorData.close()
+                }
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+        return messages
+    }
+    
+    public static func getMessageFromId(message_id: String = "") -> [Chat] {
+        var messages: [Chat] = []
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            do {
+                let query = """
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, m.thumb_id from MESSAGE m, BUDDY b where (m.l_pin = b.f_pin OR m.f_pin = b.f_pin) and m.attachment_flag = '3' and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            union
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, m.thumb_id from MESSAGE m where m.f_pin = '-999' and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            union
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, m.thumb_id from MESSAGE m where m.f_pin = '-997' and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            union
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, m.thumb_id from MESSAGE m, GROUPZ b where m.l_pin = b.group_id and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            union
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, m.thumb_id from MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and m.l_pin = b.chat_id and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            order by 6 desc
+                            """
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
+                    while cursorData.next() {
+                        let chat = Chat(fpin: cursorData.string(forColumnIndex: 0) ?? "",
+                                        pin: cursorData.string(forColumnIndex: 1) ?? "",
+                                        messageId: cursorData.string(forColumnIndex: 2) ?? "",
+                                        counter: "0",
+                                        messageText: cursorData.string(forColumnIndex: 3) ?? "",
+                                        serverDate: cursorData.string(forColumnIndex: 4) ?? "",
+                                        image: cursorData.string(forColumnIndex: 5) ?? "",
+                                        video: cursorData.string(forColumnIndex: 6) ?? "",
+                                        file: cursorData.string(forColumnIndex: 7) ?? "",
+                                        attachmentFlag: cursorData.string(forColumnIndex: 8) ?? "",
+                                        messageScope: cursorData.string(forColumnIndex: 9) ?? "",
+                                        name: cursorData.string(forColumnIndex: 10) ?? "",
+                                        profile: cursorData.string(forColumnIndex: 11) ?? "",
+                                        official: cursorData.string(forColumnIndex: 12) ?? "",
+                                        status: cursorData.string(forColumnIndex: 13) ?? "",
+                                        credential: cursorData.string(forColumnIndex: 14) ?? "",
+                                        lock: cursorData.string(forColumnIndex: 15) ?? "",
+                                        thumb: cursorData.string(forColumnIndex: 20) ?? "",
+                                        audio: cursorData.string(forColumnIndex: 16) ?? "",
+                                        gif: cursorData.string(forColumnIndex: 17) ?? "",
+                                        groupId: cursorData.string(forColumnIndex: 18) ?? "",
+                                        groupName: cursorData.string(forColumnIndex: 19) ?? "")
                         messages.append(chat)
                     }
                     cursorData.close()
@@ -276,7 +328,7 @@ public class Chat: Model {
                                         gif: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 17) ?? "" : cursorData.string(forColumnIndex: 18) ?? "",
                                         groupId: cursorData.string(forColumnIndex: 19) ?? "",
                                         groupName: cursorData.string(forColumnIndex: 20) ?? "",
-                                        pinned: Int(cursorData.int(forColumnIndex: 21)))
+                                        pinned: cursorData.longLongInt(forColumnIndex: 21))
                         chats.append(chat)
                     }
                     cursorData.close()

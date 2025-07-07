@@ -3214,3 +3214,44 @@ class ZoomTransitioningDelegate: NSObject, UIViewControllerTransitioningDelegate
             return animator
     }
 }
+
+public class CallBannerView: UIView {
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.systemGreen
+
+        let label = UILabel()
+        label.text = "Ardi easySoft - Ringing"
+        label.textColor = .white
+        label.font = UIFont.boldSystemFont(ofSize: 16)
+
+        let endCallButton = UIButton(type: .system)
+        endCallButton.setImage(UIImage(systemName: "phone.down.fill"), for: .normal)
+        endCallButton.tintColor = .white
+        endCallButton.addTarget(self, action: #selector(endCallTapped), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [label, endCallButton])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.distribution = .equalSpacing
+        stack.spacing = 12
+
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10)
+        ])
+    }
+
+    @objc func endCallTapped() {
+        print("Call ended")
+        self.removeFromSuperview()
+    }
+
+    public required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
