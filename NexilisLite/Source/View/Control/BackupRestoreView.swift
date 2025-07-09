@@ -501,13 +501,19 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
     private func restoreUcList(dataUcList: [String]) {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
-                    "l_pin" : dataUcList[0],
-                    "message_id" : dataUcList[1],
-                    "counter" : 0,
-                    "pinned" : 0,
-                    "archived" : 0
-                ], replace: true)
+                var lastMessageId = ""
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE_SUMMARY where l_pin = '\(dataUcList[0])'"), cursor.next() {
+                    lastMessageId = cursor.string(forColumnIndex: 0) ?? ""
+                }
+                if lastMessageId.isEmpty {
+                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+                        "l_pin" : dataUcList[0],
+                        "message_id" : dataUcList[1],
+                        "counter" : 0,
+                        "pinned" : 0,
+                        "archived" : 0
+                    ], replace: true)
+                }
                 recordSizeRestore += 1
             } catch {
                 rollback.pointee = true
@@ -617,7 +623,11 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         let dataMessage = valueText[i].components(separatedBy: separator)
                         restoreMessage(nameColumn: nameColumn, message: dataMessage)
                         DispatchQueue.main.async { [self] in
-                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                            var text = "Restoring...".localized() + "  \(percent)"
+                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
+                                text = "Finalizing data restore...".localized()
+                            }
+                            labelRestoring.text = text
                         }
                     }
                 } else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "UC_LIST" {
@@ -626,7 +636,11 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         let dataUcList = valueText[i].components(separatedBy: separator)
                         restoreUcList(dataUcList: dataUcList)
                         DispatchQueue.main.async { [self] in
-                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                            var text = "Restoring...".localized() + "  \(percent)"
+                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
+                                text = "Finalizing data restore...".localized()
+                            }
+                            labelRestoring.text = text
                         }
                     }
                 } else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "FORM_DATA" {
@@ -636,7 +650,11 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         let dataFormData = valueText[i].components(separatedBy: separator)
                         restoreFormData(nameColumn: nameColumn, data: dataFormData)
                         DispatchQueue.main.async { [self] in
-                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                            var text = "Restoring...".localized() + "  \(percent)"
+                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
+                                text = "Finalizing data restore...".localized()
+                            }
+                            labelRestoring.text = text
                         }
                     }
                 } else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "TASK_PIC" {
@@ -646,7 +664,11 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         let dataTaskPIC = valueText[i].components(separatedBy: separator)
                         restoreTaskPIC(nameColumn: nameColumn, data: dataTaskPIC)
                         DispatchQueue.main.async { [self] in
-                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                            var text = "Restoring...".localized() + "  \(percent)"
+                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
+                                text = "Finalizing data restore...".localized()
+                            }
+                            labelRestoring.text = text
                         }
                     }
                 }
@@ -657,7 +679,11 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         let dataTaskDetail = valueText[i].components(separatedBy: separator)
                         restoreTaskDetail(nameColumn: nameColumn, data: dataTaskDetail)
                         DispatchQueue.main.async { [self] in
-                            labelRestoring.text = "Restoring...".localized() + "  \(percent)"
+                            var text = "Restoring...".localized() + "  \(percent)"
+                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
+                                text = "Finalizing data restore...".localized()
+                            }
+                            labelRestoring.text = text
                         }
                     }
                 }
@@ -1012,7 +1038,8 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
 func formatPercentage(numerator: Int64, denominator: Int64) -> String {
     guard denominator != 0 else { return "NaN" }
 
-    let value = Double(numerator) / Double(denominator)
+    var value = Double(numerator) / Double(denominator)
+    value = min(value, 1.0)
 
     let formatter = NumberFormatter()
     formatter.numberStyle = .percent

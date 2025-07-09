@@ -4927,7 +4927,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
                children = [reply, delete]
             }
-            if (Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty && dataMessages[indexPath!.row]["read_receipts"] as? String != "8") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+            if ((Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"] as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty) || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" {
                 children.insert(forward, at: 2)
             }
             if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
@@ -5412,7 +5412,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             contactChatNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             if let controller = contactChatNav.viewControllers.first as? ContactChatViewController {
                 controller.isChooser = { [weak self] scope, pin in
-                    if scope == MessageScope.WHISPER {
+                    if scope == MessageScope.WHISPER || scope == MessageScope.CALL || scope == MessageScope.MISSED_CALL {
                         let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
                         editorPersonalVC.unique_l_pin = pin
                         editorPersonalVC.dataMessageForward = dataMessages
@@ -7952,7 +7952,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             var addTopMargin = true
             if !reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM {
                 let data = queryMessageReply(message_id: reffChat)
-                if data.count != 0 {
+                if data.count != 0 && topMarginText.constant == 15.0 {
                     addTopMargin = false
                 }
             }

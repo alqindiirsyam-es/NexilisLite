@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.47"
+    public static var cpaasVersion = "5.0.48"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1976,7 +1976,10 @@ public class Nexilis: NSObject {
                 print("Access database error: \(error.localizedDescription)")
             }
         }
-        let pin = lPin == me ? fPin : lPin
+        var pin = lPin == me ? fPin : lPin
+        if !chatId.isEmpty {
+            pin = chatId
+        }
         var pinned = 0
         var archived = 0
         if fmdb == nil {

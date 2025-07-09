@@ -1586,26 +1586,28 @@ extension ContactChatViewController {
                                     stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                                 }
                                 stringMessage.append(("🚫 _"+"You were deleted this message".localized()+"_").richText())
-                            } else if data.messageScope != MessageScope.CALL && data.messageScope != MessageScope.MISSED_CALL && !data.messageId.contains("NTFPIN_") {
+                            } else {
                                 let imageStatus = NSTextAttachment()
-                                let status = getRealStatus(messageId: data.messageId)
-                                if status == "0" {
-                                    imageStatus.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
-                                } else if status == "1" {
-                                    imageStatus.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
-                                } else if status == "2" {
-                                    imageStatus.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
-                                } else if (status == "3") {
-                                    imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
-                                } else if (status == "8") {
-                                    imageStatus.image = UIImage(named: "message_status_ack", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
-                                } else {
-                                    imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.systemBlue)
+                                if data.messageScope != MessageScope.CALL && data.messageScope != MessageScope.MISSED_CALL && !data.messageId.contains("NTFPIN_") {
+                                    let status = getRealStatus(messageId: data.messageId)
+                                    if status == "0" {
+                                        imageStatus.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
+                                    } else if status == "1" {
+                                        imageStatus.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
+                                    } else if status == "2" {
+                                        imageStatus.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
+                                    } else if (status == "3") {
+                                        imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
+                                    } else if (status == "8") {
+                                        imageStatus.image = UIImage(named: "message_status_ack", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
+                                    } else {
+                                        imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.systemBlue)
+                                    }
+                                    imageStatus.bounds = CGRect(x: 0, y: -5, width: 15, height: 15)
+                                    let imageStatusString = NSAttributedString(attachment: imageStatus)
+                                    stringMessage.append(imageStatusString)
+                                    stringMessage.append(NSAttributedString(string: " "))
                                 }
-                                imageStatus.bounds = CGRect(x: 0, y: -5, width: 15, height: 15)
-                                let imageStatusString = NSAttributedString(attachment: imageStatus)
-                                stringMessage.append(imageStatusString)
-                                stringMessage.append(NSAttributedString(string: " "))
                                 if data.messageScope == "4" {
                                     stringMessage.append(NSAttributedString(string: "You".localized() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                                 }

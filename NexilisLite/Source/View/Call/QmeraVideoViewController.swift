@@ -342,7 +342,7 @@ class QmeraVideoViewController: UIViewController {
     
     func addTimerVC() {
         view.addSubview(containerTimerVC)
-        containerTimerVC.anchor(top: view.safeAreaLayoutGuide.topAnchor, centerX: view.centerXAnchor, minWidth: 40)
+        containerTimerVC.anchor(top: view.safeAreaLayoutGuide.topAnchor, centerX: view.centerXAnchor, minHeight: 40, minWidth: 40)
         containerTimerVC.makeRoundedView(radius: 8)
         containerTimerVC.backgroundColor = .black.withAlphaComponent(0.3)
         containerTimerVC.addSubview(labelTimerVC)

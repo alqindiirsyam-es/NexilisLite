@@ -2714,8 +2714,11 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                 let mentionText = words[lastWordIndex]
                 let lastChar = fulltextForMention.last
                 if lastChar != "\n" && lastChar != " " {
-                    if mentionText.starts(with: "@") || (mentionText.count >= 2 && (self.textFieldSend.textColor != UIColor.lightGray || heightTableEditMention != nil)) {
+                    if mentionText.starts(with: "@") || (mentionText.count >= 2 && (self.textFieldSend.textColor != UIColor.lightGray || heightTableEditMention != nil) && extractFromAtIfSymbolsBefore(String(mentionText)) == nil) {
                         showMention(text: mentionText.starts(with: "@") ? String(mentionText.dropFirst()) : String(mentionText))
+                        isShowMention = true
+                    } else if let textM = extractFromAtIfSymbolsBefore(String(mentionText)) {
+                        showMention(text: String(textM.dropFirst()))
                         isShowMention = true
                     }
                 }
@@ -2801,6 +2804,21 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         if adjustedCursorPosition != cursorPositionIndent {
             textView.selectedRange = NSRange(location: adjustedCursorPosition, length: 0)
         }
+    }
+    
+    func extractFromAtIfSymbolsBefore(_ text: String) -> String? {
+        guard let atIndex = text.firstIndex(of: "@") else {
+            return nil
+        }
+        
+        let beforeAt = text[..<atIndex]
+        let afterAt = text[atIndex...]
+
+        // Define symbols as anything that's not a letter or digit
+        let symbolSet = CharacterSet.letters.union(.decimalDigits).inverted
+        let isAllSymbols = beforeAt.unicodeScalars.allSatisfy { symbolSet.contains($0) }
+
+        return isAllSymbols ? String(afterAt) : nil
     }
     
     public func textViewDidChange(_ textView: UITextView) {
@@ -3770,7 +3788,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
                 children = [reply, pin, delete]
             }
-            if (Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty && dataMessages[indexPath!.row]["read_receipts"] as? String != "8") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+            if ((Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"] as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty) || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" {
                 children.insert(forward, at: 2)
             }
             if dataMessages[indexPath!.row]["f_pin"] as? String ?? "" != "-999" && dataMessages[indexPath!.row]["f_pin"] as? String != User.getMyPin() && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11" {
@@ -3818,7 +3836,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             jaData.append(jsonObject)
             if let jsonData = try? JSONSerialization.data(withJSONObject: jaData, options: []),
                let jsonString = String(data: jsonData, encoding: .utf8) {
-                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getPinMessage(f_pin: User.getMyPin() ?? "", data: jsonString, oppositePin: self.unique_l_pin, chatId: self.dataTopic["chat_id"] as? String ?? "", scopeId: MessageScope.GROUP)) {
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getPinMessage(f_pin: User.getMyPin() ?? "", data: jsonString, oppositePin: self.dataGroup["group_id"]  as? String ?? "", chatId: self.dataTopic["chat_id"] as? String ?? "", scopeId: MessageScope.GROUP)) {
                     if response.isOk() {
                         if isPinned {
                             let mId = Nexilis.saveMessageNotif(textMessage: "You".localized() + " " + "pinned a message".localized(), fPin: User.getMyPin() ?? "", lPin: self.unique_l_pin, chatId: self.dataTopic["chat_id"] as? String ?? "", scopeId: MessageScope.GROUP)
@@ -4417,7 +4435,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             contactChatNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             if let controller = contactChatNav.viewControllers.first as? ContactChatViewController {
                 controller.isChooser = { [weak self] scope, pin in
-                    if scope == "3" {
+                    if scope == MessageScope.WHISPER || scope == MessageScope.CALL || scope == MessageScope.MISSED_CALL {
                         let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
                         editorPersonalVC.unique_l_pin = pin
                         editorPersonalVC.dataMessageForward = dataMessages
@@ -4879,7 +4897,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             if let lastLineIndex = lines.lastIndex(where: { !$0.isEmpty }) {
                 let words = lines[lastLineIndex].split(separator: " ")
                 if let lastWordIndex = words.lastIndex(where: { !$0.isEmpty }) {
-                    let lastWord = words[lastWordIndex]
+                    var lastWord = words[lastWordIndex]
+                    if let textM = extractFromAtIfSymbolsBefore(String(lastWord)) {
+                        lastWord = textM[textM.startIndex..<textM.endIndex]
+                    }
                     if let rangeLastWord = fulltextForMention.range(of: lastWord, options: .backwards) {
                         listMentionInTextField.append(listMentionWithText[indexPath.row])
                         
@@ -5393,7 +5414,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             imagePinView.tintColor = .lightGray
         }
         
-        if dataMessages[indexPath.row]["read_receipts"] as? String == "8"  && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+        if dataMessages[indexPath.row]["read_receipts"] as? String == "8" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             var imageAck = UIImage(named: "ack_icon_gray", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
             cellMessage.contentView.addSubview(imageAckView)
             imageAckView.translatesAutoresizingMaskIntoConstraints = false
@@ -6621,7 +6642,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             var addTopMargin = true
             if !reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM {
                 let data = queryMessageReply(message_id: reffChat)
-                if data.count != 0 {
+                if data.count != 0 && topMarginText.constant == 15.0 {
                     addTopMargin = false
                 }
             }
