@@ -46,6 +46,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
         navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
         
         tableView = UITableView()
+        tableView.backgroundColor = .clear
         view.addSubview(tableView)
         tableView.anchor(top: view.safeAreaLayoutGuide.topAnchor, left: view.leftAnchor, bottom: view.safeAreaLayoutGuide.bottomAnchor, right: view.rightAnchor)
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cellBackupRestore")
@@ -338,6 +339,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
     
     private func makeViewBackup(cell: UITableViewCell, indexPath: IndexPath) {
         cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+        cell.backgroundColor = .clear
         if indexPath.section == 0 {
             cell.selectionStyle = .none
             let container = UIView()

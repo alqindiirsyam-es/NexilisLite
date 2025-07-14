@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.48"
+    public static var cpaasVersion = "5.0.50"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1109,7 +1109,7 @@ public class Nexilis: NSObject {
     
     public static var isProcessWriteSync = false
     public static func writeSync(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
-        if !API.bInetConnAvailable() {
+        if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
             return nil
         }
         while Nexilis.isProcessWriteSync {
@@ -1132,7 +1132,7 @@ public class Nexilis: NSObject {
     
     public static func write(message: TMessage, timeout: Int = 15 * 1000) -> String? {
         do {
-            if !API.bInetConnAvailable() {
+            if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
                 return nil
             }
             //print(">> SENDING MESSAGE >> ", message.toLogString())
@@ -1155,7 +1155,7 @@ public class Nexilis: NSObject {
     
     public static func writeDraw(data: String, timeout: Int = 15 * 1000) -> String? {
         do {
-            if !API.bInetConnAvailable() {
+            if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
                 return nil
             }
             //print(">> SENDING MESSAGE >> ", data)
@@ -1172,7 +1172,7 @@ public class Nexilis: NSObject {
     public static func response(packetId: String, message: TMessage, timeout: Int = 15 * 1000) -> String? {
         var result: String? = nil
         do {
-            if !API.bInetConnAvailable() {
+            if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
                 return nil
             }
             //print(">> RESPONSE >> " + packetId + " " + message.toLogString());
@@ -1186,7 +1186,7 @@ public class Nexilis: NSObject {
     public static func responseString(packetId: String, message: String, timeout: Int = 15 * 1000) -> String? {
         var result: String? = nil
         do {
-            if !API.bInetConnAvailable() {
+            if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
                 return nil
             }
             //print(">> RESPONSE >> " + packetId + " " + message);

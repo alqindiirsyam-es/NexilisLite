@@ -22,33 +22,38 @@ class InquiryThread {
     private var queue = [TMessage]()
     
     init() {
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select status, message, id from INQUIRY") {
-                    while cursor.next() {
-                        let status = cursor.int(forColumnIndex: 0)
-                        if status == 1 {
-                            delInquiry(fmdb: fmdb, messageId: cursor.string(forColumnIndex: 2)!)
-                            continue
-                        }
-                        if let cursorMessage = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(cursor.string(forColumnIndex: 2)!)'") {
-                            if cursorMessage.next() {
-                                if let message = cursor.string(forColumnIndex: 1) {
-                                    addQueue(message: TMessage(data: message))
-                                }
-                            } else {
-                                delInquiry(fmdb: fmdb, messageId: cursor.string(forColumnIndex: 2)!)
-                            }
-                            cursorMessage.close()
-                        }
-                    }
-                    cursor.close()
-                }
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
+        DispatchQueue.global().async { [self] in
+            while Database.shared.database == nil {
+                Thread.sleep(forTimeInterval: 1.0)
             }
-        })
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                do {
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select status, message, id from INQUIRY") {
+                        while cursor.next() {
+                            let status = cursor.int(forColumnIndex: 0)
+                            if status == 1 {
+                                delInquiry(fmdb: fmdb, messageId: cursor.string(forColumnIndex: 2)!)
+                                continue
+                            }
+                            if let cursorMessage = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(cursor.string(forColumnIndex: 2)!)'") {
+                                if cursorMessage.next() {
+                                    if let message = cursor.string(forColumnIndex: 1) {
+                                        addQueue(message: TMessage(data: message))
+                                    }
+                                } else {
+                                    delInquiry(fmdb: fmdb, messageId: cursor.string(forColumnIndex: 2)!)
+                                }
+                                cursorMessage.close()
+                            }
+                        }
+                        cursor.close()
+                    }
+                } catch {
+                    rollback.pointee = true
+                    print("Access database error: \(error.localizedDescription)")
+                }
+            })
+        }
     }
     
     private func delInquiry(fmdb: Any, messageId: String) {
@@ -142,7 +147,10 @@ class InquiryThread {
         //print("save message sendChat")
         if !self.isWait {
             //print("inquiry write", message.toLogString())
-            _ = Nexilis.write(message: CoreMessage_TMessageBank.getMobileInquiry(message_id: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)))
+            var res = Nexilis.write(message: CoreMessage_TMessageBank.getMobileInquiry(message_id: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)))
+            while res == nil {
+                res = Nexilis.write(message: CoreMessage_TMessageBank.getMobileInquiry(message_id: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)))
+            }
         } else {
             queue.append(message)
         }

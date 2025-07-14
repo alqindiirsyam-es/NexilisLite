@@ -2180,23 +2180,49 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             return
         }
         DispatchQueue.global().async {
-            while API.nGetCLXConnState() == 0 || !API.bInetConnAvailable() {
-                Thread.sleep(forTimeInterval: 1)
-            }
-            Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                do {
-                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                        "status" : "4"
-                    ], _where: "message_id = '\(message_id)'")
-                } catch {
-                    rollback.pointee = true
-                    print("Access database error: \(error.localizedDescription)")
+            var isBackground = true
+            while isBackground {
+                DispatchQueue.main.sync {
+                    isBackground = API.nGetCLXConnState() == 0 || !API.bInetConnAvailable() || APIS.checkAppStateisBackground()
                 }
-            })
-            message.mStatus = CoreMessage_TMessageUtil.getTID()
-            message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
-            message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
-            _ = Nexilis.write(message: message)
+                if isBackground {
+                    Thread.sleep(forTimeInterval: 1.0)
+                } else {
+                    if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
+                        let valueListGroupImages = listGroupImages.value
+                        for i in 0..<valueListGroupImages.count {
+                            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                do {
+                                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                        "status" : "4"
+                                    ], _where: "message_id = '\(valueListGroupImages[i].messageId)'")
+                                } catch {
+                                    rollback.pointee = true
+                                    print("Access database error: \(error.localizedDescription)")
+                                }
+                            })
+                            message.mStatus = CoreMessage_TMessageUtil.getTID()
+                            message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
+                            message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(valueListGroupImages[i].messageId)"
+                        }
+                    } else {
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            do {
+                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                    "status" : "4"
+                                ], _where: "message_id = '\(message_id)'")
+                            } catch {
+                                rollback.pointee = true
+                                print("Access database error: \(error.localizedDescription)")
+                            }
+                        })
+                        message.mStatus = CoreMessage_TMessageUtil.getTID()
+                        message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
+                        message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
+                    }
+                    _ = Nexilis.write(message: message)
+                }
+            }
         }
         if let index = dataMessages.firstIndex(where: {$0["message_id"] as? String == message_id}) {
             dataMessages[index]["status"] = "4"
@@ -7385,36 +7411,38 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         obj.message_id = dataMessagesPin[nextPinShowed][TypeDataMessage.message_id] as? String ?? ""
         contentMessageTapped(obj)
         
-        if nextPinShowed < dataMessagesPin.count - 1 {
-            nextPinShowed+=1
-        } else {
-            nextPinShowed = 0
-        }
-        
-        DispatchQueue.main.async {
-            self.signSelectedPin.subviews.forEach({ $0.removeFromSuperview() })
-            self.signSelectedPin.removeFromSuperview()
-            self.containerPin.addSubview(self.signSelectedPin)
-            self.signSelectedPin.anchor(left: self.containerPin.leftAnchor, paddingLeft: 8, centerY: self.containerPin.centerYAnchor, width: 2, height: 30)
-            self.signSelectedPin.layer.cornerRadius = 1
-            self.signSelectedPin.clipsToBounds = true
-            self.signSelectedPin.alignment = .fill
-            self.signSelectedPin.axis = .vertical
-            self.signSelectedPin.distribution = .fill
-            self.signSelectedPin.spacing = dataMessagesPin.count == 3 ? 1.5 : 2
-            
-            let heightSign: CGFloat = CGFloat((30 / dataMessagesPin.count) - 1)
-            let widthSign: CGFloat = 2
-
-            for i in 0..<dataMessagesPin.count {
-                let viewSign = UIView()
-                viewSign.backgroundColor = (i == self.nextPinShowed) ? .white : .gray
-                viewSign.anchor(width: widthSign, height: heightSign)
-                viewSign.layer.cornerRadius = 1
-                viewSign.clipsToBounds = true
-                self.signSelectedPin.addArrangedSubview(viewSign)
+        if dataMessagesPin.count > 0 {
+            if nextPinShowed < dataMessagesPin.count - 1 {
+                nextPinShowed+=1
+            } else {
+                nextPinShowed = 0
             }
-            self.animateLabelTextChange(label: self.textPin, newText: dataMessagesPin[self.nextPinShowed][TypeDataMessage.message_text] as? String ?? "")
+            
+            DispatchQueue.main.async {
+                self.signSelectedPin.subviews.forEach({ $0.removeFromSuperview() })
+                self.signSelectedPin.removeFromSuperview()
+                self.containerPin.addSubview(self.signSelectedPin)
+                self.signSelectedPin.anchor(left: self.containerPin.leftAnchor, paddingLeft: 8, centerY: self.containerPin.centerYAnchor, width: 2, height: 30)
+                self.signSelectedPin.layer.cornerRadius = 1
+                self.signSelectedPin.clipsToBounds = true
+                self.signSelectedPin.alignment = .fill
+                self.signSelectedPin.axis = .vertical
+                self.signSelectedPin.distribution = .fill
+                self.signSelectedPin.spacing = dataMessagesPin.count == 3 ? 1.5 : 2
+                
+                let heightSign: CGFloat = CGFloat((30 / dataMessagesPin.count) - 1)
+                let widthSign: CGFloat = 2
+
+                for i in 0..<dataMessagesPin.count {
+                    let viewSign = UIView()
+                    viewSign.backgroundColor = (i == self.nextPinShowed) ? .white : .gray
+                    viewSign.anchor(width: widthSign, height: heightSign)
+                    viewSign.layer.cornerRadius = 1
+                    viewSign.clipsToBounds = true
+                    self.signSelectedPin.addArrangedSubview(viewSign)
+                }
+                self.animateLabelTextChange(label: self.textPin, newText: dataMessagesPin[self.nextPinShowed][TypeDataMessage.message_text] as? String ?? "")
+            }
         }
     }
     

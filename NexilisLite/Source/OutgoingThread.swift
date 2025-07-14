@@ -24,30 +24,35 @@ class OutgoingThread {
     private var queue = [TMessage]()
     
     init() {
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message, id from OUTGOING") {
-                    while cursor.next() {
-                        if let message = cursor.string(forColumnIndex: 0) {
-                            if let cursorMessage = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(cursor.string(forColumnIndex: 1)!)'") {
-                                if cursorMessage.next() {
-                                    addQueue(message: TMessage(data: message))
+        DispatchQueue.global().async { [self] in
+            while Database.shared.database == nil {
+                Thread.sleep(forTimeInterval: 1.0)
+            }
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                do {
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message, id from OUTGOING") {
+                        while cursor.next() {
+                            if let message = cursor.string(forColumnIndex: 0) {
+                                if let cursorMessage = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(cursor.string(forColumnIndex: 1)!)'") {
+                                    if cursorMessage.next() {
+                                        addQueue(message: TMessage(data: message))
+                                    } else {
+                                        delOutgoing(fmdb: fmdb, messageId: cursor.string(forColumnIndex: 1)!)
+                                    }
+                                    cursorMessage.close()
                                 } else {
                                     delOutgoing(fmdb: fmdb, messageId: cursor.string(forColumnIndex: 1)!)
                                 }
-                                cursorMessage.close()
-                            } else {
-                                delOutgoing(fmdb: fmdb, messageId: cursor.string(forColumnIndex: 1)!)
                             }
                         }
+                        cursor.close()
                     }
-                    cursor.close()
+                } catch {
+                    rollback.pointee = true
+                    print("Access database error: \(error.localizedDescription)")
                 }
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
-            }
-        })
+            })
+        }
     }
     
     func addQueue(message: TMessage) {

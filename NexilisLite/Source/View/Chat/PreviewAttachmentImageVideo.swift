@@ -44,6 +44,13 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     var tableViewConfigFile: UITableView!
     var specFileString = ""
     
+    var lastPositionCursorMention = 0
+    var lastTextLength = 0
+    var tableMention = UITableView()
+    var heightTableMention: NSLayoutConstraint!
+    var listMentionWithText:[User] = []
+    var listMentionInTextField:[User] = []
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -140,7 +147,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             
             textFieldSend.layer.cornerRadius = textFieldSend.maxCornerRadius()
             textFieldSend.layer.borderWidth = 1.0
-            textFieldSend.backgroundColor = .white.withAlphaComponent(0.5)
+            textFieldSend.backgroundColor = .white
             if (currentTextTextField == "" || currentTextTextField == nil) {
                 textFieldSend.text = "Send message".localized()
                 textFieldSend.textColor = UIColor.lightGray
@@ -159,7 +166,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             center.addObserver(self, selector: #selector(keyboardWillHide(notification:)), name: UIResponder.keyboardWillHideNotification, object: nil)
             
             let dismissKeyboard = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
-            view.addGestureRecognizer(dismissKeyboard)
+            dismissKeyboard.cancelsTouchesInView = false
+            scrollViewImage.addGestureRecognizer(dismissKeyboard)
         }
         
         buttonCancel.circle()
@@ -169,6 +177,22 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         buttonSpecFile.circle()
         buttonSpecFile.backgroundColor = .secondaryColor.withAlphaComponent(0.4)
         buttonSpecFile.addTarget(self, action: #selector(showSpecFile), for: .touchUpInside)
+        
+        if let vc = delegate as? EditorGroup {
+            self.listMentionWithText = vc.listMentionWithText
+            self.listMentionInTextField = vc.listMentionInTextField
+            tableMention = UITableView()
+            tableMention.register(UITableViewCell.self, forCellReuseIdentifier: "cellMention")
+            tableMention.dataSource = self
+            tableMention.delegate = self
+            tableMention.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
+            tableMention.backgroundColor = .white
+            self.view.addSubview(tableMention)
+            tableMention.anchor(left: view.leftAnchor, bottom: textFieldSend.topAnchor, right: view.rightAnchor)
+            heightTableMention = tableMention.heightAnchor.constraint(equalToConstant: 0)
+            self.heightTableMention.isActive = true
+        }
+        lastTextLength = textFieldSend.text.count
     }
     
     @objc func showChooserACKConfidential() {
@@ -209,19 +233,73 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     }
     
     func setPreviousVariableMessageMode() {
-        let stack = self.presentingViewController as! UINavigationController
-        let vc = stack.viewControllers[stack.viewControllers.count - 1]
+        let vc = delegate
         if vc is EditorPersonal {
             let editorVc = vc as! EditorPersonal
             editorVc.setAckConfidential(isAck: self.isAck, isConfidential: self.isConfidential)
-        } else {
+        } else if vc is EditorGroup {
             let editorVc = vc as! EditorGroup
             editorVc.setAckConfidential(isAck: self.isAck, isConfidential: self.isConfidential)
         }
     }
     
     func textViewDidChange(_ textView: UITextView) {
-        textView.attributedText = textView.text.richText(isEditing: true)
+        //indention code:
+        let text = textView.text ?? ""
+        let cursorPosition = textView.selectedRange.location
+        
+        let tempListMention = listMentionInTextField
+        if listMentionInTextField.count > 0 {
+            for j in 0..<listMentionInTextField.count {
+                var index = j
+                if tempListMention.count != listMentionInTextField.count {
+                    index = j - (tempListMention.count - listMentionInTextField.count)
+                }
+                var upper = (Int(listMentionInTextField[index].ex_block ?? "0") ?? 0)
+                if cursorPosition <= upper {
+                    upper += text.count - lastTextLength
+                    listMentionInTextField[index].ex_block = "\(upper)"
+                }
+                let lower = upper - listMentionInTextField[index].fullName.count
+                let name = listMentionInTextField[index].fullName.trimmingCharacters(in: .whitespaces)
+                if textView.text.substring(from: lower, to: upper) != "@\(name)" {
+                    listMentionInTextField.remove(at: index)
+                }
+            }
+        }
+        
+        // Handle Bullets (- [space] + letter → • )
+        let bulletPattern = #"(?<=\n|^)- (\S)"#
+        if let match = text.range(of: bulletPattern, options: .regularExpression) {
+            let matchedText = text[match]
+
+            if let spaceIndex = matchedText.firstIndex(of: " ") {
+                let firstLetter = matchedText[matchedText.index(after: spaceIndex)...]
+                let replacedText = text.replacingOccurrences(of: matchedText, with: "  • \(firstLetter)", range: match)
+
+                let newCursorPosition = cursorPosition + 2  // Adjust cursor position
+                textView.text = replacedText
+                textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
+            }
+        }
+
+        // Handle Numbered Lists (e.g., "1. " [space] + letter → " 1.")
+        let numberPattern = #"(?<=\n|^)(\d+)\. (\S)"# // Matches "1. X"
+        if let match = text.range(of: numberPattern, options: .regularExpression) {
+            let matchedText = text[match]
+
+            if let spaceIndex = matchedText.firstIndex(of: " ") {
+                let firstLetter = matchedText[matchedText.index(after: spaceIndex)...]
+                let replacedText = text.replacingOccurrences(of: matchedText, with: "  \(matchedText)", range: match)
+
+                let newCursorPosition = cursorPosition + 2  // Adjust cursor
+                textView.text = replacedText
+                textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
+            }
+        }
+
+        handleRichText(textView)
+        lastTextLength = text.count
     }
     
     func textViewDidBeginEditing(_ textView: UITextView) {
@@ -239,16 +317,254 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     }
     
     func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-        let cursorPosition = textView.caretRect(for: self.textFieldSend.selectedTextRange!.start).origin
-        let currentLine = Int(cursorPosition.y / self.textFieldSend.font!.lineHeight)
-        UIView.animate(withDuration: 0.3) {
-            if currentLine == 0 {
-                self.heightTextFieldSend.constant = 40
-            } else if currentLine < 4 {
-                self.heightTextFieldSend.constant = self.textFieldSend.contentSize.height// Padding
+        if text.isEmpty {
+            if let vc = delegate as? EditorGroup {
+                if listMentionInTextField.count > 0 {
+                    for i in 0..<listMentionInTextField.count {
+                        if lastPositionCursorMention == Int(listMentionInTextField[i].ex_block!)! + 1 {
+                            let fulltextForMention = textView.text.substring(from: 0, to: lastPositionCursorMention - 1)
+                            let diff = textView.text.count - fulltextForMention.count
+                            var text = textView.text ?? ""
+                            let nameMention = listMentionInTextField[i].fullName.trimmingCharacters(in: .whitespaces)
+                            let rangeReplacement = NSRange(location: lastPositionCursorMention - nameMention.count - 1, length: nameMention.count + 1)
+                            let replacementText = ""
+                            
+                            let copyAttributedText = text.richText(isEditing: true, group_id: vc.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
+                            copyAttributedText.removeAttribute(.foregroundColor, range: rangeReplacement)
+                            
+                            textView.attributedText = copyAttributedText
+
+                            // Replace the old text with the new text using the replaceSubrange(_:with:) method
+                            if let startIndex = text.index(text.startIndex, offsetBy: rangeReplacement.location, limitedBy: text.endIndex),
+                               let endIndex = text.index(startIndex, offsetBy: rangeReplacement.length, limitedBy: text.endIndex) {
+                                text.replaceSubrange(startIndex..<endIndex, with: replacementText)
+                            }
+                            listMentionInTextField.remove(at: i)
+                            
+                            textView.attributedText = text.richText(isEditing: true, group_id: vc.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
+                            
+                            let newPosition = textView.position(from: textView.beginningOfDocument, offset: textView.text.count - diff)
+                            textView.selectedTextRange = textView.textRange(from: newPosition!, to: newPosition!)
+                            textViewDidChangeSelection(textView)
+                            handleRichText(textView)
+                            return false
+                        }
+                    }
+                }
             }
         }
+        let indent = handleIndent(textView, range, text)
+        if !indent {
+            textViewDidChangeSelection(textView)
+            handleRichText(textView)
+            return indent
+        }
+        if (textView.text.count == 0) {
+            return text != "\n"
+        }
         return true
+    }
+    
+    private func handleIndent(_ textView: UITextView, _ range: NSRange, _ text: String) -> Bool {
+        guard let nsText = textView.text as NSString? else { return true }
+        let newText = nsText.replacingCharacters(in: range, with: text)
+        var lines = newText.components(separatedBy: "\n")
+        
+        // Ensure range location is valid, considering Unicode scalars
+        guard let textRange = Range(range, in: textView.text) else { return true }
+        let prefixText = textView.text[..<textRange.lowerBound]
+        let affectedLineIndex = prefixText.components(separatedBy: "\n").count - 1
+        guard affectedLineIndex >= 0, affectedLineIndex < lines.count else { return true }
+        
+        let affectedLine = lines[affectedLineIndex]
+        
+        // Prevent deleting two-space indentation before bullet/number
+        if affectedLine.hasPrefix("  •") || affectedLine.range(of: #"^\s{2}\d+\."#, options: .regularExpression) != nil {
+            if let lineStart = textView.text.range(of: affectedLine)?.lowerBound,
+               let startIndex = textView.text.distance(of: lineStart) {
+                if range.location == startIndex || range.location == startIndex + 1 {
+                    return false
+                }
+            }
+        }
+        
+        // Auto-indent new lines based on previous line
+        if text == "\n" {
+            let previousLine = lines[affectedLineIndex]
+            
+            if previousLine.hasPrefix("  •") {
+                let newBullet = "\n  • "
+                textView.text = nsText.replacingCharacters(in: range, with: newBullet)
+                textView.selectedRange = NSRange(location: range.location + newBullet.utf16.count, length: 0)
+                return false
+            }
+            
+            if let match = previousLine.range(of: #"^\s{2}(\d+)\."#, options: .regularExpression),
+               let numberMatch = previousLine[match].components(separatedBy: ".").first,
+               let number = Int(numberMatch.trimmingCharacters(in: .whitespaces)) {
+                
+                let newNumber = "\n  \(number + 1). "
+                textView.text = nsText.replacingCharacters(in: range, with: newNumber)
+                textView.selectedRange = NSRange(location: range.location + newNumber.utf16.count, length: 0)
+                return false
+            }
+        }
+        
+        // Handle Backspace on Empty Bullet (Convert "  • " → "- ")
+        if text.isEmpty && affectedLine.trimmingCharacters(in: .whitespaces) == "•" {
+            lines[affectedLineIndex] = "- "  // Replace "  • " with "- "
+            textView.text = lines.joined(separator: "\n")
+            textView.selectedRange = NSRange(location: range.location - 1, length: 0)
+            return false
+        }
+        
+        // Handle Backspace on Numbered List
+        if text.isEmpty, affectedLine.range(of: #"^\s{2}(\d+)\.$"#, options: .regularExpression) != nil {
+            lines[affectedLineIndex] = affectedLine.trimmingCharacters(in: .whitespaces)
+            textView.text = lines.joined(separator: "\n")
+            textView.selectedRange = NSRange(location: range.location - 1, length: 0)
+            return false
+        }
+        return true
+    }
+    
+    private func handleRichText(_ textView: UITextView) {
+        if let vc = delegate as? EditorGroup {
+            textView.preserveCursorPosition(withChanges: { _ in
+                textView.attributedText = textView.text.richText(isEditing: true, group_id: vc.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: self.listMentionInTextField)
+                return .preserveCursor
+            })
+        } else {
+            textView.preserveCursorPosition(withChanges: { _ in
+                textView.attributedText = textView.text.richText(isEditing: true)
+                return .preserveCursor
+            })
+        }
+    }
+    
+    func textViewDidChangeSelection(_ textView: UITextView) {
+        if let vc = delegate as? EditorGroup {
+            lastPositionCursorMention = textView.selectedRange.location
+            var isShowMention = false
+
+            let fulltextForMention = textView.text.prefix(lastPositionCursorMention)
+            
+            let lines = fulltextForMention.split(separator: "\n")
+            if let lastLineIndex = lines.lastIndex(where: { !$0.isEmpty }) {
+                let words = lines[lastLineIndex].split(separator: " ")
+                if let lastWordIndex = words.lastIndex(where: { !$0.isEmpty }) {
+                    let mentionText = words[lastWordIndex]
+                    let lastChar = fulltextForMention.last
+                    if lastChar != "\n" && lastChar != " " {
+                        if mentionText.starts(with: "@") || (mentionText.count >= 2 && (self.textFieldSend.textColor != UIColor.lightGray) && extractFromAtIfSymbolsBefore(String(mentionText)) == nil) {
+                            showMention(text: mentionText.starts(with: "@") ? String(mentionText.dropFirst()) : String(mentionText))
+                            isShowMention = true
+                        } else if let textM = extractFromAtIfSymbolsBefore(String(mentionText)) {
+                            showMention(text: String(textM.dropFirst()))
+                            isShowMention = true
+                        }
+                    }
+                }
+            }
+            
+            if !isShowMention {
+                hideMention()
+            }
+        }
+        let nowTextFieldSend = self.textFieldSend
+        let cursorPosition = textView.caretRect(for: nowTextFieldSend!.selectedTextRange!.start).origin
+        let doubleCurrentLine = cursorPosition.y / nowTextFieldSend!.font!.lineHeight
+        if doubleCurrentLine.isFinite {
+            let currentLine = Int(ceil(doubleCurrentLine))
+            UIView.animate(withDuration: 0.3) {
+                let layoutManager = textView.layoutManager
+                var numberOfLines = 0
+                var index = 0
+                let numberOfGlyphs = layoutManager.numberOfGlyphs
+
+                while index < numberOfGlyphs {
+                    var lineRange = NSRange()
+                    layoutManager.lineFragmentRect(forGlyphAt: index, effectiveRange: &lineRange)
+                    index = NSMaxRange(lineRange)
+                    numberOfLines += 1
+                }
+                if currentLine == 1 && (numberOfLines == 1 || numberOfLines == 0) {
+                    self.heightTextFieldSend.constant = 40
+                } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintViewTextField != nil && self.constraintViewTextField.constant < 95.0)) && currentLine >= 4 {
+                    self.heightTextFieldSend.constant = 95.0
+                } else if currentLine < 4 && numberOfLines < 5 {
+                    if (nowTextFieldSend!.text.count > 0 && self.heightTextFieldSend.constant != nowTextFieldSend!.contentSize.height) {
+                        self.heightTextFieldSend.constant = nowTextFieldSend!.contentSize.height
+                    }
+                }
+            }
+        }
+    }
+    
+    func extractFromAtIfSymbolsBefore(_ text: String) -> String? {
+        guard let atIndex = text.firstIndex(of: "@") else {
+            return nil
+        }
+        
+        let beforeAt = text[..<atIndex]
+        let afterAt = text[atIndex...]
+
+        // Define symbols as anything that's not a letter or digit
+        let symbolSet = CharacterSet.letters.union(.decimalDigits).inverted
+        let isAllSymbols = beforeAt.unicodeScalars.allSatisfy { symbolSet.contains($0) }
+
+        return isAllSymbols ? String(afterAt) : nil
+    }
+    
+    private func showMention(text: String) {
+        listMentionWithText.removeAll()
+        Database.shared.database?.inTransaction({ fmdb, rollback in
+            let vc = delegate as! EditorGroup
+            do {
+                let idMe = User.getMyPin()!
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name || ' ' || ifnull(last_name, '') name FROM GROUPZ_MEMBER where group_id='\(vc.dataGroup["group_id"]  as? String ?? "")' AND f_pin <> '\(idMe)' AND name LIKE '%\(text)%'") {
+                    while cursor.next() {
+                        let user = User(pin: "")
+                        user.pin = cursor.string(forColumnIndex: 0) ?? ""
+                        user.firstName = cursor.string(forColumnIndex: 1) ?? ""
+                        if !user.pin.isEmpty {
+                            let userFromBuddy = User.getDataCanNil(pin: user.pin, fmdb: fmdb)
+                            if userFromBuddy != nil {
+                                listMentionWithText.append(userFromBuddy!)
+                            } else {
+                                listMentionWithText.append(user)
+                            }
+                        }
+                    }
+                    cursor.close()
+                }
+                listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
+                var nowTableMention = tableMention
+                var nowHeightTableMention = heightTableMention!
+                if listMentionWithText.count > 0 {
+                    if listMentionWithText.count < 5 {
+                        nowHeightTableMention.constant = CGFloat(44 * listMentionWithText.count)
+                    } else {
+                        nowHeightTableMention.constant = 44 * 4
+                    }
+                    nowTableMention.reloadData()
+                } else {
+                    nowHeightTableMention.constant = 44
+                    self.hideMention()
+                }
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+    }
+    
+    private func hideMention() {
+        if self.heightTableMention != nil && self.heightTableMention.constant != 0 {
+            listMentionWithText.removeAll()
+            tableMention.reloadData()
+            self.heightTableMention.constant = 0
+        }
     }
     
     @objc func previewImageVideoTapped(_ sender: ObjectGesture) {
@@ -619,6 +935,47 @@ extension PreviewAttachmentImageVideo: UITableViewDelegate, UITableViewDataSourc
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        if tableView == tableMention, let vc = delegate as? EditorGroup {
+            tableView.deselectRow(at: indexPath, animated: true)
+            let nowTextField = textFieldSend!
+            let fulltextForMention = nowTextField.text.substring(from: 0, to: lastPositionCursorMention - 1)
+            let diff = nowTextField.text.count - fulltextForMention.count
+            let lines = fulltextForMention.split(separator: "\n")
+            if let lastLineIndex = lines.lastIndex(where: { !$0.isEmpty }) {
+                let words = lines[lastLineIndex].split(separator: " ")
+                if let lastWordIndex = words.lastIndex(where: { !$0.isEmpty }) {
+                    var lastWord = words[lastWordIndex]
+                    if let textM = extractFromAtIfSymbolsBefore(String(lastWord)) {
+                        lastWord = textM[textM.startIndex..<textM.endIndex]
+                    }
+                    if let rangeLastWord = fulltextForMention.range(of: lastWord, options: .backwards) {
+                        listMentionInTextField.append(listMentionWithText[indexPath.row])
+                        
+                        var addSpaceAfterReplacement = ""
+                        if diff == 0 {
+                            addSpaceAfterReplacement = " "
+                        }
+                        
+                        var text = nowTextField.text ?? ""
+                        let nameMention = listMentionWithText[indexPath.row].fullName.trimmingCharacters(in: .whitespaces)
+                        listMentionInTextField.last?.ex_block = "\(fulltextForMention.distance(from: fulltextForMention.startIndex, to: rangeLastWord.lowerBound) + nameMention.count)" //upperbound
+                        let replacementText = "@\(nameMention)"
+                        
+                        // Replace the old text with the new text using the replaceSubrange(_:with:) method
+                        text.replaceSubrange(rangeLastWord, with: replacementText + addSpaceAfterReplacement)
+                        
+                        nowTextField.attributedText = text.richText(isEditing: true, group_id: vc.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: listMentionInTextField)
+                        
+                        let newPosition = nowTextField.position(from: nowTextField.beginningOfDocument, offset: nowTextField.text.count - diff)
+                        nowTextField.selectedTextRange = nowTextField.textRange(from: newPosition!, to: newPosition!)
+                        
+                        hideMention()
+                        lastTextLength = nowTextField.text.count
+                        return
+                    }
+                }
+            }
+        }
         var type = ""
         if indexPath.row == 0 {
             type = "share,download"
@@ -645,6 +1002,21 @@ extension PreviewAttachmentImageVideo: UITableViewDelegate, UITableViewDataSourc
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        if tableView == tableMention {
+            let cellMention = tableView.dequeueReusableCell(withIdentifier: tableView == tableMention ? "cellMention" : "cellEditMention", for: indexPath as IndexPath)
+            var content = cellMention.defaultContentConfiguration()
+            content.textProperties.font = UIFont.systemFont(ofSize: 11 + offset())
+            content.imageProperties.tintColor = .black
+            content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+            if indexPath.row < listMentionWithText.count {
+                getImage(name: listMentionWithText[indexPath.row].thumb, placeholderImage: UIImage(systemName: "person"), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                    content.image = image
+                })
+                content.text = listMentionWithText[indexPath.row].firstName + " " + listMentionWithText[indexPath.row].lastName
+            }
+            cellMention.contentConfiguration = content
+            return cellMention
+        }
         let cell = tableView.dequeueReusableCell(withIdentifier: "cellConfigFile", for: indexPath as IndexPath)
         var content = cell.defaultContentConfiguration()
         content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
@@ -663,5 +1035,10 @@ extension PreviewAttachmentImageVideo: UITableViewDelegate, UITableViewDataSourc
         cell.contentConfiguration = content
         cell.tintColor = .black
         return cell
+    }
+    
+    func offset() -> CGFloat{
+        guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
+        return CGFloat(fontSize)
     }
 }
