@@ -21,6 +21,7 @@ public class CommunityList: UIViewController, UITableViewDataSource, UITableView
         tableView.tableFooterView = UIView()
         tableView.sectionHeaderHeight = 0
         tableView.sectionFooterHeight = 0
+        tableView.backgroundColor = .clear
         tableView.automaticallyAdjustsScrollIndicatorInsets = false
         if #available(iOS 15.0, *) {
             tableView.sectionHeaderTopPadding = 0

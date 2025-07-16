@@ -560,6 +560,7 @@ public class SignUpSignIn: UIViewController {
                                 self.navigationController?.popViewController(animated: true)
                             }
                         }
+                        Nexilis.getFeatureAccess()
                     })
                 })
             }

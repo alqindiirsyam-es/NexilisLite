@@ -109,6 +109,10 @@ public final class Utils {
         SecureUserDefaults.shared.set(value, forKey: "app_builder_url_third_tab")
     }
     
+    static func setURLStatusUpdate(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "app_builder_url_status_update")
+    }
+    
     static func setURLBase(value: String) {
         SecureUserDefaults.shared.set(value, forKey: "app_builder_url_base")
     }
@@ -814,6 +818,9 @@ public final class Utils {
                     }
                     if Array(json.keys)[i] == "app_builder_url_third_tab" {
                         Utils.setURLThirdTab(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "app_builder_url_status_update" {
+                        Utils.setURLStatusUpdate(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "app_builder_custom_tab" {
                         Utils.setCustomTab(cust: Array(json.values)[i] as? String ?? "")

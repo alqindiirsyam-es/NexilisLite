@@ -22,6 +22,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         tableView.tableFooterView = UIView()
         tableView.sectionHeaderHeight = 0
         tableView.sectionFooterHeight = 0
+        tableView.backgroundColor = .clear
         tableView.automaticallyAdjustsScrollIndicatorInsets = false
         if #available(iOS 15.0, *) {
             tableView.sectionHeaderTopPadding = 0
@@ -248,6 +249,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let call = calls[indexPath.row]
         let cell = tableView.dequeueReusableCell(withIdentifier: "cellCallLog", for: indexPath)
+        cell.backgroundColor = .clear
         let textTime = UILabel()
         textTime.text = call.time
         textTime.font = .systemFont(ofSize: 14)

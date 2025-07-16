@@ -3948,15 +3948,15 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 row[TypeDataMessage.is_pinned] = cursorData.string(forColumnIndex: 27)
                 row["progress"] = 0.0
                 row["isSelected"] = false
-                if !self.dataDates.contains("Today".localized()) {
-                    self.dataDates.append("Today".localized())
-                    self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
-                }
                 row["chat_date"] = "Today".localized()
                 cursorData.close()
             }
         })
         DispatchQueue.main.async {
+            if !self.dataDates.contains("Today".localized()) {
+                self.dataDates.append("Today".localized())
+                self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
+            }
             self.tableChatView.beginUpdates()
             self.dataMessages.append(row)
             self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
@@ -4848,16 +4848,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         containerView.addSubview(dateView)
         dateView.translatesAutoresizingMaskIntoConstraints = false
         var topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor)
-        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10.0)
+        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10)
         NSLayoutConstraint.activate([
             topAnchor,
-            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10.0),
+            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
             dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-//            dateView.heightAnchor.constraint(equalToConstant: 30),
             dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
         ])
         dateView.backgroundColor = .orangeColor
-        dateView.layer.cornerRadius = 15.0
+        dateView.layer.cornerRadius = 8.0
         dateView.clipsToBounds = true
         
         let labelDate = UILabel()
@@ -4880,7 +4879,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if tableView == tableMention || tableView == tableMentionEdit || tableView == tableViewConfigFile {
             return 0
         }
-        return 50
+        return 30
     }
     
     public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -5115,13 +5114,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if messageIdChat.contains("NTFPIN_") {
             containerMessage.backgroundColor = .orangeColor
             containerMessage.anchor(top: cellMessage.contentView.topAnchor, bottom: cellMessage.contentView.bottomAnchor, paddingTop: 5, paddingBottom: 5, centerX: cellMessage.contentView.centerXAnchor, minWidth: 40, maxWidth: UIScreen.main.bounds.width - 40)
-            containerMessage.layer.cornerRadius = 15
+            containerMessage.layer.cornerRadius = 8
             containerMessage.clipsToBounds = true
             
             let textMessage = UILabel()
             containerMessage.addSubview(textMessage)
             textMessage.textAlignment = .center
-            textMessage.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: 10, paddingLeft: 10, paddingBottom: 10, paddingRight: 10)
+            textMessage.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: 5, paddingLeft: 10, paddingBottom: 5, paddingRight: 10)
             textMessage.font = .systemFont(ofSize: 14)
             textMessage.text = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
             textMessage.textColor = .white
@@ -6668,7 +6667,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             var addTopMargin = true
             if !reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM {
                 let data = queryMessageReply(message_id: reffChat)
-                if data.count != 0 && topMarginText.constant == 15.0 {
+                if data.count != 0 && (topMarginText.constant == 32.0 || topMarginText.constant == 100.0) {
                     addTopMargin = false
                 }
             }

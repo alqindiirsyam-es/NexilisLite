@@ -437,6 +437,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
             Utils.setMyTheme(value: param1)
             Utils.setIsLoadThemeFromOther(value: true)
             Utils.resetValueSuperApp()
+            Utils.setLastTabSelected(value: 0)
             if let jsonArray = try! JSONSerialization.jsonObject(with: param1.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                 do {
                     for json in jsonArray {
@@ -457,6 +458,9 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                         }
                         if json["KEY"]  as! String == "app_builder_url_webview_6" {
                             Utils.setURLWv6(value: json["VALUE"] as! String)
+                        }
+                        if json["KEY"]  as! String == "app_builder_url_status_update" {
+                            Utils.setURLStatusUpdate(value: json["VALUE"] as! String)
                         }
                         if json["KEY"]  as! String == "app_builder_custom_tab" {
                             Utils.setCustomTab(cust: json["VALUE"] as! String)

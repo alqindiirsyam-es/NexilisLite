@@ -438,6 +438,9 @@ public class Database {
                                 "'archived' integer NOT NULL default 0," +
                                 "PRIMARY KEY ('l_pin'))", values: nil)
         
+        try fmdb.executeUpdate("CREATE UNIQUE INDEX IF NOT EXISTS index_MESSAGE_SUMMARY_UK1 on MESSAGE_SUMMARY (l_pin)", values: nil)
+        try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_MESSAGE_SUMMARY_UK2 on MESSAGE_SUMMARY (message_id)", values: nil)
+        
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'OUTGOING' (" +
                                 "'id' text PRIMARY KEY NOT NULL," +
                                 "'package' text," +

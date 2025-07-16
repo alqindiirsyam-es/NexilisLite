@@ -56,6 +56,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         tableView.tableFooterView = UIView()
         tableView.sectionHeaderHeight = 0
         tableView.sectionFooterHeight = 0
+        tableView.backgroundColor = .clear
         tableView.automaticallyAdjustsScrollIndicatorInsets = false
         if #available(iOS 15.0, *) {
             tableView.sectionHeaderTopPadding = 0
@@ -127,10 +128,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     private func refresh() {
         getData { [self] in
             if tempChats.count == 0 {
-                navigationItem.searchController = nil
-                DispatchQueue.main.async {
-                    self.navigationController?.navigationBar.sizeToFit()
-                }
+                searchController.searchBar.isHidden = true
                 if textChatEmpty.isDescendant(of: view) {
                     textChatEmpty.removeFromSuperview()
                 }
@@ -151,6 +149,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 if textChatEmpty.isDescendant(of: view) {
                     textChatEmpty.removeFromSuperview()
                 }
+                searchController.searchBar.isHidden = false
             }
         }
     }
@@ -352,6 +351,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "cellChatWA", for: indexPath)
+        cell.backgroundColor = .clear
         let content = cell.contentView
         if content.subviews.count > 0 {
             content.subviews.forEach { $0.removeFromSuperview() }
