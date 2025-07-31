@@ -102,6 +102,7 @@ public class Database {
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE_SUMMARY", columnName: "archived", columnType: "INTEGER", defaultValue: "0")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "is_pinned", columnType: "TEXT", defaultValue: "0")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "attachment_speciality", columnType: "TEXT", defaultValue: "")
+                changeNameColumn(database: fmdb, tableName: "COMMUNITY", oldColumnName: "group_type", newColumnName: "community_type")
                 result = 1
 //                    print("Create Done")
             } catch {
@@ -144,7 +145,28 @@ public class Database {
         }
     }
     
-    func createDatabase(fmdb:FMDatabase) throws -> Void{
+    func changeNameColumn(database: FMDatabase, tableName: String, oldColumnName: String, newColumnName: String, ) {
+        do {
+            let rs = try database.executeQuery("PRAGMA table_info(\(tableName))", values: nil)
+            var columnExists = false
+            while rs.next() {
+                if let existingColumn = rs.string(forColumn: "name"), existingColumn == oldColumnName {
+                    columnExists = true
+                    break
+                }
+            }
+            rs.close()
+
+            if columnExists {
+                let alterSQL = "ALTER TABLE \(tableName) RENAME COLUMN \(oldColumnName) TO \(newColumnName);"
+                try database.executeUpdate(alterSQL, values: nil)
+            }
+        } catch {
+            print("Error checking or adding column: \(error.localizedDescription)")
+        }
+    }
+    
+    func createDatabase(fmdb:FMDatabase) throws -> Void {
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'BUDDY' (" +
                                 "'_id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL," +
                                 "'f_pin' text NOT NULL UNIQUE," +
@@ -458,90 +480,90 @@ public class Database {
                                 ")", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'MESSAGE_FAVORITE' (" +
-        "'message_id' text PRIMARY KEY NOT NULL" +
-        ")", values: nil)
+                                "'message_id' text PRIMARY KEY NOT NULL" +
+                                ")", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'LINK_PREVIEW' (" +
-        "'id' text PRIMARY KEY NOT NULL," +
-        "'link' text NOT NULL UNIQUE," +
-        "'data_link' text," +
-        "'retry' integer DEFAULT 0" +
-        ")", values: nil)
+                                "'id' text PRIMARY KEY NOT NULL," +
+                                "'link' text NOT NULL UNIQUE," +
+                                "'data_link' text," +
+                                "'retry' integer DEFAULT 0" +
+                                ")", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'PULL_DB' (" +
-        "'id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL," +
-        "'pull_type' text NOT NULL," +
-        "'pull_key' text NOT NULL DEFAULT ('0')," +
-        "'time' text" +
-        ")", values: nil)
+                                "'id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                                "'pull_type' text NOT NULL," +
+                                "'pull_key' text NOT NULL DEFAULT ('0')," +
+                                "'time' text" +
+                                ")", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'PREFS' (" +
-        "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
-        "'key' text UNIQUE," +
-        "'value' text" +
-        ")", values: nil)
+                                "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                                "'key' text UNIQUE," +
+                                "'value' text" +
+                                ")", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'CALL_CENTER_HISTORY' (" +
-        "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
-        "'type' integer NOT NULL," +
-        "'title' text," +
-        "'time' text," +
-        "'f_pin' text," +
-        "'data' text," +
-        "'time_end' text," +
-        "'complaint_id' text NOT NULL UNIQUE," +
-        "'members' text," +
-        "'requester' text" +
-        ")", values: nil)
+                                "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                                "'type' integer NOT NULL," +
+                                "'title' text," +
+                                "'time' text," +
+                                "'f_pin' text," +
+                                "'data' text," +
+                                "'time_end' text," +
+                                "'complaint_id' text NOT NULL UNIQUE," +
+                                "'members' text," +
+                                "'requester' text" +
+                                ")", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'FORM_DATA' (" +
-        "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
-        "'reff_id' TEXT NOT NULL UNIQUE," +
-        "'form_id' TEXT," +
-        "'title' text," +
-        "'description' text," +
-        "'created_by' text," +
-        "'created_date' text," +
-        "'target_date' text," +
-        "'status' integer" +
-        ")", values: nil)
+                                "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                                "'reff_id' TEXT NOT NULL UNIQUE," +
+                                "'form_id' TEXT," +
+                                "'title' text," +
+                                "'description' text," +
+                                "'created_by' text," +
+                                "'created_date' text," +
+                                "'target_date' text," +
+                                "'status' integer" +
+                                ")", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'TASK_PIC' (" +
-        "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
-        "'reff_id' text," +
-        "'sq_no' integer," +
-        "'ac' text," +
-        "'ac_desc' text," +
-        "'f_pin' text," +
-        "'submit_date' text," +
-        "'submit_type' text," +
-        "'submit_info' text," +
-        "'submit_id' text)", values: nil)
+                                "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                                "'reff_id' text," +
+                                "'sq_no' integer," +
+                                "'ac' text," +
+                                "'ac_desc' text," +
+                                "'f_pin' text," +
+                                "'submit_date' text," +
+                                "'submit_type' text," +
+                                "'submit_info' text," +
+                                "'submit_id' text)", values: nil)
         
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS TASK_PIC_UK1 on TASK_PIC (reff_id,submit_date,f_pin,submit_info)", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'TASK_DETAIL' (" +
-        "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
-        "'reff_id' text," +
-        "'key' text," +
-        "'value' text)", values: nil)
+                                "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                                "'reff_id' text," +
+                                "'key' text," +
+                                "'value' text)", values: nil)
         
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS TASK_DETAIL_UK1 on TASK_DETAIL (reff_id,key)", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'SERVICE_BANK' (" +
-        "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
-        "'service_id' text NOT NULL UNIQUE," +
-        "'service_name' text," +
-        "'description' text," +
-        "'parent' text," +
-        "'is_tablet' text)", values: nil)
+                                "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                                "'service_id' text NOT NULL UNIQUE," +
+                                "'service_name' text," +
+                                "'description' text," +
+                                "'parent' text," +
+                                "'is_tablet' text)", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'WORKING_AREA' (" +
-        "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
-        "'area_id' text NOT NULL UNIQUE," +
-        "'name' text," +
-        "'parent' text," +
-        "'level' text)", values: nil)
+                                "'id' integer PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                                "'area_id' text NOT NULL UNIQUE," +
+                                "'name' text," +
+                                "'parent' text," +
+                                "'level' text)", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'GROUP_NM' (" +
                                 "'_id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL," +
@@ -565,6 +587,52 @@ public class Database {
                                 "'level_edu' INTEGER DEFAULT -1," +
                                 "'materi_edu' INTEGER DEFAULT -1," +
                                 "'is_education' INTEGER DEFAULT 0)", values: nil)
+        
+        try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'COMMUNITY' (" +
+                                "'_id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                                "'community_id' text NOT NULL UNIQUE," +
+                                "'f_name' text," +
+                                "'scope_id' text," +
+                                "'image_id' TEXT," +
+                                "'quote' text," +
+                                "'last_update' text," +
+                                "'created_by' text," +
+                                "'created_date' text," +
+                                "'ex_block' TEXT DEFAULT (0)," +
+                                "'folder_id' TEXT," +
+                                "'chat_modifier' INTEGER DEFAULT 1," +
+                                "'community_type' INTEGER DEFAULT 0," +
+                                "'parent' text," +
+                                "'level' text," +
+                                "'muted' INTEGER DEFAULT 0," +
+                                "'is_open' INTEGER DEFAULT 0," +
+                                "'official' INTEGER DEFAULT 0," +
+                                "'level_edu' INTEGER DEFAULT -1," +
+                                "'materi_edu' INTEGER DEFAULT -1," +
+                                "'is_education' INTEGER DEFAULT 0," +
+                                "'be' text," +
+                                "'sort_order' INTEGER DEFAULT 1)", values: nil)
+        
+        try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'COMMUNITY_GROUPZ' (" +
+                                "'community_id' TEXT NOT NULL," +
+                                "'group_id' TEXT NOT NULL," +
+                                "'created_date' TEXT DEFAULT (0)," +
+                                "'is_default' TEXT DEFAULT (0)," +
+                                "PRIMARY KEY ('community_id', 'group_id'))", values: nil)
+        
+        try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'COMMUNITY_MEMBER' (" +
+                               "'community_id' TEXT NOT NULL," +
+                               "'f_pin' TEXT NOT NULL," +
+                               "'position' TEXT DEFAULT (0)," +
+                               "'user_id' NOT NULL DEFAULT '-'," +
+                               "'ac' NOT NULL DEFAULT '-'," +
+                               "'ac_desc' NOT NULL DEFAULT '-'," +
+                               "'first_name' TEXT NOT NULL," +
+                               "'last_name' TEXT NOT NULL," +
+                               "'msisdn' TEXT NOT NULL," +
+                               "'thumb_id' TEXT NOT NULL," +
+                               "'created_date' TEXT DEFAULT (0)," +
+                               "PRIMARY KEY ('community_id', 'f_pin'))", values: nil)
     }
     
     public func executes(fmdb: FMDatabase, queries: [String]) {

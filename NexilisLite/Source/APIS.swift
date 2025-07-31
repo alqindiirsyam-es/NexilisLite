@@ -2397,6 +2397,14 @@ public class APIS: NSObject {
         return nil
     }
     
+    public static func monitoredActivity() {
+        UIViewController.swizzleViewDidAppearImplementation
+        UINavigationController.swizzlePushViewControllerImplementation
+        UINavigationController.swizzlePopViewControllerImplementation
+        _ = DataCaptured()
+        UIApplication.swizzleSendAction
+    }
+    
     private static var appNm = "";
     public static func getAppNm() -> String {
         return appNm

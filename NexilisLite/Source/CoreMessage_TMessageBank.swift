@@ -2784,4 +2784,62 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func getCreateCommunity(pCommunityName: String, pCommunityDesc: String, pCommunityThumbId: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.CREATE_COMMUNITY
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.NAME] = pCommunityName
+        tMessage.mBodies[CoreMessage_TMessageKey.DESCRIPTION] = pCommunityDesc
+        tMessage.mBodies[CoreMessage_TMessageKey.THUMB_ID] = pCommunityThumbId
+        return tMessage
+    }
+    
+    public static func getDLP(fileName: String, type: String, reason: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.DATA_LOSS_PREVENTION
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.FILE_NAME] = fileName
+        tMessage.mBodies[CoreMessage_TMessageKey.TYPE] = type
+        tMessage.mBodies[CoreMessage_TMessageKey.REASON] = reason
+        return tMessage
+    }
+    
+    public static func getLogActivity(pActivityClassName: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.LOG_ACTIVITY
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.ACTVITY] = pActivityClassName
+        tMessage.mBodies[CoreMessage_TMessageKey.LOCAL_TIMESTAMP] = "\(Date().currentTimeMillis())"
+        return tMessage
+    }
+    
+    public static func getLogMonitor(type: String, label: String, value: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.ACTIVITY_MONITORING
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.ACT_TYPE] = type
+        tMessage.mBodies[CoreMessage_TMessageKey.ACT_LABEL] = label
+        tMessage.mBodies[CoreMessage_TMessageKey.ACT_VALUE] = value
+        tMessage.mBodies[CoreMessage_TMessageKey.ACT_TIME] = "\(Date().currentTimeMillis())"
+        return tMessage
+    }
+    
+    public static func getCaptureDLP(data: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.DATA_LOSS_PREVENTION
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.DATA] = data
+        return tMessage
+    }
+    
 }

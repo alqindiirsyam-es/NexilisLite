@@ -631,26 +631,26 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
-                        row["message_id"] = cursorData.string(forColumnIndex: 0)
-                        row["f_pin"] = cursorData.string(forColumnIndex: 1)
-                        row["l_pin"] = cursorData.string(forColumnIndex: 2)
-                        row["message_scope_id"] = cursorData.string(forColumnIndex: 3)
-                        row["server_date"] = cursorData.string(forColumnIndex: 4)
-                        row["status"] = cursorData.string(forColumnIndex: 5)
-                        row["message_text"] = cursorData.string(forColumnIndex: 6)
-                        row["audio_id"] = cursorData.string(forColumnIndex: 7)
-                        row["video_id"] = cursorData.string(forColumnIndex: 8)
-                        row["image_id"] = cursorData.string(forColumnIndex: 9)
-                        row["thumb_id"] = cursorData.string(forColumnIndex: 10)
-                        row["read_receipts"] = cursorData.string(forColumnIndex: 11)
-                        row["chat_id"] = cursorData.string(forColumnIndex: 12)
-                        row["file_id"] = cursorData.string(forColumnIndex: 13)
-                        row["attachment_flag"] = cursorData.string(forColumnIndex: 14)
-                        row["reff_id"] = cursorData.string(forColumnIndex: 15)
-                        row["lock"] = cursorData.string(forColumnIndex: 16)
-                        row["is_stared"] = cursorData.string(forColumnIndex: 17)
-                        row["blog_id"] = cursorData.string(forColumnIndex: 18)
-                        row["credential"] = cursorData.string(forColumnIndex: 19)
+                        row["message_id"] = cursorData.string(forColumnIndex: 0) ?? ""
+                        row["f_pin"] = cursorData.string(forColumnIndex: 1) ?? ""
+                        row["l_pin"] = cursorData.string(forColumnIndex: 2) ?? ""
+                        row["message_scope_id"] = cursorData.string(forColumnIndex: 3) ?? ""
+                        row["server_date"] = cursorData.string(forColumnIndex: 4) ?? ""
+                        row["status"] = cursorData.string(forColumnIndex: 5) ?? ""
+                        row["message_text"] = cursorData.string(forColumnIndex: 6) ?? ""
+                        row["audio_id"] = cursorData.string(forColumnIndex: 7) ?? ""
+                        row["video_id"] = cursorData.string(forColumnIndex: 8) ?? ""
+                        row["image_id"] = cursorData.string(forColumnIndex: 9) ?? ""
+                        row["thumb_id"] = cursorData.string(forColumnIndex: 10) ?? ""
+                        row["read_receipts"] = cursorData.string(forColumnIndex: 11) ?? ""
+                        row["chat_id"] = cursorData.string(forColumnIndex: 12) ?? ""
+                        row["file_id"] = cursorData.string(forColumnIndex: 13) ?? ""
+                        row["attachment_flag"] = cursorData.string(forColumnIndex: 14) ?? ""
+                        row["reff_id"] = cursorData.string(forColumnIndex: 15) ?? ""
+                        row["lock"] = cursorData.string(forColumnIndex: 16) ?? ""
+                        row["is_stared"] = cursorData.string(forColumnIndex: 17) ?? ""
+                        row["blog_id"] = cursorData.string(forColumnIndex: 18) ?? ""
+                        row["credential"] = cursorData.string(forColumnIndex: 19) ?? ""
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as! String)'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)

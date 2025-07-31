@@ -471,30 +471,35 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 hideMention()
             }
         }
-        let nowTextFieldSend = self.textFieldSend
-        let cursorPosition = textView.caretRect(for: nowTextFieldSend!.selectedTextRange!.start).origin
-        let doubleCurrentLine = cursorPosition.y / nowTextFieldSend!.font!.lineHeight
-        if doubleCurrentLine.isFinite {
-            let currentLine = Int(ceil(doubleCurrentLine))
-            UIView.animate(withDuration: 0.3) {
-                let layoutManager = textView.layoutManager
-                var numberOfLines = 0
-                var index = 0
-                let numberOfGlyphs = layoutManager.numberOfGlyphs
+        if var nowTextFieldSend = self.textFieldSend {
+            if let sr = nowTextFieldSend.selectedTextRange {
+                if let fnt = nowTextFieldSend.font {
+                    let cursorPosition = textView.caretRect(for: sr.start).origin
+                    let doubleCurrentLine = cursorPosition.y / fnt.lineHeight
+                    if doubleCurrentLine.isFinite {
+                        let currentLine = Int(ceil(doubleCurrentLine))
+                        UIView.animate(withDuration: 0.3) {
+                            let layoutManager = textView.layoutManager
+                            var numberOfLines = 0
+                            var index = 0
+                            let numberOfGlyphs = layoutManager.numberOfGlyphs
 
-                while index < numberOfGlyphs {
-                    var lineRange = NSRange()
-                    layoutManager.lineFragmentRect(forGlyphAt: index, effectiveRange: &lineRange)
-                    index = NSMaxRange(lineRange)
-                    numberOfLines += 1
-                }
-                if currentLine == 1 && (numberOfLines == 1 || numberOfLines == 0) {
-                    self.heightTextFieldSend.constant = 40
-                } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintViewTextField != nil && self.constraintViewTextField.constant < 95.0)) && currentLine >= 4 {
-                    self.heightTextFieldSend.constant = 95.0
-                } else if currentLine < 4 && numberOfLines < 5 {
-                    if (nowTextFieldSend!.text.count > 0 && self.heightTextFieldSend.constant != nowTextFieldSend!.contentSize.height) {
-                        self.heightTextFieldSend.constant = nowTextFieldSend!.contentSize.height
+                            while index < numberOfGlyphs {
+                                var lineRange = NSRange()
+                                layoutManager.lineFragmentRect(forGlyphAt: index, effectiveRange: &lineRange)
+                                index = NSMaxRange(lineRange)
+                                numberOfLines += 1
+                            }
+                            if currentLine == 1 && (numberOfLines == 1 || numberOfLines == 0) {
+                                self.heightTextFieldSend.constant = 40
+                            } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintViewTextField != nil && self.constraintViewTextField.constant < 95.0)) && currentLine >= 4 {
+                                self.heightTextFieldSend.constant = 95.0
+                            } else if currentLine < 4 && numberOfLines < 5 {
+                                if (nowTextFieldSend.text.count > 0 && self.heightTextFieldSend.constant != nowTextFieldSend.contentSize.height) {
+                                    self.heightTextFieldSend.constant = nowTextFieldSend.contentSize.height
+                                }
+                            }
+                        }
                     }
                 }
             }

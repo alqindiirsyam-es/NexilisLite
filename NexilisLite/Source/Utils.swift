@@ -1501,6 +1501,14 @@ public final class Utils {
         return ""
     }
     
+    public static func setIsWATheme(value: Bool) {
+        SecureUserDefaults.shared.set(value, forKey: "is_wa_key")
+    }
+    public static func getIsWATheme() -> Bool {
+        let value: Bool = SecureUserDefaults.shared.value(forKey: "is_wa_key") ?? false
+        return value
+    }
+    
     static func getPasswordDB() -> String? {
         do {
             let p = getPassEncDB()

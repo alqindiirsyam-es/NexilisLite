@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.51"
+    public static var cpaasVersion = "5.0.52"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1410,23 +1410,39 @@ public class Nexilis: NSObject {
     
     private static var listDispatchGroups = [String: DispatchGroup]()
     private static var waitQueue = [String: TMessage]()
+    private static let syncQueue = DispatchQueue(label: "io.nexilis.syncQueue")
     
     public static func writeAndWait(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
-        listDispatchGroups[message.getStatus()] = DispatchGroup()
-        let groupWait = listDispatchGroups[message.getStatus()]
-        groupWait?.enter()
-        waitQueue[message.getStatus()] = message
-//        print("wandw req: \(message.getCode())")
-        _ = write(message: message, timeout: timeout)
-        if groupWait?.wait(timeout: .now() + 15) == .timedOut {
-//            print("wandw timedOut: \(message.getCode())")
-            waitQueue.removeValue(forKey: message.getStatus())
-            listDispatchGroups.removeValue(forKey: message.getStatus())
-            groupWait?.leave()
+        if message.getStatus().isEmpty {
             return nil
         }
-        listDispatchGroups.removeValue(forKey: message.getStatus())
-        return waitQueue.removeValue(forKey: message.getStatus())
+
+        var groupWait: DispatchGroup?
+
+        syncQueue.sync {
+            listDispatchGroups[message.getStatus()] = DispatchGroup()
+            groupWait = listDispatchGroups[message.getStatus()]
+            groupWait?.enter()
+            waitQueue[message.getStatus()] = message
+        }
+
+        _ = write(message: message, timeout: timeout)
+
+        if groupWait?.wait(timeout: .now() + .milliseconds(timeout)) == .timedOut {
+            syncQueue.sync {
+                waitQueue.removeValue(forKey: message.getStatus())
+                listDispatchGroups.removeValue(forKey: message.getStatus())
+                groupWait?.leave()
+            }
+            return nil
+        }
+
+        var response: TMessage?
+        syncQueue.sync {
+            listDispatchGroups.removeValue(forKey: message.getStatus())
+            response = waitQueue.removeValue(forKey: message.getStatus())
+        }
+        return response
     }
     
     static func incomingData(packetId: String, data: AnyObject) {

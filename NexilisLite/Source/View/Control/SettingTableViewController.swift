@@ -303,23 +303,15 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             })
         }
         
-        Item.menus["Config"] = [
-            Item(icon: UIImage(systemName: "iphone"), title: "Create Your Own App".localized()),
-            Item(icon: UIImage(systemName: "gearshape.circle"), title: "Configure Floating Button".localized())
-        ]
-        if !isChangeProfile || Utils.getEnableMobileBuilder() != "1" {
-            if Item.menus["Config"]!.count > 1 {
-                Item.menus["Config"]!.remove(at: 0)
-            } else {
-                Item.menus["Config"]!.removeAll()
-            }
+        Item.menus["Config"] = []
+        if isChangeProfile && Nexilis.checkingAccess(key: "create_miniapp") {
+            Item.menus["Config"]?.append(Item(icon: UIImage(systemName: "iphone"), title: "Create Your Own App".localized()))
         }
-        if !Nexilis.showButtonFB || !Nexilis.checkingAccess(key: "can_config_fb") {
-            if Item.menus["Config"]!.count > 1 {
-                Item.menus["Config"]!.remove(at: 1)
-            } else {
-                Item.menus["Config"]!.removeAll()
-            }
+        if Nexilis.showButtonFB && Nexilis.checkingAccess(key: "can_config_fb") {
+            Item.menus["Config"]?.append(Item(icon: UIImage(systemName: "gearshape.circle"), title: "Configure Floating Button".localized()))
+        }
+        if isChangeProfile && Nexilis.checkingAccess(key: "can_switch_style") {
+            Item.menus["Config"]?.append(Item(icon: UIImage(systemName: "paintbrush"), title: "Switch Style".localized()))
         }
         if Utils.getIsLoadThemeFromOther() {
             Item.menus["Config"]?.insert(Item(icon: UIImage(systemName: "iphone"), title: "Back to Company App".localized()), at: 1)

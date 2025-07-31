@@ -506,4 +506,12 @@ public class CoreMessage_TMessageKey {
     public static let FINGERPRINT = "FPR";
     public static let SIGNATURE = "SIG";
     public static let PUBLIC_KEY = "PUK";
+    
+    public static let COMMUNITY_ID = "CMID";
+    public static let COMMUNITY_NAME = "CMNM";
+    
+    public static let ACT_LABEL = "ACTL";
+    public static let ACT_VALUE = "ACTV";
+    public static let ACT_TYPE = "ACTT";
+    public static let ACT_TIME = "ACTMS";
 }

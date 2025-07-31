@@ -85,48 +85,71 @@ public class MasterKeyUtil {
         }
     }
     
+    private let masterKeyQueue = DispatchQueue(label: "io.nexilis.masterKeyQueue")
+
     func getMasterKey() throws -> SymmetricKey {
-        if Nexilis.checkingAccess(key: "authentication") && isDeviceNotSecure() && Nexilis.dispatch == nil {
-            var result = false
-            Nexilis.dispatch = DispatchGroup()
-            Nexilis.dispatch?.enter()
-            Utils.authenticateWithBiometrics { success, errorMessage in
-                if success {
-                    print("Access granted!")
-                    result = true
-                } else {
-                    print("Access denied: \(errorMessage ?? "Unknown error")")
+        var retrievedKey: SymmetricKey?
+        var thrownError: Error?
+
+        masterKeyQueue.sync {
+            if Nexilis.checkingAccess(key: "authentication") && isDeviceNotSecure() {
+                let semaphore = DispatchSemaphore(value: 0)
+                var result = false
+
+                Utils.authenticateWithBiometrics { success, errorMessage in
+                    if success {
+                        print("Access granted!")
+                        result = true
+                    } else {
+                        print("Access denied: \(errorMessage ?? "Unknown error")")
+                    }
+                    semaphore.signal()
                 }
-                if let dispatch = Nexilis.dispatch {
-                    dispatch.leave()
+
+                semaphore.wait()
+
+                if !result {
+                    DispatchQueue.main.async {
+                        Utils.showAlert(
+                            title: "Failed to get Master Key".localized(),
+                            message: "Biometric authentication hasn't been set up/Biometric invalid.".localized()
+                        )
+                    }
+                    thrownError = NSError(domain: "KeychainError", code: -99, userInfo: nil)
+                    return
                 }
             }
-            Nexilis.dispatch?.wait()
-            Nexilis.dispatch = nil
-            if !result {
-                DispatchQueue.main.async {
-                    Utils.showAlert(title: "Failed to get Master Key".localized(), message: "Biometric authentication hasn't been set up/Biometric invalid.".localized())
-                }
-                throw NSError(domain: "KeychainError", code: -99, userInfo: nil)
+
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassKey,
+                kSecAttrApplicationTag as String: keyAlias,
+                kSecReturnData as String: true
+            ]
+
+            var item: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &item)
+            guard status == errSecSuccess else {
+                thrownError = NSError(domain: "KeychainError", code: Int(status), userInfo: nil)
+                return
             }
+
+            guard let keyData = item as? Data else {
+                thrownError = NSError(domain: "KeyRetrievalError", code: -1, userInfo: nil)
+                return
+            }
+
+            retrievedKey = SymmetricKey(data: keyData)
         }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: keyAlias,
-            kSecReturnData as String: true
-        ]
-        
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess else {
-            throw NSError(domain: "KeychainError", code: Int(status), userInfo: nil)
+
+        if let error = thrownError {
+            throw error
         }
-        
-        guard let keyData = item as? Data else {
-            throw NSError(domain: "KeyRetrievalError", code: -1, userInfo: nil)
+
+        guard let key = retrievedKey else {
+            throw NSError(domain: "KeychainError", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to get key"])
         }
-        
-        return SymmetricKey(data: keyData)
+
+        return key
     }
     
     func getPrefsKey() throws -> SymmetricKey {

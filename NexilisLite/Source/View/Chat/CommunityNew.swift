@@ -7,14 +7,17 @@
 
 import Foundation
 import UIKit
+import NotificationBannerSwift
 
-public class CommunityNew: UIViewController {
+public class CommunityNew: UIViewController, UITextFieldDelegate  {
     
     let containerButton = UIView()
     let buttonComm = UIButton(type: .custom)
     let scrollView = UIScrollView()
     var bottomConstButton: NSLayoutConstraint!
     let fieldName = UITextField()
+    let fieldDesc = UITextView()
+    var thumb = ""
     
     public override func viewDidLoad() {
         setUpHeader()
@@ -103,7 +106,7 @@ public class CommunityNew: UIViewController {
         let ppView = UIImageView()
         ppView.backgroundColor = .whatsappGrayPPColor
         scrollView.addSubview(ppView)
-        ppView.anchor(top: scrollView.topAnchor, paddingTop: 115, centerX: scrollView.centerXAnchor, width: 120, height: 120)
+        ppView.anchor(top: scrollView.topAnchor, paddingTop: 80, centerX: scrollView.centerXAnchor, width: 120, height: 120)
         ppView.layer.cornerRadius = 25
         ppView.clipsToBounds = true
         ppView.image = UIImage(systemName: "person.3.fill")
@@ -126,6 +129,8 @@ public class CommunityNew: UIViewController {
         fieldName.clipsToBounds = true
         fieldName.tintColor = .whatsappGreenColor
         fieldName.textColor = .black
+        fieldName.addTarget(self, action: #selector(didChanged(sender:)), for: .editingChanged)
+        fieldName.delegate = self
         let leftPadding = UIView(frame: CGRect(x: 0, y: 0, width: 10, height: 0))
         fieldName.leftView = leftPadding
         fieldName.leftViewMode = .always
@@ -133,7 +138,6 @@ public class CommunityNew: UIViewController {
         fieldName.rightView = rightPadding
         fieldName.rightViewMode = .always
         
-        let fieldDesc = UITextView()
         scrollView.addSubview(fieldDesc)
         fieldDesc.font = .systemFont(ofSize: 14)
         fieldDesc.backgroundColor = .white
@@ -148,8 +152,6 @@ public class CommunityNew: UIViewController {
         
         containerButton.addSubview(buttonComm)
         buttonComm.anchor(top: containerButton.topAnchor, left: containerButton.leftAnchor, right: containerButton.rightAnchor, paddingTop: 5, paddingLeft: 30, paddingRight: 30, height: 45)
-//        buttonComm.backgroundColor = .whatsappGreenColor
-//        buttonComm.setTitleColor(.white, for: .normal)
         buttonComm.backgroundColor = .waGrayLight
         buttonComm.setTitleColor(.waGrayFont, for: .normal)
         buttonComm.layer.cornerRadius = 15
@@ -157,9 +159,112 @@ public class CommunityNew: UIViewController {
         buttonComm.setTitle("Create Community".localized(), for: .normal)
         buttonComm.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
         buttonComm.isEnabled = false
+//        buttonComm.addTarget(self, action: #selector(didSubmit), for: .touchUpInside)
+    }
+    
+    public func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        if textField != fieldName {
+            return true
+        }
+        guard let currentText = textField.text else { return true }
+        let newLength = currentText.count + string.count - range.length
+        return newLength <= 100
+    }
+
+    @objc func didChanged(sender: Any) {
+        if let text = fieldName.text, text.trimmingCharacters(in: .whitespaces).isEmpty {
+            buttonComm.backgroundColor = .waGrayLight
+            buttonComm.setTitleColor(.waGrayFont, for: .normal)
+        } else {
+            buttonComm.backgroundColor = .whatsappGreenColor
+            buttonComm.setTitleColor(.white, for: .normal)
+        }
     }
     
     @objc func cancel(sender: Any) {
         self.dismiss(animated: true, completion: nil)
+    }
+    
+    @objc func didSubmit(sender: Any) {
+        if let text = fieldName.text {
+            buttonComm.backgroundColor = .waGrayLight
+            buttonComm.setTitleColor(.waGrayFont, for: .normal)
+            
+            Nexilis.showLoader()
+            DispatchQueue.global().async {
+                if let resp = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCreateCommunity(pCommunityName: text, pCommunityDesc: self.fieldDesc.text ?? "", pCommunityThumbId: self.thumb)) {
+                    if resp.isOk() {
+                        let communityId = resp.getBody(key: CoreMessage_TMessageKey.COMMUNITY_ID, default_value: "")
+                        if communityId.isEmpty {
+                            DispatchQueue.main.async {
+                                Nexilis.hideLoader(completion: {
+                                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                    imageView.tintColor = .white
+                                    let banner = FloatingNotificationBanner(title: "Failed to create community, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                    banner.show()
+                                })
+                            }
+                            return
+                        }
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            let me = User.getMyPin() ?? ""
+                            let createdDate = Date().currentTimeMillis()
+                            if let dataMe = User.getData(pin: me, fmdb: fmdb) {
+                                do {
+                                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "COMMUNITY", cvalues: [
+                                        "community_id" : communityId,
+                                        "f_name" : text,
+                                        "image_id": self.thumb,
+                                        "quote": self.fieldDesc.text ?? "",
+                                        "created_by" : me,
+                                        "created_date" : "\(createdDate)",
+                                        "community_type" : 0,
+                                        "level" : 1,
+                                        "be" : dataMe.beId
+                                    ], replace: true)
+                                    
+                                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "COMMUNITY_MEMBER", cvalues: [
+                                        "community_id" :communityId,
+                                        "f_pin" : me,
+                                        "position" : 1,
+                                        "user_id" : me,
+                                        "ac" : "",
+                                        "ac_desc" : "",
+                                        "first_name" : dataMe.firstName,
+                                        "last_name" : dataMe.lastName,
+                                        "msisdn" : "",
+                                        "thumb_id" : dataMe.thumb,
+                                        "created_date" : "\(createdDate)"
+                                    ], replace: true)
+                                } catch {
+                                    rollback.pointee = true
+                                    print("Access database error: \(error.localizedDescription)")
+                                }
+                                
+                            }
+                        })
+                    } else {
+                        DispatchQueue.main.async {
+                            Nexilis.hideLoader(completion: {
+                                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(title: "Failed to create community, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                banner.show()
+                            })
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader(completion: {
+                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                            banner.show()
+                        })
+                    }
+                }
+            }
+        }
+        
     }
 }

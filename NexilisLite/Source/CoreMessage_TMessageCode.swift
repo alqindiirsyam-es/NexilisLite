@@ -811,5 +811,22 @@ public class CoreMessage_TMessageCode {
     
     public static let AUTH_REQUEST = "AR01";
     public static let CHECK_USER_MSISDN = "CUM1";
+    public static let DATA_LOSS_PREVENTION = "DLP";
+    public static let LOG_ACTIVITY = "ACLG";
+    public static let ACTIVITY_MONITORING = "ACTM";
+    
+    public static let CREATE_COMMUNITY = "CM01";
+    public static let GET_COMMUNITY_GROUPS = "CM02";
+    public static let GET_COMMUNITY_MEMBERS = "CM03";
+    public static let INVITE_COMMUNITY_MEMBERS = "CM04";
+    public static let PUSH_COMMUNITY = "CM05";
+    public static let GET_COMMUNITY = "CM06";
+    public static let EXIT_COMMUNITY = "CM07";
+    public static let INVITE_COMMUNITY_GROUP = "CM08";
+    public static let REMOVE_COMMUNITY_GROUP = "CM09";
+    public static let REMOVE_COMMUNITY = "CM10";
+    public static let CHANGE_COMMUNITY_INFO = "CM11";
+    public static let REPORT_COMMUNITY = "CM12";
+    public static let CHANGE_COMMUNITY_POSITION = "CM13";
 
 }

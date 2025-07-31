@@ -188,7 +188,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     public override func viewDidLoad() {
         super.viewDidLoad()
 //        navigationController?.navigationBar.topItem?.title = ""
-        Utils.addBackground(view: contactChatNav.view)
+        Utils.addBackground(view: self.view)
         if let dataWall = UserDefaults.standard.data(forKey: "chatWallpaper") {
             wallpaperView.image = UIImage(data: UserDefaults.standard.data(forKey: "chatWallpaper")!)
         }
@@ -3320,6 +3320,24 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         let fPin = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
         let scope = message.getBody(key: CoreMessage_TMessageKey.SCOPE_ID)
         message.mBodies[CoreMessage_TMessageKey.SERVER_DATE] = String(Date().currentTimeMillis())
+        if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
+            let valueListGroupImages = listGroupImages.value
+            message.mStatus = CoreMessage_TMessageUtil.getTID()
+            message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
+            var mId = ""
+            for i in 0..<valueListGroupImages.count {
+                if mId.isEmpty {
+                    mId = "-2,\(valueListGroupImages[i].messageId)"
+                } else {
+                    mId = mId + "," + valueListGroupImages[i].messageId
+                }
+            }
+            message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = mId
+        } else {
+            message.mStatus = CoreMessage_TMessageUtil.getTID()
+            message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
+            message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
+        }
         if (fPin.elementsEqual("-999") || scope.elementsEqual("16") || scope.elementsEqual("15")){
             return
         }
@@ -3332,39 +3350,40 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 if isBackground {
                     Thread.sleep(forTimeInterval: 1.0)
                 } else {
-                    if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
-                        let valueListGroupImages = listGroupImages.value
-                        for i in 0..<valueListGroupImages.count {
-                            Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                do {
-                                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                                        "status" : "4"
-                                    ], _where: "message_id = '\(valueListGroupImages[i].messageId)'")
-                                } catch {
-                                    rollback.pointee = true
-                                    print("Access database error: \(error.localizedDescription)")
+                    if let resp = Nexilis.writeAndWait(message: message) {
+                        if resp.isOk() {
+                            if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
+                                let valueListGroupImages = listGroupImages.value
+                                for i in 0..<valueListGroupImages.count {
+                                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                        do {
+                                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                                "status" : "4"
+                                            ], _where: "message_id = '\(valueListGroupImages[i].messageId)'")
+                                        } catch {
+                                            rollback.pointee = true
+                                            print("Access database error: \(error.localizedDescription)")
+                                        }
+                                    })
                                 }
-                            })
-                            message.mStatus = CoreMessage_TMessageUtil.getTID()
-                            message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
-                            message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(valueListGroupImages[i].messageId)"
+                            } else {
+                                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                    do {
+                                        _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                            "status" : "4"
+                                        ], _where: "message_id = '\(message_id)'")
+                                    } catch {
+                                        rollback.pointee = true
+                                        print("Access database error: \(error.localizedDescription)")
+                                    }
+                                })
+                            }
+                        } else {
+                            self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
                         }
                     } else {
-                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            do {
-                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                                    "status" : "4"
-                                ], _where: "message_id = '\(message_id)'")
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
-                            }
-                        })
-                        message.mStatus = CoreMessage_TMessageUtil.getTID()
-                        message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
-                        message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
+                        self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
                     }
-                    _ = Nexilis.write(message: message)
                 }
             }
         }
@@ -4034,44 +4053,49 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     public func textViewDidChangeSelection(_ textView: UITextView) {
-        var nowTextFieldSend = self.textFieldSend
-        if isEditingMessage {
-            nowTextFieldSend = editTextView
-        }
-        let cursorPosition = textView.caretRect(for: nowTextFieldSend!.selectedTextRange!.start).origin
-        let doubleCurrentLine = cursorPosition.y / nowTextFieldSend!.font!.lineHeight
-        if doubleCurrentLine.isFinite {
-            let currentLine = Int(ceil(doubleCurrentLine))
-            UIView.animate(withDuration: 0.3) {
-                let layoutManager = textView.layoutManager
-                var numberOfLines = 0
-                var index = 0
-                let numberOfGlyphs = layoutManager.numberOfGlyphs
+        if var nowTextFieldSend = self.textFieldSend {
+            if isEditingMessage {
+                nowTextFieldSend = editTextView
+            }
+            if let sr = nowTextFieldSend.selectedTextRange {
+                if let fnt = nowTextFieldSend.font {
+                    let cursorPosition = textView.caretRect(for: sr.start).origin
+                    let doubleCurrentLine = cursorPosition.y / fnt.lineHeight
+                    if doubleCurrentLine.isFinite {
+                        let currentLine = Int(ceil(doubleCurrentLine))
+                        UIView.animate(withDuration: 0.3) {
+                            let layoutManager = textView.layoutManager
+                            var numberOfLines = 0
+                            var index = 0
+                            let numberOfGlyphs = layoutManager.numberOfGlyphs
 
-                while index < numberOfGlyphs {
-                    var lineRange = NSRange()
-                    layoutManager.lineFragmentRect(forGlyphAt: index, effectiveRange: &lineRange)
-                    index = NSMaxRange(lineRange)
-                    numberOfLines += 1
-                }
-                if currentLine == 1 && (numberOfLines == 1 || numberOfLines == 0) {
-                    if self.isEditingMessage {
-                        self.constraintHeighteditTextView.constant = 40
-                    } else {
-                        self.heightTextFieldSend.constant = 40
-                    }
-                } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintHeighteditTextView != nil && self.constraintHeighteditTextView.constant < 95.0)) && currentLine >= 4 {
-                    if self.isEditingMessage {
-                        self.constraintHeighteditTextView.constant = 95.0
-                    } else {
-                        self.heightTextFieldSend.constant = 95.0
-                    }
-                } else if currentLine < 4 && numberOfLines < 5 {
-                    if (nowTextFieldSend!.text.count > 0 && self.heightTextFieldSend.constant != nowTextFieldSend!.contentSize.height) {
-                        if self.isEditingMessage {
-                            self.constraintHeighteditTextView.constant = nowTextFieldSend!.contentSize.height
-                        } else {
-                            self.heightTextFieldSend.constant = nowTextFieldSend!.contentSize.height
+                            while index < numberOfGlyphs {
+                                var lineRange = NSRange()
+                                layoutManager.lineFragmentRect(forGlyphAt: index, effectiveRange: &lineRange)
+                                index = NSMaxRange(lineRange)
+                                numberOfLines += 1
+                            }
+                            if currentLine == 1 && (numberOfLines == 1 || numberOfLines == 0) {
+                                if self.isEditingMessage {
+                                    self.constraintHeighteditTextView.constant = 40
+                                } else {
+                                    self.heightTextFieldSend.constant = 40
+                                }
+                            } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintHeighteditTextView != nil && self.constraintHeighteditTextView.constant < 95.0)) && currentLine >= 4 {
+                                if self.isEditingMessage {
+                                    self.constraintHeighteditTextView.constant = 95.0
+                                } else {
+                                    self.heightTextFieldSend.constant = 95.0
+                                }
+                            } else if currentLine < 4 && numberOfLines < 5 {
+                                if (nowTextFieldSend.text.count > 0 && self.heightTextFieldSend.constant != nowTextFieldSend.contentSize.height) {
+                                    if self.isEditingMessage {
+                                        self.constraintHeighteditTextView.constant = nowTextFieldSend.contentSize.height
+                                    } else {
+                                        self.heightTextFieldSend.constant = nowTextFieldSend.contentSize.height
+                                    }
+                                }
+                            }
                         }
                     }
                 }

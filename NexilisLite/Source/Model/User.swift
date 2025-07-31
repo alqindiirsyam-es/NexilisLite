@@ -22,6 +22,7 @@ public class User: Model {
     public var ex_offmp: String?
     public var device_id: String
     public var status: String
+    public var beId: String
     
     public var isSelected: Bool = false
     public var isMuted: Bool = false
@@ -39,9 +40,10 @@ public class User: Model {
         self.ex_offmp = ""
         self.device_id = ""
         self.status = ""
+        self.beId = ""
     }
     
-    public init(pin: String, firstName: String, lastName: String, thumb: String, userType: String = "0", privacy_flag: String = "", offline_mode: String = "", ex_block: String = "", official: String = "", ex_offmp: String = "", device_id: String = "", status: String = "") {
+    public init(pin: String, firstName: String, lastName: String, thumb: String, userType: String = "0", privacy_flag: String = "", offline_mode: String = "", ex_block: String = "", official: String = "", ex_offmp: String = "", device_id: String = "", status: String = "", beId: String = "") {
         self.pin = pin
         self.firstName = firstName
         self.lastName = lastName
@@ -54,6 +56,7 @@ public class User: Model {
         self.ex_offmp = ex_offmp
         self.device_id = device_id
         self.status = status
+        self.beId = beId
     }
     
     public static func == (lhs: User, rhs: User) -> Bool {
@@ -134,7 +137,7 @@ public class User: Model {
         }
         var user: User?
         if fmdb != nil {
-            if let cursor = Database.shared.getRecords(fmdb: fmdb!, query: "select f_pin, first_name, last_name, image_id, user_type, privacy_flag, offline_mode, ex_block, device_id, official_account, quote from BUDDY where f_pin = '\(pin)' OR device_id = '\(pin)'"), cursor.next() {
+            if let cursor = Database.shared.getRecords(fmdb: fmdb!, query: "select f_pin, first_name, last_name, image_id, user_type, privacy_flag, offline_mode, ex_block, device_id, official_account, quote, be_info from BUDDY where f_pin = '\(pin)' OR device_id = '\(pin)'"), cursor.next() {
                 user = User(pin: cursor.string(forColumnIndex: 0) ?? "",
                             firstName: cursor.string(forColumnIndex: 1) ?? "",
                             lastName: cursor.string(forColumnIndex: 2) ?? "",
@@ -145,7 +148,8 @@ public class User: Model {
                             ex_block: cursor.string(forColumnIndex: 7) ?? "",
                             official: cursor.string(forColumnIndex: 9) ?? "",
                             device_id: cursor.string(forColumnIndex: 8) ?? "",
-                            status: cursor.string(forColumnIndex: 10) ?? "")
+                            status: cursor.string(forColumnIndex: 10) ?? "",
+                            beId: cursor.string(forColumnIndex: 11) ?? "")
                 cursor.close()
             } else if let cursor = Database.shared.getRecords(fmdb: fmdb!, query: """
                                                               SELECT a.f_pin, a.first_name, a.last_name, a.thumb_id
@@ -180,7 +184,7 @@ public class User: Model {
         } else {
             Database.shared.database?.inTransaction({ fmdb, rollback in
                 do {
-                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name, image_id, user_type, privacy_flag, offline_mode, ex_block, device_id, official_account, quote from BUDDY where f_pin = '\(pin)' OR device_id = '\(pin)'"), cursor.next() {
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name, image_id, user_type, privacy_flag, offline_mode, ex_block, device_id, official_account, quote, be_info from BUDDY where f_pin = '\(pin)' OR device_id = '\(pin)'"), cursor.next() {
                         user = User(pin: cursor.string(forColumnIndex: 0) ?? "",
                                     firstName: cursor.string(forColumnIndex: 1) ?? "",
                                     lastName: cursor.string(forColumnIndex: 2) ?? "",
@@ -191,7 +195,8 @@ public class User: Model {
                                     ex_block: cursor.string(forColumnIndex: 7) ?? "",
                                     official: cursor.string(forColumnIndex: 9) ?? "",
                                     device_id: cursor.string(forColumnIndex: 8) ?? "",
-                                    status: cursor.string(forColumnIndex: 10) ?? "")
+                                    status: cursor.string(forColumnIndex: 10) ?? "",
+                                    beId: cursor.string(forColumnIndex: 11) ?? "")
                         cursor.close()
                     } else if let cursor = Database.shared.getRecords(fmdb: fmdb, query: """
                                                               SELECT a.f_pin, a.first_name, a.last_name, a.thumb_id

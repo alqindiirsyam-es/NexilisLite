@@ -18,6 +18,16 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     var previewItem: NSURL?
 
     var isGridView: Bool = true
+    var isTab = true
+    
+    public init(isTab: Bool = false) {
+        self.isTab = isTab
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     let searchBar: UISearchBar = {
         let sb = UISearchBar()

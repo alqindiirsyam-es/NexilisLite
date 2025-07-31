@@ -689,6 +689,12 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         let disiniKey = "1711024221024"
         let gudegKey = "1712052403416"
         let kmiKey = "1713407687550"
+        let waKey = "1744166263877"
+        if appId == waKey {
+            Utils.setIsWATheme(value: true)
+        } else {
+            Utils.setIsWATheme(value: false)
+        }
         switch appId {
         case digisalesKey:
             UIApplication.shared.setAlternateIconName("digisales_icon")

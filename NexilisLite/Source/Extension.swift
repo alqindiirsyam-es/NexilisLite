@@ -14,6 +14,11 @@ import MobileCoreServices
 import CommonCrypto
 import ZIPFoundation
 import PDFKit
+import ObjectiveC
+import CoreLocation
+import CoreTelephony
+import Network
+import SystemConfiguration.CaptiveNetwork
 
 extension Date {
     
@@ -671,6 +676,12 @@ extension URL {
                 return 1
             }
         }
+        
+        if matches.result != 1 {
+            DispatchQueue.global().async {
+                DataCaptured.sendErrorDLP(fileName: self.lastPathComponent, code: matches.result == -1 ? 22 : 21)
+            }
+        }
 
         return matches.result
     }
@@ -679,6 +690,9 @@ extension URL {
 
 extension UIColor {
     public static var mainColor: UIColor {
+        if Utils.getIsWATheme() {
+            return whatsappGreenColor
+        }
         return renderColor(hex: "#046cfc")
     }
     
@@ -1710,3 +1724,486 @@ extension Collection {
         return indices.contains(index) ? self[index] : nil
     }
 }
+
+extension UIViewController {
+    static let swizzleViewDidAppearImplementation: Void = {
+        let originalSelector = #selector(viewDidAppear(_:))
+        let swizzledSelector = #selector(swizzled_viewDidAppear(_:))
+
+        guard
+            let originalMethod = class_getInstanceMethod(UIViewController.self, originalSelector),
+            let swizzledMethod = class_getInstanceMethod(UIViewController.self, swizzledSelector)
+        else {
+            return
+        }
+
+        method_exchangeImplementations(originalMethod, swizzledMethod)
+    }()
+
+    @objc func swizzled_viewDidAppear(_ animated: Bool) {
+        swizzled_viewDidAppear(animated)
+
+        if self is UINavigationController || self is UITabBarController {
+            // If it's a UINavigationController, get its topViewController
+            if let nav = self as? UINavigationController,
+               let topVC = nav.topViewController {
+                DataCaptured.actVC = "\(String(describing: type(of: topVC)))"
+                DispatchQueue.global().async {
+                    DataCaptured.sendLogMonitorActivity()
+                }
+            }
+            return
+        }
+        
+        if "\(type(of: self))".hasPrefix("UI") {
+            return
+        }
+
+        // Normal screen
+        DataCaptured.actVC = "\(String(describing: type(of: self)))"
+        DispatchQueue.global().async {
+            DataCaptured.sendLogMonitorActivity()
+        }
+    }
+}
+
+extension UINavigationController {
+    static let swizzlePushViewControllerImplementation: Void = {
+        let originalSelector = #selector(pushViewController(_:animated:))
+        let swizzledSelector = #selector(swizzled_pushViewController(_:animated:))
+
+        guard
+            let originalMethod = class_getInstanceMethod(UINavigationController.self, originalSelector),
+            let swizzledMethod = class_getInstanceMethod(UINavigationController.self, swizzledSelector)
+        else {
+            return
+        }
+
+        method_exchangeImplementations(originalMethod, swizzledMethod)
+    }()
+
+    @objc func swizzled_pushViewController(_ viewController: UIViewController, animated: Bool) {
+        DataCaptured.actNC = "\(String(describing: type(of: viewController)))"
+        DataCaptured.actVC = ""
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1, execute: {
+            if DataCaptured.actVC.isEmpty {
+                DataCaptured.sendLogMonitorActivity()
+            }
+        })
+        swizzled_pushViewController(viewController, animated: animated)
+    }
+    
+    static let swizzlePopViewControllerImplementation: Void = {
+        let originalSelector = #selector(popViewController(animated:))
+        let swizzledSelector = #selector(swizzled_popViewController(animated:))
+
+        guard
+            let originalMethod = class_getInstanceMethod(UINavigationController.self, originalSelector),
+            let swizzledMethod = class_getInstanceMethod(UINavigationController.self, swizzledSelector)
+        else {
+            return
+        }
+
+        method_exchangeImplementations(originalMethod, swizzledMethod)
+    }()
+
+    @objc func swizzled_popViewController(animated: Bool) -> UIViewController? {
+        let poppedVC = swizzled_popViewController(animated: animated)
+        if let topVC = self.topViewController {
+            DataCaptured.actNC = "\(String(describing: type(of: topVC)))"
+            DataCaptured.actVC = ""
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1, execute: {
+                if DataCaptured.actVC.isEmpty {
+                    DataCaptured.sendLogMonitorActivity()
+                }
+            })
+        }
+        return poppedVC
+    }
+}
+
+extension UIApplication {
+    static let swizzleSendAction: Void = {
+        let original = #selector(sendAction(_:to:from:for:))
+        let swizzled = #selector(swizzled_sendAction(_:to:from:for:))
+
+        guard let originalMethod = class_getInstanceMethod(UIApplication.self, original),
+              let swizzledMethod = class_getInstanceMethod(UIApplication.self, swizzled) else { return }
+
+        method_exchangeImplementations(originalMethod, swizzledMethod)
+    }()
+
+    @objc func swizzled_sendAction(_ action: Selector, to target: Any?, from sender: Any?, for event: UIEvent?) -> Bool {
+        if let button = sender as? UIButton {
+            let title = button.titleLabel?.text ?? "Unnamed Button"
+            DataCaptured.action = "CLICKED"
+            DataCaptured.textAction = "\(title)"
+            DispatchQueue.global().async {
+                DataCaptured.sendLogMonitorAction()
+            }
+        }
+        return swizzled_sendAction(action, to: target, from: sender, for: event)
+    }
+
+    static func enableSwizzling() {
+        _ = swizzleSendAction
+    }
+}
+
+class DataCaptured: NSObject {
+    static var actVC = ""
+    static var actNC = ""
+    static var action = ""
+    static var textAction = ""
+    
+    override init() {
+        NotificationCenter.default.addObserver(
+            forName: UITextField.textDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let textField = notification.object as? UITextField {
+                DataCaptured.action = "TEXT_CHANGED"
+                DataCaptured.textAction = textField.text ?? ""
+                DispatchQueue.global().async {
+                    DataCaptured.sendLogMonitorAction()
+                }
+            }
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UITextView.textDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let textView = notification.object as? UITextView {
+                DataCaptured.action = "TEXT_CHANGED"
+                DataCaptured.textAction = textView.text ?? ""
+                DispatchQueue.global().async {
+                    DataCaptured.sendLogMonitorAction()
+                }
+            }
+        }
+    }
+    static func sendLogMonitorAction() {
+        var type = "1"
+        var value = "1"
+        if action == "TEXT_CHANGED" {
+            type = "2"
+            value = textAction
+        }
+        print("sendLogMonitorAction: \(type) <><> \(textAction) <><> \(value)")
+//        _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getLogMonitor(type: type, label: textAction, value: value))
+    }
+    
+    static func sendLogMonitorActivity() {
+        var act = actNC
+        if !actVC.isEmpty {
+            act = actVC
+        }
+        print("sendLogMonitorActivity: \(act)")
+//        _ = Nexilis.write(message: CoreMessage_TMessageBank.getLogActivity(pActivityClassName: act))
+    }
+    
+    static func sendErrorDLP(fileName: String, code: Int) {
+        var data = collectDeviceAttributes()
+        data["security_shield"] = "\(code)"
+        data["filename"] = fileName
+        if let jsonData = try? JSONSerialization.data(withJSONObject: data, options: .prettyPrinted),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            print("sendErrorDLP: \(jsonString)")
+//            _ = Nexilis.write(message: CoreMessage_TMessageBank.getCaptureDLP(data: jsonString))
+        }
+    }
+    
+    private var currentLocation: CLLocation?
+    private static func collectDeviceAttributes() -> [String: Any] {
+        var params: [String: Any] = [:]
+
+        // User and session
+        let me: String? = User.getMyPin() ?? ""
+        let sesId: String? = Utils.getConnectionID()
+        params["f_pin"] = me
+        params["session_id"] = sesId
+
+        // App info (replace with your preferences retrieval)
+        params["api"] = Nexilis.sAPIKey
+        params["app_id"] = APIS.getAppNm()
+        params["lib_version"] = Nexilis.cpaasVersion
+        params["app_version"] = Nexilis.cpaasVersion
+
+        // Network Info
+        let (netType, netTypeName) = getNetworkType()
+        let (operatorCode, operatorName) = getCarrierInfo()
+        let (wifiStatus, wifiIp, wifiSsid, wifiBssid) = getWifiInfo()
+        params["network_type"] = netType
+        params["network_type_name"] = netTypeName
+        params["network_operator"] = operatorCode
+        params["network_operator_name"] = operatorName
+        params["wifi_ssid"] = wifiSsid
+        params["wifi_bssid"] = wifiBssid
+        params["wifi_adapter"] = wifiStatus
+        params["wifi_ip"] = wifiIp
+        
+
+        // IP Address
+        params["ip_addressv4"] = getIPAddress(useIPv4: true)
+        params["ip_address"] = getIPAddress(useIPv4: false)
+
+        // GPS / location
+        let semaphore = DispatchSemaphore(value: 0)
+        
+        DispatchQueue.main.async {
+            LocationFetcher.shared.getCurrentLocation { coordinate in
+                var long = "0"
+                var lat = "0"
+                if let coord = coordinate {
+                    long = "\(coord.longitude)"
+                    lat = "\(coord.latitude)"
+                }
+//                print("Latitude: \(lat), Longitude: \(long)")
+                params["latitude"] = lat
+                params["longitude"] = long
+                semaphore.signal()
+            }
+        }
+        
+        _ = semaphore.wait(timeout: .now() + 10.0)
+
+        // iOS doesn't have an Android ID; use identifierForVendor
+        params["ios_identifier"] = UIDevice.current.identifierForVendor?.uuidString ?? ""
+
+        // Device attributes
+        let device = UIDevice.current
+        params["device_NAME"] = device.name
+        params["device_MODEL"] = device.model
+        params["device_SYSTEM_NAME"] = device.systemName
+        params["device_SYSTEM_VERSION"] = device.systemVersion
+        params["device_IDENTIFIER_FOR_VENDOR"] = device.identifierForVendor?.uuidString ?? ""
+
+        return getSimData(params: params)
+    }
+    
+    private static func getSimData(params: [String: Any] = [:]) -> [String: Any] {
+        var params = params
+        var simArray: [[String: Any]] = []
+
+        let networkInfo = CTTelephonyNetworkInfo()
+
+        if #available(iOS 12.0, *) {
+            if let carriers = networkInfo.serviceSubscriberCellularProviders {
+                for (key, carrier) in carriers {
+                    var simInfo: [String: Any] = [:]
+                    simInfo["carrier_name"] = carrier.carrierName ?? ""
+                    simInfo["mcc"] = carrier.mobileCountryCode ?? ""
+                    simInfo["mnc"] = carrier.mobileNetworkCode ?? ""
+                    simInfo["sim_slot"] = key // This is not a true "slot", but the key used internally
+                    simArray.append(simInfo)
+                }
+            }
+        } else {
+            if let carrier = networkInfo.subscriberCellularProvider {
+                var simInfo: [String: Any] = [:]
+                simInfo["carrier_name"] = carrier.carrierName ?? ""
+                simInfo["mcc"] = carrier.mobileCountryCode ?? ""
+                simInfo["mnc"] = carrier.mobileNetworkCode ?? ""
+                simInfo["sim_slot"] = "default"
+                simArray.append(simInfo)
+            }
+        }
+        params["sim_data"] = simArray
+
+        return params
+    }
+    
+    private static func getNetworkType() -> (type: String, name: String) {
+        let monitor = NWPathMonitor()
+        var networkType = ""
+        var networkTypeName = ""
+        
+        let semaphore = DispatchSemaphore(value: 0)
+        monitor.pathUpdateHandler = { path in
+            if path.usesInterfaceType(.wifi) {
+                networkType = "1" // Corresponds to TYPE_WIFI in Android
+                networkTypeName = "WIFI"
+            } else if path.usesInterfaceType(.cellular) {
+                networkType = "0" // Corresponds to TYPE_MOBILE
+                networkTypeName = "MOBILE"
+            } else {
+                networkType = "-1"
+                networkTypeName = "UNKNOWN"
+            }
+            semaphore.signal()
+            monitor.cancel()
+        }
+        let queue = DispatchQueue(label: "NetworkMonitor")
+        monitor.start(queue: queue)
+        semaphore.wait()
+        
+        return (networkType, networkTypeName)
+    }
+    
+    private static func getCarrierInfo() -> (operatorCode: String, operatorName: String) {
+        let networkInfo = CTTelephonyNetworkInfo()
+        
+        var carrierCode = ""
+        var carrierName = ""
+        
+        if #available(iOS 12.0, *) {
+            if let carriers = networkInfo.serviceSubscriberCellularProviders {
+                for (_, carrier) in carriers {
+                    carrierCode = (carrier.mobileCountryCode ?? "") + (carrier.mobileNetworkCode ?? "")
+                    carrierName = carrier.carrierName ?? ""
+                    break // Just use the first one
+                }
+            }
+        } else {
+            if let carrier = networkInfo.subscriberCellularProvider {
+                carrierCode = (carrier.mobileCountryCode ?? "") + (carrier.mobileNetworkCode ?? "")
+                carrierName = carrier.carrierName ?? ""
+            }
+        }
+        
+        return (carrierCode, carrierName)
+    }
+    
+    private static func getWifiInfo() -> (adapter: String, ip: String, ssid: String, bssid: String) {
+        var adapterStatus = "Off"
+        var ipAddress = ""
+        var ssid = ""
+        var bssid = ""
+        
+        // Get IP Address
+        if let interfaces = CNCopySupportedInterfaces() as NSArray? {
+            for interfaceName in interfaces {
+                if let unsafeInterfaceData = CNCopyCurrentNetworkInfo(interfaceName as! CFString) as NSDictionary? {
+                    ssid = unsafeInterfaceData["SSID"] as? String ?? ""
+                    bssid = unsafeInterfaceData["BSSID"] as? String ?? ""
+                    adapterStatus = "Connected"
+                    break
+                }
+            }
+        }
+        
+        if ssid.isEmpty {
+            adapterStatus = "Not Connected"
+        }
+
+        ipAddress = getWiFiIPAddress() ?? ""
+
+        return (adapterStatus, ipAddress, ssid, bssid)
+    }
+
+    private static func getWiFiIPAddress() -> String? {
+        var address: String?
+
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return nil }
+
+        for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+            let interface = ptr.pointee
+            let addrFamily = interface.ifa_addr.pointee.sa_family
+
+            if addrFamily == UInt8(AF_INET) || addrFamily == UInt8(AF_INET6) {
+                let name = String(cString: interface.ifa_name)
+                if name == "en0" { // en0 is Wi-Fi
+                    var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
+                                &hostname, socklen_t(hostname.count),
+                                nil, socklen_t(0), NI_NUMERICHOST)
+                    address = String(cString: hostname)
+                    break
+                }
+            }
+        }
+
+        freeifaddrs(ifaddr)
+        return address
+    }
+    
+    private static func getIPAddress(useIPv4: Bool) -> String {
+        var address: String = ""
+
+        var ifaddr: UnsafeMutablePointer<ifaddrs>? = nil
+        if getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr {
+            for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+                let interface = ptr.pointee
+                let addrFamily = interface.ifa_addr.pointee.sa_family
+
+                if addrFamily == UInt8(AF_INET) || addrFamily == UInt8(AF_INET6) {
+                    let name = String(cString: interface.ifa_name)
+                    if name == "en0" || name == "pdp_ip0" {
+                        var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                        let result = getnameinfo(
+                            interface.ifa_addr,
+                            socklen_t(interface.ifa_addr.pointee.sa_len),
+                            &hostname,
+                            socklen_t(hostname.count),
+                            nil,
+                            socklen_t(0),
+                            NI_NUMERICHOST
+                        )
+
+                        if result == 0 {
+                            let ip = String(cString: hostname)
+                            let isIPv4 = ip.contains(":") == false
+                            if useIPv4 && isIPv4 {
+                                address = ip
+                                break
+                            } else if !useIPv4 && !isIPv4 {
+                                // Remove IPv6 scope if present
+                                let cleanIPv6 = ip.split(separator: "%").first.map(String.init) ?? ip
+                                address = cleanIPv6.uppercased()
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+            freeifaddrs(ifaddr)
+        }
+
+        return address
+    }
+}
+
+private class LocationFetcher: NSObject, CLLocationManagerDelegate {
+    static var shared = LocationFetcher()
+    private var manager: CLLocationManager?
+    private var completion: ((CLLocationCoordinate2D?) -> Void)?
+    
+    func getCurrentLocation(completion: @escaping (CLLocationCoordinate2D?) -> Void) {
+        self.completion = completion
+        self.manager = CLLocationManager()
+        self.manager?.delegate = self
+        self.manager?.desiredAccuracy = kCLLocationAccuracyBest
+        self.manager?.requestWhenInUseAuthorization()
+        
+        if CLLocationManager.locationServicesEnabled() {
+            self.manager?.requestLocation()
+        } else {
+            completion(nil)
+        }
+    }
+    
+    // MARK: - CLLocationManagerDelegate
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        completion?(locations.last?.coordinate)
+        cleanup()
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("Error: \(error.localizedDescription)")
+        completion?(nil)
+        cleanup()
+    }
+    
+    private func cleanup() {
+        manager?.stopUpdatingLocation()
+        manager?.delegate = nil
+        manager = nil
+        completion = nil
+    }
+}
+
+
