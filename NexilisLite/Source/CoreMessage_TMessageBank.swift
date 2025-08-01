@@ -2842,4 +2842,20 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func getMFAValidation(data: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        tMessage.mPIN = data
+        tMessage.mCode = CoreMessage_TMessageCode.DEMO_FIDO
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        return tMessage
+    }
+    
+    public static func getAuthRequest(data: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        tMessage.mPIN = data
+        tMessage.mCode = CoreMessage_TMessageCode.AUTH_REQUEST
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        return tMessage
+    }
+    
 }

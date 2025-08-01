@@ -2552,6 +2552,10 @@ public class Nexilis: NSObject {
     
     weak open var connectionDelegate: ConnectionDelegate?
     
+    weak open var mfaDelegate: MFADelegate?
+    
+    weak open var authDelegate: AuthenticationDelegate?
+    
     var floating: FloatingNotificationBanner!
     
     var stateUnfriend = ""

@@ -514,4 +514,6 @@ public class CoreMessage_TMessageKey {
     public static let ACT_VALUE = "ACTV";
     public static let ACT_TYPE = "ACTT";
     public static let ACT_TIME = "ACTMS";
+    
+    public static let TOTP = "TOTP";
 }

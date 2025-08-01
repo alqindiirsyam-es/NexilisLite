@@ -511,6 +511,47 @@ public class APIS: NSObject {
         }
     }
     
+    public static func openMFA(method: String, flag: Int){
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        if flag == MFAViewController.STEP_NEEDED_FIDO {
+            if let me = User.getMyPin() {
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getMFAValidation(data: me)) {
+                    if response.isOk() {
+                        UIApplication.shared.visibleViewController?.view.makeToast("Action Successful".localized(), duration: 3)
+                    }
+                    else {
+                        UIApplication.shared.visibleViewController?.view.makeToast(response.mBodies[CoreMessage_TMessageKey.MESSAGE_TEXT], duration: 3)
+                    }
+                }
+            }
+            
+        }
+        else if flag == MFAViewController.STEP_NEEDED_FINGER {
+            let controller = MFAOnlyBiometricViewController()
+            let navigationController = CustomNavigationController(rootViewController: controller)
+            navigationController.defaultStyle()
+            if UIApplication.shared.visibleViewController?.navigationController != nil {
+                UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+            } else {
+                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+            }
+        }
+        else {
+            let controller = MFAViewController()
+            let navigationController = CustomNavigationController(rootViewController: controller)
+            navigationController.defaultStyle()
+            if UIApplication.shared.visibleViewController?.navigationController != nil {
+                UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+            } else {
+                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+            }
+        }
+    }
+    
     public static func openSecureBrowser() {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
@@ -2414,6 +2455,9 @@ public class APIS: NSObject {
     public static func getnameGroupShared() -> String {
         return nameGroupShared
     }
+    
+    
+    
 }
 
 extension UINavigationController {

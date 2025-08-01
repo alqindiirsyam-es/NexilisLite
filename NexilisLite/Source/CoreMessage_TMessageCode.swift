@@ -828,5 +828,8 @@ public class CoreMessage_TMessageCode {
     public static let CHANGE_COMMUNITY_INFO = "CM11";
     public static let REPORT_COMMUNITY = "CM12";
     public static let CHANGE_COMMUNITY_POSITION = "CM13";
+    
+    public static let GET_MULTI_FACTOR_AUTHENTICATION = "GMFA";
+    public static let DEMO_FIDO = "DF01";
 
 }
