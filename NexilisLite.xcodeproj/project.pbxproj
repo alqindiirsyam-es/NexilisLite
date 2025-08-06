@@ -245,6 +245,9 @@
 		CD9551692A664BDB00AF6476 /* Poppins-SemiBoldItalic.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD9551332A664BD400AF6476 /* Poppins-SemiBoldItalic.otf */; };
 		CD95516A2A664BDB00AF6476 /* Poppins-BoldItalic.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD95513A2A664BD400AF6476 /* Poppins-BoldItalic.otf */; };
 		CD95516B2A664BDB00AF6476 /* Poppins-ExtraLightItalic.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD9551382A664BD400AF6476 /* Poppins-ExtraLightItalic.otf */; };
+		CD962CFD2E420B5300A7BDA5 /* TOTPGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD962CFC2E420B5300A7BDA5 /* TOTPGenerator.swift */; };
+		CD962CFE2E420B5300A7BDA5 /* MFAViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD962CFB2E420B5300A7BDA5 /* MFAViewController.swift */; };
+		CD962CFF2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD962CFA2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift */; };
 		CD9829B72A3C07CB009F6743 /* SeminarListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD9829B62A3C07CB009F6743 /* SeminarListViewController.swift */; };
 		CDA461222AB99E09001CD010 /* ConfigureFloatingButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA461212AB99E09001CD010 /* ConfigureFloatingButton.swift */; };
 		CDB21B2E2BA9998400EC5280 /* pb_def_icon_mode2.gif in Resources */ = {isa = PBXBuildFile; fileRef = CDB21B2B2BA9998400EC5280 /* pb_def_icon_mode2.gif */; };
@@ -535,6 +538,9 @@
 		CD9551432A664BD400AF6476 /* Poppins-BlackItalic.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-BlackItalic.otf"; sourceTree = "<group>"; };
 		CD9551442A664BD400AF6476 /* Poppins-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-Regular.otf"; sourceTree = "<group>"; };
 		CD9551452A664BD400AF6476 /* Poppins-ExtraBold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-ExtraBold.otf"; sourceTree = "<group>"; };
+		CD962CFA2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFABiometricOnlyViewController.swift; sourceTree = "<group>"; };
+		CD962CFB2E420B5300A7BDA5 /* MFAViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFAViewController.swift; sourceTree = "<group>"; };
+		CD962CFC2E420B5300A7BDA5 /* TOTPGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOTPGenerator.swift; sourceTree = "<group>"; };
 		CD9829B62A3C07CB009F6743 /* SeminarListViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SeminarListViewController.swift; sourceTree = "<group>"; };
 		CDA461212AB99E09001CD010 /* ConfigureFloatingButton.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ConfigureFloatingButton.swift; sourceTree = "<group>"; };
 		CDB21B2B2BA9998400EC5280 /* pb_def_icon_mode2.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = pb_def_icon_mode2.gif; sourceTree = "<group>"; };
@@ -794,8 +800,6 @@
 		CD1E71892A0BA86100BF871F /* Control */ = {
 			isa = PBXGroup;
 			children = (
-				CD21CA582E0AA0A200DA6B77 /* SignInOption.swift */,
-				1258BCB52D82D71200EFF5BD /* ChatWallpaperViewController.swift */,
 				CD1E71AB2A0BA86100BF871F /* AddFriendTableViewController.swift */,
 				CD1E71AD2A0BA86100BF871F /* AudienceViewController.swift */,
 				CD1E719B2A0BA86100BF871F /* BackupRestoreOption.swift */,
@@ -809,6 +813,7 @@
 				CD1E71922A0BA86100BF871F /* ChangeNamePassswordViewController.swift */,
 				CD1E719D2A0BA86100BF871F /* ChangeNameTableViewController.swift */,
 				CD1E71962A0BA86100BF871F /* ChangePasswordViewController.swift */,
+				1258BCB52D82D71200EFF5BD /* ChatWallpaperViewController.swift */,
 				CD1E718F2A0BA86100BF871F /* CheckConnection.swift */,
 				CDA461212AB99E09001CD010 /* ConfigureFloatingButton.swift */,
 				CD1E71932A0BA86100BF871F /* ContactChatViewController.swift */,
@@ -822,6 +827,8 @@
 				CD1E718E2A0BA86100BF871F /* HistoryBroadcastViewController.swift */,
 				CD1E719C2A0BA86100BF871F /* HistoryCCViewController.swift */,
 				CD1E71A42A0BA86100BF871F /* ImageVideoPicker.swift */,
+				CD962CFA2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift */,
+				CD962CFB2E420B5300A7BDA5 /* MFAViewController.swift */,
 				CD1E719E2A0BA86100BF871F /* NotificationSound.swift */,
 				CD1E71A62A0BA86100BF871F /* ProfileViewController.swift */,
 				CD2B01222D43961E00C11B20 /* QRProfileController.swift */,
@@ -831,7 +838,9 @@
 				CD1E71A12A0BA86100BF871F /* SetInternalCSAccount.swift */,
 				CD1E71AA2A0BA86100BF871F /* SetOfficerBNI.swift */,
 				CD1E71992A0BA86100BF871F /* SettingTableViewController.swift */,
+				CD21CA582E0AA0A200DA6B77 /* SignInOption.swift */,
 				CD1E71902A0BA86100BF871F /* SignUpSignIn.swift */,
+				CD962CFC2E420B5300A7BDA5 /* TOTPGenerator.swift */,
 				CD1E719F2A0BA86100BF871F /* TypeViewController.swift */,
 				CD1E71A02A0BA86100BF871F /* VerifyEmail.swift */,
 			);
@@ -1432,6 +1441,9 @@
 				CD5A73AF2A77642D000541A5 /* ListGroupImages.swift in Sources */,
 				CD1E720F2A0BA86100BF871F /* Download.swift in Sources */,
 				CD1E725D2A0BA86100BF871F /* WhiteboardDelegate.swift in Sources */,
+				CD962CFD2E420B5300A7BDA5 /* TOTPGenerator.swift in Sources */,
+				CD962CFE2E420B5300A7BDA5 /* MFAViewController.swift in Sources */,
+				CD962CFF2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift in Sources */,
 				CD1E721B2A0BA86100BF871F /* Nexilis.swift in Sources */,
 				CD1E72102A0BA86100BF871F /* Extension.swift in Sources */,
 				CD1E724C2A0BA86100BF871F /* NotificationSound.swift in Sources */,

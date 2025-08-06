@@ -805,7 +805,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                        handler:@escaping (_ exportSession: AVAssetExportSession?) -> Void) {
         let urlAsset = AVURLAsset(url: inputURL, options: nil)
         guard let exportSession = AVAssetExportSession(asset: urlAsset,
-                                                       presetName: AVAssetExportPresetMediumQuality) else {
+                                                       presetName: AVAssetExportPresetHighestQuality) else {
             handler(nil)
             
             return

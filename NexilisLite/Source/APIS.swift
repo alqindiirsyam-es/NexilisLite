@@ -18,9 +18,9 @@ import Intents
 public class APIS: NSObject {
     private static var isAlertPresented = false
     private static var transitioningDelegateRef: ZoomTransitioningDelegate?
-    public static func connect(appName: String, apiKey: String, delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
+    public static func connect(appName: String, apiKey: String, userName: String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
-        Nexilis.connect(apiKey: apiKey, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
+        Nexilis.connect(apiKey: apiKey, userId: userName, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
     }
     
     public static func getTotalCounter() -> Int32 {
@@ -197,7 +197,7 @@ public class APIS: NSObject {
         }
     }
     
-    public static func openChat() {
+    public static func openChat(withoutUCList: Bool = false) {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -206,7 +206,7 @@ public class APIS: NSObject {
         let navigationController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactChatNav") as! UINavigationController
         Utils.addBackground(view: navigationController.view)
         let vc = navigationController.topViewController as! ContactChatViewController
-        vc.noUCList = true
+        vc.noUCList = withoutUCList
         navigationController.defaultStyle()
         if UIApplication.shared.visibleViewController?.navigationController != nil {
             UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
@@ -973,6 +973,64 @@ public class APIS: NSObject {
         } else {
             UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
         }
+    }
+    
+    public static func logOut() {
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        Nexilis.destroyAll()
+        _ = Nexilis.write(message: CoreMessage_TMessageBank.getLogout())
+    }
+    
+    public static func openPPOB() {
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        let idx = Nexilis.IDX_PPOB
+        let url = getURLFB(idx: idx)
+        print("HUHU: \(idx) <><> \(url)")
+        Nexilis.buttonClicked(index: idx, id: url)
+    }
+    
+    public static func openSocialCommerce() {
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        let idx = Nexilis.IDX_SOCIAL_COMMERCE
+        let url = getURLFB(idx: idx)
+        Nexilis.buttonClicked(index: idx, id: url)
+    }
+    
+    private static func getURLFB(idx: Int) -> String {
+        let data = Utils.getHistoryPullFB()
+        if !data.isEmpty {
+            if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                let filteredData = jsonArray.filter({
+                    let package_id = ($0["package_id"] as! String)
+                    if package_id.contains("_fb") {
+                        let listSplit = package_id.split(separator: "_", maxSplits: 2)
+                        let numIdx = listSplit[listSplit.firstIndex(where: { $0.contains("fb") }) ?? 0]
+                        let indexTap = Int(String(numIdx).substring(from: 2, to: numIdx.count)) ?? 0
+                        return indexTap == idx
+                    }
+                    return package_id.isEmpty
+                })
+                if filteredData.count != 0 {
+                    let data = filteredData[0] as? [String: Any]
+                    let package_id = data?["package_id"] as! String
+                    let listSplit = package_id.split(separator: "_", maxSplits: 2)
+                    return String(listSplit[2])
+                }
+            }
+        }
+        return ""
     }
     
     public static func sendSMS(phoneNumber: String, message: String = ""){

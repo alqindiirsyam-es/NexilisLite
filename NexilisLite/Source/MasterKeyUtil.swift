@@ -110,12 +110,18 @@ public class MasterKeyUtil {
 
                 if !result {
                     DispatchQueue.main.async {
-                        Utils.showAlert(
-                            title: "Failed to get Master Key".localized(),
-                            message: "Biometric authentication hasn't been set up/Biometric invalid.".localized()
-                        )
+//                        self.showAlert(
+//                            title: "Failed to get Master Key".localized(),
+//                            message: "Biometric authentication hasn't been set up/Biometric invalid.".localized()
+//                        )
+                        let alertController = UIAlertController(title: "Failed to Verify Identity".localized(), message: "Biometric authentication hasn't been set up/Biometric invalid.".localized(), preferredStyle: .alert)
+                        alertController.addAction(UIAlertAction(title: "OK", style: .default, handler: {(_) in
+                            semaphore.signal()
+                        }))
+                        UIApplication.shared.visibleViewController?.present(alertController, animated: true)
                     }
                     thrownError = NSError(domain: "KeychainError", code: -99, userInfo: nil)
+                    semaphore.wait()
                     return
                 }
             }
@@ -150,6 +156,16 @@ public class MasterKeyUtil {
         }
 
         return key
+    }
+    
+    private func showAlert(title: String, message: String) {
+        let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alertController.addAction(UIAlertAction(title: "OK", style: .default, handler: {(_) in
+            if Database.shared.database == nil {
+                exit(979)
+            }
+        }))
+        UIApplication.shared.visibleViewController?.present(alertController, animated: true)
     }
     
     func getPrefsKey() throws -> SymmetricKey {

@@ -32,6 +32,19 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
+    public static func getSignInApi(api: String, p_pin: String, name: String) -> TMessage {
+        let tmessage = TMessage()
+        tmessage.mCode = CoreMessage_TMessageCode.SEND_SIGNIN
+        tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tmessage.mBodies[CoreMessage_TMessageKey.NAME] = name
+        tmessage.mBodies[CoreMessage_TMessageKey.API] = api
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
+        tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
+        tmessage.mPIN = p_pin
+        return tmessage
+    }
+    
     public static func getSignIn(p_name: String, p_password: String) -> TMessage {
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.SEND_SIGNIN
@@ -2854,6 +2867,15 @@ public class CoreMessage_TMessageBank {
         let tMessage = NexilisLite.TMessage()
         tMessage.mPIN = data
         tMessage.mCode = CoreMessage_TMessageCode.AUTH_REQUEST
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        return tMessage
+    }
+    
+    public static func getLogout() -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.LOGOUT
         tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
         return tMessage
     }

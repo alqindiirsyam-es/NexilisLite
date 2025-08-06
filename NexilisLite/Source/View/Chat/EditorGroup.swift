@@ -7121,7 +7121,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         let fileManager = FileManager.default
                         let tempURL = fileManager.temporaryDirectory.appendingPathComponent(sender.labelFile.text ?? "")
                         do {
-                            try fileManager.copyItem(at: urlFile, to: tempURL)
+                            if !fileManager.fileExists(atPath: tempURL.path) {
+                                try fileManager.copyItem(at: urlFile, to: tempURL)
+                            }
                             let activityViewController = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
                             activityViewController.popoverPresentationController?.sourceView = vcHandleFile.view
                             vcHandleFile.present(activityViewController, animated: true, completion: nil)

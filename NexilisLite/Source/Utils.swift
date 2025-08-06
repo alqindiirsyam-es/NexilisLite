@@ -1572,16 +1572,6 @@ public final class Utils {
             completion(false, "Biometric authentication is not available")
         }
     }
-    
-    static func showAlert(title: String, message: String) {
-        let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alertController.addAction(UIAlertAction(title: "OK", style: .default, handler: {(_) in
-            if Database.shared.database == nil {
-                exit(979)
-            }
-        }))
-        UIApplication.shared.visibleViewController?.present(alertController, animated: true)
-    }
 }
 public extension UIImage {
     var jpeg: Data? { jpegData(compressionQuality: 1) }  // QUALITY min = 0 / max = 1

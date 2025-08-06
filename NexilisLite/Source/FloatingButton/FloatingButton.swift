@@ -666,11 +666,11 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         var app_id = sender.accessibilityIdentifier!
         var indexTap = 0
         if package_id.contains("_fb"){
-            let listSplit = package_id.split(separator: "_", maxSplits: 1)
+            let listSplit = package_id.split(separator: "_", maxSplits: 2)
             let numIdx = listSplit[listSplit.firstIndex(where: { $0.contains("fb") }) ?? 0]
-            indexTap = Int(String(numIdx).substring(from: 2, to: numIdx.count))!
-            if listSplit.count == 2 {
-                app_id = String(listSplit[1])
+            indexTap = Int(String(numIdx).substring(from: 2, to: numIdx.count)) ?? 0
+            if listSplit.count == 3 {
+                app_id = String(listSplit[2])
             }
         }
         Nexilis.buttonClicked(index: indexTap, id: app_id)

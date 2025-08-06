@@ -131,6 +131,8 @@ public class Nexilis: NSObject {
     private static var ringbacktonePlayer: AVAudioPlayer?
     private static var busyPlayer: AVAudioPlayer?
     static var sharedAudioPlayer: AVAudioPlayer?
+    
+    private static var iRetryCheckSignInSignUp = 0
 //    static var firstCall = true
     
     private func createDelegate() {
@@ -141,7 +143,7 @@ public class Nexilis: NSObject {
         personInfoDelegate = self
     }
     
-    public static func connect(apiKey: String, delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
+    public static func connect(apiKey: String, userId:String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         showFB = showButton
         Nexilis.fromMAB = fromMAB
         
@@ -217,7 +219,7 @@ public class Nexilis: NSObject {
                 Nexilis.PORT = Int(address.components(separatedBy: ":")[1]) ?? 0
                 if id.isEmpty {
                     let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
-                    id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...])
+                    id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...]) + "\(Date().currentTimeMillis())"
                     Utils.setConnectionID(value: id)
                 }
                 try API.initConnection(sAPIK: apiKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
@@ -225,13 +227,63 @@ public class Nexilis: NSObject {
                     Thread.sleep(forTimeInterval: 0.5)
                 }
                 if(User.getMyPin() == nil) {
-                    if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpApi(api: apiKey, p_pin: id), timeout: 30 * 1000){
-                        id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
-                        let enable_signup = (response.getBody(key: CoreMessage_TMessageKey.IS_ENABLED_ANONYMOUS, default_value: "0")) == "1"
-                        Utils.setForceAnonymous(value: enable_signup)
-                        if(!id.isEmpty) {
-                            SecureUserDefaults.shared.set(id, forKey: "me")
+                    iRetryCheckSignInSignUp = 0
+                    let maxWaitTime: TimeInterval = 60 * 60 // 1 hour in seconds
+                    let t0 = Date().currentTimeMillis()
+                    
+                    do {
+                        while iRetryCheckSignInSignUp <= 30 || Date().currentTimeMillis() - t0 <= Int(maxWaitTime) {
+                            var tmessage = CoreMessage_TMessageBank.getSignUpApi(api: apiKey, p_pin: id)
+                            if !userId.isEmpty {
+                                tmessage = CoreMessage_TMessageBank.getSignInApi(api: apiKey, p_pin: id, name: userId)
+                            }
+                            if let response = Nexilis.writeSync(message: tmessage, timeout: 30 * 1000) {
+                                if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "11" {
+                                    let message = "94:Unregistered user"
+                                    delegate.onFailed(error: message)
+                                    sendStateToServer(s: message)
+                                    print("checkSignInSignUp sleep 30s before retrying send to server..")
+                                    Thread.sleep(forTimeInterval: 30)
+                                } else if !response.isOk() {
+                                    let message = "99:Something went wrong. Invalid response, please check your connection.."
+                                    delegate.onFailed(error: message)
+                                    sendStateToServer(s: message)
+                                    print("checkSignInSignUp sleep 30s before retrying send to server..")
+                                    Thread.sleep(forTimeInterval: 30)
+                                } else {
+                                    SecureUserDefaults.shared.set(id, forKey: "device_id")
+                                    id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
+                                    var enable_signup = (response.getBody(key: CoreMessage_TMessageKey.IS_ENABLED_ANONYMOUS, default_value: "0")) == "1"
+                                    if !enable_signup && !userId.isEmpty {
+                                        enable_signup = true
+                                        Utils.setProfile(value: true)
+                                    }
+                                    Utils.setForceAnonymous(value: enable_signup)
+                                    if(!id.isEmpty) {
+                                        SecureUserDefaults.shared.set(id, forKey: "me")
+                                    }
+                                    break
+                                }
+                            } else {
+                                iRetryCheckSignInSignUp += 1
+
+                                if iRetryCheckSignInSignUp >= 30 {
+                                    let message: String
+                                    if !userId.isEmpty {
+                                        message = "99:Something went wrong while Sign-In. Please check your connection.."
+                                    } else {
+                                        message = "99:Something went wrong while Sign-Up. Please check your connection.."
+                                    }
+                                    delegate.onFailed(error: message)
+                                    sendStateToServer(s: message)
+                                }
+
+                                print("checkSignInSignUp sleep 30s before retrying send to server..")
+                                Thread.sleep(forTimeInterval: 30)
+                            }
                         }
+                    } catch {
+                        print("checkSignInSignUp error: \(error.localizedDescription)")
                     }
                 }
 
@@ -246,7 +298,10 @@ public class Nexilis: NSObject {
                 
                 if let me = User.getMyPin() {
                     if Utils.getSetProfile() {
-                        if Utils.getSecureFolderOffline() != "0" {
+                        if Utils.getSecureFolderOffline() != "0" || !userId.isEmpty {
+                            while FileEncryption.shared.aesKey == nil {
+                                Thread.sleep(forTimeInterval: 1)
+                            }
                             _ = Database.shared.openDatabase()
                         }
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -502,7 +557,7 @@ public class Nexilis: NSObject {
                 "state": s
             ]
             Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "logging")!, parameter: parameter) { data, response, error in
-                print("\(response)")
+//                print("\(response)")
             }
         }
     }
