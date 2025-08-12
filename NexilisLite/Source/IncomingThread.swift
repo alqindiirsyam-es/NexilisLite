@@ -262,10 +262,12 @@ class IncomingThread {
         if let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID] {
             _ = Nexilis.responseString(packetId: packetId, message: "00", timeout: 3000)
         }
-        UIApplication.shared.visibleViewController?.deleteAllRecordDatabase()
-        Nexilis.floatingButton.removeFromSuperview()
-        SecureUserDefaults.shared.removeValue(forKey: "me")
-        Utils.setProfile(value: false)
+        DispatchQueue.main.async {
+            UIApplication.shared.visibleViewController?.deleteAllRecordDatabase()
+            Nexilis.floatingButton.removeFromSuperview()
+            SecureUserDefaults.shared.removeValue(forKey: "me")
+            Utils.setProfile(value: false)
+        }
         ack(message: message)
     }
     

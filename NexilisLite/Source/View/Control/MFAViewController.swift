@@ -9,27 +9,17 @@ import UIKit
 import Foundation
 import os
 import LocalAuthentication
+import nuSDKService
 
 // MARK: - MFA Class
 class MFAViewController: UIViewController {
-
-    // MARK: - Constants & Variables
-    private let TAG = "MFA"
-
-    // Step definitions mirroring the Java code
     static let STEP_NEEDED_FIDO = 1
     static let STEP_NEEDED_FIDO_PWD = 2
-    static let STEP_NEEDED_FIDO_PWD_FINGER = 3
-    static let STEP_NEEDED_FINGER = 4
+    static let STEP_NEEDED_FIDO_PWD_BIOMETRIC = 3
     
-    // Properties to be set on initialization
     var STEP_NEEDED = STEP_NEEDED_FIDO_PWD
     var METHOD = ""
-    
-    private var mfaState = "open"
-    private var challengeString = ""
 
-    // MARK: - UI Components
     private let imageViewBackground = UIImageView()
     private let scrollView = UIScrollView()
     private let mainStackView = UIStackView()
@@ -39,29 +29,70 @@ class MFAViewController: UIViewController {
     private let subtitleLabel = UILabel()
     private let passwordTextField = UITextField()
     private let passwordVisibilityButton = UIButton(type: .system)
-    private let submitButton = UIButton(type: .system)
     private let poweredStackView = UIStackView()
     private let poweredLabel = UILabel()
     private let poweredImageView = UIImageView()
 
     private var isPasswordVisible = false
 
-    // MARK: - Lifecycle Methods
     override func viewDidLoad() {
         super.viewDidLoad()
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Submit".localized(), style: .plain, target: self, action: #selector(submitAction))
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        tapGesture.cancelsTouchesInView = false
+        self.view.addGestureRecognizer(tapGesture)
         setupUI()
         setupLayout()
         loadData()
         updateUIBasedOnMethod()
-        updateUIBasedOnMode()
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        let attributes = [NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 16.0), NSAttributedString.Key.foregroundColor: UIColor.white]
+        let navBarAppearance = UINavigationBarAppearance()
+        navBarAppearance.configureWithOpaqueBackground()
+        navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
+        navBarAppearance.titleTextAttributes = attributes
+        navigationController?.navigationBar.standardAppearance = navBarAppearance
+        navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow),
+                                                   name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide),
+                                                   name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+    
+    @objc private func keyboardWillShow(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        
+        let keyboardHeight = keyboardFrame.height
+        let bottomInset = keyboardHeight - view.safeAreaInsets.bottom
+        scrollView.contentInset.bottom = bottomInset - 20
+        scrollView.verticalScrollIndicatorInsets.bottom = bottomInset - 20
+        
+        // ✅ Scroll password field above keyboard
+        let passwordFrameInScroll = scrollView.convert(passwordTextField.frame, from: passwordTextField.superview)
+        scrollView.scrollRectToVisible(passwordFrameInScroll, animated: true)
     }
 
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        // Notify delegate if the view is closed prematurely
-        if mfaState == "open" {
-            Nexilis.shared.mfaDelegate?.onFailed(error: "back")
-        }
+    @objc private func keyboardWillHide(notification: Notification) {
+        scrollView.contentInset = .zero
+        scrollView.verticalScrollIndicatorInsets = .zero
+    }
+    
+    @objc func cancel(sender: Any) {
+        navigationController?.dismiss(animated: true, completion: nil)
+    }
+    
+    @objc func dismissKeyboard() {
+        passwordTextField.resignFirstResponder()
     }
 
     // MARK: - UI Setup
@@ -87,24 +118,24 @@ class MFAViewController: UIViewController {
 
         // Header Images
         headerImageView1.contentMode = .scaleAspectFit
-        headerImageView1.image = UIImage(named: "pb_mfa_bjb")
+        headerImageView1.image = UIImage(named: "pb_mfa_bjb", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
         headerImageView1.heightAnchor.constraint(equalToConstant: 100).isActive = true
         mainStackView.addArrangedSubview(headerImageView1)
 
         headerImageView2.contentMode = .scaleAspectFit
-        headerImageView2.image = UIImage(named: "pb_mfa_splash")
+        headerImageView2.image = UIImage(named: "pb_mfa_splash", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
         headerImageView2.heightAnchor.constraint(equalToConstant: 200).isActive = true
         mainStackView.addArrangedSubview(headerImageView2)
 
         // Header Title Label
-        headerTitleLabel.font = UIFont(name: "Poppins-Bold", size: 17)
+        headerTitleLabel.font = .boldSystemFont(ofSize: 17)
         headerTitleLabel.textAlignment = .center
         headerTitleLabel.numberOfLines = 0
         mainStackView.addArrangedSubview(headerTitleLabel)
 
         // Subtitle Label
         subtitleLabel.text = "Please input your password to continue"
-        subtitleLabel.font = UIFont(name: "Poppins-Regular", size: 12)
+        subtitleLabel.font = .systemFont(ofSize: 12)
         subtitleLabel.textAlignment = .center
         subtitleLabel.numberOfLines = 0
         mainStackView.addArrangedSubview(subtitleLabel)
@@ -119,7 +150,7 @@ class MFAViewController: UIViewController {
         // Password Text Field
         passwordTextField.placeholder = "Type your password..."
         passwordTextField.isSecureTextEntry = true
-        passwordTextField.font = UIFont(name: "Poppins-Regular", size: 15)
+        passwordTextField.font = .systemFont(ofSize: 15)
         passwordTextField.borderStyle = .roundedRect
         passwordTextField.keyboardType = .default
         passwordTextField.autocapitalizationType = .none
@@ -131,18 +162,8 @@ class MFAViewController: UIViewController {
         passwordVisibilityButton.setImage(UIImage(systemName: "eye.slash.fill"), for: .normal)
         passwordVisibilityButton.addTarget(self, action: #selector(togglePasswordVisibility), for: .touchUpInside)
         passwordVisibilityButton.translatesAutoresizingMaskIntoConstraints = false
+        passwordVisibilityButton.tintColor = .black
         passwordContainerView.addSubview(passwordVisibilityButton)
-        
-        // Submit Button
-        submitButton.setTitle("SUBMIT", for: .normal)
-        submitButton.backgroundColor = UIColor(hex: "#14507f")
-        submitButton.setTitleColor(.white, for: .normal)
-        submitButton.layer.cornerRadius = 24
-        submitButton.titleLabel?.font = UIFont(name: "Poppins-Regular", size: 16)
-        submitButton.addTarget(self, action: #selector(submitAction), for: .touchUpInside)
-        submitButton.heightAnchor.constraint(equalToConstant: 48).isActive = true
-        submitButton.widthAnchor.constraint(equalToConstant: 300).isActive = true
-        mainStackView.addArrangedSubview(submitButton)
         
         mainStackView.setCustomSpacing(12, after: subtitleLabel)
         mainStackView.setCustomSpacing(24, after: passwordContainerView)
@@ -168,7 +189,7 @@ class MFAViewController: UIViewController {
     private func setupLayout() {
         NSLayoutConstraint.activate([
             // Background
-            imageViewBackground.topAnchor.constraint(equalTo: view.topAnchor),
+            imageViewBackground.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             imageViewBackground.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             imageViewBackground.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             imageViewBackground.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -206,21 +227,10 @@ class MFAViewController: UIViewController {
     
     // MARK: - Data & Logic
     private func loadData() {
-        // Fetch and apply "Powered By" text from shared configuration
         let poweredText = "Nexilis"
         if !poweredText.isEmpty {
             poweredLabel.text = "Powered by \(poweredText)"
         }
-        
-        setBackground()
-    }
-    
-    private func randomizeBackground(from list: String) {
-        
-    }
-
-    private func setBackground() {
-
     }
     
     // MARK: - Actions
@@ -232,235 +242,231 @@ class MFAViewController: UIViewController {
     }
 
     @objc private func submitAction() {
-        // Check for network connectivity
-//        if Nexilis.shared.getNetworkState() != 1 {
-//            self.showToast(message: "Connection failed. Please check your network.")
-//            return
-//        }
-//        
+        if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
+            self.view.makeToast("Check your connection".localized(), duration: 2.0, position: .center)
+            return
+        }
         guard let password = passwordTextField.text, !password.trimmingCharacters(in: .whitespaces).isEmpty else {
-            self.showToast(message: "Password cannot be empty.")
+            self.view.makeToast("Password cannot be empty.".localized(), duration: 2.0, position: .center)
             return
         }
 
         guard password.count >= 6 else {
-            self.showToast(message: "Password must be at least 6 characters.")
+            self.view.makeToast("Password must be at least 6 characters.".localized(), duration: 2.0, position: .center)
             return
         }
 
-        if STEP_NEEDED == MFAViewController.STEP_NEEDED_FIDO_PWD_FINGER {
-            biometricAuth()
-        } else {
-            submit()
-        }
+        submit()
     }
 
     private func submit() {
         guard let password = passwordTextField.text else { return }
-        self.showToast(message: "Please wait...", duration: 2.0)
+        Nexilis.showLoader()
         
         DispatchQueue.global().async {
-            // 1. Encrypt password
-            let encryptedPwd = password
-            
-            // 2. Create message for the server
-            var tMessage = TMessage()
-            tMessage.mBodies[CoreMessage_TMessageKey.PSWD] = encryptedPwd
-            tMessage.mBodies[CoreMessage_TMessageKey.ACTVITY] =  self.METHOD
-            
-            // 3. Add FIDO and TOTP data to the message
-            self.getFIDO(tMessage: &tMessage)
             do {
-                let totp = try TOTPGenerator.generate(base32Secret: "JBSWY3DPEHPK3PXP", digits: 6, timeStepSeconds: 30)
-                tMessage.mBodies[CoreMessage_TMessageKey.TOTP] = totp
-            } catch {
-                os_log("Failed to generate TOTP: %{public}@", log: .default, type: .error, error.localizedDescription)
-            }
-
-            // 4. Send the message and wait for a response
-            if let response = Nexilis.writeAndWait(message: tMessage) {
-                DispatchQueue.main.async {
-//                    guard let response = response else {
-//                        self.showToast(message: "Connection failed.")
-//                        Nexilis.shared.mfaDelegate?.onFailed(error: "Connection failed.")
-//                        self.dismiss(animated: true)
-//                        return
-//                    }
-                    
+                // 1. Encrypt password
+                let encryptedPwd = password
+                
+                // 2. Create message for the server
+                let me = User.getMyPin() ?? ""
+                let tMessage = CoreMessage_TMessageBank.getMFAValidation(data: me)
+                tMessage.mBodies[CoreMessage_TMessageKey.PSWD] = encryptedPwd
+                tMessage.mBodies[CoreMessage_TMessageKey.ACTVITY] = self.METHOD
+                var hasKey = false
+                if !KeyManagerNexilis.hasGeneratedKey() {
+                    KeyManagerNexilis.generateKey()
+                    KeyManagerNexilis.saveMarker()
+                } else {
+                    hasKey = true
+                }
+                guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: false) else {
+                    KeyManagerNexilis.deleteKey()
+                    KeyManagerNexilis.deleteMarker()
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader {
+                            let errorMessage = "Failed to get Private Key"
+                            let dialog = DialogErrorMFA()
+                            dialog.modalTransitionStyle = .crossDissolve
+                            dialog.modalPresentationStyle = .overCurrentContext
+                            dialog.errorDesc = errorMessage
+                            dialog.method = self.METHOD
+                            dialog.isDismiss = { res in
+                                if res == 0 {
+                                    self.navigationController?.dismiss(animated: true, completion: {
+                                        APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                    })
+                                }
+                            }
+                            UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                        }
+                    }
+                    return
+                }
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
                     if response.isOk() {
-                        self.mfaState = "success"
-                        self.showToast(message: "Success!")
-                        Nexilis.shared.mfaDelegate?.onSuccess()
-                        self.dismiss(animated: true)
-                    } else {
-                        self.mfaState = "failed"
-                        let errorMessage = response.mBodies[CoreMessage_TMessageKey.MESSAGE_TEXT] ?? "An unknown error occurred."
-                        self.showToast(message: errorMessage)
-                        Nexilis.shared.mfaDelegate?.onFailed(error: errorMessage)
-                        self.dismiss(animated: true)
+                        let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
+                        if data.isEmpty {
+                            DispatchQueue.main.async {
+                                KeyManagerNexilis.deleteKey()
+                                KeyManagerNexilis.deleteMarker()
+                                Nexilis.hideLoader {
+                                    let errorMessage = "Failed to get Auth Data"
+                                    let dialog = DialogErrorMFA()
+                                    dialog.modalTransitionStyle = .crossDissolve
+                                    dialog.modalPresentationStyle = .overCurrentContext
+                                    dialog.errorDesc = errorMessage
+                                    dialog.method = self.METHOD
+                                    dialog.isDismiss = { res in
+                                        if res == 0 {
+                                            self.navigationController?.dismiss(animated: true, completion: {
+                                                APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                            })
+                                        }
+                                    }
+                                    UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                }
+                            }
+                            return
+                        }
+                        let df = HMACDeviceFingerprintNexilis.generate()
+                        tMessage.mBodies[CoreMessage_TMessageKey.FINGERPRINT] = df
+                        if hasKey {
+                            var sign = ""
+                            if let dataSign = "\(data)!\(df)".data(using: .utf8) {
+                                if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
+                                    sign = signature.base64EncodedString()
+                                }
+                            }
+                            tMessage.mBodies[CoreMessage_TMessageKey.SIGNATURE] = sign
+                        } else {
+                            if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
+                                tMessage.mBodies[CoreMessage_TMessageKey.PUBLIC_KEY] = publicKey
+                            }
+                        }
+                        let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
+                        let otp = try TOTPGenerator.generateTOTP(base32Secret: secret, digits: 6, timeStepSeconds: 30)
+                        tMessage.mBodies[CoreMessage_TMessageKey.TOTP] = otp
+                        if let response = Nexilis.writeAndWait(message: tMessage) {
+                            if response.isOk() {
+                                if self.STEP_NEEDED == MFAViewController.STEP_NEEDED_FIDO_PWD_BIOMETRIC {
+                                    self.biometricAuth()
+                                } else {
+                                    DispatchQueue.main.async {
+                                        Nexilis.hideLoader {
+                                            self.navigationController?.dismiss(animated: true, completion: {
+                                                UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
+                                                self.dismissKeyboard()
+                                                APIS.getMFACallback()?("Success")
+                                            })
+                                        }
+                                    }
+                                }
+                            }
+                            else {
+                                DispatchQueue.main.async {
+                                    KeyManagerNexilis.deleteKey()
+                                    KeyManagerNexilis.deleteMarker()
+                                    Nexilis.hideLoader {
+                                        let errorMessage = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
+                                        let dialog = DialogErrorMFA()
+                                        dialog.modalTransitionStyle = .crossDissolve
+                                        dialog.modalPresentationStyle = .overCurrentContext
+                                        dialog.errorDesc = errorMessage
+                                        dialog.method = self.METHOD
+                                        dialog.isDismiss = { res in
+                                            if res == 0 {
+                                                self.navigationController?.dismiss(animated: true, completion: {
+                                                    APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                                })
+                                            }
+                                        }
+                                        UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        KeyManagerNexilis.deleteKey()
+                        KeyManagerNexilis.deleteMarker()
+                        Nexilis.hideLoader {
+                            let errorMessage = "Failed to get Auth Data"
+                            let dialog = DialogErrorMFA()
+                            dialog.modalTransitionStyle = .crossDissolve
+                            dialog.modalPresentationStyle = .overCurrentContext
+                            dialog.errorDesc = errorMessage
+                            dialog.method = self.METHOD
+                            dialog.isDismiss = { res in
+                                if res == 0 {
+                                    self.navigationController?.dismiss(animated: true, completion: {
+                                        APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                    })
+                                }
+                            }
+                            UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                        }
                     }
                 }
+            } catch {
+                
             }
         }
-    }
-    
-    private func getFIDO(tMessage: inout TMessage) {
-//        do {
-//            let fingerprint = try HMACDeviceFingerprint.generate()
-//            tMessage.putBody(key: CoreMessage_TMessageKey.FINGERPRINT, value: fingerprint)
-//            
-//            if KeyManagerNexilis.hasGeneratedKey() {
-//                // If key exists, sign the challenge and fingerprint
-//                let signature = try KeyManagerNexilis.sign(data: self.challengeString + "!" + fingerprint)
-//                tMessage.putBody(key: CoreMessage_TMessageKey.SIGNATURE, value: signature)
-//            } else {
-//                // Otherwise, generate a new key and send the public part
-//                try KeyManagerNexilis.generateKey()
-//                let publicKey = try KeyManagerNexilis.getPublicKeyEncoded()
-//                tMessage.putBody(key: CoreMessage_TMessageKey.PUBLIC_KEY, value: publicKey)
-//            }
-//        } catch {
-//            os_log("FIDO operation failed: %{public}@", log: .default, type: .error, error.localizedDescription)
-//        }
     }
 
     private func biometricAuth() {
-        let context = LAContext()
-        var error: NSError?
+        let semaphore = DispatchSemaphore(value: 0)
+        var result = false
 
-        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
-            let reason = "Confirm your identity to proceed"
-            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { [weak self] success, authenticationError in
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    if success {
-                        os_log("Biometric authentication succeeded.", log: .default, type: .info)
-                        self.showToast(message: "Please wait...", duration: 2.0)
-                        if KeyManagerNexilis.hasGeneratedKey() {
-                            self.requestAuth() // FIDO flow
-                        } else {
-                            self.submit() // Standard password submission
-                        }
-                    } else {
-                        os_log("Biometric authentication failed.", log: .default, type: .error)
-                        let errorMessage = authenticationError?.localizedDescription ?? "Authentication failed."
-                        self.showToast(message: errorMessage)
-                    }
+        Utils.authenticateWithBiometrics { success, errorMessage in
+            if success {
+                print("Access granted!")
+                result = true
+            } else {
+                print("Access denied: \(errorMessage ?? "Unknown error")")
+            }
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+
+        if result {
+            DispatchQueue.main.async {
+                Nexilis.hideLoader {
+                    self.navigationController?.dismiss(animated: true, completion: {
+                        UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
+                        self.dismissKeyboard()
+                        APIS.getMFACallback()?("Success")
+                    })
                 }
             }
         } else {
-            os_log("Biometrics not available. Falling back to standard submission.", log: .default, type: .info)
-            // If biometrics are not available on the device, proceed with the standard submission.
-            self.submit()
-        }
-    }
-    
-    private func requestAuth() {
-        DispatchQueue.global().async {
-            // Request a challenge from the server
-            var appname = APIS.getAppNm()
-            if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAuthRequest(data: appname)) {
-                
-                if !response.isOk()  {
-                    self.showToast(message: "Action failed: Could not get challenge.")
-                    return
+            KeyManagerNexilis.deleteKey()
+            KeyManagerNexilis.deleteMarker()
+            DispatchQueue.main.async {
+                Nexilis.hideLoader {
+                    let errorMessage = "Gagal mendeteksi Biometric (Fingerprint/Face ID)"
+                    let dialog = DialogErrorMFA()
+                    dialog.modalTransitionStyle = .crossDissolve
+                    dialog.modalPresentationStyle = .overCurrentContext
+                    dialog.errorDesc = errorMessage
+                    dialog.method = self.METHOD
+                    dialog.isDismiss = { res in
+                        if res == 0 {
+                            self.navigationController?.dismiss(animated: true, completion: {
+                                APIS.getMFACallback()?("Failed: \(errorMessage)")
+                            })
+                        }
+                    }
+                    UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                 }
-                
-                // On success, store the challenge and then proceed with the final submission
-                self.challengeString = response.getBody(key: CoreMessage_TMessageKey.DATA) ?? ""
-                self.submit()
             }
         }
-    }
-
-    // MARK: - UI Updates
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
-            updateUIBasedOnMode()
-            setBackground()
-        }
-    }
-    
-    private func updateUIBasedOnMode() {
-        let isDarkMode = traitCollection.userInterfaceStyle == .dark
-        let textColor: UIColor = isDarkMode ? .white : .black
-        let placeholderColor: UIColor = .gray
-        
-        passwordTextField.textColor = textColor
-        passwordTextField.attributedPlaceholder = NSAttributedString(
-            string: "Type your password...",
-            attributes: [.foregroundColor: placeholderColor]
-        )
-        passwordVisibilityButton.tintColor = textColor
-        headerTitleLabel.textColor = textColor
-        subtitleLabel.textColor = isDarkMode ? .lightGray : .darkGray
-        poweredLabel.textColor = isDarkMode ? .lightGray : .darkGray
-        submitButton.backgroundColor = isDarkMode ? UIColor(hex: "#2E77AE") : UIColor(hex: "#14507f")
     }
     
     private func updateUIBasedOnMethod() {
-        if METHOD.contains("Sign Up") {
-            headerTitleLabel.text = "Register"
-        } else {
-            headerTitleLabel.text = "Authenticate Your Account"
-        }
+        headerTitleLabel.text = METHOD
     }
-}
-
-// MARK: - Helper Extensions & Mocks
-
-// Helper for Hex Color
-extension UIColor {
-    convenience init(hex: String) {
-        var cString: String = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if cString.hasPrefix("#") { cString.removeFirst() }
-        guard cString.count == 6 else { self.init(white: 0.6, alpha: 1.0); return }
-        
-        var rgbValue: UInt64 = 0
-        Scanner(string: cString).scanHexInt64(&rgbValue)
-        
-        self.init(red: CGFloat((rgbValue & 0xFF0000) >> 16) / 255.0,
-                  green: CGFloat((rgbValue & 0x00FF00) >> 8) / 255.0,
-                  blue: CGFloat(rgbValue & 0x0000FF) / 255.0,
-                  alpha: 1.0)
-    }
-}
-
-// Helper to show Android-style Toast messages
-extension UIViewController {
-    func showToast(message: String, duration: Double = 3.0) {
-        let toastLabel = UILabel()
-        toastLabel.backgroundColor = UIColor.black.withAlphaComponent(0.6)
-        toastLabel.textColor = .white
-        toastLabel.font = .systemFont(ofSize: 14.0)
-        toastLabel.textAlignment = .center
-        toastLabel.text = message
-        toastLabel.alpha = 1.0
-        toastLabel.layer.cornerRadius = 10
-        toastLabel.clipsToBounds = true
-        
-        self.view.addSubview(toastLabel)
-        
-        toastLabel.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            toastLabel.centerXAnchor.constraint(equalTo: self.view.centerXAnchor),
-            toastLabel.bottomAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.bottomAnchor, constant: -50),
-            toastLabel.widthAnchor.constraint(lessThanOrEqualTo: self.view.widthAnchor, constant: -40),
-            toastLabel.heightAnchor.constraint(equalToConstant: 40)
-        ])
-        
-        UIView.animate(withDuration: 0.5, delay: duration, options: .curveEaseOut, animations: {
-            toastLabel.alpha = 0.0
-        }, completion: { _ in
-            toastLabel.removeFromSuperview()
-        })
-    }
-}
-
-// Delegate protocol for callbacks
-public protocol MFADelegate: AnyObject {
-    func onSuccess()
-    func onFailed(error: String)
 }
 

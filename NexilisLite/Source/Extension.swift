@@ -991,16 +991,17 @@ extension String {
         let textUTF8 = self
         let finalText = NSMutableAttributedString(string: textUTF8, attributes: [.font: font])
         
-        let formattingRules: [(String, [NSAttributedString.Key: Any])] = [
-            ("_", [.font: italicFont]), // Italic
-            ("*", [.font: boldFont]), // Bold
-            ("~", [.strikethroughStyle: NSUnderlineStyle.single.rawValue]),
-            ("^", [.underlineStyle: NSUnderlineStyle.single.rawValue]),
-            ("$", [.font: italicFont, .foregroundColor: UIColor.darkGray]) // Italic + Gray for $
+        let rules: [(String, [NSAttributedString.Key: Any])] = [
+            ("_", [NSAttributedString.Key.font: italicFont]),
+            ("*", [NSAttributedString.Key.font: boldFont]),
+            ("~", [NSAttributedString.Key.strikethroughStyle: NSUnderlineStyle.single.rawValue]),
+            ("^", [NSAttributedString.Key.underlineStyle: NSUnderlineStyle.single.rawValue]),
+            ("$", [NSAttributedString.Key.font: italicFont,
+                   NSAttributedString.Key.foregroundColor: UIColor.darkGray])
         ]
 
-        for (sign, attributes) in formattingRules {
-            applyTextFormatting(to: finalText, sign: sign, attributes: attributes, isEditing: isEditing)
+        for (sign, attributes) in rules {
+            applyTextFormatting(to: finalText, sign: sign, attributes: attributes, isEditing: isEditing, boldItalicFont: boldItalicFont)
         }
         
         processMentions(in: finalText, groupID: group_id, isEditing: isEditing, listMentionInTextField: listMentionInTextField)
@@ -1018,29 +1019,42 @@ extension String {
         to text: NSMutableAttributedString,
         sign: String,
         attributes: [NSAttributedString.Key: Any],
-        isEditing: Bool
+        isEditing: Bool,
+        boldItalicFont: UIFont? = nil
     ) {
         let escapedSign = NSRegularExpression.escapedPattern(for: sign)
-        let pattern = "\(escapedSign)(.+?)\(escapedSign)" // Ensure sign is correctly escaped in regex
+        let pattern = "\(escapedSign)(.+?)\(escapedSign)"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return }
 
         let matches = regex.matches(in: text.string, options: [], range: NSRange(location: 0, length: text.length))
 
-        for match in matches.reversed() { // Iterate in reverse to prevent index shifting
+        for match in matches.reversed() {
             let fullRange = match.range
             let textRange = match.range(at: 1)
 
-            // Apply the desired formatting
-            for (key, value) in attributes {
-                text.addAttribute(key, value: value, range: textRange)
+            // Special case: if applying bold or italic, check if the other style is already present
+            if let font = attributes[.font] as? UIFont, let boldItalicFont {
+                let currentFont = text.attribute(.font, at: textRange.location, effectiveRange: nil) as? UIFont
+                let isItalic = currentFont?.fontDescriptor.symbolicTraits.contains(.traitItalic) ?? false
+                let isBold = currentFont?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false
+
+                if (font.fontDescriptor.symbolicTraits.contains(.traitBold) && isItalic) ||
+                   (font.fontDescriptor.symbolicTraits.contains(.traitItalic) && isBold) {
+                    text.addAttribute(.font, value: boldItalicFont, range: textRange)
+                } else {
+                    text.addAttribute(.font, value: font, range: textRange)
+                }
+            } else {
+                // Apply normally
+                for (key, value) in attributes {
+                    text.addAttribute(key, value: value, range: textRange)
+                }
             }
 
             if !isEditing {
-                // Remove formatting characters (signs)
                 text.replaceCharacters(in: NSRange(location: fullRange.upperBound - sign.count, length: sign.count), with: "")
                 text.replaceCharacters(in: NSRange(location: fullRange.lowerBound, length: sign.count), with: "")
             } else {
-                // Change color of formatting characters (grayed out)
                 text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.lowerBound, length: sign.count))
                 text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.upperBound - sign.count, length: sign.count))
             }

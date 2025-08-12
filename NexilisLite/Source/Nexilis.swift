@@ -242,13 +242,13 @@ public class Nexilis: NSObject {
                                     let message = "94:Unregistered user"
                                     delegate.onFailed(error: message)
                                     sendStateToServer(s: message)
-                                    print("checkSignInSignUp sleep 30s before retrying send to server..")
+                                    print("checkSignInSignUp sleep 30s before retrying send to server..\(response.toLogString())")
                                     Thread.sleep(forTimeInterval: 30)
                                 } else if !response.isOk() {
                                     let message = "99:Something went wrong. Invalid response, please check your connection.."
                                     delegate.onFailed(error: message)
                                     sendStateToServer(s: message)
-                                    print("checkSignInSignUp sleep 30s before retrying send to server..")
+                                    print("checkSignInSignUp sleep 30s before retrying send to server..\(response.toLogString())")
                                     Thread.sleep(forTimeInterval: 30)
                                 } else {
                                     SecureUserDefaults.shared.set(id, forKey: "device_id")
@@ -257,6 +257,8 @@ public class Nexilis: NSObject {
                                     if !enable_signup && !userId.isEmpty {
                                         enable_signup = true
                                         Utils.setProfile(value: true)
+                                        KeyManagerNexilis.deleteKey()
+                                        KeyManagerNexilis.deleteMarker()
                                     }
                                     Utils.setForceAnonymous(value: enable_signup)
                                     if(!id.isEmpty) {
@@ -2606,10 +2608,6 @@ public class Nexilis: NSObject {
     weak open var timelineDelegate: TimelineDelegate?
     
     weak open var connectionDelegate: ConnectionDelegate?
-    
-    weak open var mfaDelegate: MFADelegate?
-    
-    weak open var authDelegate: AuthenticationDelegate?
     
     var floating: FloatingNotificationBanner!
     

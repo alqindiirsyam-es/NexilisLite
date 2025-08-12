@@ -281,15 +281,12 @@ class KeyManagerNexilis {
     static let keyMarkerTag = "io.nexilis.fido2.key.\(Bundle.main.infoDictionary?["CFBundleName"] as! String).marker".data(using: .utf8)!
     static let markerAccount = "nexilis.key.\(Bundle.main.infoDictionary?["CFBundleName"] as! String).marker"
     static func generateKey() {
-        let accessControl = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.userPresence], nil)!
-
         let attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
             kSecAttrKeySizeInBits as String: 2048,
             kSecPrivateKeyAttrs as String: [
                 kSecAttrIsPermanent as String: true,
-                kSecAttrApplicationTag as String: tag,
-                kSecAttrAccessControl as String: accessControl
+                kSecAttrApplicationTag as String: tag
             ]
         ]
 
@@ -381,15 +378,29 @@ class KeyManagerNexilis {
         return [0x80 | UInt8(bytes.count)] + bytes
     }
     
-    static func getPrivateKey() -> SecKey? {
+    static func getPrivateKey(useBiometric: Bool = true) -> SecKey? {
+        if useBiometric {
+            let semaphore = DispatchSemaphore(value: 0)
+            var result = false
+
+            Utils.authenticateWithBiometrics { success, errorMessage in
+                if success {
+                    print("Access granted!")
+                    result = true
+                } else {
+                    print("Access denied: \(errorMessage ?? "Unknown error")")
+                }
+                semaphore.signal()
+            }
+
+            semaphore.wait()
+
+            if !result {
+                return nil
+            }
+        }
         let context = LAContext()
         context.localizedReason = "Verify your identity to continue with login.".localized()
-
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            print("Biometric auth not available: \(String(describing: error))")
-            return nil
-        }
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassKey,

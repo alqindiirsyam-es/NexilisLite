@@ -160,6 +160,34 @@ public class APIS: NSObject {
         }
     }
     
+    public static func openContactCenterWithContext(context: String) {
+        let isChangeProfile = Utils.getSetProfile()
+        if !isChangeProfile {
+            APIS.showChangeProfile()
+            return
+        }
+        if !Nexilis.checkingAccess(key: "call_center") {
+            if Nexilis.checkingAccessAlert(key: "call_center") != "|" && !Nexilis.checkingAccessAlert(key: "call_center").isEmpty {
+                let title = Nexilis.checkingAccessAlert(key: "call_center").components(separatedBy: "|")[0]
+                let message = Nexilis.checkingAccessAlert(key: "call_center").components(separatedBy: "|")[1]
+                APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+            } else {
+                UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+            }
+            return
+        }
+        let controller = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+        controller.isContactCenter = true
+        controller.contextCC = context
+        let navigationController = CustomNavigationController(rootViewController: controller)
+        navigationController.defaultStyle()
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+        }
+    }
+    
     public static func openUrl(url: String) {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
@@ -511,6 +539,16 @@ public class APIS: NSObject {
         }
     }
     
+    private static var mfaCallback: ((String) -> Void)?
+
+    static func getMFACallback() -> ((String) -> Void)? {
+        return mfaCallback
+    }
+
+    public static func setMFACallback(_ callback: @escaping (String) -> Void) {
+        mfaCallback = callback
+    }
+    
     public static func openMFA(method: String, flag: Int){
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
@@ -518,32 +556,112 @@ public class APIS: NSObject {
             return
         }
         if flag == MFAViewController.STEP_NEEDED_FIDO {
-            if let me = User.getMyPin() {
-                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getMFAValidation(data: me)) {
-                    if response.isOk() {
-                        UIApplication.shared.visibleViewController?.view.makeToast("Action Successful".localized(), duration: 3)
-                    }
-                    else {
-                        UIApplication.shared.visibleViewController?.view.makeToast(response.mBodies[CoreMessage_TMessageKey.MESSAGE_TEXT], duration: 3)
+            DispatchQueue.global().async {
+                if let me = User.getMyPin() {
+                    do {
+                        let message = CoreMessage_TMessageBank.getMFAValidation(data: me)
+                        var hasKey = false
+                        if !KeyManagerNexilis.hasGeneratedKey() {
+                            KeyManagerNexilis.generateKey()
+                            KeyManagerNexilis.saveMarker()
+                        } else {
+                            hasKey = true
+                        }
+                        guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: false) else {
+                            KeyManagerNexilis.deleteKey()
+                            KeyManagerNexilis.deleteMarker()
+                            DispatchQueue.main.async {
+                                let errorMessage = "Failed to get Private Key"
+                                let dialog = DialogErrorMFA()
+                                dialog.modalTransitionStyle = .crossDissolve
+                                dialog.modalPresentationStyle = .overCurrentContext
+                                dialog.errorDesc = errorMessage
+                                dialog.method = method
+                                UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                APIS.getMFACallback()?("Failed: \(errorMessage)")
+                            }
+                            return
+                        }
+                        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
+                            if response.isOk() {
+                                let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
+                                if data.isEmpty {
+                                    DispatchQueue.main.async {
+                                        let errorMessage = "Failed to get Auth Data"
+                                        let dialog = DialogErrorMFA()
+                                        dialog.modalTransitionStyle = .crossDissolve
+                                        dialog.modalPresentationStyle = .overCurrentContext
+                                        dialog.errorDesc = errorMessage
+                                        dialog.method = method
+                                        UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                        APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                    }
+                                    return
+                                }
+                                let df = HMACDeviceFingerprintNexilis.generate()
+                                message.mBodies[CoreMessage_TMessageKey.FINGERPRINT] = df
+                                if hasKey {
+                                    var sign = ""
+                                    if let dataSign = "\(data)!\(df)".data(using: .utf8) {
+                                        if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
+                                            sign = signature.base64EncodedString()
+                                        }
+                                    }
+                                    message.mBodies[CoreMessage_TMessageKey.SIGNATURE] = sign
+                                } else {
+                                    if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
+                                        message.mBodies[CoreMessage_TMessageKey.PUBLIC_KEY] = publicKey
+                                    }
+                                }
+                                let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
+                                let otp = try TOTPGenerator.generateTOTP(base32Secret: secret, digits: 6, timeStepSeconds: 30)
+                                message.mBodies[CoreMessage_TMessageKey.TOTP] = otp
+                                if let response = Nexilis.writeAndWait(message: message) {
+                                    if response.isOk() {
+                                        DispatchQueue.main.async {
+                                            UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
+                                        }
+                                        APIS.getMFACallback()?("Success")
+                                    }
+                                    else {
+                                        let errorMessage = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
+                                        DispatchQueue.main.async {
+                                            let errorMessage = "Failed to get Auth Data"
+                                            let dialog = DialogErrorMFA()
+                                            dialog.modalTransitionStyle = .crossDissolve
+                                            dialog.modalPresentationStyle = .overCurrentContext
+                                            dialog.errorDesc = errorMessage
+                                            dialog.method = method
+                                            UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                            APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            DispatchQueue.main.async {
+                                let errorMessage = "Failed to get Auth Data"
+                                let dialog = DialogErrorMFA()
+                                dialog.modalTransitionStyle = .crossDissolve
+                                dialog.modalPresentationStyle = .overCurrentContext
+                                dialog.errorDesc = errorMessage
+                                dialog.method = method
+                                UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                APIS.getMFACallback()?("Failed: \(errorMessage)")
+                            }
+                        }
+                    } catch {
                     }
                 }
-            }
-            
-        }
-        else if flag == MFAViewController.STEP_NEEDED_FINGER {
-            let controller = MFAOnlyBiometricViewController()
-            let navigationController = CustomNavigationController(rootViewController: controller)
-            navigationController.defaultStyle()
-            if UIApplication.shared.visibleViewController?.navigationController != nil {
-                UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-            } else {
-                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
             }
         }
         else {
             let controller = MFAViewController()
+            controller.METHOD = method
+            controller.STEP_NEEDED = flag
             let navigationController = CustomNavigationController(rootViewController: controller)
             navigationController.defaultStyle()
+            
             if UIApplication.shared.visibleViewController?.navigationController != nil {
                 UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
             } else {

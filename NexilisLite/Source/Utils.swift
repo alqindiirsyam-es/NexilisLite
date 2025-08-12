@@ -446,6 +446,23 @@ public final class Utils {
         return dateFormatter
     }()
     
+    static func getGreetingsTimeDefaultWelcome() -> String {
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: Date())
+        let minute = calendar.component(.minute, from: Date())
+        var time: String
+
+        if hour < 10 || (hour == 10 && minute <= 0) {
+            time = "1"
+        } else if hour < 15 || (hour == 15 && minute <= 0) {
+            time = "2"
+        } else {
+            time = "3"
+        }
+        
+        return time
+    }
+    
     public static func previewMessageText(chat: Chat) -> Any {
         if chat.credential == "1" && chat.lock == "2" {
             return ("🚫 _"+"Message has expired".localized()+"_").richText(group_id: chat.pin)
@@ -2342,8 +2359,9 @@ public class DialogSignIn: UIViewController {
     
     @objc func ccTapped() {
         //print("ccTapped")
-        APIS.openContactCenter()
-        self.dismiss(animated: true)
+        self.dismiss(animated: true, completion: {
+            APIS.openContactCenter()
+        })
     }
     
     @objc func verifyTapped() {
@@ -2562,8 +2580,9 @@ public class DialogSecurityShield: UIViewController {
     
     @objc func ccTapped() {
         //print("ccTapped")
-        APIS.openContactCenter()
-        self.dismiss(animated: true)
+        self.dismiss(animated: true, completion: {
+            APIS.openContactCenter()
+        })
     }
     
     @objc func activateTapped() {
@@ -2675,8 +2694,9 @@ public class DialogTransactionApproval: UIViewController {
     
     @objc func ccTapped() {
         //print("ccTapped")
-        APIS.openContactCenter()
-        self.dismiss(animated: true)
+        self.dismiss(animated: true, completion: {
+            APIS.openContactCenter()
+        })
     }
     
     @objc func approveTapped() {
@@ -2806,6 +2826,118 @@ public class ValidationTransactionLimit: UIViewController, UITextFieldDelegate {
         let formattedString = formatter.string(from: NSNumber(value: Int(cleanString)!)) ?? ""
         
         return formattedString
+    }
+}
+
+public class DialogErrorMFA: UIViewController {
+    
+    public var errorDesc = ""
+    public var method = ""
+    var isDismiss: ((Int) -> ())?
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        self.view.backgroundColor = .black.withAlphaComponent(0.5)
+        
+        let container = UIView()
+        self.view.addSubview(container)
+        container.anchor(top: self.view.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, paddingTop: 30, paddingLeft: 20, paddingRight: 20)
+        container.layer.cornerRadius = 20.0
+        container.clipsToBounds = true
+        container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        
+        let title = UILabel()
+        title.text = errorDesc
+        title.font = .boldSystemFont(ofSize: 14)
+        title.numberOfLines = 0
+        title.textAlignment = .center
+        title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        container.addSubview(title)
+        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: 270)
+        
+        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageWarning)
+        imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: -5, width: 30, height: 30)
+        
+        let imageLogo = UIImageView(image: UIImage(named: "bjb-blue-flat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageLogo)
+        imageLogo.anchor(top: container.topAnchor, left: container.leftAnchor, paddingTop: 10, paddingLeft: 10, width: 40, height: 40)
+        
+        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageChat)
+        imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 10, width: 30, height: 30)
+        
+        let contentDesc = "Silakan coba lagi atau hubungi Contact Center BJB untuk bantuan lebih lanjut"
+        let contentS = UILabel()
+        contentS.tintColor = .label
+        contentS.attributedText = contentDesc.richText()
+        contentS.numberOfLines = 0
+        container.addSubview(contentS)
+        contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 20, paddingLeft: 15, paddingRight: 10)
+        
+        let buttonCC = UIButton(type: .custom)
+        buttonCC.setTitle("Call Center", for: .normal)
+        buttonCC.backgroundColor = .gray
+        buttonCC.titleLabel?.textColor = .white
+        buttonCC.titleLabel?.font = .boldSystemFont(ofSize: 14)
+        buttonCC.layer.cornerRadius = 17.5
+        buttonCC.clipsToBounds = true
+        buttonCC.addTarget(self, action: #selector(ccTapped), for: .touchUpInside)
+        container.addSubview(buttonCC)
+        buttonCC.anchor(top: contentS.bottomAnchor, paddingTop: 20, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+        
+        let buttonTryAgain = UIButton(type: .custom)
+        buttonTryAgain.setTitle("Coba Lagi", for: .normal)
+        buttonTryAgain.backgroundColor = .mainColor
+        buttonTryAgain.titleLabel?.textColor = .white
+        buttonTryAgain.titleLabel?.font = .boldSystemFont(ofSize: 14)
+        buttonTryAgain.layer.cornerRadius = 17.5
+        buttonTryAgain.clipsToBounds = true
+        buttonTryAgain.addTarget(self, action: #selector(tryAgainTapped), for: .touchUpInside)
+        container.addSubview(buttonTryAgain)
+        buttonTryAgain.anchor(top: contentS.bottomAnchor, right: buttonCC.leftAnchor, paddingTop: 20, paddingRight: 5, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+        
+        let buttonReject = UIButton(type: .custom)
+        buttonReject.setTitle("Tutup", for: .normal)
+        buttonReject.backgroundColor = .red
+        buttonReject.titleLabel?.textColor = .white
+        buttonReject.titleLabel?.font = .boldSystemFont(ofSize: 14)
+        buttonReject.layer.cornerRadius = 17.5
+        buttonReject.clipsToBounds = true
+        buttonReject.addTarget(self, action: #selector(rejectTapped), for: .touchUpInside)
+        container.addSubview(buttonReject)
+        buttonReject.anchor(top: contentS.bottomAnchor, left: buttonCC.rightAnchor, paddingTop: 20, paddingLeft: 5, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+        
+        let footer = UILabel()
+        footer.text = "We value your security".localized()
+        footer.font = .systemFont(ofSize: 12)
+        footer.textColor = .gray
+        footer.numberOfLines = 0
+        container.addSubview(footer)
+        footer.anchor(top: buttonReject.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingBottom: 5, paddingRight: 10)
+        
+    }
+    
+    private func getContentDesc() -> String {
+        return "Saya mengalami hambatan pada waktu *\(method)*, dikarenakan *\(errorDesc)*"
+    }
+    
+    @objc func ccTapped() {
+        let contentDesc = getContentDesc()
+        self.dismiss(animated: true, completion: { [self] in
+            APIS.openContactCenterWithContext(context: "\(contentDesc)~\(method)~\(errorDesc)")
+        })
+    }
+    
+    @objc func tryAgainTapped() {
+        self.dismiss(animated: true, completion: {
+            self.isDismiss?(1)
+        })
+    }
+    
+    @objc func rejectTapped() {
+        self.dismiss(animated: true)
+        self.isDismiss?(0)
     }
 }
 

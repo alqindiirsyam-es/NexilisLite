@@ -142,6 +142,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var buttonSpec = UIButton(type: .custom)
     var tableViewConfigFile: UITableView!
     var specFileString = ""
+    var contextCC = ""
     
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
@@ -6119,7 +6120,33 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 5).isActive = true
                 messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                if category_cc[0].id.contains("level0_") || dataMessages[indexPath.row]["attachment_flag"] != nil && dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "503" {
+                if !contextCC.isEmpty {
+                    let dataSplit = contextCC.components(separatedBy: "~")
+                    let contentErr = dataSplit[0]
+                    var activity = ""
+                    var titleErr = ""
+                    if dataSplit.count > 1 {
+                        activity = dataSplit[1]
+                    }
+                    if dataSplit.count > 2 {
+                        titleErr = dataSplit[2]
+                    }
+                    var welcome = ""
+                    let time = Utils.getGreetingsTimeDefaultWelcome()
+                    if time == "1" {
+                        welcome = "Selamat pagi"
+                    } else if time == "2" {
+                        welcome = "Selamat siang"
+                    } else {
+                        welcome = "Selamat malam"
+                    }
+                    var myName = ""
+                    let myData = User.getDataCanNil(pin: User.getMyPin())
+                    if myData != nil {
+                        myName = myData!.fullName
+                    }
+                    messageText.attributedText = "_\(welcome) Pak/Bu *\(myName)*. Kami mendeteksi anda mengalami hambatan pada waktu *\(activity)*, dikarenakan *\(titleErr)*. Kami siap membantu anda untuk mensolusikan masalah yang dihadapi. Silahkan memilih cara interaksi yang diinginkan melalui tombol di bawah ini._".richText(fontSize: 14)
+                } else if category_cc[0].id.contains("level0_") || dataMessages[indexPath.row]["attachment_flag"] != nil && dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "503" {
                     messageText.text = "Welcome to".localized() + " " + dataPerson["name"]!! + " " + "Contact Center".localized()
                      + "\n" + "Please choose your desired communication method...".localized()
                 } else if category_cc[0].id.contains("level1_") {
@@ -6131,8 +6158,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 } else {
                     messageText.text = "Sorry, currently all our representatives are busy helping other customers. Do you want us to get back to you as soon as one of them is available?".localized()
                 }
-                messageText.font = UIFont.systemFont(ofSize: 14 + offset(), weight: .medium)
-                messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+                if contextCC.isEmpty {
+                    messageText.font = UIFont.systemFont(ofSize: 14 + offset(), weight: .medium)
+                    messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+                }
                 
 //                let date = Date()
 //                let formatter = DateFormatter()
