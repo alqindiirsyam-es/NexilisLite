@@ -1869,6 +1869,10 @@ public class APIS: NSObject {
             }
         }
     }
+
+    public static func checkClone(window: inout UIWindow?) {
+        CloneCheck.enforceAllChecks(window: &window)
+    }
     
     public static func checkAppStateisBackground() -> Bool {
         let state = UIApplication.shared.applicationState
