@@ -1906,7 +1906,7 @@ class DataCaptured: NSObject {
             type = "2"
             value = textAction
         }
-        print("sendLogMonitorAction: \(type) <><> \(textAction) <><> \(value)")
+//        print("sendLogMonitorAction: \(type) <><> \(textAction) <><> \(value)")
 //        _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getLogMonitor(type: type, label: textAction, value: value))
     }
     
@@ -1915,7 +1915,7 @@ class DataCaptured: NSObject {
         if !actVC.isEmpty {
             act = actVC
         }
-        print("sendLogMonitorActivity: \(act)")
+//        print("sendLogMonitorActivity: \(act)")
 //        _ = Nexilis.write(message: CoreMessage_TMessageBank.getLogActivity(pActivityClassName: act))
     }
     
@@ -1925,8 +1925,8 @@ class DataCaptured: NSObject {
         data["filename"] = fileName
         if let jsonData = try? JSONSerialization.data(withJSONObject: data, options: .prettyPrinted),
            let jsonString = String(data: jsonData, encoding: .utf8) {
-            print("sendErrorDLP: \(jsonString)")
-//            _ = Nexilis.write(message: CoreMessage_TMessageBank.getCaptureDLP(data: jsonString))
+//            print("sendErrorDLP: \(jsonString)")
+            _ = Nexilis.write(message: CoreMessage_TMessageBank.getCaptureDLP(data: jsonString))
         }
     }
     

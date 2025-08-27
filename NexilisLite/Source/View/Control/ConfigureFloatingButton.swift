@@ -117,6 +117,7 @@ public class ConfigureFloatingButton: UIViewController {
         }
         DispatchQueue.main.async {
             Nexilis.floatingButton.removeFromSuperview()
+            FloatingButton.datePull = nil
             Nexilis.floatingButton = FloatingButton()
             Nexilis.addFB()
             if Nexilis.fromMAB {

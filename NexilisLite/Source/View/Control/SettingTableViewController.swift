@@ -635,7 +635,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 DispatchQueue.global().async {
                     let apiKey = Nexilis.sAPIKey
                     var id = Utils.getConnectionID()
-                    if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpApi(api: apiKey, p_pin: id), timeout: 30 * 1000) {
+                    if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpApi(api: apiKey, p_pin: id), timeout: 15 * 1000) {
                         id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
                         if(!id.isEmpty){
 //                            Nexilis.changeUser(f_pin: id)
@@ -658,6 +658,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                     banner.show()
                                     if Nexilis.showFB {
                                         Nexilis.floatingButton.removeFromSuperview()
+                                        FloatingButton.datePull = nil
                                         Nexilis.floatingButton = FloatingButton()
                                         Nexilis.addFB()
                                     }

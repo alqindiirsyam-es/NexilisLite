@@ -194,6 +194,7 @@ public class CoreMessage_TMessageKey {
     public static let ANDROID_PACKAGE_NAME = "A95"
     public static let ANDROID_CLASS_NAME     = "A96"
     public static let ERRCOD                 = "A97"
+    public static let ERRAPICOD = "A97A";
     public static let REQUEST_ID             = "A98"
     
     public static let FAMILY_ID            = "A99"

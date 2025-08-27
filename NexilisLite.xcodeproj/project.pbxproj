@@ -247,7 +247,6 @@
 		CD95516B2A664BDB00AF6476 /* Poppins-ExtraLightItalic.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD9551382A664BD400AF6476 /* Poppins-ExtraLightItalic.otf */; };
 		CD962CFD2E420B5300A7BDA5 /* TOTPGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD962CFC2E420B5300A7BDA5 /* TOTPGenerator.swift */; };
 		CD962CFE2E420B5300A7BDA5 /* MFAViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD962CFB2E420B5300A7BDA5 /* MFAViewController.swift */; };
-		CD962CFF2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD962CFA2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift */; };
 		CD9829B72A3C07CB009F6743 /* SeminarListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD9829B62A3C07CB009F6743 /* SeminarListViewController.swift */; };
 		CDA461222AB99E09001CD010 /* ConfigureFloatingButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA461212AB99E09001CD010 /* ConfigureFloatingButton.swift */; };
 		CDB21B2E2BA9998400EC5280 /* pb_def_icon_mode2.gif in Resources */ = {isa = PBXBuildFile; fileRef = CDB21B2B2BA9998400EC5280 /* pb_def_icon_mode2.gif */; };
@@ -538,7 +537,6 @@
 		CD9551432A664BD400AF6476 /* Poppins-BlackItalic.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-BlackItalic.otf"; sourceTree = "<group>"; };
 		CD9551442A664BD400AF6476 /* Poppins-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-Regular.otf"; sourceTree = "<group>"; };
 		CD9551452A664BD400AF6476 /* Poppins-ExtraBold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-ExtraBold.otf"; sourceTree = "<group>"; };
-		CD962CFA2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFABiometricOnlyViewController.swift; sourceTree = "<group>"; };
 		CD962CFB2E420B5300A7BDA5 /* MFAViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFAViewController.swift; sourceTree = "<group>"; };
 		CD962CFC2E420B5300A7BDA5 /* TOTPGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOTPGenerator.swift; sourceTree = "<group>"; };
 		CD9829B62A3C07CB009F6743 /* SeminarListViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SeminarListViewController.swift; sourceTree = "<group>"; };
@@ -827,7 +825,6 @@
 				CD1E718E2A0BA86100BF871F /* HistoryBroadcastViewController.swift */,
 				CD1E719C2A0BA86100BF871F /* HistoryCCViewController.swift */,
 				CD1E71A42A0BA86100BF871F /* ImageVideoPicker.swift */,
-				CD962CFA2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift */,
 				CD962CFB2E420B5300A7BDA5 /* MFAViewController.swift */,
 				CD1E719E2A0BA86100BF871F /* NotificationSound.swift */,
 				CD1E71A62A0BA86100BF871F /* ProfileViewController.swift */,
@@ -1443,7 +1440,6 @@
 				CD1E725D2A0BA86100BF871F /* WhiteboardDelegate.swift in Sources */,
 				CD962CFD2E420B5300A7BDA5 /* TOTPGenerator.swift in Sources */,
 				CD962CFE2E420B5300A7BDA5 /* MFAViewController.swift in Sources */,
-				CD962CFF2E420B5300A7BDA5 /* MFABiometricOnlyViewController.swift in Sources */,
 				CD1E721B2A0BA86100BF871F /* Nexilis.swift in Sources */,
 				CD1E72102A0BA86100BF871F /* Extension.swift in Sources */,
 				CD1E724C2A0BA86100BF871F /* NotificationSound.swift in Sources */,

@@ -445,6 +445,7 @@ public class ChangeDeviceViewController: UIViewController {
                 Nexilis.hideLoader(completion: {
                     if Nexilis.showFB {
                         Nexilis.floatingButton.removeFromSuperview()
+                        FloatingButton.datePull = nil
                         Nexilis.floatingButton = FloatingButton()
                         Nexilis.addFB()
                     }
@@ -484,6 +485,7 @@ public class ChangeDeviceViewController: UIViewController {
                     banner.show()
                     if Nexilis.showFB {
                         Nexilis.floatingButton.removeFromSuperview()
+                        FloatingButton.datePull = nil
                         Nexilis.floatingButton = FloatingButton()
                         Nexilis.addFB()
                     }

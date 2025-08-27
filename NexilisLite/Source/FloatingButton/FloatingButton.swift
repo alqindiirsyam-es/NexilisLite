@@ -33,7 +33,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
     let labelCounterFB = UILabel()
     let indicatorCounterFBBig = UIImageView()
     
-    static var datePull: Date?
+    public static var datePull: Date?
     var animationTimer = Timer()
     var configAnim: Int = Int(Utils.getFloatingAnim().components(separatedBy: "~")[0]) ?? 1
     var isLoopingAnim = (Int(Utils.getFloatingAnim().components(separatedBy: "~")[1]) ?? 1) == 1 ? true : false
@@ -389,7 +389,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 while API.nGetCLXConnState() == 0 || !API.bInetConnAvailable() {
                     Thread.sleep(forTimeInterval: 1)
                 }
-                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.pullFloatingButton(), timeout: 5000) {
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.pullFloatingButton(), timeout: 10000) {
                     if response.isOk() {
                         Utils.setHistoryPullFB(value: response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: ""))
                         setFBFromPull()

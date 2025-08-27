@@ -3254,6 +3254,23 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
         DispatchQueue.global().async {
             let message = CoreMessage_TMessageBank.getRequestCallCenter(p_channel: channel, category_id: service_id)
+            message.mBodies["wlc_device"] = "\(UIDevice.current.model)(\(UIDevice.current.name))"
+            message.mBodies["wlc_time"] = "\(Date().currentTimeMillis())"
+            message.mBodies["wlc_longitude"] = "\(self.longitude)"
+            message.mBodies["wlc_latitude"] = "\(self.latitude)"
+            if !self.contextCC.isEmpty {
+                let dataSplit = self.contextCC.components(separatedBy: "~")
+                var activity = ""
+                var titleErr = ""
+                if dataSplit.count > 1 {
+                    activity = dataSplit[1]
+                }
+                if dataSplit.count > 2 {
+                    titleErr = dataSplit[2]
+                }
+                message.mBodies["wlc_activity"] = "\(activity)"
+                message.mBodies["wlc_error_description"] = "\(titleErr)"
+            }
             if let response = Nexilis.writeSync(message: message) {
                 if !self.isDirectCC {
                     DispatchQueue.main.async {

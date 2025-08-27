@@ -1526,6 +1526,47 @@ public final class Utils {
         return value
     }
     
+    public static func setBiometricState(value: Data?) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_biometric_state")
+    }
+    public static func getBiometricState() -> Data? {
+        let value: Data? = SecureUserDefaults.shared.value(forKey: "pb_biometric_state")
+        return value
+    }
+    
+    static func setSignUpLevel(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_signup_level")
+    }
+
+    static func getSignUpLevel() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_signup_level") {
+            return value
+        }
+        return "1,2"
+    }
+    
+    static func setSignInLevel(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_signin_level")
+    }
+
+    static func getSignInLevel() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_signin_level") {
+            return value
+        }
+        return "1,2"
+    }
+    
+    static func setTxnLevel(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_txn_level")
+    }
+
+    static func getTxnLevel() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_txn_level") {
+            return value
+        }
+        return ""
+    }
+    
     static func getPasswordDB() -> String? {
         do {
             let p = getPassEncDB()
@@ -2202,6 +2243,7 @@ public class DialogVerifyYou: UIViewController {
                                 banner.show()
                                 if Nexilis.showFB {
                                     Nexilis.floatingButton.removeFromSuperview()
+                                    FloatingButton.datePull = nil
                                     Nexilis.floatingButton = FloatingButton()
                                     Nexilis.addFB()
                                 }
@@ -2833,6 +2875,7 @@ public class DialogErrorMFA: UIViewController {
     
     public var errorDesc = ""
     public var method = ""
+    public var hideTryAgain = false
     var isDismiss: ((Int) -> ())?
     
     public override func viewDidLoad() {
@@ -2853,9 +2896,9 @@ public class DialogErrorMFA: UIViewController {
         title.textAlignment = .center
         title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         container.addSubview(title)
-        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: 270)
+        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: UIScreen.main.bounds.width / 2)
         
-        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning_green", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
         container.addSubview(imageWarning)
         imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: -5, width: 30, height: 30)
         
@@ -2867,7 +2910,10 @@ public class DialogErrorMFA: UIViewController {
         container.addSubview(imageChat)
         imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 10, width: 30, height: 30)
         
-        let contentDesc = "Silakan coba lagi atau hubungi Contact Center BJB untuk bantuan lebih lanjut"
+        var contentDesc = "Silakan coba lagi atau hubungi Contact Center BJB untuk bantuan lebih lanjut"
+        if hideTryAgain {
+            contentDesc = "Silakan hubungi Contact Center BJB untuk bantuan lebih lanjut atau Silahkan Sign Up/Sign In Ulang"
+        }
         let contentS = UILabel()
         contentS.tintColor = .label
         contentS.attributedText = contentDesc.richText()
@@ -2884,18 +2930,24 @@ public class DialogErrorMFA: UIViewController {
         buttonCC.clipsToBounds = true
         buttonCC.addTarget(self, action: #selector(ccTapped), for: .touchUpInside)
         container.addSubview(buttonCC)
-        buttonCC.anchor(top: contentS.bottomAnchor, paddingTop: 20, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+        if !hideTryAgain {
+            buttonCC.anchor(top: contentS.bottomAnchor, paddingTop: 20, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+        } else {
+            buttonCC.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, paddingTop: 20, paddingLeft: 5, width: UIScreen.main.bounds.width / 2 - 30, height: 35)
+        }
         
-        let buttonTryAgain = UIButton(type: .custom)
-        buttonTryAgain.setTitle("Coba Lagi", for: .normal)
-        buttonTryAgain.backgroundColor = .mainColor
-        buttonTryAgain.titleLabel?.textColor = .white
-        buttonTryAgain.titleLabel?.font = .boldSystemFont(ofSize: 14)
-        buttonTryAgain.layer.cornerRadius = 17.5
-        buttonTryAgain.clipsToBounds = true
-        buttonTryAgain.addTarget(self, action: #selector(tryAgainTapped), for: .touchUpInside)
-        container.addSubview(buttonTryAgain)
-        buttonTryAgain.anchor(top: contentS.bottomAnchor, right: buttonCC.leftAnchor, paddingTop: 20, paddingRight: 5, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+        if !hideTryAgain {
+            let buttonTryAgain = UIButton(type: .custom)
+            buttonTryAgain.setTitle("Coba Lagi", for: .normal)
+            buttonTryAgain.backgroundColor = .mainColor
+            buttonTryAgain.titleLabel?.textColor = .white
+            buttonTryAgain.titleLabel?.font = .boldSystemFont(ofSize: 14)
+            buttonTryAgain.layer.cornerRadius = 17.5
+            buttonTryAgain.clipsToBounds = true
+            buttonTryAgain.addTarget(self, action: #selector(tryAgainTapped), for: .touchUpInside)
+            container.addSubview(buttonTryAgain)
+            buttonTryAgain.anchor(top: contentS.bottomAnchor, right: buttonCC.leftAnchor, paddingTop: 20, paddingRight: 5, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+        }
         
         let buttonReject = UIButton(type: .custom)
         buttonReject.setTitle("Tutup", for: .normal)
@@ -2906,7 +2958,11 @@ public class DialogErrorMFA: UIViewController {
         buttonReject.clipsToBounds = true
         buttonReject.addTarget(self, action: #selector(rejectTapped), for: .touchUpInside)
         container.addSubview(buttonReject)
-        buttonReject.anchor(top: contentS.bottomAnchor, left: buttonCC.rightAnchor, paddingTop: 20, paddingLeft: 5, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+        if !hideTryAgain {
+            buttonReject.anchor(top: contentS.bottomAnchor, left: buttonCC.rightAnchor, paddingTop: 20, paddingLeft: 5, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+        } else {
+            buttonReject.anchor(top: contentS.bottomAnchor, right: container.rightAnchor, paddingTop: 20, paddingRight: 5, width: UIScreen.main.bounds.width / 2 - 30, height: 35)
+        }
         
         let footer = UILabel()
         footer.text = "We value your security".localized()

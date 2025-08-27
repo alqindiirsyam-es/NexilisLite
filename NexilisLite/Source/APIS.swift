@@ -539,123 +539,232 @@ public class APIS: NSObject {
         }
     }
     
-    private static var mfaCallback: ((String) -> Void)?
+    /*
+     0
+     Success
+     1
+     Invalid PIN/Password
+     2
+     Auth Failure
+     3
+     Device Key Signature Mismatch
+     4
+     Policy Level Not Met
+     5
+     PPKey Generated Failed
+     6
+     Challenge-Response Failed
+     7
+     TOTOP Mismatch
+     9
+     Server Error Code
+     10
+     Invalid Face ID or Face ID mismatch
+     11
+     Invalid Fingerprint
+     12
+     Invalid SIM Card does not match the one registered in our system
+     13
+     Unable to access servers. Check your internet connection and try again later
+     99
+     Back / Cancel
+     */
+    private static var mfaCallback: ((Int) -> Void)?
+    
+    private static var methodSetted = ""
 
-    static func getMFACallback() -> ((String) -> Void)? {
+    public static func setTxnAuthActivity(activity: String) {
+        methodSetted = activity
+    }
+    static func getMFACallback() -> ((Int) -> Void)? {
         return mfaCallback
     }
-
-    public static func setMFACallback(_ callback: @escaping (String) -> Void) {
-        mfaCallback = callback
+    
+    public static func signUp(userId: String, mfaCallback: @escaping (Int) -> Void) {
+        self.mfaCallback = mfaCallback
+        let method = "Sign Up"
+        let policyLevel = Utils.getSignUpLevel()
+//        print("signUp: \(policyLevel)")
+        signUpSignInMFA(method: method, userId: userId, policyLevel: policyLevel)
     }
     
-    public static func openMFA(method: String, flag: Int){
+    public static func signIn(userId: String, mfaCallback: @escaping (Int) -> Void) {
+        self.mfaCallback = mfaCallback
+        let method = "Sign In"
+        let policyLevel = Utils.getSignInLevel()
+//        print("signIn: \(policyLevel)")
+        signUpSignInMFA(method: method, userId: userId, policyLevel: policyLevel)
+    }
+    
+    public static func txnAuth(userId: String, txnId: String, amount: Double, mfaCallback: @escaping (Int) -> Void) {
+        self.mfaCallback = mfaCallback
+        var method = "Transaction"
+        if !methodSetted.isEmpty {
+            method = methodSetted
+        }
+        let dataTxn = Utils.getTxnLevel()
+        var policyLevel = "1,2"
+//        print("txnAuth: \(dataTxn)")
+        if !dataTxn.isEmpty {
+            if let data = dataTxn.data(using: .utf8) {
+                do {
+                    // Parse to generic JSON array
+                    if let jsonArray = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]] {
+                        for json in jsonArray {
+                            let min = json["min"] as? Double ?? 0
+                            let max = json["max"] as? Double ?? 0
+                            let policy = json["policy"] as? String ?? ""
+                            if max == -1 {
+                                if amount >= min {
+                                    policyLevel = policy
+                                    break
+                                }
+                            } else {
+                                if amount >= min && amount <= max {
+                                    policyLevel = policy
+                                    break
+                                }
+                            }
+                        }
+                        openMFA(method: method, flag: policyLevel)
+                    }
+                } catch {
+                    print("Error converting string to JSONArray:", error)
+                }
+            }
+        }
+    }
+    
+    private static func signUpSignInMFA(method: String, userId: String, policyLevel: String) {
+        Nexilis.showLoader()
+        DispatchQueue.global().async {
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpSignInAPI(p_name: userId, p_password: ""), timeout: 15 * 1000) {
+                if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "20" {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader {
+                            let errMessage = "Invalid user / Username and password does not match".localized()
+                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            APIS.getMFACallback()?(2)
+                        }
+                    }
+                } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "11" {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader {
+                            let errMessage = "Failed, unknown user".localized()
+                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            APIS.getMFACallback()?(2)
+                        }
+                    }
+                } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "4u" {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader {
+                            let errMessage = "Failed, blocked user".localized()
+                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            APIS.getMFACallback()?(2)
+                        }
+                    }
+                } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "13" {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader {
+                            let errMessage = "Failed, This user is not registered on this device".localized()
+                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            APIS.getMFACallback()?(2)
+                        }
+                    }
+                } else if !response.isOk() {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader {
+                            let errMessage = "Failed".localized()
+                            UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                            APIS.getMFACallback()?(2)
+                        }
+                    }
+                } else {
+                    if Database.shared.openDatabase() == 0 {
+                        APIS.showRestartApp()
+                        KeyManagerNexilis.deleteKey()
+                        KeyManagerNexilis.deleteMarker()
+                        return
+                    }
+                    let sign = response.getBody(key: CoreMessage_TMessageKey.SIGN, default_value: "")
+                    if sign == "1" {
+                        let id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
+                        let f_pin = response.getBody(key: CoreMessage_TMessageKey.F_PIN_REAL, default_value: "")
+                        let device_id = response.getBody(key: CoreMessage_TMessageKey.IMEI, default_value: id)
+                        let last_sign = response.getBody(key: CoreMessage_TMessageKey.LAST_SIGN, default_value: "0")
+                        if last_sign != "0" {
+                            Utils.setLoginMultipleFPin(value: f_pin)
+                            DispatchQueue.main.async {
+                                let errMessage = "Multiple Login Detected...".localized()
+                                UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                                if Nexilis.showFB {
+                                    Nexilis.floatingButton.removeFromSuperview()
+                                    FloatingButton.datePull = nil
+                                    Nexilis.floatingButton = FloatingButton()
+                                    Nexilis.addFB()
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
+                                    let dialog = DialogUnableAccess()
+                                    dialog.modalTransitionStyle = .crossDissolve
+                                    dialog.modalPresentationStyle = .overCurrentContext
+                                    UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                })
+                            }
+                            return
+                        }
+                        DispatchQueue.main.async {
+                            UIApplication.shared.visibleViewController?.deleteAllRecordDatabase()
+                        }
+                        if(!id.isEmpty) {
+                            SecureUserDefaults.shared.set(device_id, forKey: "device_id")
+                            Utils.setProfile(value: true)
+                            // pos registration
+                            _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                                Nexilis.hideLoader(completion: {
+                                    if Nexilis.showFB {
+                                        Nexilis.floatingButton.removeFromSuperview()
+                                        FloatingButton.datePull = nil
+                                        Nexilis.floatingButton = FloatingButton()
+                                        Nexilis.addFB()
+                                    }
+                                    Nexilis.getFeatureAccess()
+                                    openMFA(method: method, flag: policyLevel)
+                                })
+                            })
+                        }
+                    } else {
+                        let idMe = User.getMyPin()!
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: idMe))
+                        Utils.setProfile(value: true)
+                        DispatchQueue.main.async {
+                            Nexilis.hideLoader(completion: {
+                                openMFA(method: method, flag: policyLevel)
+                            })
+                        }
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    Nexilis.hideLoader {
+                        let errMessage = "Unable to access servers. Check your internet connection and try again later".localized()
+                        UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
+                        APIS.getMFACallback()?(13)
+                    }
+                }
+            }
+        }
+    }
+    
+    private static func openMFA(method: String, flag: String) {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
             return
         }
-        if flag == MFAViewController.STEP_NEEDED_FIDO {
-            DispatchQueue.global().async {
-                if let me = User.getMyPin() {
-                    do {
-                        let message = CoreMessage_TMessageBank.getMFAValidation(data: me)
-                        var hasKey = false
-                        if !KeyManagerNexilis.hasGeneratedKey() {
-                            KeyManagerNexilis.generateKey()
-                            KeyManagerNexilis.saveMarker()
-                        } else {
-                            hasKey = true
-                        }
-                        guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: false) else {
-                            KeyManagerNexilis.deleteKey()
-                            KeyManagerNexilis.deleteMarker()
-                            DispatchQueue.main.async {
-                                let errorMessage = "Failed to get Private Key"
-                                let dialog = DialogErrorMFA()
-                                dialog.modalTransitionStyle = .crossDissolve
-                                dialog.modalPresentationStyle = .overCurrentContext
-                                dialog.errorDesc = errorMessage
-                                dialog.method = method
-                                UIApplication.shared.visibleViewController?.present(dialog, animated: true)
-                                APIS.getMFACallback()?("Failed: \(errorMessage)")
-                            }
-                            return
-                        }
-                        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
-                            if response.isOk() {
-                                let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
-                                if data.isEmpty {
-                                    DispatchQueue.main.async {
-                                        let errorMessage = "Failed to get Auth Data"
-                                        let dialog = DialogErrorMFA()
-                                        dialog.modalTransitionStyle = .crossDissolve
-                                        dialog.modalPresentationStyle = .overCurrentContext
-                                        dialog.errorDesc = errorMessage
-                                        dialog.method = method
-                                        UIApplication.shared.visibleViewController?.present(dialog, animated: true)
-                                        APIS.getMFACallback()?("Failed: \(errorMessage)")
-                                    }
-                                    return
-                                }
-                                let df = HMACDeviceFingerprintNexilis.generate()
-                                message.mBodies[CoreMessage_TMessageKey.FINGERPRINT] = df
-                                if hasKey {
-                                    var sign = ""
-                                    if let dataSign = "\(data)!\(df)".data(using: .utf8) {
-                                        if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
-                                            sign = signature.base64EncodedString()
-                                        }
-                                    }
-                                    message.mBodies[CoreMessage_TMessageKey.SIGNATURE] = sign
-                                } else {
-                                    if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
-                                        message.mBodies[CoreMessage_TMessageKey.PUBLIC_KEY] = publicKey
-                                    }
-                                }
-                                let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
-                                let otp = try TOTPGenerator.generateTOTP(base32Secret: secret, digits: 6, timeStepSeconds: 30)
-                                message.mBodies[CoreMessage_TMessageKey.TOTP] = otp
-                                if let response = Nexilis.writeAndWait(message: message) {
-                                    if response.isOk() {
-                                        DispatchQueue.main.async {
-                                            UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
-                                        }
-                                        APIS.getMFACallback()?("Success")
-                                    }
-                                    else {
-                                        let errorMessage = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
-                                        DispatchQueue.main.async {
-                                            let errorMessage = "Failed to get Auth Data"
-                                            let dialog = DialogErrorMFA()
-                                            dialog.modalTransitionStyle = .crossDissolve
-                                            dialog.modalPresentationStyle = .overCurrentContext
-                                            dialog.errorDesc = errorMessage
-                                            dialog.method = method
-                                            UIApplication.shared.visibleViewController?.present(dialog, animated: true)
-                                            APIS.getMFACallback()?("Failed: \(errorMessage)")
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            DispatchQueue.main.async {
-                                let errorMessage = "Failed to get Auth Data"
-                                let dialog = DialogErrorMFA()
-                                dialog.modalTransitionStyle = .crossDissolve
-                                dialog.modalPresentationStyle = .overCurrentContext
-                                dialog.errorDesc = errorMessage
-                                dialog.method = method
-                                UIApplication.shared.visibleViewController?.present(dialog, animated: true)
-                                APIS.getMFACallback()?("Failed: \(errorMessage)")
-                            }
-                        }
-                    } catch {
-                    }
-                }
-            }
-        }
-        else {
+        if flag == MFAViewController.STEP_FIDO || flag == MFAViewController.STEP_FIDO_BIOFACE || flag == MFAViewController.STEP_FIDO_BIOFINGER {
+            checkFidoWithOrBIO(method: method, flag: flag)
+        } else {
             let controller = MFAViewController()
             controller.METHOD = method
             controller.STEP_NEEDED = flag
@@ -666,6 +775,189 @@ public class APIS: NSObject {
                 UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
             } else {
                 UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+            }
+        }
+    }
+    
+    private static func checkFidoWithOrBIO(method: String, flag: String) {
+        DispatchQueue.global().async {
+            if let me = User.getMyPin() {
+                do {
+                    let message = CoreMessage_TMessageBank.getMFAValidation(data: me)
+                    var hasKey = false
+                    if !KeyManagerNexilis.hasGeneratedKey() {
+                        KeyManagerNexilis.generateKey()
+                        KeyManagerNexilis.saveMarker()
+                    } else {
+                        hasKey = true
+                    }
+                    guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: false) else {
+                        KeyManagerNexilis.deleteKey()
+                        KeyManagerNexilis.deleteMarker()
+                        DispatchQueue.main.async {
+                            let errorMessage = "PPKey Generated Failed".localized()
+                            let dialog = DialogErrorMFA()
+                            dialog.modalTransitionStyle = .crossDissolve
+                            dialog.modalPresentationStyle = .overCurrentContext
+                            dialog.errorDesc = errorMessage
+                            dialog.method = method
+                            UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                            APIS.getMFACallback()?(5)
+                        }
+                        return
+                    }
+                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
+                        if response.isOk() {
+                            let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
+                            if data.isEmpty {
+                                KeyManagerNexilis.deleteKey()
+                                KeyManagerNexilis.deleteMarker()
+                                DispatchQueue.main.async {
+                                    let errorMessage = "Auth Failure".localized()
+                                    let dialog = DialogErrorMFA()
+                                    dialog.modalTransitionStyle = .crossDissolve
+                                    dialog.modalPresentationStyle = .overCurrentContext
+                                    dialog.errorDesc = errorMessage
+                                    dialog.method = method
+                                    UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                    APIS.getMFACallback()?(2)
+                                }
+                                return
+                            }
+                            let df = HMACDeviceFingerprintNexilis.generate()
+                            message.mBodies[CoreMessage_TMessageKey.FINGERPRINT] = df
+                            if hasKey {
+                                var sign = ""
+                                if let dataSign = "\(data)!\(df)".data(using: .utf8) {
+                                    if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
+                                        sign = signature.base64EncodedString()
+                                    }
+                                }
+                                message.mBodies[CoreMessage_TMessageKey.SIGNATURE] = sign
+                            } else {
+                                if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
+                                    message.mBodies[CoreMessage_TMessageKey.PUBLIC_KEY] = publicKey
+                                }
+                            }
+                            let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
+                            let otp = try TOTPGenerator.generateTOTP(base32Secret: secret, digits: 6, timeStepSeconds: 300)
+                            message.mBodies[CoreMessage_TMessageKey.TOTP] = otp
+                            if let response = Nexilis.writeAndWait(message: message) {
+                                if response.isOk() {
+                                    if flag == MFAViewController.STEP_FIDO_BIOFACE || flag == MFAViewController.STEP_FIDO_BIOFINGER {
+                                        let semaphore = DispatchSemaphore(value: 0)
+                                        var result = true
+                                        var stateErr = 0
+                                        let manager = BiometricStateManager()
+                                        if method == "Sign Up" {
+                                            manager.authenticateAndSaveState { res in
+                                                result = res
+                                                semaphore.signal()
+                                            }
+                                        } else {
+                                            manager.hasBiometricStateChanged { (res, state) in
+                                                result = res
+                                                stateErr = state
+                                                semaphore.signal()
+                                            }
+                                        }
+                                        
+                                        semaphore.wait()
+
+                                        if result {
+                                            DispatchQueue.main.async {
+                                                UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
+                                            }
+                                            APIS.getMFACallback()?(0)
+                                        } else {
+                                            KeyManagerNexilis.deleteKey()
+                                            KeyManagerNexilis.deleteMarker()
+                                            DispatchQueue.main.async {
+                                                var errorMessage = "Gagal mendeteksi Biometric (Touch/Face ID)"
+                                                var errCode = 10
+                                                if stateErr == 1 {
+                                                    errorMessage = "Terjadi Perubahan Biometric (Touch/Face ID)"
+                                                    errCode = 14
+                                                }
+                                                let dialog = DialogErrorMFA()
+                                                dialog.modalTransitionStyle = .crossDissolve
+                                                dialog.modalPresentationStyle = .overCurrentContext
+                                                dialog.errorDesc = errorMessage
+                                                dialog.method = method
+                                                dialog.hideTryAgain = (stateErr == 1)
+                                                dialog.isDismiss = { res in
+                                                    if res == 0 {
+                                                        APIS.logOut()
+                                                        APIS.getMFACallback()?(errCode)
+                                                    }
+                                                }
+                                                UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                            }
+                                        }
+                                    } else {
+                                        DispatchQueue.main.async {
+                                            UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
+                                        }
+                                        APIS.getMFACallback()?(0)
+                                    }
+                                }
+                                else {
+                                    KeyManagerNexilis.deleteKey()
+                                    KeyManagerNexilis.deleteMarker()
+                                    let errorMessage = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT, default_value: "Auth Failure".localized())
+                                    let errCode = response.getBodyAsInteger(key: CoreMessage_TMessageKey.ERRAPICOD, default_value: 2)
+                                    DispatchQueue.main.async {
+                                        let dialog = DialogErrorMFA()
+                                        dialog.modalTransitionStyle = .crossDissolve
+                                        dialog.modalPresentationStyle = .overCurrentContext
+                                        dialog.errorDesc = errorMessage
+                                        dialog.method = method
+                                        UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                        APIS.getMFACallback()?(errCode)
+                                    }
+                                }
+                            } else {
+                                KeyManagerNexilis.deleteKey()
+                                KeyManagerNexilis.deleteMarker()
+                                DispatchQueue.main.async {
+                                    let errorMessage = "Unable to access servers. Check your internet connection and try again later".localized()
+                                    let dialog = DialogErrorMFA()
+                                    dialog.modalTransitionStyle = .crossDissolve
+                                    dialog.modalPresentationStyle = .overCurrentContext
+                                    dialog.errorDesc = errorMessage
+                                    dialog.method = method
+                                    UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                    APIS.getMFACallback()?(13)
+                                }
+                            }
+                        }
+                    } else {
+                        KeyManagerNexilis.deleteKey()
+                        KeyManagerNexilis.deleteMarker()
+                        DispatchQueue.main.async {
+                            let errorMessage = "Unable to access servers. Check your internet connection and try again later".localized()
+                            let dialog = DialogErrorMFA()
+                            dialog.modalTransitionStyle = .crossDissolve
+                            dialog.modalPresentationStyle = .overCurrentContext
+                            dialog.errorDesc = errorMessage
+                            dialog.method = method
+                            UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                            APIS.getMFACallback()?(13)
+                        }
+                    }
+                } catch {
+                }
+            }
+        }
+    }
+    
+    public static func setFloatingButton(isShow: Bool) {
+        DispatchQueue.main.async {
+            Nexilis.floatingButton.removeFromSuperview()
+            FloatingButton.datePull = nil
+            if isShow {
+                Nexilis.floatingButton = FloatingButton()
+                Nexilis.addFB()
             }
         }
     }
@@ -1123,6 +1415,7 @@ public class APIS: NSObject {
         }
         let idx = Nexilis.IDX_SOCIAL_COMMERCE
         let url = getURLFB(idx: idx)
+        print("HUHU: \(idx) <><> \(url)")
         Nexilis.buttonClicked(index: idx, id: url)
     }
     

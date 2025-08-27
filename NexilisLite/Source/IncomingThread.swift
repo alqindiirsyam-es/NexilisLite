@@ -262,11 +262,55 @@ class IncomingThread {
         if let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID] {
             _ = Nexilis.responseString(packetId: packetId, message: "00", timeout: 3000)
         }
-        DispatchQueue.main.async {
-            UIApplication.shared.visibleViewController?.deleteAllRecordDatabase()
-            Nexilis.floatingButton.removeFromSuperview()
-            SecureUserDefaults.shared.removeValue(forKey: "me")
-            Utils.setProfile(value: false)
+        DispatchQueue.global().async {
+            let apiKey = Nexilis.sAPIKey
+            var id = Utils.getConnectionID()
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpApi(api: apiKey, p_pin: id), timeout: 15 * 1000) {
+                id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
+                if(!id.isEmpty){
+//                            Nexilis.changeUser(f_pin: id)
+                    SecureUserDefaults.shared.set(id, forKey: "me")
+                    APIS.sendPushToken(Utils.getTokenAPN(), isResend: true)
+                    Nexilis.sendVersionToBE()
+                    Utils.setProfile(value: false)
+                    if Utils.getForceAnonymous() {
+                        DispatchQueue.main.async {
+                            APIS.setFloatingButton(isShow: false)
+                            UIApplication.shared.visibleViewController?.deleteAllRecordDatabase()
+                        }
+                        SecureUserDefaults.shared.removeValue(forKey: "device_id")
+                        Nexilis.destroyAll()
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
+                    }
+                    DispatchQueue.main.async {
+                        var dataImage: [AnyHashable : Any] = [:]
+                        dataImage["name"] = ""
+                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
+                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                        if !Utils.getForceAnonymous() {
+                            Nexilis.showForceSignIn()
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader(completion: {
+                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                            banner.show()
+                        })
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    Nexilis.hideLoader(completion: {
+                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                        imageView.tintColor = .white
+                        let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                        banner.show()
+                    })
+                }
+            }
         }
         ack(message: message)
     }
@@ -1289,6 +1333,7 @@ class IncomingThread {
     }
     
     private func receiveMessage(message: TMessage) -> Void {
+        print("recive message \(message.toLogString())")
         if Utils.getSecureFolderOffline() == "0" {
             if API.nGetCLXConnState() == 0 {
                 do {

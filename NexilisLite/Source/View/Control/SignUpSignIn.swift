@@ -507,6 +507,7 @@ public class SignUpSignIn: UIViewController {
                     Nexilis.hideLoader(completion: {
                         if Nexilis.showFB {
                             Nexilis.floatingButton.removeFromSuperview()
+                            FloatingButton.datePull = nil
                             Nexilis.floatingButton = FloatingButton()
                             Nexilis.addFB()
                         }
@@ -546,6 +547,7 @@ public class SignUpSignIn: UIViewController {
                         banner.show()
                         if Nexilis.showFB {
                             Nexilis.floatingButton.removeFromSuperview()
+                            FloatingButton.datePull = nil
                             Nexilis.floatingButton = FloatingButton()
                             Nexilis.addFB()
                         }

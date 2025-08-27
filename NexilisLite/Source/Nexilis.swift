@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.52"
+    public static var cpaasVersion = "5.0.55"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -257,9 +257,9 @@ public class Nexilis: NSObject {
                                     if !enable_signup && !userId.isEmpty {
                                         enable_signup = true
                                         Utils.setProfile(value: true)
-                                        KeyManagerNexilis.deleteKey()
-                                        KeyManagerNexilis.deleteMarker()
                                     }
+                                    KeyManagerNexilis.deleteKey()
+                                    KeyManagerNexilis.deleteMarker()
                                     Utils.setForceAnonymous(value: enable_signup)
                                     if(!id.isEmpty) {
                                         SecureUserDefaults.shared.set(id, forKey: "me")
@@ -342,7 +342,7 @@ public class Nexilis: NSObject {
                             showForceSignIn()
                         }
                     }
-                    getServiceBank()
+//                    getServiceBank()
                     getPullWorkingArea()
                     getPullGroupNoMember()
                     getWhitelistFileExt()
@@ -657,8 +657,31 @@ public class Nexilis: NSObject {
                                 }
                                 if jsonData["chatbot_greetings"]! != nil {
                                     if let greeting = jsonData["chatbot_greetings"] as? String {
-                                        print("Chatbot greeting: \(greeting)")
+//                                        print("Chatbot greeting: \(greeting)")
                                         Utils.setChatbotGreetings(value: greeting)
+                                    }
+                                }
+                                if jsonData["mfa_signup"]! != nil {
+                                    if let data = jsonData["mfa_signup"] as? String {
+//                                        print("mfa_signup: \(data)")
+                                        Utils.setSignUpLevel(value: data)
+                                    }
+                                }
+                                if jsonData["mfa_signin"]! != nil {
+                                    if let data = jsonData["mfa_signin"] as? String {
+//                                        print("mfa_signin: \(data)")
+                                        Utils.setSignInLevel(value: data)
+                                    }
+                                }
+                                if jsonData["mfa_trx"]! != nil {
+                                    if let data = jsonData["mfa_trx"] as? String {
+//                                        print("mfa_trx: \(data)")
+                                        let encoder = JSONEncoder()
+                                        encoder.outputFormatting = .prettyPrinted
+                                        let jsonData = try encoder.encode(data)
+                                        if let jsonString = String(data: jsonData, encoding: .utf8) {
+                                            Utils.setTxnLevel(value: jsonString)
+                                        }
                                     }
                                 }
                             }
@@ -3420,7 +3443,7 @@ extension Nexilis: MessageDelegate {
                     data["l_pin"] = message.getBody(key: CoreMessage_TMessageKey.L_PIN)
                     data["f_display_name"] = message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME)
                     Nexilis.onGoingPushCC = data
-                } else if Nexilis.onGoingPushCC["f_display_name"] == message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME) {
+                } else if Nexilis.onGoingPushCC["l_pin"] == message.getBody(key: CoreMessage_TMessageKey.L_PIN) {
                     return
                 }
                 let alert = LibAlertController(title: "", message: "\n\n\n\n\n\n\n\n\n\n".localized(), preferredStyle: .alert)

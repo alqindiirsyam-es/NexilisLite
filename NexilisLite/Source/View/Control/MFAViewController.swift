@@ -13,11 +13,15 @@ import nuSDKService
 
 // MARK: - MFA Class
 class MFAViewController: UIViewController {
-    static let STEP_NEEDED_FIDO = 1
-    static let STEP_NEEDED_FIDO_PWD = 2
-    static let STEP_NEEDED_FIDO_PWD_BIOMETRIC = 3
     
-    var STEP_NEEDED = STEP_NEEDED_FIDO_PWD
+    static let STEP_FIDO = "1";
+    static let STEP_FIDO_PWD = "1,2";
+    static let STEP_FIDO_PWD_BIOFINGER = "1,2,3";
+    static let STEP_FIDO_PWD_BIOFACE = "1,2,4";
+    static let STEP_FIDO_BIOFINGER = "1,3";
+    static let STEP_FIDO_BIOFACE = "1,4";
+    
+    var STEP_NEEDED = STEP_FIDO_PWD
     var METHOD = ""
 
     private let imageViewBackground = UIImageView()
@@ -88,6 +92,7 @@ class MFAViewController: UIViewController {
     }
     
     @objc func cancel(sender: Any) {
+        APIS.getMFACallback()?(99)
         navigationController?.dismiss(animated: true, completion: nil)
     }
     
@@ -285,7 +290,7 @@ class MFAViewController: UIViewController {
                     KeyManagerNexilis.deleteMarker()
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
-                            let errorMessage = "Failed to get Private Key"
+                            let errorMessage = "PPKey Generated Failed".localized()
                             let dialog = DialogErrorMFA()
                             dialog.modalTransitionStyle = .crossDissolve
                             dialog.modalPresentationStyle = .overCurrentContext
@@ -294,7 +299,7 @@ class MFAViewController: UIViewController {
                             dialog.isDismiss = { res in
                                 if res == 0 {
                                     self.navigationController?.dismiss(animated: true, completion: {
-                                        APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                        APIS.getMFACallback()?(5)
                                     })
                                 }
                             }
@@ -311,7 +316,7 @@ class MFAViewController: UIViewController {
                                 KeyManagerNexilis.deleteKey()
                                 KeyManagerNexilis.deleteMarker()
                                 Nexilis.hideLoader {
-                                    let errorMessage = "Failed to get Auth Data"
+                                    let errorMessage = "Auth Failure".localized()
                                     let dialog = DialogErrorMFA()
                                     dialog.modalTransitionStyle = .crossDissolve
                                     dialog.modalPresentationStyle = .overCurrentContext
@@ -320,7 +325,7 @@ class MFAViewController: UIViewController {
                                     dialog.isDismiss = { res in
                                         if res == 0 {
                                             self.navigationController?.dismiss(animated: true, completion: {
-                                                APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                                APIS.getMFACallback()?(2)
                                             })
                                         }
                                     }
@@ -345,11 +350,11 @@ class MFAViewController: UIViewController {
                             }
                         }
                         let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
-                        let otp = try TOTPGenerator.generateTOTP(base32Secret: secret, digits: 6, timeStepSeconds: 30)
+                        let otp = try TOTPGenerator.generateTOTP(base32Secret: secret, digits: 6, timeStepSeconds: 300)
                         tMessage.mBodies[CoreMessage_TMessageKey.TOTP] = otp
                         if let response = Nexilis.writeAndWait(message: tMessage) {
                             if response.isOk() {
-                                if self.STEP_NEEDED == MFAViewController.STEP_NEEDED_FIDO_PWD_BIOMETRIC {
+                                if self.STEP_NEEDED == MFAViewController.STEP_FIDO_PWD_BIOFINGER || self.STEP_NEEDED == MFAViewController.STEP_FIDO_PWD_BIOFACE {
                                     self.biometricAuth()
                                 } else {
                                     DispatchQueue.main.async {
@@ -357,7 +362,7 @@ class MFAViewController: UIViewController {
                                             self.navigationController?.dismiss(animated: true, completion: {
                                                 UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
                                                 self.dismissKeyboard()
-                                                APIS.getMFACallback()?("Success")
+                                                APIS.getMFACallback()?(0)
                                             })
                                         }
                                     }
@@ -368,7 +373,8 @@ class MFAViewController: UIViewController {
                                     KeyManagerNexilis.deleteKey()
                                     KeyManagerNexilis.deleteMarker()
                                     Nexilis.hideLoader {
-                                        let errorMessage = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
+                                        let errorMessage = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT, default_value: "Auth Failure".localized())
+                                        let errCode = response.getBodyAsInteger(key: CoreMessage_TMessageKey.ERRAPICOD, default_value: 2)
                                         let dialog = DialogErrorMFA()
                                         dialog.modalTransitionStyle = .crossDissolve
                                         dialog.modalPresentationStyle = .overCurrentContext
@@ -377,7 +383,7 @@ class MFAViewController: UIViewController {
                                         dialog.isDismiss = { res in
                                             if res == 0 {
                                                 self.navigationController?.dismiss(animated: true, completion: {
-                                                    APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                                    APIS.getMFACallback()?(errCode)
                                                 })
                                             }
                                         }
@@ -392,7 +398,7 @@ class MFAViewController: UIViewController {
                         KeyManagerNexilis.deleteKey()
                         KeyManagerNexilis.deleteMarker()
                         Nexilis.hideLoader {
-                            let errorMessage = "Failed to get Auth Data"
+                            let errorMessage = "Unable to access servers. Check your internet connection and try again later".localized()
                             let dialog = DialogErrorMFA()
                             dialog.modalTransitionStyle = .crossDissolve
                             dialog.modalPresentationStyle = .overCurrentContext
@@ -401,7 +407,7 @@ class MFAViewController: UIViewController {
                             dialog.isDismiss = { res in
                                 if res == 0 {
                                     self.navigationController?.dismiss(animated: true, completion: {
-                                        APIS.getMFACallback()?("Failed: \(errorMessage)")
+                                        APIS.getMFACallback()?(13)
                                     })
                                 }
                             }
@@ -417,18 +423,22 @@ class MFAViewController: UIViewController {
 
     private func biometricAuth() {
         let semaphore = DispatchSemaphore(value: 0)
-        var result = false
-
-        Utils.authenticateWithBiometrics { success, errorMessage in
-            if success {
-                print("Access granted!")
-                result = true
-            } else {
-                print("Access denied: \(errorMessage ?? "Unknown error")")
+        var result = true
+        var stateErr = 0
+        let manager = BiometricStateManager()
+        if self.METHOD == "Sign Up" {
+            manager.authenticateAndSaveState { res in
+                result = res
+                semaphore.signal()
             }
-            semaphore.signal()
+        } else {
+            manager.hasBiometricStateChanged { (res, state) in
+                result = res
+                stateErr = state
+                semaphore.signal()
+            }
         }
-
+        
         semaphore.wait()
 
         if result {
@@ -437,7 +447,7 @@ class MFAViewController: UIViewController {
                     self.navigationController?.dismiss(animated: true, completion: {
                         UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
                         self.dismissKeyboard()
-                        APIS.getMFACallback()?("Success")
+                        APIS.getMFACallback()?(0)
                     })
                 }
             }
@@ -446,17 +456,22 @@ class MFAViewController: UIViewController {
             KeyManagerNexilis.deleteMarker()
             DispatchQueue.main.async {
                 Nexilis.hideLoader {
-                    let errorMessage = "Gagal mendeteksi Biometric (Fingerprint/Face ID)"
+                    var errorMessage = "Gagal mendeteksi Biometric (Touch/Face ID)"
+                    var errCode = 10
+                    if stateErr == 1 {
+                        errorMessage = "Terjadi Perubahan Biometric (Touch/Face ID)"
+                        errCode = 14
+                    }
                     let dialog = DialogErrorMFA()
                     dialog.modalTransitionStyle = .crossDissolve
                     dialog.modalPresentationStyle = .overCurrentContext
                     dialog.errorDesc = errorMessage
                     dialog.method = self.METHOD
+                    dialog.hideTryAgain = (stateErr == 1)
                     dialog.isDismiss = { res in
                         if res == 0 {
-                            self.navigationController?.dismiss(animated: true, completion: {
-                                APIS.getMFACallback()?("Failed: \(errorMessage)")
-                            })
+                            APIS.logOut()
+                            APIS.getMFACallback()?(errCode)
                         }
                     }
                     UIApplication.shared.visibleViewController?.present(dialog, animated: true)

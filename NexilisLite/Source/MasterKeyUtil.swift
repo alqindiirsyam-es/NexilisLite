@@ -8,6 +8,7 @@
 import CryptoKit
 import LocalAuthentication
 import UIKit
+import LocalAuthentication
 
 
 public class MasterKeyUtil {
@@ -468,3 +469,43 @@ class KeyManagerNexilis {
         return signature
     }
 }
+
+class BiometricStateManager {
+    func authenticateAndSaveState(completion: @escaping (Bool) -> Void) {
+        let context = LAContext()
+        var error: NSError?
+
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                                   localizedReason: "Daftarkan biometric anda!") { success, _ in
+                if success, let domainState = context.evaluatedPolicyDomainState {
+                    Utils.setBiometricState(value: domainState)
+                }
+                completion(success)
+            }
+        } else {
+            completion(false)
+        }
+    }
+    
+    func hasBiometricStateChanged(completion: @escaping (Bool, Int) -> Void) {
+        let context = LAContext()
+        var error: NSError?
+
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                                   localizedReason: "Validasi biometric anda!") { success, _ in
+                if success, let currentState = context.evaluatedPolicyDomainState,
+                   let savedState = Utils.getBiometricState() {
+                    completion(savedState == currentState, 1)
+                } else {
+                    completion(false, 0)
+                }
+            }
+        } else {
+            completion(false, 0)
+        }
+    }
+}
+
+
