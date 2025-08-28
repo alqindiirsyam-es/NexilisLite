@@ -1333,7 +1333,7 @@ class IncomingThread {
     }
     
     private func receiveMessage(message: TMessage) -> Void {
-        print("recive message \(message.toLogString())")
+//        print("receive message \(message.toLogString())")
         if Utils.getSecureFolderOffline() == "0" {
             if API.nGetCLXConnState() == 0 {
                 do {

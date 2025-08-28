@@ -423,6 +423,10 @@ public class CoreMessage_TMessageKey {
     public static let SUB_TOTAL = "A150"
     public static let IS_CALL_CENTER = "icc"
     public static let CALL_CENTER_ID = "ccid"
+    public static let IS_BROADCAST_MESSAGE = "ibm";
+    public static let EX_BOOK = "exbook";
+    public static let EX_BOOK1 = "exbook1";
+    public static let LN = "LN";
     
     public static let MERCHANT_ID = "MERID"
     public static let MERCHANT_IMAGE = "MERIMG"
@@ -499,6 +503,12 @@ public class CoreMessage_TMessageKey {
     public static let SCALE = "SCL";
     public static let STYLE = "STL";
     public static let GIF_ID = "GF";
+    public static let FLOATING_MODE = "FLM";
+    public static let BACKGROUND = "BCG";
+    public static let COLOR = "CLR";
+    public static let ICON_TITLE = "ICT";
+    public static let ICON_SUFFIX = "ICSF";
+    public static let FOOTER = "FT";
     
     public static let IS_SECRET = "sct";
     public static let IS_DELETED_RETENTION = "idl";

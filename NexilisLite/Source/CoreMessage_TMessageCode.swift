@@ -270,14 +270,16 @@ public class CoreMessage_TMessageCode {
     public static let IMAGE_DOWNLOAD = "A109";
     
     public static let REQUEST_FORM_LIST = "A112";
+    public static let PULL_FORM_SYNC = "A112A";
     public static let FORM_PUSH = "A113";
     public static let FORM_PUSH_UPDATE = "A113A";
     public static let FORM_PIC_SUBMIT = "A114";
-    public static let SUBMIT_FORM    = "A115";
-    public static let APPROVE_FORM   = "A115A";
+    public static let SUBMIT_FORM = "A115";
+    public static let APPROVE_FORM = "A115A";
     public static let FOLLOW_FORM = "A115B";
     public static let SUB_ACTIVITY_UPDATE = "A115C";
-    public static let APPROVE_SUBMIT_STATUS   = "A115D";
+    public static let APPROVE_SUBMIT_STATUS = "A115D";
+    public static let PULL_INSTANT_MESSAGING_ATTACHMENT = "PIA";
     
     public static let FOLLOW_PERSON         = "B01";
     public static let UNFOLLOW_PERSON       = "B02";

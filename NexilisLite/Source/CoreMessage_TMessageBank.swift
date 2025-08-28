@@ -2880,4 +2880,14 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func pullFormSyc(formId: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.PULL_FORM_SYNC
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.FORM_ID] = formId
+        return tMessage
+    }
+    
 }

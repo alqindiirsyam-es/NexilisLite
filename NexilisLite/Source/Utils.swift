@@ -787,6 +787,8 @@ public final class Utils {
         let urlConfig = URLSessionConfiguration.default
         urlConfig.timeoutIntervalForRequest = 30.0
         urlConfig.timeoutIntervalForResource = 60.0
+        urlConfig.isDiscretionary = false
+        urlConfig.sessionSendsLaunchEvents = true
         let sessionDelegate = SelfSignedURLSessionDelegate()
         let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
         let task = session.dataTask(with: request, completionHandler: completion)
@@ -2997,6 +2999,177 @@ public class DialogErrorMFA: UIViewController {
     }
 }
 
+public class DialogBroadcastInApp: UIViewController {
+    
+    public var form: FormM!
+    public var formItem: FormItemM!
+    public var labelForm = ""
+    public var listTitleButton: [String] = []
+    public var message: [String: Any] = [:]
+    
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        self.view.backgroundColor = .black.withAlphaComponent(0.5)
+        
+        let container = UIView()
+        self.view.addSubview(container)
+        container.anchor(left: self.view.leftAnchor, right: self.view.rightAnchor, paddingLeft: 20, paddingRight: 20, centerY: self.view.centerYAnchor)
+        container.layer.cornerRadius = 20.0
+        container.clipsToBounds = true
+        container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        
+        let title = UILabel()
+        title.text = form.title
+        title.font = .boldSystemFont(ofSize: 14)
+        title.numberOfLines = 0
+        title.textAlignment = .center
+        title.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        container.addSubview(title)
+        title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: UIScreen.main.bounds.width / 2)
+        
+        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning_green", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        if !form.iconTitle.isEmpty {
+            getImage(name: form.iconTitle, completion: { result, isDownloaded, image in
+                DispatchQueue.main.async {
+                    if let img = image {
+                        DispatchQueue.main.async {
+                            imageWarning.image = image
+                        }
+                    }
+                }
+            })
+        }
+        container.addSubview(imageWarning)
+        imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: -5, width: 30, height: 30)
+        
+        let imageLogo = UIImageView(image: UIImage(named: "bjb-blue-flat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        container.addSubview(imageLogo)
+        imageLogo.anchor(top: container.topAnchor, left: container.leftAnchor, paddingTop: 10, paddingLeft: 10, width: 40, height: 40)
+        
+        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        if !form.iconSuffix.isEmpty {
+            getImage(name: form.iconSuffix, completion: { result, isDownloaded, image in
+                if let img = image {
+                    DispatchQueue.main.async {
+                        imageChat.image = image
+                    }
+                }
+            })
+        }
+        container.addSubview(imageChat)
+        imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 10, width: 30, height: 30)
+        
+        let content = labelForm
+        var contentAtt = NSAttributedString(string: "")
+        let contentS = UITextView()
+        contentS.tintColor = .label
+        if HtmlUtils.hasHtmlTag(content) {
+            contentAtt = HtmlUtils.toHTMLPreview(content)
+            contentS.attributedText = contentAtt
+        } else {
+            contentS.attributedText = content.richText()
+        }
+        contentS.isEditable = false
+        contentS.isScrollEnabled = false
+        contentS.dataDetectorTypes = [.link]
+        container.addSubview(contentS)
+        contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 20, paddingLeft: 15, paddingRight: 10)
+        
+        let spacing: CGFloat = 5
+        let buttonHeight: CGFloat = 35
+        let maxPerRow = 3
+        let parentWidth = UIScreen.main.bounds.width - 40
+        
+        let containerButton = UIView()
+        container.addSubview(containerButton)
+        containerButton.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, width: parentWidth)
+        
+        
+        let buttonWidth = (parentWidth - (CGFloat(maxPerRow + 1) * spacing)) / CGFloat(maxPerRow)
+        var finalRow = 1
+        for (index, title) in listTitleButton.enumerated() {
+            let row = index / maxPerRow
+            let col = index % maxPerRow
+            
+            let x = spacing + CGFloat(col) * (buttonWidth + spacing)
+            let y = spacing + CGFloat(row) * (buttonHeight + spacing)
+            
+            var finalTitleButton = title
+            if title.starts(with: "call_") {
+                finalTitleButton = "Call " + title.components(separatedBy: "_")[1]
+            } else if title == "cc" {
+                finalTitleButton = "Contact Center"
+            }
+            
+            let button = UIButton(type: .system)
+            button.frame = CGRect(x: x, y: y, width: buttonWidth, height: buttonHeight)
+            button.layer.cornerRadius = 17.5
+            button.clipsToBounds = true
+            button.titleLabel?.font = .boldSystemFont(ofSize: 14)
+            button.setTitleColor(.white, for: .normal)
+            button.addAction{ btn in
+                if title == "cc" {
+                    if self.form.formId == "212953" || self.form.formId == "112903"{
+                        APIS.openContactCenterWithContext(context: self.formItem.label + "~Transaction~Credit Card~Fraud")
+                    } else {
+                        APIS.openContactCenterWithContext(context: self.formItem.label)
+                    }
+                } else if title.starts(with: "call_") {
+                    var phone = Utils.getCallCenter()
+                    if phone.substring(from: 0, to: 0) == "0" {
+                        phone = "+62" + phone.substring(from: 1, to: phone.count)
+                    }
+                    if let url = URL(string: "tel://\(phone)") {
+                        UIApplication.shared.open(url)
+                    }
+                } else {
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                            "ex_book" : self.message[CoreMessage_TMessageKey.MESSAGE_TEXT] ?? ""
+                        ], _where: "message_id = '\(self.message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")'")
+                    })
+                    var messageTextSend = ""
+                    let message = CoreMessage_TMessageBank.sendMessage(l_pin: self.form.formId, message_scope_id: MessageScope.FORM, status: "1", message_text: messageTextSend, credential: "0", attachment_flag: "", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: "", audio_id: "", video_id: "", file_id: self.form.formId, thumb_id: "", reff_id: "", read_receipts: "4", chat_id: "", is_call_center: "0", call_center_id: "", opposite_pin: "", specFile: "")
+                    OutgoingThread.default.addQueue(message: message)
+                    self.dismiss(animated: true)
+                }
+            }
+
+            if formItem.background.isEmpty {
+                button.setTitle(finalTitleButton, for: .normal)
+                button.backgroundColor = .systemBlue
+            } else {
+                let backgrounds = formItem.background.components(separatedBy: ",")
+                if index < backgrounds.count {
+                    let background = backgrounds[index]
+                    button.setTitle("", for: .normal)
+                    getImage(name: background, isResized: false, completion: { result, isDownloaded, image in
+                        if let img = image {
+                            DispatchQueue.main.async {
+                                button.setBackgroundImage(img.resizableImage(withCapInsets: .zero, resizingMode: .stretch), for: .normal)
+                            }
+                        }
+                    })
+                }
+            }
+            
+            containerButton.addSubview(button)
+            finalRow = row + 1
+        }
+        
+        containerButton.heightAnchor.constraint(equalToConstant: CGFloat(35 * finalRow)).isActive = true
+        
+        let footer = UILabel()
+        footer.text = form.footer
+        footer.font = .systemFont(ofSize: 12)
+        footer.textColor = .gray
+        footer.numberOfLines = 0
+        container.addSubview(footer)
+        footer.anchor(top: containerButton.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingTop: 10, paddingBottom: 5, paddingRight: 10)
+        
+    }
+}
+
 class LocationManager: NSObject, CLLocationManagerDelegate {
     private var locationManager = CLLocationManager()
 
@@ -3446,5 +3619,119 @@ public class CallBannerView: UIView {
 
     public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+}
+
+class HtmlUtils {
+    private static func unescapeHTMLEntities(_ text: String) -> String {
+        var result = text
+
+        // quick named entity replacements
+        let named: [String: String] = [
+            "&lt;": "<",
+            "&gt;": ">",
+            "&amp;": "&",
+            "&quot;": "\"",
+            "&apos;": "'",
+            "&#039;": "'" // common single-quote entity in some HTML sources
+        ]
+        for (k, v) in named {
+            result = result.replacingOccurrences(of: k, with: v)
+        }
+
+        // decode decimal numeric entities like &#39;
+        let decimalPattern = "&#(\\d+);"
+        if let decRegex = try? NSRegularExpression(pattern: decimalPattern, options: []) {
+            let matches = decRegex.matches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count))
+            for match in matches.reversed() { // reverse so ranges remain valid while replacing
+                guard match.numberOfRanges >= 2,
+                      let numRange = Range(match.range(at: 1), in: result) else { continue }
+                let numStr = String(result[numRange])
+                if let code = Int(numStr), let scalar = UnicodeScalar(code) {
+                    let char = String(scalar)
+                    if let fullRange = Range(match.range(at: 0), in: result) {
+                        result.replaceSubrange(fullRange, with: char)
+                    }
+                }
+            }
+        }
+
+        // decode hex numeric entities like &#x27;
+        let hexPattern = "&#x([0-9a-fA-F]+);"
+        if let hexRegex = try? NSRegularExpression(pattern: hexPattern, options: []) {
+            let matches = hexRegex.matches(in: result, options: [], range: NSRange(location: 0, length: result.utf16.count))
+            for match in matches.reversed() {
+                guard match.numberOfRanges >= 2,
+                      let hexRange = Range(match.range(at: 1), in: result) else { continue }
+                let hexStr = String(result[hexRange])
+                if let code = Int(hexStr, radix: 16), let scalar = UnicodeScalar(code) {
+                    let char = String(scalar)
+                    if let fullRange = Range(match.range(at: 0), in: result) {
+                        result.replaceSubrange(fullRange, with: char)
+                    }
+                }
+            }
+        }
+
+        return result
+    }
+
+    static func toHTMLPreview(_ pText: String, fontSize: CGFloat = 12) -> NSAttributedString {
+        let unescaped = unescapeHTMLEntities(pText).replacingOccurrences(of: "\n", with: "<br>")
+
+        let parsed: NSAttributedString = {
+            guard let data = unescaped.data(using: .utf8) else { return NSAttributedString(string: unescaped) }
+            do {
+                return try NSAttributedString(
+                    data: data,
+                    options: [
+                        .documentType: NSAttributedString.DocumentType.html,
+                        .characterEncoding: String.Encoding.utf8.rawValue
+                    ],
+                    documentAttributes: nil
+                )
+            } catch {
+                return NSAttributedString(string: unescaped)
+            }
+        }()
+
+        // 3) Apply your custom fonts while preserving link attributes
+        let mutable = NSMutableAttributedString(attributedString: parsed)
+        let normalFont = UIFont.systemFont(ofSize: fontSize)
+        let boldFont = UIFont.boldSystemFont(ofSize: fontSize)
+        let italicFont = UIFont.italicSystemFont(ofSize: fontSize)
+        let boldItalicFont = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
+
+        mutable.enumerateAttribute(.font, in: NSRange(location: 0, length: mutable.length)) { value, range, _ in
+            guard let oldFont = value as? UIFont else { return }
+            let traits = oldFont.fontDescriptor.symbolicTraits
+            let newFont: UIFont
+            if traits.contains([.traitBold, .traitItalic]) {
+                newFont = boldItalicFont
+            } else if traits.contains(.traitBold) {
+                newFont = boldFont
+            } else if traits.contains(.traitItalic) {
+                newFont = italicFont
+            } else {
+                newFont = normalFont
+            }
+            // replace font but DO NOT remove link attribute or other attrs
+            mutable.addAttribute(.font, value: newFont, range: range)
+        }
+
+        return mutable
+    }
+    
+    static func hasHtmlTag(_ pText: String) -> Bool {
+        // unescape entities first
+        let unescaped = unescapeHTMLEntities(pText)
+        
+        let pattern = ".*\\<[^>]+>.*"
+        if let regex = try? NSRegularExpression(pattern: pattern,
+                                                options: [.dotMatchesLineSeparators]) {
+            let range = NSRange(location: 0, length: (unescaped as NSString).length)
+            return regex.firstMatch(in: unescaped, options: [], range: range) != nil
+        }
+        return false
     }
 }

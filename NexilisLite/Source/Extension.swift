@@ -455,7 +455,7 @@ extension NSObject {
     
     private static var urlStore = [String:String]()
 
-    public func getImage(name url: String, placeholderImage: UIImage? = nil, isCircle: Bool = false, tableView: UITableView? = nil, indexPath: IndexPath? = nil, completion: @escaping (Bool, Bool, UIImage?)->()) {
+    public func getImage(name url: String, placeholderImage: UIImage? = nil, isCircle: Bool = false, tableView: UITableView? = nil, indexPath: IndexPath? = nil, isResized: Bool = true, completion: @escaping (Bool, Bool, UIImage?)->()) {
         let tmpAddress = String(format: "%p", unsafeBitCast(self, to: Int.self))
         type(of: self).urlStore[tmpAddress] = url
         if url.isEmpty {
@@ -466,8 +466,12 @@ extension NSObject {
             let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             let file = documentDir.appendingPathComponent(url)
             if FileManager().fileExists(atPath: file.path) {
-                let image = UIImage(contentsOfFile: file.path)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-                completion(true, false, isCircle ? image?.circleMasked : image)
+                var image = UIImage(contentsOfFile: file.path)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
+                if isResized {
+                    completion(true, false, isCircle ? image?.circleMasked : image)
+                } else {
+                    completion(true, false, isCircle ? UIImage(contentsOfFile: file.path)?.circleMasked : UIImage(contentsOfFile: file.path))
+                }
             } else if var tempData = try FileEncryption.shared.readSecure(filename: url) {
                 let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: tempData)
                 if dataDecrypt != nil {
@@ -475,7 +479,11 @@ extension NSObject {
                 }
                 let image = UIImage(data: tempData)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
 //                FileEncryption.shared.wipeData(&tempData)
-                completion(true, true, isCircle ? image?.circleMasked : image)
+                if isResized {
+                    completion(true, false, isCircle ? image?.circleMasked : image)
+                } else {
+                    completion(true, false, isCircle ? UIImage(data: tempData)?.circleMasked : UIImage(data: tempData))
+                }
             } else {
 //                completion(false, false, placeholderImage)
                 Download().startHTTP(forKey: url) { (name, progress) in
@@ -487,7 +495,11 @@ extension NSObject {
                         if type(of: self).urlStore[tmpAddress] == name && tableView == nil {
                             if FileManager().fileExists(atPath: file.path) {
                                 let image = UIImage(contentsOfFile: file.path)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-                                completion(true, true, isCircle ? image?.circleMasked : image)
+                                if isResized {
+                                    completion(true, false, isCircle ? image?.circleMasked : image)
+                                } else {
+                                    completion(true, false, isCircle ? UIImage(contentsOfFile: file.path)?.circleMasked : UIImage(contentsOfFile: file.path))
+                                }
                             } else if FileEncryption.shared.isSecureExists(filename: url) {
                                 do {
                                     if var imageData = try FileEncryption.shared.readSecure(filename: url) {
@@ -496,7 +508,11 @@ extension NSObject {
                                             imageData = dataDecrypt!
                                         }
                                         let image = UIImage(data: imageData)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-                                        completion(true, true, isCircle ? image?.circleMasked : image)
+                                        if isResized {
+                                            completion(true, false, isCircle ? image?.circleMasked : image)
+                                        } else {
+                                            completion(true, false, isCircle ? UIImage(data: imageData)?.circleMasked : UIImage(data: imageData))
+                                        }
                                     }
                                 } catch {
                                     
@@ -1194,6 +1210,7 @@ extension Bundle {
 //
 //}
 
+private var actionKey: UInt8 = 0
 extension UIButton {
     private func actionHandleBlock(action:(() -> Void)? = nil) {
         struct __ {
@@ -1219,6 +1236,18 @@ extension UIButton {
         self.setImage(image, for: state)
         self.titleEdgeInsets = UIEdgeInsets(top: 0, left: -((image?.size.width ?? 0) + 5), bottom: 0, right: (image?.size.width ?? 0))
         self.imageEdgeInsets = UIEdgeInsets(top: 10, left: (self.titleLabel?.frame.size.width ?? 0) + 90, bottom: 10, right: -((self.titleLabel?.frame.size.width ?? 0) + 5))
+    }
+    
+    func addAction(for controlEvents: UIControl.Event = .touchUpInside,
+                   _ closure: @escaping (UIButton) -> Void) {
+        objc_setAssociatedObject(self, &actionKey, closure, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        addTarget(self, action: #selector(handleAction), for: controlEvents)
+    }
+    
+    @objc private func handleAction() {
+        if let closure = objc_getAssociatedObject(self, &actionKey) as? (UIButton) -> Void {
+            closure(self)
+        }
     }
 }
 

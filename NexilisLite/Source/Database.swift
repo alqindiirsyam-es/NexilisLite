@@ -98,10 +98,28 @@ public class Database {
         database?.inTransaction({(fmdb, rollback) in
             do {
                 try createDatabase(fmdb: fmdb)
+                //MESSAGE_SUMMARY
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE_SUMMARY", columnName: "pinned", columnType: "INTEGER", defaultValue: "0")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE_SUMMARY", columnName: "archived", columnType: "INTEGER", defaultValue: "0")
-                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "is_pinned", columnType: "TEXT", defaultValue: "0")
+                
+                //MESSAGE
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "notif_broadcast", columnType: "INTEGER", defaultValue: "0")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "is_broadcast", columnType: "INTEGER", defaultValue: "0")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "ex_book", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "ex_book1", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "deleted_by_admin", columnType: "INTEGER", defaultValue: "0")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "is_work_mode", columnType: "INTEGER", defaultValue: "0")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "is_hidden", columnType: "INTEGER", defaultValue: "0")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "attachment_speciality", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "gif_id", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "style", columnType: "INTEGER", defaultValue: "0")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "story_url", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "story_text", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "story_thumb", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "story_pin", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "attachment_speciality", columnType: "TEXT", defaultValue: "")
+                
+                //COMMUNITY
                 changeNameColumn(database: fmdb, tableName: "COMMUNITY", oldColumnName: "group_type", newColumnName: "community_type")
                 result = 1
 //                    print("Create Done")
@@ -276,66 +294,78 @@ public class Database {
                                 "'is_education' INTEGER DEFAULT 0)", values: nil)
         
         try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'MESSAGE' (" +
-                                "'message_id' TEXT NOT NULL UNIQUE," +
-                                "'f_pin' TEXT," +
-                                "'l_pin' TEXT," +
-                                "'message_scope_id' TEXT," +
-                                "'server_date' INTEGER," +
-                                "'status' TEXT," +
-                                "'message_text' TEXT," +
-                                "'audio_id' TEXT," +
-                                "'video_id' TEXT," +
-                                "'image_id' TEXT," +
-                                "'thumb_id' TEXT," +
-                                "'opposite_pin' TEXT," +
-                                "'lock' TEXT," +
-                                "'format' TEXT," +
-                                "'broadcast_flag' INTEGER DEFAULT 0," +
-                                "'blog_id' TEXT," +
-                                "'f_user_id' TEXT," +
-                                "'l_user_id' TEXT," +
-                                "'read_receipts' INTEGER DEFAULT 0," +
-                                "'chat_id' TEXT," +
-                                "'file_id' TEXT," +
-                                "'delivery_receipts' INTEGER DEFAULT 0," +
-                                "'account_type' TEXT," +
-                                "'contact' TEXT," +
-                                "'credential' TEXT," +
-                                "'attachment_flag' INTEGER DEFAULT 0," +
-                                "'is_stared' INTEGER DEFAULT 0," +
-                                "'f_display_name' TEXT," +
-                                "'reff_id' TEXT," +
-                                "'sent_qty' INTEGER DEFAULT 0," +
-                                "'delivered_qty' INTEGER DEFAULT 0," +
-                                "'read_qty' INTEGER DEFAULT 0," +
-                                "'ack_qty' INTEGER DEFAULT 0," +
-                                "'read_local_qty' INTEGER DEFAULT 0," +
-                                "'delivered_pin' TEXT," +
-                                "'read_pin' TEXT," +
-                                "'ack_pin' TEXT," +
-                                "'read_local_pin' TEXT," +
-                                "'expired_qty' TEXT," +
-                                "'message_large_text' TEXT," +
-                                "'tag_forum' TEXT," +
-                                "'tag_activity' TEXT," +
-                                "'unk_numbers' INTEGER DEFAULT 0," +
-                                "'conn_state' INTEGER DEFAULT 1," +
-                                "'tag_client' TEXT," +
-                                "'gif_id' TEXT," +
-                                "'tag_subactivity' TEXT," +
-                                "'messagenumber' INTEGER DEFAULT 0," +
-                                "'mail_account' TEXT," +
-                                "'message_text_plain' TEXT," +
-                                "'local_timestamp' TEXT," +
-                                "'is_consult' INTEGER DEFAULT 0," +
-                                "'is_call_center' INTEGER DEFAULT 0," +
-                                "'call_center_id' TEXT," +
-                                "'last_edited' INTEGER DEFAULT 0," +
-                                "'is_secret' INTEGER DEFAULT 0," +
-                                "'is_deleted_retention' INTEGER DEFAULT 0," +
-                                "'is_forwarded_message' INTEGER DEFAULT 0," +
-                                "'is_pinned' INTEGER DEFAULT 0," +
-                                "'attachment_speciality' TEXT" +
+                               "'message_id' TEXT NOT NULL UNIQUE," +
+                               "'f_pin' TEXT," +
+                               "'l_pin' TEXT," +
+                               "'message_scope_id' TEXT," +
+                               "'server_date' INTEGER," +
+                               "'status' TEXT," +
+                               "'message_text' TEXT," +
+                               "'audio_id' TEXT," +
+                               "'video_id' TEXT," +
+                               "'image_id' TEXT," +
+                               "'thumb_id' TEXT," +
+                               "'opposite_pin' TEXT," +
+                               "'lock' TEXT," +
+                               "'format' TEXT," +
+                               "'broadcast_flag' INTEGER DEFAULT 0," +
+                               "'blog_id' TEXT," +
+                               "'f_user_id' TEXT," +
+                               "'l_user_id' TEXT," +
+                               "'read_receipts' INTEGER DEFAULT 0," +
+                               "'chat_id' TEXT," +
+                               "'file_id' TEXT," +
+                               "'delivery_receipts' INTEGER DEFAULT 0," +
+                               "'account_type' TEXT," +
+                               "'contact' TEXT," +
+                               "'credential' TEXT," +
+                               "'attachment_flag' INTEGER DEFAULT 0," +
+                               "'is_stared' INTEGER DEFAULT 0," +
+                               "'f_display_name' TEXT," +
+                               "'reff_id' TEXT," +
+                               "'sent_qty' INTEGER DEFAULT 0," +
+                               "'delivered_qty' INTEGER DEFAULT 0," +
+                               "'read_qty' INTEGER DEFAULT 0," +
+                               "'ack_qty' INTEGER DEFAULT 0," +
+                               "'read_local_qty' INTEGER DEFAULT 0," +
+                               "'delivered_pin' TEXT," +
+                               "'read_pin' TEXT," +
+                               "'ack_pin' TEXT," +
+                               "'read_local_pin' TEXT," +
+                               "'expired_qty' TEXT," +
+                               "'message_large_text' TEXT," +
+                               "'tag_forum' TEXT," +
+                               "'tag_activity' TEXT," +
+                               "'unk_numbers' INTEGER DEFAULT 0," +
+                               "'conn_state' INTEGER DEFAULT 1," +
+                               "'tag_client' TEXT," +
+                               "'tag_subactivity' TEXT," +
+                               "'messagenumber' INTEGER DEFAULT 0," +
+                               "'mail_account' TEXT," +
+                               "'message_text_plain' TEXT," +
+                               "'local_timestamp' TEXT," +
+                               "'is_consult' INTEGER DEFAULT 0," +
+                               "'is_call_center' INTEGER DEFAULT 0," +
+                               "'call_center_id' INTEGER DEFAULT 0," +
+                               "'notif_broadcast' INTEGER DEFAULT 0," +
+                               "'is_broadcast' INTEGER DEFAULT 0," +
+                               "'ex_book' TEXT," +
+                               "'ex_book1' TEXT," +
+                               "'deleted_by_admin' INTEGER DEFAULT 0," +
+                               "'is_work_mode' INTEGER DEFAULT 0," +
+                               "'is_hidden' INTEGER DEFAULT 0," +
+                               "'gif_id' TEXT," +
+                               "'style' INTEGER DEFAULT 0," +
+                               "'last_edited' INTEGER DEFAULT 0," +
+                               "'is_secret' INTEGER DEFAULT 0," +
+                               "'is_deleted_retention' INTEGER DEFAULT 0," +
+                               "'is_forwarded_message' INTEGER DEFAULT 0," +
+                               "'story_url' TEXT," +
+                               "'story_text' TEXT," +
+                               "'story_thumb' TEXT," +
+                               "'story_pin' TEXT," +
+                               "'is_pinned' INTEGER DEFAULT 0," +
+                               "'attachment_speciality' TEXT" +
                                 ")", values: nil)
         
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_opposite on MESSAGE (opposite_pin, chat_id)", values: nil)
@@ -633,6 +663,28 @@ public class Database {
                                "'thumb_id' TEXT NOT NULL," +
                                "'created_date' TEXT DEFAULT (0)," +
                                "PRIMARY KEY ('community_id', 'f_pin'))", values: nil)
+        
+        try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'FORM' (" +
+                               "'_id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                               "'form_id' TEXT NOT NULL UNIQUE," +
+                               "'name' TEXT," +
+                               "'created_date' TEXT," +
+                               "'created_by' TEXT," +
+                               "'sq_no' INTEGER," +
+                               "'icon_title' TEXT," +
+                               "'icon_suffix' TEXT," +
+                               "'footer' TEXT)", values: nil)
+        
+        try fmdb.executeUpdate("CREATE TABLE IF NOT EXISTS 'FORM_ITEM' (" +
+                               "'_id' INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL," +
+                               "'form_id' TEXT," +
+                               "'key' TEXT," +
+                               "'label' TEXT," +
+                               "'value' TEXT," +
+                               "'type' TEXT," +
+                               "'sq_no' INTEGER," +
+                               "'background' TEXT," +
+                               "'color' TEXT)", values: nil)
     }
     
     public func executes(fmdb: FMDatabase, queries: [String]) {

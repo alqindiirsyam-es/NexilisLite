@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.55"
+    public static var cpaasVersion = "5.0.56"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1663,6 +1663,8 @@ public class Nexilis: NSObject {
                         "local_timestamp" : message.getBody(key: CoreMessage_TMessageKey.LOCAL_TIMESTAMP, default_value : String(Date().currentTimeMillis())),
                         "broadcast_flag" : broadcast_flag,
                         "is_call_center" : is_call_center,
+                        "ex_book" : message.getBody(key: CoreMessage_TMessageKey.EX_BOOK, default_value:  "0"),
+                        "ex_book1" : message.getBody(key: CoreMessage_TMessageKey.EX_BOOK1, default_value:  "0"),
                         "call_center_id" : call_center_id,
                         "last_edited" : last_edited,
                         "is_secret" : is_secret,
@@ -3051,6 +3053,111 @@ extension Nexilis: MessageDelegate {
     func showBroadcastMessage(m: [String: String]) {
         let fileType = m[CoreMessage_TMessageKey.CATEGORY_FLAG]!
         let gifId = m[CoreMessage_TMessageKey.GIF_ID] ?? ""
+        let scopeBrodcast = m[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]
+        if scopeBrodcast == "18" {
+            DispatchQueue.global().async {
+                while (API.nGetCLXConnState() == 0) {
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+                if let stringForm = m[CoreMessage_TMessageKey.MESSAGE_TEXT] {
+                    if let data = stringForm.data(using: .utf8) {
+                        do {
+                            if let jsonForm = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                                let formId = jsonForm["form_id"] as! String
+                                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullFormSyc(formId: formId)) {
+                                    if response.isOk() {
+                                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                            do {
+                                                let formId = response.getBody(key: CoreMessage_TMessageKey.FORM_ID)
+                                                let title = response.getBody(key: CoreMessage_TMessageKey.TITLE)
+                                                let createdDate = response.getBody(key: CoreMessage_TMessageKey.CREATED_DATE)
+                                                let createdBy = response.getBody(key: CoreMessage_TMessageKey.CREATED_BY)
+                                                let seq = response.getBodyAsLong(key: CoreMessage_TMessageKey.SEQUENCE, default_value: 0)
+                                                let iconTitle = response.getBody(key: CoreMessage_TMessageKey.ICON_TITLE)
+                                                let iconSuffix = response.getBody(key: CoreMessage_TMessageKey.ICON_SUFFIX)
+                                                let footer = response.getBody(key: CoreMessage_TMessageKey.FOOTER)
+                                                let form = FormM(formId: formId, title: title, createdDate: createdDate, createdBy: createdBy, sqNo: Int64(seq), iconTitle: iconTitle, iconSuffix: iconSuffix, footer: footer)
+                                                
+                                                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "FORM", cvalues: [
+                                                    "form_id" : formId,
+                                                    "name" : title,
+                                                    "created_date" : createdDate,
+                                                    "created_by" : createdBy,
+                                                    "sq_no" : seq,
+                                                    "icon_title" : iconTitle,
+                                                    "icon_suffix" : iconSuffix,
+                                                    "footer" : footer
+                                                ], replace: true)
+                                                var isButton = false
+                                                let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
+                                                var firstFormItem: FormItemM = FormItemM(formId: "")
+                                                if !data.isEmpty {
+                                                    if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                                                        for json in jsonArray {
+                                                            let key = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.KEY)
+                                                            let label = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LABEL)
+                                                            let value = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.VALUE)
+                                                            let type = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.TYPE)
+                                                            let background = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.BACKGROUND)
+                                                            let color = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.COLOR)
+                                                            let formItem = FormItemM(formId: formId, label: label, value: value, key: key, sqNo: Int64(seq), type: type, background: background, color: color)
+                                                            firstFormItem = formItem
+                                                            if type == "26" {
+                                                                isButton = true
+                                                            }
+                                                            
+                                                            _ = try Database.shared.insertRecord(fmdb: fmdb, table: "FORM_ITEM", cvalues: [
+                                                                "form_id" : formId,
+                                                                "key" : key,
+                                                                "label" : label,
+                                                                "value" : value,
+                                                                "type" : type,
+                                                                "sq_no" : seq,
+                                                                "background" : background,
+                                                                "color" : color
+                                                            ], replace: true)
+                                                        }
+                                                    }
+                                                }
+                                                if isButton {
+                                                    DispatchQueue.main.async {
+                                                        let dialog = DialogBroadcastInApp()
+                                                        dialog.modalTransitionStyle = .crossDissolve
+                                                        dialog.modalPresentationStyle = .overCurrentContext
+                                                        dialog.form = form
+                                                        dialog.formItem = firstFormItem
+                                                        dialog.listTitleButton = (m["exbook1"]!).components(separatedBy: ",")
+                                                        let brdTitle = jsonForm["brd_title"] as? String
+                                                        let formL = jsonForm["form_label"] as? String
+                                                        if brdTitle != nil && formL != nil{
+                                                            dialog.labelForm = formL ?? ""
+                                                        }
+                                                        dialog.message = m
+                                                        UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                                                    }
+                                                } else {
+                                                    print("show broadcast no button")
+                                                }
+                                            } catch {
+                                                rollback.pointee = true
+                                                print("Access database error: \(error.localizedDescription)")
+                                            }
+                                        })
+                                    } else {
+                                        self.showBroadcastMessage(m: m)
+                                    }
+                                } else {
+                                    self.showBroadcastMessage(m: m)
+                                }
+                            }
+                        } catch {
+                            print("Error converting string to JSON:", error)
+                        }
+                    }
+                }
+            }
+            return
+        }
         let broadcastVC = UIViewController()
         if let viewBroadcast = broadcastVC.view {
             broadcastVC.modalPresentationStyle = .custom
