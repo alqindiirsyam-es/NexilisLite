@@ -104,7 +104,7 @@ class ScreenSharingViewController: UIViewController {
             labelIncomingOutgoing.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         ])
         if fromContact == 0 {
-            labelIncomingOutgoing.text = "Waiting for answer".localized() + "..."
+            labelIncomingOutgoing.text = "Ringing".localized() + "..."
             _ = Nexilis.write(message: CoreMessage_TMessageBank.ssCreate(l_pin: user!.pin))
         } else {
             labelIncomingOutgoing.text = "Incoming Screen Sharing".localized() + "..."

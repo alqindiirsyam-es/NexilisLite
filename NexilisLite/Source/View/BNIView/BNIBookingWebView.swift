@@ -177,8 +177,10 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         if lang == "id" {
             intLang = 1
         }
-        if stringQMS.starts(with: Utils.getURLBase()) && !stringQMS.contains("/TrustedChannel") && !stringQMS.contains("/get_oneapp") {
+        if stringQMS.contains("?") {
             stringQMS = stringQMS + "&lang=\(intLang)&theme=\(self.traitCollection.userInterfaceStyle == .dark ? "0" : "1")"
+        } else {
+            stringQMS = stringQMS + "?lang=\(intLang)&theme=\(self.traitCollection.userInterfaceStyle == .dark ? "0" : "1")"
         }
         if let url = URL(string: "\(stringQMS)") {
             if !isSecureBrowser {

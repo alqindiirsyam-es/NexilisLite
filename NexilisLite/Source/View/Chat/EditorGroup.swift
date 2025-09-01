@@ -296,6 +296,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         center.addObserver(self, selector: #selector(onMemberTopic(notification:)), name: NSNotification.Name(rawValue: "onTopic"), object: nil)
         center.addObserver(self, selector: #selector(onFailedSendMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.failedSendMessage), object: nil)
         center.addObserver(self, selector: #selector(onUpdatedMessage(notification:)), name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil)
+        center.addObserver(self, selector: #selector(onCheckNewMessages(notification:)), name: NSNotification.Name(rawValue: "checkNewMessagesNexilis"), object: nil)
         
         locationManager.delegate = self
         locationManager.requestWhenInUseAuthorization()
@@ -677,17 +678,18 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         })
     }
     
-    private func getData() {
+    private func getData(offset: Int64 = 0) {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"]  as? String ?? "")' order by server_date asc"
+                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"]  as? String ?? "")' order by server_date asc LIMIT -1 OFFSET \(offset)"
                 if isHistoryCC {
-                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc"
+                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc LIMIT -1 OFFSET \(offset)"
                 } else if (dataTopic["chat_id"]  as? String ?? "" != "") {
-                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='\(dataTopic["chat_id"]  as? String ?? "")' order by server_date asc"
+                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='\(dataTopic["chat_id"]  as? String ?? "")' order by server_date asc LIMIT -1 OFFSET \(offset)"
                 }
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     var tempImages: [ImageGrouping] = []
+                    var idxOff = 0
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
                         row["message_id"] = cursorData.string(forColumnIndex: 0)
@@ -819,7 +821,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         } else if tempImages.count != 0 {
                             tempImages.removeAll()
                         }
+                        if offset > 0 && idxOff == 0 {
+                            self.markerCounter = row["message_id"] as? String
+                        }
                         dataMessages.append(row)
+                        idxOff+=1
                     }
     //                if isHistoryCC {
     //                    dataMessages.remove(at: 0)
@@ -853,7 +859,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     private func getRealStatus(messageId: String) -> String {
-        var status = "1"
+        var status = "-1"
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status, f_pin FROM MESSAGE_STATUS WHERE message_id='\(messageId)'") {
@@ -862,7 +868,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         listStatus.append(Int(cursorStatus.string(forColumnIndex: 0)!)!)
                     }
                     cursorStatus.close()
-                    status = "\(listStatus.min() ?? 2)"
+                    status = "\(listStatus.min() ?? -1)"
                 }
             } catch {
                 rollback.pointee = true
@@ -1085,6 +1091,48 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     @objc func onUploadChat(notification: NSNotification) {
         let data:[AnyHashable : Any] = notification.userInfo!
         updateProgress(data)
+    }
+    
+    @objc func  onCheckNewMessages(notification: NSNotification) {
+        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"]  as? String ?? "")' order by server_date asc"
+        if isHistoryCC {
+            query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc"
+        } else if (dataTopic["chat_id"]  as? String ?? "" != "") {
+            query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='\(dataTopic["chat_id"]  as? String ?? "")' order by server_date asc"
+        }
+        var countMessagesNow: Int64 = 0
+        DispatchQueue.main.async { [self] in
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                do {
+                    if let cursorCount = Database.shared.getRecords(fmdb: fmdb, query: query), cursorCount.next() {
+                        countMessagesNow = Int64(cursorCount.int(forColumnIndex: 0))
+                        cursorCount.close()
+                    }
+                }catch{}
+            })
+            if dataMessages.count < countMessagesNow {
+                self.counter = Int(countMessagesNow) - dataMessages.count
+                getData(offset: Int64(self.dataMessages.count))
+                tableChatView.reloadData()
+                if !self.indicatorCounterBSTB.isDescendant(of: self.view) && !self.buttonScrollToBottom.isDescendant(of: self.view) {
+                    let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
+                    if indexMessage != nil {
+                        let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
+                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                        self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .top, animated: true)
+                    }
+                } else if self.buttonScrollToBottom.isDescendant(of: self.view) {
+                    if !self.indicatorCounterBSTB.isDescendant(of: self.view) {
+                        addCounterAtButttonScrollToBottom()
+                    } else {
+                        self.labelCounter.text = "\(counter)"
+                    }
+                } else {
+                    addButtonScrollToBottom()
+                    addCounterAtButttonScrollToBottom()
+                }
+            }
+        }
     }
     
     @objc func onUpdatedMessage(notification: NSNotification) {
@@ -1865,7 +1913,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         sendChat(message_text: textFieldSend.text!, viewController: self)
     }
     
-    private func sendChat(message_scope_id:String =  MessageScope.GROUP, status:String =  "2", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, gif_id: String = "", is_forwarded: Int = 0) {
+    private func sendChat(message_scope_id:String =  MessageScope.GROUP, status:String =  "1", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, gif_id: String = "", is_forwarded: Int = 0) {
         if viewController is EditorGroup && file_id == "" && dataMessageForward == nil {
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
@@ -2472,10 +2520,45 @@ extension EditorGroup: ImageVideoPickerDelegate, PreviewAttachmentImageVideoDele
             picker.dismiss(animated: true, completion: {
                 Nexilis.showLoader(text: "Preparing...".localized())
                 result.itemProvider.loadDataRepresentation(forTypeIdentifier: "com.compuserve.gif") { data, error in
-                    if let error = error {
-                        print("Error loading GIF: \(error.localizedDescription)")
-                        Nexilis.hideLoader() {
-                            
+                    if error != nil {
+                        self.loadAnimatedMedia(from: result.itemProvider) { data, isGIF in
+                            guard let data = data else {
+                                print("Failed to load media")
+                                return
+                            }
+
+                            DispatchQueue.main.async {
+                                Nexilis.hideLoader() {
+                                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                                    if (self.textFieldSend.textColor != .lightGray) {
+                                        previewImageVC.currentTextTextField = self.textFieldSend.text
+                                    }
+                                    if isGIF {
+                                        previewImageVC.fromCopy = true
+                                        previewImageVC.isGIF = true
+                                        previewImageVC.dataGIF = data
+                                        previewImageVC.modalPresentationStyle = .custom
+                                        previewImageVC.delegate = self
+                                        previewImageVC.isAck = self.isAck
+                                        previewImageVC.isConfidential = self.isConfidential
+                                    } else {
+                                        let fileManager = FileManager.default
+                                        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                        let destinationURL = documentsDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+                                        do {
+                                            try data.write(to: destinationURL)
+                                            previewImageVC.modalPresentationStyle = .custom
+                                            previewImageVC.urlVideoPhpPicker = destinationURL
+                                            previewImageVC.delegate = self
+                                            previewImageVC.isAck = self.isAck
+                                            previewImageVC.isConfidential = self.isConfidential
+                                        } catch {
+                                            
+                                        }
+                                    }
+                                    self.present(previewImageVC, animated: true, completion: nil)
+                                }
+                            }
                         }
                     } else if let data = data {
                         DispatchQueue.main.async {
@@ -2563,6 +2646,37 @@ extension EditorGroup: ImageVideoPickerDelegate, PreviewAttachmentImageVideoDele
                     }
                 }
             })
+        }
+    }
+    
+    func loadAnimatedMedia(from provider: NSItemProvider, completion: @escaping (Data?, Bool) -> Void) {
+        // First: real GIF
+        if provider.hasItemConformingToTypeIdentifier("com.compuserve.gif") {
+            provider.loadFileRepresentation(forTypeIdentifier: "com.compuserve.gif") { url, error in
+                if let url = url, let data = try? Data(contentsOf: url) {
+                    completion(data, true) // true = isGIF
+                } else {
+                    // fallback
+                    self.loadQuickTimeMovie(from: provider, completion: completion)
+                }
+            }
+        } else {
+            // fallback directly
+            self.loadQuickTimeMovie(from: provider, completion: completion)
+        }
+    }
+
+    private func loadQuickTimeMovie(from provider: NSItemProvider, completion: @escaping (Data?, Bool) -> Void) {
+        if provider.hasItemConformingToTypeIdentifier("com.apple.quicktime-movie") {
+            provider.loadFileRepresentation(forTypeIdentifier: "com.apple.quicktime-movie") { url, error in
+                if let url = url, let data = try? Data(contentsOf: url) {
+                    completion(data, false) // false = it's MOV, not GIF
+                } else {
+                    completion(nil, false)
+                }
+            }
+        } else {
+            completion(nil, false)
         }
     }
     
@@ -3847,21 +3961,16 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                 children.insert(info, at: children.count - 1)
             }
-            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
-                if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
-                    children.insert(edit, at: children.count - 1)
-                }
-                if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
-                    if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 {
-                        let date = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
-                        let pastDate = date.addingTimeInterval(-10 * 60)
-                        let differenceInSeconds = date.timeIntervalSince(pastDate)
-                        if abs(differenceInSeconds) <= 15 * 60 {
-                            children.insert(edit, at: children.count - 1)
-                        }
+            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" {
+                if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 {
+                    let date = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
+                    let pastDate = date.addingTimeInterval(-10 * 60)
+                    let differenceInSeconds = date.timeIntervalSince(pastDate)
+                    if abs(differenceInSeconds) <= 15 * 60 {
+                        children.insert(edit, at: children.count - 1)
                     }
-                    isMore = true
                 }
+                isMore = true
             }
         }
         
@@ -4725,6 +4834,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     self.timerCredential.removeValue(forKey: dataMessages[i]["message_id"]  as? String ?? "")
                 }
             }
+            let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+            self.pinAllMessages(dataMessages: dataMessagesPin)
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
             cancelAction()
         }
@@ -5176,7 +5287,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         messageText.textDragInteraction?.isEnabled = false
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
-        let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32)
+        var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32)
         
         let dataProfile = getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"]  as? String ?? "", message_id: dataMessages[indexPath.row]["message_id"]  as? String ?? "")
         
@@ -5274,7 +5385,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 statusMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
                 statusMessage.widthAnchor.constraint(equalToConstant: 15).isActive = true
                 statusMessage.heightAnchor.constraint(equalToConstant: 15).isActive = true
-                let status = getRealStatus(messageId: dataMessages[indexPath.row]["message_id"]  as? String ?? "")
+                var status = getRealStatus(messageId: dataMessages[indexPath.row]["message_id"]  as? String ?? "")
+                if status == "-1" {
+                    status = dataMessages[indexPath.row]["status"]! as? String ?? ""
+                }
                 if status == "0" {
                     statusMessage.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
                 } else if status == "1" {
@@ -6223,6 +6337,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let data = queryMessageReply(message_id: reffChat)
             if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
                 containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 37).isActive = true
+            } else {
+                containerViewFile.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
             }
             containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
             containerViewFile.bottomAnchor.constraint(equalTo:messageText.topAnchor, constant: -5).isActive = true
@@ -6492,6 +6608,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 containerReply.backgroundColor = .black.withAlphaComponent(0.2)
                 containerReply.layer.cornerRadius = 5
                 containerReply.clipsToBounds = true
+                
+                if (thumbChat != "" || fileChat != "") && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
+                    topMarginText = messageText.topAnchor.constraint(greaterThanOrEqualTo: containerMessage.topAnchor, constant: topMarginText.constant + 50 + (self.offset()*3))
+                }
                 
                 let leftReply = UIView()
                 containerReply.addSubview(leftReply)
@@ -6929,9 +7049,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             imageViewer.navigationItem.leftBarButtonItem = backButton
             if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
                 let shareAction = UIAction { _ in
-                    var activityViewController = UIActivityViewController(activityItems: [image ?? UIImage()], applicationActivities: nil)
+                    var activityViewController = UIActivityViewController(activityItems: [""], applicationActivities: nil)
                     if type == 1 {
                         activityViewController = UIActivityViewController(activityItems: [url ?? URL(string: "")!], applicationActivities: nil)
+                    } else {
+                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("ImageSharedNexilis-\(Date().currentTimeMillis())" + ".jpeg")
+                        try? data!.write(to: tempURL)
+                        activityViewController = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
                     }
                     activityViewController.popoverPresentationController?.sourceView = imageViewer.view
                     imageViewer.present(activityViewController, animated: true, completion: nil)
@@ -7119,7 +7243,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
                     let shareAction = UIAction { _ in
                         let fileManager = FileManager.default
-                        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(sender.labelFile.text ?? "")
+                        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(urlFile.lastPathComponent)
                         do {
                             if !fileManager.fileExists(atPath: tempURL.path) {
                                 try fileManager.copyItem(at: urlFile, to: tempURL)

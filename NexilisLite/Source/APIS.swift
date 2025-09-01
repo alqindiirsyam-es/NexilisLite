@@ -1561,7 +1561,6 @@ public class APIS: NSObject {
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any], _ completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         DispatchQueue.main.async {
             if checkAppStateisBackground() {
-                print("SHOW NOTIF ON BACKGROUND")
                 DispatchQueue.global().async {
                     if let payload = userInfo["payload"] as? [String: Any] {
                         if let messagePayload = payload["message"] as? [String: Any] {
@@ -1658,7 +1657,7 @@ public class APIS: NSObject {
                             }
                         }
                     } else if let message_id = userInfo["message_id"] as? String {
-                        getMessageById(id: message_id, completionHandler)
+                        getMessageById(id: message_id, completionHandler: completionHandler)
                     }
                 }
             }
@@ -1727,7 +1726,7 @@ public class APIS: NSObject {
         }
     }
     
-    private static func getMessageById(id: String, _ completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+    private static func getMessageById(id: String, retry: Int = 0, completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         DispatchQueue.global().async {
             let parameter: [String : Any] = [
                 "pin": User.getMyPin() ?? "",
@@ -1735,7 +1734,12 @@ public class APIS: NSObject {
             ]
             Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
                 if error != nil {
-                    completionHandler(.failed)
+                    let ret = retry + 1
+                    if ret <= 5 {
+                        getMessageById(id: id, retry: ret, completionHandler: completionHandler)
+                    } else {
+                        completionHandler(.failed)
+                    }
                 } else if let data = data {
                     do {
                         if let dataString = String(data: data, encoding: .utf8) {
@@ -1757,22 +1761,35 @@ public class APIS: NSObject {
                                         IncomingThread.dispatch = nil
                                     }
                                 }
-                                print("save from APIS")
+//                                print("save from APIS")
                                 Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
                                 ackAPN(id: id)
                                 DispatchQueue.main.async {
                                     UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
                                 }
-                                completionHandler(.newData)
+                            } else {
+                                let ret = retry + 1
+                                if ret <= 5 {
+                                    getMessageById(id: id, retry: ret, completionHandler: completionHandler)
+                                } else {
+                                    completionHandler(.failed)
+                                }
                             }
                         }
                     } catch {
-                        
+                        let ret = retry + 1
+                        if ret <= 5 {
+                            getMessageById(id: id, retry: ret, completionHandler: completionHandler)
+                        } else {
+                            completionHandler(.failed)
+                        }
                     }
                 } else {
-                    completionHandler(.failed)
-                    DispatchQueue.main.async {
-                        UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+                    let ret = retry + 1
+                    if ret <= 5 {
+                        getMessageById(id: id, retry: ret, completionHandler: completionHandler)
+                    } else {
+                        completionHandler(.failed)
                     }
                 }
             }
@@ -2225,6 +2242,7 @@ public class APIS: NSObject {
                         }
                     }
                 }
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "checkNewMessagesNexilis"), object: nil, userInfo: nil)
             }
         }
         afterEnterBackground = true

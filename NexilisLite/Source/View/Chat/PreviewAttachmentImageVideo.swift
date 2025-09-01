@@ -544,8 +544,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                     cursor.close()
                 }
                 listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
-                var nowTableMention = tableMention
-                var nowHeightTableMention = heightTableMention!
+                let nowTableMention = tableMention
+                let nowHeightTableMention = heightTableMention!
                 if listMentionWithText.count > 0 {
                     if listMentionWithText.count < 5 {
                         nowHeightTableMention.constant = CGFloat(44 * listMentionWithText.count)
@@ -927,7 +927,7 @@ extension PreviewAttachmentImageVideo: UITableViewDelegate, UITableViewDataSourc
     }
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return 2
+        return listMentionWithText.count
     }
     
     func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {

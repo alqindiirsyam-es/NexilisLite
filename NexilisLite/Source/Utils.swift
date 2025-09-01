@@ -3007,10 +3007,19 @@ public class DialogBroadcastInApp: UIViewController {
     public var listTitleButton: [String] = []
     public var message: [String: Any] = [:]
     
+    private var iconTitleImage: UIImage?
+    private var iconSuffixImage: UIImage?
+    private var buttonBackgroundImages: [Int: UIImage] = [:]
+    
     public override func viewDidLoad() {
         super.viewDidLoad()
-        self.view.backgroundColor = .black.withAlphaComponent(0.5)
-        
+        self.view.backgroundColor = .black.withAlphaComponent(0.3)
+        DispatchQueue.global().async {
+            self.loadDataAndBuildUI()
+        }
+    }
+    
+    private func setupUI() {
         let container = UIView()
         self.view.addSubview(container)
         container.anchor(left: self.view.leftAnchor, right: self.view.rightAnchor, paddingLeft: 20, paddingRight: 20, centerY: self.view.centerYAnchor)
@@ -3027,18 +3036,8 @@ public class DialogBroadcastInApp: UIViewController {
         container.addSubview(title)
         title.anchor(top: container.topAnchor, paddingTop: 15, centerX: container.centerXAnchor, maxWidth: UIScreen.main.bounds.width / 2)
         
-        let imageWarning = UIImageView(image: UIImage(named: "pb_security_warning_green", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
-        if !form.iconTitle.isEmpty {
-            getImage(name: form.iconTitle, completion: { result, isDownloaded, image in
-                DispatchQueue.main.async {
-                    if let img = image {
-                        DispatchQueue.main.async {
-                            imageWarning.image = image
-                        }
-                    }
-                }
-            })
-        }
+        let defaultWarningImage = UIImage(named: "pb_security_warning_green", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        let imageWarning = UIImageView(image: self.iconTitleImage ?? defaultWarningImage)
         container.addSubview(imageWarning)
         imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: -5, width: 30, height: 30)
         
@@ -3046,16 +3045,8 @@ public class DialogBroadcastInApp: UIViewController {
         container.addSubview(imageLogo)
         imageLogo.anchor(top: container.topAnchor, left: container.leftAnchor, paddingTop: 10, paddingLeft: 10, width: 40, height: 40)
         
-        let imageChat = UIImageView(image: UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
-        if !form.iconSuffix.isEmpty {
-            getImage(name: form.iconSuffix, completion: { result, isDownloaded, image in
-                if let img = image {
-                    DispatchQueue.main.async {
-                        imageChat.image = image
-                    }
-                }
-            })
-        }
+        let defaultChatImage = UIImage(named: "pb_startup_iconsuffix", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        let imageChat = UIImageView(image: self.iconSuffixImage ?? defaultChatImage)
         container.addSubview(imageChat)
         imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 10, width: 30, height: 30)
         
@@ -3128,7 +3119,29 @@ public class DialogBroadcastInApp: UIViewController {
                             "ex_book" : self.message[CoreMessage_TMessageKey.MESSAGE_TEXT] ?? ""
                         ], _where: "message_id = '\(self.message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")'")
                     })
+                    let messageText = self.message[CoreMessage_TMessageKey.MESSAGE_TEXT] as? String ?? ""
                     var messageTextSend = ""
+                    if var json = try! JSONSerialization.jsonObject(with: messageText.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
+                        Database.shared.database?.inTransaction({ fmdb, rollback in
+                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select * from FORM_ITEM where form_id = '\(self.formItem.formId)'"), cursor.next() {
+                                for columnIndex in 0..<cursor.columnCount {
+                                    if let columnName = cursor.columnName(for: columnIndex) {
+                                        if let value = cursor.object(forColumn: columnName) {
+                                            if columnName == "key" {
+                                                json[value as? String ?? ""] = title
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                                cursor.close()
+                            }
+                            if let jsonData = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
+                               let jsonString = String(data: jsonData, encoding: .utf8) {
+                                messageTextSend = jsonString
+                            }
+                        })
+                    }
                     let message = CoreMessage_TMessageBank.sendMessage(l_pin: self.form.formId, message_scope_id: MessageScope.FORM, status: "1", message_text: messageTextSend, credential: "0", attachment_flag: "", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: "", audio_id: "", video_id: "", file_id: self.form.formId, thumb_id: "", reff_id: "", read_receipts: "4", chat_id: "", is_call_center: "0", call_center_id: "", opposite_pin: "", specFile: "")
                     OutgoingThread.default.addQueue(message: message)
                     self.dismiss(animated: true)
@@ -3141,15 +3154,10 @@ public class DialogBroadcastInApp: UIViewController {
             } else {
                 let backgrounds = formItem.background.components(separatedBy: ",")
                 if index < backgrounds.count {
-                    let background = backgrounds[index]
                     button.setTitle("", for: .normal)
-                    getImage(name: background, isResized: false, completion: { result, isDownloaded, image in
-                        if let img = image {
-                            DispatchQueue.main.async {
-                                button.setBackgroundImage(img.resizableImage(withCapInsets: .zero, resizingMode: .stretch), for: .normal)
-                            }
-                        }
-                    })
+                    if let img =  buttonBackgroundImages[index] {
+                        button.setBackgroundImage(img.resizableImage(withCapInsets: .zero, resizingMode: .stretch), for: .normal)
+                    }
                 }
             }
             
@@ -3166,7 +3174,43 @@ public class DialogBroadcastInApp: UIViewController {
         footer.numberOfLines = 0
         container.addSubview(footer)
         footer.anchor(top: containerButton.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingTop: 10, paddingBottom: 5, paddingRight: 10)
-        
+    }
+    
+    private func loadDataAndBuildUI() {
+        let semaphore = DispatchSemaphore(value: 0)
+        if !form.iconTitle.isEmpty {
+            getImage(name: form.iconTitle) { result, _, image in
+                if result, let img = image {
+                    self.iconTitleImage = img
+                    semaphore.signal()
+                }
+            }
+            semaphore.wait()
+        }
+        if !form.iconSuffix.isEmpty {
+            getImage(name: form.iconSuffix) { result, _, image in
+                if result, let img = image {
+                    self.iconSuffixImage = img
+                    semaphore.signal()
+                }
+            }
+            semaphore.wait()
+        }
+        if !formItem.background.isEmpty {
+            let backgrounds = formItem.background.components(separatedBy: ",")
+            for (index, backgroundName) in backgrounds.enumerated() {
+                getImage(name: backgroundName, isResized: false) { result, _, image in
+                    if result, let img = image {
+                        self.buttonBackgroundImages[index] = img
+                        semaphore.signal()
+                    }
+                }
+                semaphore.wait()
+            }
+        }
+        DispatchQueue.main.async {
+            self.setupUI()
+        }
     }
 }
 
@@ -3733,5 +3777,103 @@ class HtmlUtils {
             return regex.firstMatch(in: unescaped, options: [], range: range) != nil
         }
         return false
+    }
+}
+
+class FormView: UIView {
+    
+    private var scrollView: UIScrollView!
+    private var stackView: UIStackView!
+    
+    private var resetButton: UIButton!
+    private var submitButton: UIButton!
+    private var rejectButton: UIButton!
+    private var approveButton: UIButton!
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupView()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupView()
+    }
+    
+    private func setupView() {
+        backgroundColor = .white
+        
+        // ScrollView + Stack
+        scrollView = UIScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(scrollView)
+        
+        stackView = UIStackView()
+        stackView.axis = .vertical
+        stackView.spacing = 10
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(stackView)
+        
+        // Buttons
+        resetButton = createButton(title: "Reset".localized(), color: .gray, action: #selector(resetTapped))
+        submitButton = createButton(title: "Submit".localized(), color: .systemBlue, action: #selector(submitTapped))
+        rejectButton = createButton(title: "Reject".localized(), color: .gray, action: #selector(rejectTapped))
+        approveButton = createButton(title: "Approve".localized(), color: .systemBlue, action: #selector(approveTapped))
+        
+        let buttonStack = UIStackView(arrangedSubviews: [resetButton, rejectButton, submitButton, approveButton])
+        buttonStack.axis = .horizontal
+        buttonStack.spacing = 8
+        buttonStack.distribution = .fillEqually
+        buttonStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(buttonStack)
+        
+        // Layout
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.leftAnchor.constraint(equalTo: leftAnchor),
+            scrollView.rightAnchor.constraint(equalTo: rightAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: buttonStack.topAnchor, constant: -10),
+            
+            stackView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            stackView.leftAnchor.constraint(equalTo: scrollView.leftAnchor),
+            stackView.rightAnchor.constraint(equalTo: scrollView.rightAnchor),
+            stackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            stackView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+            
+            buttonStack.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            buttonStack.leftAnchor.constraint(equalTo: leftAnchor, constant: 8),
+            buttonStack.rightAnchor.constraint(equalTo: rightAnchor, constant: -8),
+            buttonStack.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+    
+    private func createButton(title: String, color: UIColor, action: Selector) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.backgroundColor = color
+        button.setTitleColor(.white, for: .normal)
+        button.layer.cornerRadius = 8
+        button.addTarget(self, action: action, for: .touchUpInside)
+        return button
+    }
+    
+    // MARK: - Actions
+    @objc private func resetTapped() { print("Reset tapped") }
+    @objc private func submitTapped() { print("Submit tapped") }
+    @objc private func rejectTapped() { print("Reject tapped") }
+    @objc private func approveTapped() { print("Approve tapped") }
+    
+    // MARK: - Add Dynamic Fields
+    func addField(_ view: UIView) {
+        stackView.addArrangedSubview(view)
+    }
+}
+
+// MARK: - UILabel convenience init
+extension UILabel {
+    convenience init(text: String) {
+        self.init()
+        self.text = text
+        self.font = UIFont.systemFont(ofSize: 14)
     }
 }

@@ -283,6 +283,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         center.addObserver(self, selector: #selector(onFailedSendMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.failedSendMessage), object: nil)
         center.addObserver(self, selector: #selector(onRefreshCallLog(notification:)), name: NSNotification.Name(rawValue: "refreshCallLog"), object: nil)
         center.addObserver(self, selector: #selector(onUpdatedMessage(notification:)), name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil)
+        center.addObserver(self, selector: #selector(onCheckNewMessages(notification:)), name: NSNotification.Name(rawValue: "checkNewMessagesNexilis"), object: nil)
         
         locationManager.delegate = self
         locationManager.requestWhenInUseAuthorization()
@@ -1106,15 +1107,15 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         })
     }
     
-    private func getData() {
+    private func getData(offset: Int64 = 0) {
 //        let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0"
 //        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20 ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
-        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc"
+        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc LIMIT -1 OFFSET \(offset)"
         if isContactCenter {
             if complaintId.isEmpty {
-                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc"
+                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc LIMIT -1 OFFSET \(offset)"
             } else {
-                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 AND call_center_id = '\(complaintId)' order by server_date asc"
+                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 AND call_center_id = '\(complaintId)' order by server_date asc LIMIT -1 OFFSET \(offset)"
             }
             if isRequestContactCenter && !isDirectCC {
                 viewButton.isHidden = true
@@ -1148,6 +1149,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             do {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     var tempImages: [ImageGrouping] = []
+                    var idxOff = 0
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
                         row["message_id"] = cursorData.string(forColumnIndex: 0)
@@ -1284,7 +1286,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         } else if tempImages.count != 0 {
                             tempImages.removeAll()
                         }
+                        if offset > 0 && idxOff == 0 {
+                            self.markerCounter = row["message_id"] as? String
+                        }
                         dataMessages.append(row)
+                        idxOff+=1
                     }
                     if tempImages.count >= 4 {
                         if tempImages.count > 30 {
@@ -1469,6 +1475,50 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     @objc func onUploadChat(notification: NSNotification) {
         let data:[AnyHashable : Any] = notification.userInfo!
         updateProgress(data)
+    }
+    
+    @objc func  onCheckNewMessages(notification: NSNotification) {
+        var query = "SELECT COUNT(*) AS total FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc"
+        if isContactCenter {
+            if complaintId.isEmpty {
+                query = "SELECT COUNT(*) AS total FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc"
+            } else {
+                query = "SELECT COUNT(*) AS total FROM MESSAGE where message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 AND call_center_id = '\(complaintId)' order by server_date asc"
+            }
+        }
+        var countMessagesNow: Int64 = 0
+        DispatchQueue.main.async { [self] in
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                do {
+                    if let cursorCount = Database.shared.getRecords(fmdb: fmdb, query: query), cursorCount.next() {
+                        countMessagesNow = Int64(cursorCount.int(forColumnIndex: 0))
+                        cursorCount.close()
+                    }
+                }catch{}
+            })
+            if dataMessages.count < countMessagesNow {
+                self.counter = Int(countMessagesNow) - dataMessages.count
+                getData(offset: Int64(self.dataMessages.count))
+                tableChatView.reloadData()
+                if !self.indicatorCounterBSTB.isDescendant(of: self.view) && !self.buttonScrollToBottom.isDescendant(of: self.view) {
+                    let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
+                    if indexMessage != nil {
+                        let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
+                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                        self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .top, animated: true)
+                    }
+                } else if self.buttonScrollToBottom.isDescendant(of: self.view) {
+                    if !self.indicatorCounterBSTB.isDescendant(of: self.view) {
+                        addCounterAtButttonScrollToBottom()
+                    } else {
+                        self.labelCounter.text = "\(counter)"
+                    }
+                } else {
+                    addButtonScrollToBottom()
+                    addCounterAtButttonScrollToBottom()
+                }
+            }
+        }
     }
     
     @objc func onUpdatedMessage(notification: NSNotification) {
@@ -3728,9 +3778,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 }
             }
         }
-        if counter == 0 && indicatorCounterBSTB.isDescendant(of: self.view) {
-            indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
-            indicatorCounterBSTB.removeFromSuperview()
+        if counter == 0 {
+            if indicatorCounterBSTB.isDescendant(of: self.view) {
+                indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
+                indicatorCounterBSTB.removeFromSuperview()
+            }
+            updateCounter(counter: 0)
         } else if counter != 0 && currentIndexpath != nil {
             let dataFilter = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[currentIndexpath!.section] })
             if dataFilter.count == 0 {
@@ -3784,10 +3837,46 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
             picker.dismiss(animated: true, completion: {
                 Nexilis.showLoader(text: "Preparing...".localized())
                 result.itemProvider.loadDataRepresentation(forTypeIdentifier: "com.compuserve.gif") { data, error in
-                    if let error = error {
-                        print("Error loading GIF: \(error.localizedDescription)")
-                        Nexilis.hideLoader() {
-                            
+                    if error != nil {
+                        self.loadAnimatedMedia(from: result.itemProvider) { data, isGIF in
+                            guard let data = data else {
+                                print("Failed to load media")
+                                return
+                            }
+
+                            DispatchQueue.main.async {
+                                Nexilis.hideLoader() {
+                                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                                    if (self.textFieldSend.textColor != .lightGray) {
+                                        previewImageVC.currentTextTextField = self.textFieldSend.text
+                                    }
+                                    if isGIF {
+                                        previewImageVC.fromCopy = true
+                                        previewImageVC.isGIF = true
+                                        previewImageVC.dataGIF = data
+                                        previewImageVC.modalPresentationStyle = .custom
+                                        previewImageVC.delegate = self
+                                        previewImageVC.isAck = self.isAck
+                                        previewImageVC.isConfidential = self.isConfidential
+                                    } else {
+                                        let fileManager = FileManager.default
+                                        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                        let destinationURL = documentsDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+                                        do {
+                                            try data.write(to: destinationURL)
+                                            previewImageVC.modalPresentationStyle = .custom
+                                            previewImageVC.urlVideoPhpPicker = destinationURL
+                                            previewImageVC.delegate = self
+                                            previewImageVC.isAck = self.isAck
+                                            previewImageVC.isConfidential = self.isConfidential
+                                            previewImageVC.isCC = self.isContactCenter
+                                        } catch {
+                                            
+                                        }
+                                    }
+                                    self.present(previewImageVC, animated: true, completion: nil)
+                                }
+                            }
                         }
                     } else if let data = data {
                         DispatchQueue.main.async {
@@ -3876,6 +3965,37 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
                     }
                 }
             })
+        }
+    }
+    
+    func loadAnimatedMedia(from provider: NSItemProvider, completion: @escaping (Data?, Bool) -> Void) {
+        // First: real GIF
+        if provider.hasItemConformingToTypeIdentifier("com.compuserve.gif") {
+            provider.loadFileRepresentation(forTypeIdentifier: "com.compuserve.gif") { url, error in
+                if let url = url, let data = try? Data(contentsOf: url) {
+                    completion(data, true) // true = isGIF
+                } else {
+                    // fallback
+                    self.loadQuickTimeMovie(from: provider, completion: completion)
+                }
+            }
+        } else {
+            // fallback directly
+            self.loadQuickTimeMovie(from: provider, completion: completion)
+        }
+    }
+
+    private func loadQuickTimeMovie(from provider: NSItemProvider, completion: @escaping (Data?, Bool) -> Void) {
+        if provider.hasItemConformingToTypeIdentifier("com.apple.quicktime-movie") {
+            provider.loadFileRepresentation(forTypeIdentifier: "com.apple.quicktime-movie") { url, error in
+                if let url = url, let data = try? Data(contentsOf: url) {
+                    completion(data, false) // false = it's MOV, not GIF
+                } else {
+                    completion(nil, false)
+                }
+            }
+        } else {
+            completion(nil, false)
         }
     }
     
@@ -4982,7 +5102,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                 children.insert(info, at: children.count - 1)
             }
-            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
+            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" {
                 if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 {
                     let date = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
                     let pastDate = date.addingTimeInterval(-10 * 60)
@@ -5725,6 +5845,8 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     self.timerCredential.removeValue(forKey: dataMessages[i]["message_id"]  as? String ?? "")
                 }
             }
+            let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+            self.pinAllMessages(dataMessages: dataMessagesPin)
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
             cancelAction()
         }
@@ -6703,7 +6825,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         messageText.textDragInteraction?.isEnabled = false
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
-        let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
+        var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         messageText.font = .systemFont(ofSize: 12 + offset())
         var textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
@@ -7565,6 +7687,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             let data = queryMessageReply(message_id: reffChat)
             if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
                 containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+            } else {
+                containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
             }
             containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
             containerViewFile.bottomAnchor.constraint(equalTo:messageText.topAnchor, constant: -5).isActive = true
@@ -7829,6 +7953,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 containerReply.backgroundColor = .black.withAlphaComponent(0.2)
                 containerReply.layer.cornerRadius = 5
                 containerReply.clipsToBounds = true
+                
+                if (thumbChat != "" || fileChat != "") && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
+                    topMarginText = messageText.topAnchor.constraint(greaterThanOrEqualTo: containerMessage.topAnchor, constant: topMarginText.constant + 50 + (self.offset()*3))
+                }
                 
                 let leftReply = UIView()
                 containerReply.addSubview(leftReply)
@@ -8339,9 +8467,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             imageViewer.navigationItem.leftBarButtonItem = backButton
             if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
                 let shareAction = UIAction { _ in
-                    var activityViewController = UIActivityViewController(activityItems: [image ?? UIImage()], applicationActivities: nil)
+                    var activityViewController = UIActivityViewController(activityItems: [""], applicationActivities: nil)
                     if type == 1 {
                         activityViewController = UIActivityViewController(activityItems: [url ?? URL(string: "")!], applicationActivities: nil)
+                    } else {
+                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("ImageSharedNexilis-\(Date().currentTimeMillis())" + ".jpeg")
+                        try? data!.write(to: tempURL)
+                        activityViewController = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
                     }
                     activityViewController.popoverPresentationController?.sourceView = imageViewer.view
                     imageViewer.present(activityViewController, animated: true, completion: nil)
@@ -8551,7 +8683,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
                     let shareAction = UIAction { _ in
                         let fileManager = FileManager.default
-                        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(sender.labelFile.text ?? "")
+                        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(urlFile.lastPathComponent)
                         do {
                             if !fileManager.fileExists(atPath: tempURL.path) {
                                 try fileManager.copyItem(at: urlFile, to: tempURL)

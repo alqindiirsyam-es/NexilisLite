@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.56"
+    public static var cpaasVersion = "5.0.58"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -159,7 +159,7 @@ public class Nexilis: NSObject {
             try MasterKeyUtil.shared.generateAndStoreMasterKey()
             try MasterKeyUtil.shared.generateAndStorePrefsKey()
             if Utils.getCertificatePinningWebview().isEmpty {
-                let cert: [String: String] = ["nexilis.io": Utils.decrypt(str: "7^reFspLRnRz3NaVjeI2AUQ0l5JFQbf0bZZ3dfYaBMqnL"), "newuniverse.io": Utils.decrypt(str: "6]umyRKg9l6D2N?2wVaejmtPrWNtVKpjqt0mqyA68XwFi")]
+                let cert: [String: String] = ["nexilis.io": Utils.decrypt(str: "6]W6LyyA5NGynzKr3SQbHULW4ghD57B2qvuCOliRoaFEt"), "newuniverse.io": Utils.decrypt(str: "2?iVFEW74Edu3HKUcELqAaQ6cAGmVnYrgdTmW6WoL5N8V")]
                 if let jsonData = try? JSONSerialization.data(withJSONObject: cert, options: []),
                    let jsonString = String(data: jsonData, encoding: .utf8) {
                     Utils.setCertificatePinningWebview(value: jsonString)
@@ -931,11 +931,11 @@ public class Nexilis: NSObject {
     
     public static func addQueueMessage(message: TMessage, isEditMessage: Bool = false) {
 //        OutgoingThread.default.addQueue(message: message)
-        if isEditMessage {
+//        if isEditMessage {
             OutgoingThread.default.addQueue(message: message)
-        } else {
-            InquiryThread.default.addQueue(message: message)
-        }
+//        } else {
+//            InquiryThread.default.addQueue(message: message)
+//        }
     }
     
     public static func deleteQueueMessage(message: TMessage) {
@@ -1391,9 +1391,6 @@ public class Nexilis: NSObject {
             } else {
                 UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
             }
-            return
-        }
-        if id == nil {
             return
         }
         if let url = URL(string: "itms-apps://apple.com/app/\(id)") {
@@ -2259,6 +2256,19 @@ public class Nexilis: NSObject {
                                 }
                             }
                             cursorStatus.close()
+                        } else {
+                            if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS where message_id = '\(t)'"), cursorStatus.next() {
+                                if Int(status)! == 2 {
+                                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
+                                        "status" : status,
+                                        "time_ack" : String(Date().currentTimeMillis()),
+                                        "longitude" : longitude,
+                                        "latitude" : latitude,
+                                        "location" : desc,
+                                        "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(t)'")
+                                }
+                                cursorStatus.close()
+                            }
                         }
                     }
                 } else {
@@ -2297,6 +2307,17 @@ public class Nexilis: NSObject {
                                     "location" : desc,
                                     "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                             }
+                        }
+                        cursorStatus.close()
+                    } else if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS where message_id = '\(message_id)'"), cursorStatus.next() {
+                        if Int(status)! == 2 {
+                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
+                                "status" : status,
+                                "time_ack" : String(Date().currentTimeMillis()),
+                                "longitude" : longitude,
+                                "latitude" : latitude,
+                                "location" : desc,
+                                "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)'")
                         }
                         cursorStatus.close()
                     }
@@ -3136,7 +3157,7 @@ extension Nexilis: MessageDelegate {
                                                         UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                                                     }
                                                 } else {
-                                                    print("show broadcast no button")
+                                                    print("show broadcast no button \(response.toLogString())")
                                                 }
                                             } catch {
                                                 rollback.pointee = true

@@ -455,83 +455,101 @@ extension NSObject {
     
     private static var urlStore = [String:String]()
 
-    public func getImage(name url: String, placeholderImage: UIImage? = nil, isCircle: Bool = false, tableView: UITableView? = nil, indexPath: IndexPath? = nil, isResized: Bool = true, completion: @escaping (Bool, Bool, UIImage?)->()) {
+    public func getImage(
+        name url: String,
+        placeholderImage: UIImage? = nil,
+        isCircle: Bool = false,
+        tableView: UITableView? = nil,
+        indexPath: IndexPath? = nil,
+        isResized: Bool = true,
+        completion: @escaping (Bool, Bool, UIImage?) -> ()
+    ) {
         let tmpAddress = String(format: "%p", unsafeBitCast(self, to: Int.self))
         type(of: self).urlStore[tmpAddress] = url
-        if url.isEmpty {
+        
+        // Handle empty URL
+        guard !url.isEmpty else {
             completion(false, false, placeholderImage)
             return
         }
+        
         do {
-            let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let documentDir = try FileManager.default.url(for: .documentDirectory,
+                                                          in: .userDomainMask,
+                                                          appropriateFor: nil,
+                                                          create: true)
             let file = documentDir.appendingPathComponent(url)
             if FileManager().fileExists(atPath: file.path) {
-                var image = UIImage(contentsOfFile: file.path)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
+                var image = UIImage(contentsOfFile: file.path)
                 if isResized {
-                    completion(true, false, isCircle ? image?.circleMasked : image)
-                } else {
-                    completion(true, false, isCircle ? UIImage(contentsOfFile: file.path)?.circleMasked : UIImage(contentsOfFile: file.path))
+                    image = image?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
                 }
-            } else if var tempData = try FileEncryption.shared.readSecure(filename: url) {
-                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: tempData)
-                if dataDecrypt != nil {
-                    tempData = dataDecrypt!
+                if isCircle {
+                    image = image?.circleMasked
                 }
-                let image = UIImage(data: tempData)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-//                FileEncryption.shared.wipeData(&tempData)
+                completion(true, false, image)
+                return
+            }
+            if var tempData = try? FileEncryption.shared.readSecure(filename: url) {
+                if let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: tempData) {
+                    tempData = dataDecrypt
+                }
+                var image = UIImage(data: tempData)
                 if isResized {
-                    completion(true, false, isCircle ? image?.circleMasked : image)
-                } else {
-                    completion(true, false, isCircle ? UIImage(data: tempData)?.circleMasked : UIImage(data: tempData))
+                    image = image?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
                 }
-            } else {
-//                completion(false, false, placeholderImage)
-                Download().startHTTP(forKey: url) { (name, progress) in
-                    guard progress == 100 else {
-                        return
-                    }
-                    
-                    DispatchQueue.main.async {
-                        if type(of: self).urlStore[tmpAddress] == name && tableView == nil {
-                            if FileManager().fileExists(atPath: file.path) {
-                                let image = UIImage(contentsOfFile: file.path)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
+                if isCircle {
+                    image = image?.circleMasked
+                }
+                completion(true, false, image)
+                return
+            }
+            
+            // ❌ 3. Not available locally → fallback to download (async)
+            completion(false, false, placeholderImage) // give placeholder early
+            
+            Download().startHTTP(forKey: url) { (name, progress) in
+                guard progress == 100 else { return }
+                
+                DispatchQueue.main.async {
+                    if type(of: self).urlStore[tmpAddress] == name && tableView == nil {
+                        if FileManager().fileExists(atPath: file.path) {
+                            var image = UIImage(contentsOfFile: file.path)
+                            if isResized {
+                                image = image?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
+                            }
+                            if isCircle {
+                                image = image?.circleMasked
+                            }
+                            completion(true, true, image)
+                        } else if FileEncryption.shared.isSecureExists(filename: url) {
+                            if var imageData = try? FileEncryption.shared.readSecure(filename: url) {
+                                if let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData) {
+                                    imageData = dataDecrypt
+                                }
+                                var image = UIImage(data: imageData)
                                 if isResized {
-                                    completion(true, false, isCircle ? image?.circleMasked : image)
-                                } else {
-                                    completion(true, false, isCircle ? UIImage(contentsOfFile: file.path)?.circleMasked : UIImage(contentsOfFile: file.path))
+                                    image = image?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
                                 }
-                            } else if FileEncryption.shared.isSecureExists(filename: url) {
-                                do {
-                                    if var imageData = try FileEncryption.shared.readSecure(filename: url) {
-                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
-                                        if dataDecrypt != nil {
-                                            imageData = dataDecrypt!
-                                        }
-                                        let image = UIImage(data: imageData)?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-                                        if isResized {
-                                            completion(true, false, isCircle ? image?.circleMasked : image)
-                                        } else {
-                                            completion(true, false, isCircle ? UIImage(data: imageData)?.circleMasked : UIImage(data: imageData))
-                                        }
-                                    }
-                                } catch {
-                                    
+                                if isCircle {
+                                    image = image?.circleMasked
                                 }
+                                completion(true, true, image)
                             }
                         }
+                    } else if let tableView = tableView {
+                        tableView.reloadData()
                     }
                 }
             }
+            
         } catch {
+            // In case documentDir fetch fails
             completion(false, false, placeholderImage)
             Download().startHTTP(forKey: url) { (name, progress) in
-                guard progress == 100 else {
-                    return
-                }
-                
+                guard progress == 100 else { return }
                 DispatchQueue.main.async {
-                    guard let tableView = tableView else { return }
-                    tableView.reloadData()
+                    tableView?.reloadData()
                 }
             }
         }

@@ -1114,9 +1114,13 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             imageViewer.navigationItem.leftBarButtonItem = backButton
             if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
                 let shareAction = UIAction { _ in
-                    var activityViewController = UIActivityViewController(activityItems: [image ?? UIImage()], applicationActivities: nil)
+                    var activityViewController = UIActivityViewController(activityItems: [""], applicationActivities: nil)
                     if type == 1 {
                         activityViewController = UIActivityViewController(activityItems: [url ?? URL(string: "")!], applicationActivities: nil)
+                    } else {
+                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("ImageSharedNexilis-\(Date().currentTimeMillis())" + ".jpeg")
+                        try? data!.write(to: tempURL)
+                        activityViewController = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
                     }
                     activityViewController.popoverPresentationController?.sourceView = imageViewer.view
                     imageViewer.present(activityViewController, animated: true, completion: nil)
@@ -1301,7 +1305,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
                     let shareAction = UIAction { _ in
                         let fileManager = FileManager.default
-                        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(sender.labelFile.text ?? "")
+                        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(urlFile.lastPathComponent)
                         do {
                             if !fileManager.fileExists(atPath: tempURL.path) {
                                 try fileManager.copyItem(at: urlFile, to: tempURL)

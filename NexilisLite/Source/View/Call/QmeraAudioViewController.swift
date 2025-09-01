@@ -105,7 +105,7 @@ class QmeraAudioViewController: UIViewController {
     
     let status: UILabel = {
         let label = UILabel()
-        label.text = "Calling..."
+        label.text = "Calling".localized() + "..."
         label.font = UIFont.systemFont(ofSize: 14)
         label.textColor = .white
         label.textAlignment = .center
@@ -400,7 +400,7 @@ class QmeraAudioViewController: UIViewController {
                         if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getCalling(fPin: u.pin, type: "1"), timeout: 30 * 1000) {
                             if response.isOk() {
                                 DispatchQueue.main.async {
-                                    self.status.text = "Waiting for answer".localized()
+                                    self.status.text = "Ringing".localized() + "..."
                                 }
                             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
                                 API.initiateCCall(sParty: u.pin)
@@ -571,7 +571,7 @@ class QmeraAudioViewController: UIViewController {
         status.anchor(left: view.leftAnchor, bottom: profiles.topAnchor, right: view.rightAnchor, paddingBottom: 30, centerX: view.centerXAnchor)
         profiles.anchor(centerX: view.centerXAnchor, centerY: view.centerYAnchor, width: 150, height: 150)
         name.anchor(top: profiles.bottomAnchor, left: view.leftAnchor, right: view.rightAnchor, paddingTop: 5, paddingLeft: 20, paddingRight: 20, centerX: view.centerXAnchor)
-        status.text = "Connecting..."
+        status.text = "Calling".localized() + "..."
         view.addSubview(end)
         end.anchor(bottom: view.bottomAnchor, paddingBottom: 60, centerX: view.centerXAnchor, width: buttonSize, height: buttonSize)
         
@@ -584,7 +584,7 @@ class QmeraAudioViewController: UIViewController {
             backToDefaultAudioSession()
             Nexilis.playRingbacktoneCall()
         }
-        status.text = "Connecting..."
+        status.text = "Calling".localized() + "..."
         view.addSubview(end)
         end.anchor(bottom: view.bottomAnchor, paddingBottom: 60, centerX: view.centerXAnchor, width: buttonSize, height: buttonSize)
         
@@ -1144,7 +1144,7 @@ class QmeraAudioViewController: UIViewController {
             } else if state == Nexilis.AUDIO_CALL_RINGING || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_RINGING) {
                 if users.count == 1 && !autoAcceptAPN {
                     DispatchQueue.main.async {
-                        self.status.text = "Waiting for answer".localized()
+                        self.status.text = "Ringing".localized() + "..."
                     }
                 }
             } else if state == Nexilis.AUDIO_CALL_OFFHOOK || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_OFFHOOK) {

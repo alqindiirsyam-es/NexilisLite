@@ -33,15 +33,30 @@ class OutgoingThread {
                     if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message, id from OUTGOING") {
                         while cursor.next() {
                             if let message = cursor.string(forColumnIndex: 0) {
-                                if let cursorMessage = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(cursor.string(forColumnIndex: 1)!)'") {
-                                    if cursorMessage.next() {
-                                        addQueue(message: TMessage(data: message))
+                                let id = cursor.string(forColumnIndex: 1) ?? ""
+//                                print("KOK ADA: \(id)")
+                                let tMessage = TMessage(data: message)
+                                let message_id = tMessage.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
+                                if let cursorM = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE WHERE message_id='\(message_id)'"), cursorM.next() {
+                                    let statusM = cursorM.string(forColumnIndex: 0) ?? "0"
+                                    if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(message_id)'") {
+                                        var listStatus: [Int] = []
+                                        while cursorStatus.next() {
+                                            listStatus.append(Int(cursorStatus.string(forColumnIndex: 0)!)!)
+                                        }
+                                        let status = "\(listStatus.min() ?? Int(statusM)!)"
+                                        if status == "1" {
+                                            self.appendAndRunQueue(message: tMessage)
+                                        } else {
+                                            self.delOutgoing(fmdb: fmdb, messageId: id)
+                                        }
+                                        cursorStatus.close()
                                     } else {
-                                        delOutgoing(fmdb: fmdb, messageId: cursor.string(forColumnIndex: 1)!)
+                                        self.delOutgoing(fmdb: fmdb, messageId: id)
                                     }
-                                    cursorMessage.close()
+                                    cursorM.close()
                                 } else {
-                                    delOutgoing(fmdb: fmdb, messageId: cursor.string(forColumnIndex: 1)!)
+                                    self.delOutgoing(fmdb: fmdb, messageId: id)
                                 }
                             }
                         }
@@ -56,6 +71,13 @@ class OutgoingThread {
     }
     
     func addQueue(message: TMessage) {
+        if message.getCode() == CoreMessage_TMessageCode.SEND_CHAT || message.getCode() == CoreMessage_TMessageCode.EDIT_MESSAGE {
+            Nexilis.saveMessage(message: message)
+        }
+        appendAndRunQueue(message: message)
+    }
+    
+    func appendAndRunQueue(message: TMessage) {
         queue.append(message)
         semaphore.signal()
         addOugoing(message: message)
@@ -69,7 +91,8 @@ class OutgoingThread {
     
     private func addOugoing(message: TMessage) {
         DispatchQueue.global().async {
-            let messageId = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
+            let messageId = message.getStatus()
+//            print("SAVE OUTGOING \(messageId)")
             if !messageId.isEmpty {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
@@ -87,6 +110,7 @@ class OutgoingThread {
     }
     
     private func delOutgoing(fmdb: Any, messageId: String) {
+//        print("DELETE OUTGOING \(messageId)")
         _ = Database.shared.deleteRecord(fmdb: fmdb as! FMDatabase, table: "OUTGOING", _where: "id = '\(messageId)'")
     }
     
@@ -202,7 +226,7 @@ class OutgoingThread {
                                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                                                     "status" : response.getBody(key: CoreMessage_TMessageKey.STATUS, default_value: "2")
                                                 ], _where: "message_id = '\(messageId)'")
-                                                self.delOutgoing(fmdb: fmdb, messageId: messageId)
+                                                self.delOutgoing(fmdb: fmdb, messageId: message.getStatus())
                                             } catch {
                                                 rollback.pointee = true
                                                 print("Access database error: \(error.localizedDescription)")
@@ -245,7 +269,7 @@ class OutgoingThread {
                                         _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                                             "status" : response.getBody(key: CoreMessage_TMessageKey.STATUS, default_value: "2")
                                         ], _where: "message_id = '\(messageId)'")
-                                        self.delOutgoing(fmdb: fmdb, messageId: messageId)
+                                        self.delOutgoing(fmdb: fmdb, messageId: message.getStatus())
                                     } catch {
                                         rollback.pointee = true
                                         print("Access database error: \(error.localizedDescription)")
@@ -277,14 +301,15 @@ class OutgoingThread {
                         _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                             "status" : response.getBody(key: CoreMessage_TMessageKey.STATUS, default_value: "2")
                         ], _where: "message_id = '\(messageId)'")
-                        self.delOutgoing(fmdb: fmdb, messageId: messageId)
+                        self.delOutgoing(fmdb: fmdb, messageId: message.getStatus())
                     } catch {
                         rollback.pointee = true
                         print("Access database error: \(error.localizedDescription)")
                     }
                 })
             } else {
-                InquiryThread.default.addQueue(message: message)
+//                InquiryThread.default.addQueue(message: message)
+                OutgoingThread.default.addQueue(message: message)
             }
         }
     }
@@ -317,7 +342,7 @@ class OutgoingThread {
                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                         "status" : "0"
                     ], _where: "message_id = '\(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))'")
-                    self.delOutgoing(fmdb: fmdb, messageId: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))
+                    self.delOutgoing(fmdb: fmdb, messageId: message.getStatus())
                 } catch {
                     rollback.pointee = true
                     print("Access database error: \(error.localizedDescription)")
@@ -345,7 +370,7 @@ class OutgoingThread {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "status" : "0"
                                 ], _where: "message_id = '\(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))'")
-                                self.delOutgoing(fmdb: fmdb, messageId: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))
+                                self.delOutgoing(fmdb: fmdb, messageId: message.getStatus())
                             } catch {
                                 rollback.pointee = true
                                 print("Access database error: \(error.localizedDescription)")
@@ -448,7 +473,7 @@ class OutgoingThread {
                         rollback.pointee = true
                         //print(error)
                     }
-                    self.delOutgoing(fmdb: fmdb, messageId: messageId)
+                    self.delOutgoing(fmdb: fmdb, messageId: message.getStatus())
                 }
             } catch {
                 rollback.pointee = true

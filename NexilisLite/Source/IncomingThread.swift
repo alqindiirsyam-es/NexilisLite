@@ -1392,12 +1392,11 @@ class IncomingThread {
 //        } else {
             Nexilis.saveMessage(message: message, withStatus: false)
 //        }
-//        DispatchQueue.main.async { [self] in
-//            if APIS.checkAppStateisBackground() {
-//                APIS.addNotificationNexilis(message)
-//                ackAPN(id: message.mStatus)
-//            }
-//        }
+        DispatchQueue.main.async {
+            if APIS.checkAppStateisBackground() {
+                UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+            }
+        }
         //print("save message incoming")
         ack(message: message)
     }

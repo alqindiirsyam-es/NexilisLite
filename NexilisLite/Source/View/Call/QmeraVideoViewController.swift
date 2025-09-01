@@ -481,7 +481,7 @@ class QmeraVideoViewController: UIViewController {
             labelIncomingOutgoing.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         ])
         if isInisiator {
-            labelIncomingOutgoing.text = "Connecting".localized()
+            labelIncomingOutgoing.text = "Calling".localized() + "..."
             if ticketId.isEmpty {
                 backToDefaultAudioSession()
                 Nexilis.playRingbacktoneCall()
@@ -490,7 +490,7 @@ class QmeraVideoViewController: UIViewController {
                         if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getCalling(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
                             if response.isOk() {
                                 DispatchQueue.main.async {
-                                    self.labelIncomingOutgoing.text = "Waiting for answer".localized()
+                                    self.labelIncomingOutgoing.text = "Ringing".localized()
                                 }
                             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" && self.dataPerson.count > 0 {
                                 API.initiateCCall(sParty: self.dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
@@ -587,7 +587,7 @@ class QmeraVideoViewController: UIViewController {
                 if let f_pin = data["f_pin"] as? String {
                     if f_pin == User.getMyPin()!  {
                         if !Nexilis.callAPNActivated {
-                            labelIncomingOutgoing.text = "Waiting for answer".localized()
+                            labelIncomingOutgoing.text = "Ringing".localized()
                         }
                         API.initiateCCall(sParty: l_pin, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
                     }
@@ -1886,7 +1886,7 @@ class QmeraVideoViewController: UIViewController {
                 } else {
                     if self.dataPerson.count == 1 && !self.autoAcceptAPN {
                         DispatchQueue.main.async {
-                            self.labelIncomingOutgoing.text = "Waiting for answer".localized()
+                            self.labelIncomingOutgoing.text = "Ringing".localized() + "..."
                         }
                     }
                 }
