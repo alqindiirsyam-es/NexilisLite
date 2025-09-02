@@ -828,7 +828,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             guard let tempImage = UIImage(data: compressedData) else { break }
             compressedData = tempImage.jpegData(compressionQuality: 0.5) ?? compressedData
             imageSizeMB = Double(compressedData.count) / (1024.0 * 1024.0)
-            print("Compressed to: \(imageSizeMB) MB")
+//            print("Compressed to: \(imageSizeMB) MB")
         }
         
         return compressedData

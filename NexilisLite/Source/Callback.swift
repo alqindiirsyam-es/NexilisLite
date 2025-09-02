@@ -151,8 +151,8 @@ class NetworkMonitor {
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self = self else { return }
             
-            self.canAccessGoogle { connected in
-                if connected {
+            DispatchQueue.main.async {
+                if path.status == .satisfied && API.nGetCLXConnState() != 0 {
                     // Cancel any pending "disconnected" work if connection is back
                     self.disconnectWorkItem?.cancel()
                     self.disconnectWorkItem = nil
@@ -198,26 +198,26 @@ class NetworkMonitor {
     private func handleDisconnected() {
         fromDisconnect = true
         DispatchQueue.main.async {
-            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-            imageView.tintColor = .white
-            let banner = FloatingNotificationBanner(
-                title: "Check your connection".localized(),
-                subtitle: nil,
-                titleFont: UIFont.systemFont(ofSize: 16),
-                titleColor: nil,
-                titleTextAlign: .left,
-                subtitleFont: nil,
-                subtitleColor: nil,
-                subtitleTextAlign: nil,
-                leftView: imageView,
-                rightView: nil,
-                style: .danger,
-                colors: nil,
-                iconPosition: .center
-            )
-            banner.show()
+//            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+//            imageView.tintColor = .white
+//            let banner = FloatingNotificationBanner(
+//                title: "Check your connection".localized(),
+//                subtitle: nil,
+//                titleFont: UIFont.systemFont(ofSize: 16),
+//                titleColor: nil,
+//                titleTextAlign: .left,
+//                subtitleFont: nil,
+//                subtitleColor: nil,
+//                subtitleTextAlign: nil,
+//                leftView: imageView,
+//                rightView: nil,
+//                style: .danger,
+//                colors: nil,
+//                iconPosition: .center
+//            )
+//            banner.show()
             
-            if Utils.getSecureFolderEncrypt().isEmpty && Database.shared.database != nil {
+            if Utils.getSecureFolderOffline() == "0" && Database.shared.database != nil {
                 self.timerReloadData?.invalidate()
                 self.timerReloadData = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { _ in
                     Database.shared.database = nil
@@ -244,47 +244,28 @@ class NetworkMonitor {
                 self.timerReloadData?.invalidate()
                 self.timerReloadData = nil
                 
-                let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
-                imageView.tintColor = .white
-                let banner = FloatingNotificationBanner(
-                    title: "You're Connected".localized(),
-                    subtitle: nil,
-                    titleFont: UIFont.systemFont(ofSize: 16),
-                    titleColor: nil,
-                    titleTextAlign: .left,
-                    subtitleFont: nil,
-                    subtitleColor: nil,
-                    subtitleTextAlign: nil,
-                    leftView: imageView,
-                    rightView: nil,
-                    style: .success,
-                    colors: nil,
-                    iconPosition: .center
-                )
-                banner.show()
+//                let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+//                imageView.tintColor = .white
+//                let banner = FloatingNotificationBanner(
+//                    title: "You're Connected".localized(),
+//                    subtitle: nil,
+//                    titleFont: UIFont.systemFont(ofSize: 16),
+//                    titleColor: nil,
+//                    titleTextAlign: .left,
+//                    subtitleFont: nil,
+//                    subtitleColor: nil,
+//                    subtitleTextAlign: nil,
+//                    leftView: imageView,
+//                    rightView: nil,
+//                    style: .success,
+//                    colors: nil,
+//                    iconPosition: .center
+//                )
+//                banner.show()
             }
             if Database.shared.database == nil {
                 Nexilis.getFeatureAccess()
             }
         }
-    }
-    
-    func canAccessGoogle(completion: @escaping (Bool) -> Void) {
-        guard let url = URL(string: "https://www.google.com") else {
-            completion(false)
-            return
-        }
-        
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
-        
-        let task = URLSession.shared.dataTask(with: request) { _, response, _ in
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                completion(true)
-            } else {
-                completion(false)
-            }
-        }
-        task.resume()
     }
 }

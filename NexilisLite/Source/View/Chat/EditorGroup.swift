@@ -3173,10 +3173,18 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                 })
                 if !dataURL.isEmpty {
                     if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                        let imageUrl = data["imageUrl"] as? String
+                        let link = data["link"]  as? String ?? ""
+                        if imageUrl == nil || (link.contains("youtube.com") && link.contains("watch?v=") && !imageUrl!.contains("img.youtube.com/vi/")) {
+                            dataURL = ""
+                        }
+                    }
+                }
+                if !dataURL.isEmpty {
+                    if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
                         let title = data["title"]  as? String ?? ""
                         let description = data["description"]  as? String ?? ""
                         let imageUrl = data["imageUrl"] as? String
-                        let link = data["link"]  as? String ?? ""
                         if self.showingLink != text {
                             self.showingLink = text
                             self.deleteLinkPreview()
@@ -3195,9 +3203,19 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                                        cache: DisabledCache.instance)
                     let preview = slp.preview(stringURl,
                                               onSuccess: { result in
-                        let title = result.title ?? "No Title"
-                        let description = stringURl.contains("google.com") ? "" : result.description
-                        let imageUrl = result.icon
+                        let title = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    .nilIfEmpty ?? URL(string: text)?.host ?? "Untitled"
+                        let description: String
+                        if text.contains("google.com") {
+                            description = "" // special rule for google
+                        } else {
+                            description = result.description?.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .nilIfEmpty ?? "No description available"
+                        }
+                        let imageUrl = self.youtubeThumbnail(from: text)
+                            ?? result.image
+                            ?? result.icon
+                            ?? ""
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                             do {
                                 var dataJson: [String: Any] = [:]
@@ -3227,7 +3245,7 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                             }
                         }
                     },
-                                              onError: { error in
+                    onError: { error in
                         self.deleteLinkPreview()
                     })
                 }
@@ -3310,7 +3328,7 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         } else {
             linkPreview.leadingAnchor.constraint(equalTo: self.containerLink.leadingAnchor, constant: 5.0).isActive = true
         }
-        linkPreview.topAnchor.constraint(equalTo: descPreview.bottomAnchor, constant: 8.0).isActive = true
+        linkPreview.topAnchor.constraint(equalTo: descPreview.bottomAnchor).isActive = true
         linkPreview.trailingAnchor.constraint(equalTo: self.containerLink.trailingAnchor, constant: -80.0).isActive = true
         linkPreview.text = stringURl
         linkPreview.font = UIFont.systemFont(ofSize: 10.0 + offset())
@@ -3952,7 +3970,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
                 children = [reply, pin, delete]
             }
-            if ((Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"] as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty) || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" {
+            if (Nexilis.checkingAccess(key: "secure_folder_forward") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty) || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" && dataMessages[indexPath!.row]["attachment_flag"] as? String ?? "" != "11" {
                 children.insert(forward, at: 2)
             }
             if dataMessages[indexPath!.row]["f_pin"] as? String ?? "" != "-999" && dataMessages[indexPath!.row]["f_pin"] as? String != User.getMyPin() && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11" {
@@ -3961,8 +3979,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                 children.insert(info, at: children.count - 1)
             }
-            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" {
-                if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 {
+            if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
+                if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 && (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" {
                     let date = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
                     let pastDate = date.addingTimeInterval(-10 * 60)
                     let differenceInSeconds = date.timeIntervalSince(pastDate)
@@ -3970,7 +3988,9 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         children.insert(edit, at: children.count - 1)
                     }
                 }
-                isMore = true
+                if (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty{
+                    isMore = true
+                }
             }
         }
         
@@ -6432,6 +6452,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
             if !text.isEmpty {
                 isLoadingShowLink = true
+                var dataURL = ""
                 func showLink() {
                     if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
                         let title = data["title"] as? String
@@ -6462,7 +6483,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             imagePreview.topAnchor.constraint(equalTo: containerLinkMessage.topAnchor).isActive = true
                             imagePreview.widthAnchor.constraint(equalToConstant: 80.0).isActive = true
                             imagePreview.loadImageAsync(with: imageUrl)
-                            imagePreview.contentMode = .scaleToFill
+                            imagePreview.contentMode = .scaleAspectFill
+                            imagePreview.clipsToBounds = true
                         }
                         
                         let titlePreview = UILabel()
@@ -6476,7 +6498,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         titlePreview.topAnchor.constraint(equalTo: containerLinkMessage.topAnchor, constant: 10.0).isActive = true
                         titlePreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -5.0).isActive = true
                         titlePreview.text = title
-                        titlePreview.font = UIFont.systemFont(ofSize: 14.0 + offset(), weight: .bold)
+                        titlePreview.font = UIFont.systemFont(ofSize: 12.0 + offset(), weight: .bold)
                         titlePreview.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                         
                         let descPreview = UILabel()
@@ -6520,7 +6542,6 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         }
                     }
                 }
-                var dataURL = ""
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
                         if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select data_link from LINK_PREVIEW where link='\(text)'"), cursor.next() {
@@ -6534,6 +6555,24 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         print("Access database error: \(error.localizedDescription)")
                     }
                 })
+                if !dataURL.isEmpty {
+                    if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                        let imageUrl = data["imageUrl"] as? String
+                        let link = data["link"]  as? String ?? ""
+                        if imageUrl == nil || (link.contains("youtube.com") && link.contains("watch?v=") && !imageUrl!.contains("img.youtube.com/vi/")) {
+                            dataURL = ""
+                        }
+                    }
+                }
+                if !dataURL.isEmpty {
+                    if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                        let imageUrl = data["imageUrl"] as? String
+                        let link = data["link"]  as? String ?? ""
+                        if imageUrl == nil || (link.contains("youtube.com") && link.contains("watch?v=") && !imageUrl!.contains("img.youtube.com/vi/")) {
+                            dataURL = ""
+                        }
+                    }
+                }
                 if dataURL.isEmpty {
                     let urlConfig = URLSessionConfiguration.default
                     let sessionDelegate = SelfSignedURLSessionDelegate()
@@ -6544,9 +6583,19 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                                                cache: DisabledCache.instance)
                     let preview = slp.preview(text,
                                               onSuccess: { result in
-                        let title = result.title ?? "No Title"
-                        let description = text.contains("google.com") ? "" : result.description
-                        let imageUrl = result.icon
+                        let title = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    .nilIfEmpty ?? URL(string: text)?.host ?? "Untitled"
+                        let description: String
+                        if text.contains("google.com") {
+                            description = "" // special rule for google
+                        } else {
+                            description = result.description?.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .nilIfEmpty ?? "No description available"
+                        }
+                        let imageUrl = self.youtubeThumbnail(from: text)
+                            ?? result.image
+                            ?? result.icon
+                            ?? ""
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                             do {
                                 var dataJson: [String: Any] = [:]
@@ -6821,6 +6870,24 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         }
         
         return cellMessage
+    }
+    
+    func youtubeThumbnail(from url: String) -> String? {
+        guard let url = URL(string: url) else { return nil }
+        let host = url.host ?? ""
+        
+        if host.contains("youtube.com"),
+           let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           let videoId = queryItems.first(where: { $0.name == "v" })?.value {
+            return "https://img.youtube.com/vi/\(videoId)/hqdefault.jpg"
+        }
+        
+        if host.contains("youtu.be") {
+            let videoId = url.lastPathComponent
+            return "https://img.youtube.com/vi/\(videoId)/hqdefault.jpg"
+        }
+        
+        return nil
     }
     
     func playPauseAudio(indexPath: IndexPath, playButton: UIButton, progressSlider: UISlider, timeLabel: UILabel) {

@@ -758,6 +758,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 }
             }
             if !text.isEmpty {
+                var dataURL = ""
                 func showLink() {
                     if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
                         let title = data["title"] as! String
@@ -792,7 +793,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             } else {
                                 imagePreview.loadImageAsync(with: imageUrl)
                             }
-                            imagePreview.contentMode = .scaleToFill
+                            imagePreview.contentMode = .scaleAspectFill
+                            imagePreview.clipsToBounds = true
                         }
                         
                         let titlePreview = UILabel()
@@ -806,7 +808,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         titlePreview.topAnchor.constraint(equalTo: containerLinkMessage.topAnchor, constant: 25.0).isActive = true
                         titlePreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -80.0).isActive = true
                         titlePreview.text = title
-                        titlePreview.font = UIFont.systemFont(ofSize: 14.0 + offset(), weight: .bold)
+                        titlePreview.font = UIFont.systemFont(ofSize: 12.0 + offset(), weight: .bold)
                         titlePreview.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                         
                         let descPreview = UILabel()
@@ -844,7 +846,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         containerLinkMessage.addGestureRecognizer(objectTap)
                     }
                 }
-                var dataURL = ""
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
                         if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select data_link from LINK_PREVIEW where link='\(text)'"), cursor.next() {
@@ -858,6 +859,15 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         print("Access database error: \(error.localizedDescription)")
                     }
                 })
+                if !dataURL.isEmpty {
+                    if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                        let imageUrl = data["imageUrl"] as? String
+                        let link = data["link"]  as? String ?? ""
+                        if imageUrl == nil || (link.contains("youtube.com") && link.contains("watch?v=") && !imageUrl!.contains("img.youtube.com/vi/")) {
+                            dataURL = ""
+                        }
+                    }
+                }
                 if dataURL.isEmpty {
                     let urlConfig = URLSessionConfiguration.default
                     let sessionDelegate = SelfSignedURLSessionDelegate()
@@ -868,9 +878,19 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                        cache: DisabledCache.instance)
                     let preview = slp.preview(text,
                                               onSuccess: { result in
-                        let title = result.title ?? "No Title"
-                        let description = text.contains("google.com") ? "" : result.description
-                        let imageUrl = result.image
+                        let title = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    .nilIfEmpty ?? URL(string: text)?.host ?? "Untitled"
+                        let description: String
+                        if text.contains("google.com") {
+                            description = "" // special rule for google
+                        } else {
+                            description = result.description?.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .nilIfEmpty ?? "No description available"
+                        }
+                        let imageUrl = self.youtubeThumbnail(from: text)
+                            ?? result.image
+                            ?? result.icon
+                            ?? ""
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                             do {
                                 var dataJson: [String: Any] = [:]
@@ -906,6 +926,24 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
         
         return cellMessage
+    }
+    
+    func youtubeThumbnail(from url: String) -> String? {
+        guard let url = URL(string: url) else { return nil }
+        let host = url.host ?? ""
+        
+        if host.contains("youtube.com"),
+           let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           let videoId = queryItems.first(where: { $0.name == "v" })?.value {
+            return "https://img.youtube.com/vi/\(videoId)/hqdefault.jpg"
+        }
+        
+        if host.contains("youtu.be") {
+            let videoId = url.lastPathComponent
+            return "https://img.youtube.com/vi/\(videoId)/hqdefault.jpg"
+        }
+        
+        return nil
     }
     
     @objc func tapAck(_ sender: ObjectGesture) {
