@@ -666,7 +666,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         var app_id = sender.accessibilityIdentifier!
         var indexTap = 0
         if package_id.contains("_fb"){
-            let listSplit = package_id.split(separator: "_", maxSplits: 2)
+            let listSplit = package_id.split(separator: "_", maxSplits: 2, omittingEmptySubsequences: false).map { String($0) }
             let numIdx = listSplit[listSplit.firstIndex(where: { $0.contains("fb") }) ?? 0]
             indexTap = Int(String(numIdx).substring(from: 2, to: numIdx.count)) ?? 0
             if listSplit.count == 3 {

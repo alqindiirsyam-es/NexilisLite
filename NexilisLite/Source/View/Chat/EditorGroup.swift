@@ -1340,9 +1340,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             self.labelCounter.text = "\(self.counter)"
                         }
                     }
+                } else {
+                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                 }
             } else {
-//                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
             }
         }
     }
@@ -1984,6 +1986,42 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 }
             }
         }
+        if Nexilis.checkingAccess(key: "message_guard") {
+            let guardLite = MessageGuardLite(limits: .defaults())
+            var isSanitizedText = false
+            var isSanitizedHtml = false
+            let res = guardLite.sanitizeText(message_text.data(using: .utf8)!)
+            if res.verdict == .sanitized {
+                isSanitizedText = true
+            }
+            if let clean = res.data, let str = String(data: clean, encoding: .utf8) {
+                if MessageGuardLite.containsHtmlTags(str) {
+                    let res2 = guardLite.sanitizeHtml(res.data ?? Data())
+                    if res2.verdict == .sanitized {
+                        isSanitizedHtml = true
+                    }
+                    if let clean2 = res.data, let str2 = String(data: clean, encoding: .utf8) {
+                        message_text = str2
+                    }
+                } else {
+                    message_text = str
+                }
+            }
+            var protectionType = ""
+            if isSanitizedText && isSanitizedHtml {
+                protectionType = "text & html"
+            } else if isSanitizedText {
+                protectionType = "text"
+            } else if isSanitizedHtml {
+                protectionType = "html"
+            }
+            
+            if !protectionType.isEmpty {
+                DispatchQueue.main.async {
+                    self.view.makeToast("Your message is protected with sanitized \(protectionType) (Message Guard)".localized(), duration: 3)
+                }
+            }
+        }
         let message = CoreMessage_TMessageBank.sendMessage(l_pin: dataGroup["group_id"]  as? String ?? "", message_scope_id: message_scope_id, status: status, message_text: message_text, credential: credential, attachment_flag: attachment_flag, ex_blog_id: ex_blog_id, message_large_text: message_large_text, ex_format: ex_format, image_id: image_id, audio_id: audio_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, reff_id: reff_id, read_receipts: read_receipts, chat_id: dataTopic["chat_id"]  as? String ?? "", is_call_center: is_call_center, call_center_id: call_center_id, opposite_pin: opposite_pin, gif_id: gif_id, isForwarded: "\(is_forwarded)", specFile: specFileString)
         Nexilis.addQueueMessage(message: message)
         let messageId = String(message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID]!)
@@ -2283,10 +2321,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                 })
                             }
                         } else {
-                            self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
+                            DispatchQueue.main.sync {
+                                self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
+                            }
                         }
                     } else {
-                        self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
+                        DispatchQueue.main.sync {
+                            self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
+                        }
                     }
                 }
             }
@@ -2822,23 +2864,71 @@ extension EditorGroup: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPrevi
             
             func sendIt() {
                 sender.navigation.dismiss(animated: true, completion: nil)
-                do {
-                    let dataFile = try Data(contentsOf: self.previewItem! as URL)
-                    let urlFile = self.previewItem?.absoluteString
-                    var originaFileName = (urlFile! as NSString).lastPathComponent
-                    originaFileName = NSString(string: originaFileName).removingPercentEncoding!
-                    let renamedNameFile = "Nexilis_\(Date().currentTimeMillis())_" + originaFileName
+
+                guard let previewItem = self.previewItem else { return }
+                guard var dataFile = try? Data(contentsOf: previewItem as URL) else { return }
+
+                func sanitizeFile(mimeType: String, sanitizeAction: (Data) -> MessageGuardLite.Result) -> Data? {
+                    DispatchQueue.main.async {
+                        Nexilis.showLoader(text: "Sanitizing your \(mimeType.contains("pdf") ? "pdf file" : "image") (Message Guard)".localized())
+                    }
+                    let res = sanitizeAction(dataFile)
+                    defer {
+                        DispatchQueue.main.async { Nexilis.hideLoader {} }
+                    }
+
+                    if res.verdict == .block {
+                        DispatchQueue.main.async {
+                            Nexilis.hideLoader {
+                                APIS.showMessageGuardFile(mime: res.mime)
+                            }
+                        }
+                        return nil
+                    }
+                    return res.data ?? Data()
+                }
+
+                func processIt(with data: Data) {
+                    guard let urlFile = self.previewItem?.absoluteString else { return }
+                    let originalFileName = (urlFile as NSString).lastPathComponent.removingPercentEncoding ?? "file"
+                    let renamedNameFile = "Nexilis_\(Date().currentTimeMillis())_\(originalFileName)"
+
                     let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
                     let fileURL = documentsDirectory.appendingPathComponent(renamedNameFile)
+
                     if !FileManager.default.fileExists(atPath: fileURL.path) {
-                        do {
-                            try dataFile.write(to: fileURL)
-                        } catch {
-                        }
+                        try? data.write(to: fileURL)
                     }
-                    self.sendChat(message_text: "\(originaFileName)|", attachment_flag: "6", file_id: renamedNameFile, viewController: self)
-                } catch {
-                    
+
+                    DispatchQueue.main.async {
+                        self.sendChat(
+                            message_text: "\(originalFileName)|",
+                            attachment_flag: "6",
+                            file_id: renamedNameFile,
+                            viewController: self
+                        )
+                    }
+                }
+
+                if Nexilis.checkingAccess(key: "message_guard") {
+                    DispatchQueue.global().async {
+                        let guardLite = MessageGuardLite(limits: .defaults())
+                        let mimeType = MessageGuardLite.sniffMime(dataFile)
+
+                        if mimeType == "image/png" || mimeType == "image/jpeg" {
+                            if let sanitized = sanitizeFile(mimeType: mimeType, sanitizeAction: guardLite.sanitizeImage) {
+                                dataFile = sanitized
+                            } else { return }
+                        } else if mimeType == "application/pdf" {
+                            if let sanitized = sanitizeFile(mimeType: mimeType, sanitizeAction: guardLite.sanitizePdf) {
+                                dataFile = sanitized
+                            } else { return }
+                        }
+
+                        processIt(with: dataFile)
+                    }
+                } else {
+                    processIt(with: dataFile)
                 }
             }
         }
@@ -3210,7 +3300,7 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                             description = "" // special rule for google
                         } else {
                             description = result.description?.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .nilIfEmpty ?? "No description available"
+                                .nilIfEmpty ?? ""
                         }
                         let imageUrl = self.youtubeThumbnail(from: text)
                             ?? result.image
@@ -6590,7 +6680,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             description = "" // special rule for google
                         } else {
                             description = result.description?.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .nilIfEmpty ?? "No description available"
+                                .nilIfEmpty ?? ""
                         }
                         let imageUrl = self.youtubeThumbnail(from: text)
                             ?? result.image

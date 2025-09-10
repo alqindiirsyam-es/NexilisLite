@@ -1340,7 +1340,9 @@ extension UIImageView {
 
         // download
 
-        let url = URL(string: urlString)!
+        guard let url = URL(string: urlString) else {
+            return
+        }
         currentURL = url
         let urlConfig = URLSessionConfiguration.default
         let sessionDelegate = SelfSignedURLSessionDelegate()

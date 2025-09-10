@@ -885,7 +885,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                             description = "" // special rule for google
                         } else {
                             description = result.description?.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .nilIfEmpty ?? "No description available"
+                                .nilIfEmpty ?? ""
                         }
                         let imageUrl = self.youtubeThumbnail(from: text)
                             ?? result.image

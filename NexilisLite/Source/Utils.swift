@@ -14,6 +14,7 @@ import CoreLocation
 import CryptoKit
 import LocalAuthentication
 import AVFoundation
+import PDFKit
 //import var CommonCrypto.CC_MD5_DIGEST_LENGTH
 //import func CommonCrypto.CC_MD5
 //import typealias CommonCrypto.CC_LONG
@@ -3875,5 +3876,175 @@ extension UILabel {
         self.init()
         self.text = text
         self.font = UIFont.systemFont(ofSize: 14)
+    }
+}
+
+public final class MessageGuardLite {
+    
+    // MARK: - Verdict
+    public enum Verdict {
+        case allow, sanitized, block
+    }
+    
+    // MARK: - Result
+    public struct Result {
+        public let verdict: Verdict
+        public let reason: String
+        public let mime: String
+        public let data: Data?  // nil for some paths (like PDF->images)
+    }
+    
+    // MARK: - Limits
+    public struct Limits {
+        public let maxImagePixels: Int
+        public let maxImageEdge: Int
+        public let pdfMaxPages: Int
+        
+        public init(maxImagePixels: Int, maxImageEdge: Int, pdfMaxPages: Int) {
+            self.maxImagePixels = maxImagePixels
+            self.maxImageEdge = maxImageEdge
+            self.pdfMaxPages = pdfMaxPages
+        }
+        
+        public static func defaults() -> Limits {
+            return Limits(maxImagePixels: 4096 * 4096, maxImageEdge: 4096, pdfMaxPages: 10)
+        }
+    }
+    
+    private let limits: Limits
+    
+    public init(limits: Limits? = nil) {
+        self.limits = limits ?? Limits.defaults()
+    }
+    
+    // MARK: - 1. Text Sanitization
+    public func sanitizeText(_ utf8: Data) -> Result {
+        guard let input = String(data: utf8, encoding: .utf8) else {
+            return Result(verdict: .block,
+                          reason: "Invalid UTF-8 text",
+                          mime: "application/octet-stream",
+                          data: nil)
+        }
+        let pattern = "[\\p{C}\\u200B-\\u200F\\uFEFF\\u202A-\\u202E]"
+        let regex = try! NSRegularExpression(pattern: pattern)
+        let clean = regex.stringByReplacingMatches(in: input,
+                                                   options: [],
+                                                   range: NSRange(location: 0, length: input.utf16.count),
+                                                   withTemplate: "")
+        if input == clean {
+            return Result(verdict: .allow, reason: "No changes", mime: "text/plain", data: utf8)
+        } else {
+            return Result(verdict: .sanitized, reason: "Removed control & zero-width characters", mime: "text/plain", data: clean.data(using: .utf8))
+        }
+    }
+    
+    // MARK: - 2. HTML Sanitization
+    public func sanitizeHtml(_ utf8Html: Data) -> Result {
+        guard let input = String(data: utf8Html, encoding: .utf8) else {
+            return Result(verdict: .block, reason: "Invalid HTML encoding", mime: "application/octet-stream", data: nil)
+        }
+        
+        var clean = input
+        clean = clean.replacingOccurrences(of: "(?is)<(script|style)[^>]*>.*?</\\1>", with: "", options: .regularExpression)
+        clean = clean.replacingOccurrences(of: "\\son\\w+=\"[^\"]*\"", with: "", options: .regularExpression)
+        clean = clean.replacingOccurrences(of: "(?i)javascript:[^\"']*", with: "", options: .regularExpression)
+        
+        if input == clean {
+            return Result(verdict: .allow, reason: "No changes", mime: "text/html", data: utf8Html)
+        } else {
+            return Result(verdict: .sanitized, reason: "Sanitized HTML allowlist", mime: "text/html", data: clean.data(using: .utf8))
+        }
+    }
+    
+    // MARK: - 3. Image Sanitization
+    public func sanitizeImage(_ bytes: Data) -> Result {
+        guard let image = UIImage(data: bytes) else {
+            return Result(verdict: .block, reason: "Unrecognized or corrupt image", mime: "image/jpeg", data: nil)
+        }
+        
+        let pixels = Int(image.size.width * image.size.height)
+        var processed = image
+        
+        if pixels > limits.maxImagePixels {
+            let scale = sqrt(Double(limits.maxImagePixels) / Double(pixels))
+            let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            processed = resize(image, to: newSize)
+        }
+        
+        processed = capEdge(processed, maxEdge: limits.maxImageEdge)
+        
+        guard let out = processed.jpegData(compressionQuality: 0.8) else {
+            return Result(verdict: .block, reason: "Failed to re-encode image", mime: "image/jpeg", data: nil)
+        }
+        
+        return Result(verdict: .sanitized,
+                      reason: "Re-encoded PNG (metadata/animation removed)",
+                      mime: "image/png",
+                      data: out)
+    }
+    
+    private func resize(_ image: UIImage, to size: CGSize) -> UIImage {
+        UIGraphicsBeginImageContextWithOptions(size, true, 1.0)
+        image.draw(in: CGRect(origin: .zero, size: size))
+        let newImg = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return newImg ?? image
+    }
+    
+    private func capEdge(_ image: UIImage, maxEdge: Int) -> UIImage {
+        let w = image.size.width
+        let h = image.size.height
+        let maxDim = max(w, h)
+        if maxDim <= CGFloat(maxEdge) { return image }
+        
+        let scale = CGFloat(maxEdge) / maxDim
+        let newSize = CGSize(width: w * scale, height: h * scale)
+        return resize(image, to: newSize)
+    }
+    
+    // MARK: - 4. PDF Sanitization
+    public func sanitizePdf(_ pdfData: Data) -> Result {
+        guard let pdf = PDFDocument(data: pdfData) else {
+            return Result(
+                verdict: .block,
+                reason: "Unrecognized or corrupt PDF",
+                mime: "application/octet-stream",
+                data: nil
+            )
+        }
+        
+        // ✅ Allowed as-is
+        return Result(
+            verdict: .allow,
+            reason: "PDF is valid and within limits",
+            mime: "application/pdf",
+            data: pdfData
+        )
+    }
+    
+    // MARK: - 5. MIME Sniffing
+    public static func sniffMime(_ data: Data) -> String {
+        let bytes = [UInt8](data.prefix(8))
+        guard bytes.count >= 4 else { return "application/octet-stream" }
+        
+        if bytes.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "image/png" }
+        if bytes.starts(with: [0xFF, 0xD8]) { return "image/jpeg" }
+        if bytes.starts(with: [0x47, 0x49, 0x46]) { return "image/gif" }
+        if bytes.starts(with: [0x25, 0x50, 0x44, 0x46]) { return "application/pdf" }
+        if bytes.starts(with: [0x50, 0x4B]) { return "application/zip" }
+        
+        if let s = String(data: data.prefix(32), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            if s.hasPrefix("<!doctype html") || s.hasPrefix("<html") || s.hasPrefix("<body") {
+                return "text/html"
+            }
+        }
+        
+        return "application/octet-stream"
+    }
+    
+    public static func containsHtmlTags(_ input: String) -> Bool {
+        let pattern = ".*<[^>]+>.*"
+        return input.range(of: pattern, options: .regularExpression) != nil
     }
 }

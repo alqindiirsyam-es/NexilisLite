@@ -660,6 +660,19 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 } else {
                     compressedImage = (imageVideoData![.originalImage] as! UIImage).jpeg ?? Data()
                 }
+                if Nexilis.checkingAccess(key: "message_guard") {
+                    let guardLite = MessageGuardLite(limits: .defaults())
+                    let res = guardLite.sanitizeImage(compressedImage)
+                    if res.verdict != .block {
+                        compressedImage = res.data ?? Data()
+                    } else {
+                        DispatchQueue.main.async {
+                            Nexilis.hideLoader {}
+                        }
+                        APIS.showMessageGuardFile(mime: res.mime)
+                        return
+                    }
+                }
                 if let compressed = compressImageLikeWhatsApp(UIImage(data: compressedImage) ?? UIImage()) {
                     compressedImage = compressed
                 }

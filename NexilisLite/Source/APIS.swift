@@ -1426,7 +1426,7 @@ public class APIS: NSObject {
                 let filteredData = jsonArray.filter({
                     let package_id = ($0["package_id"] as! String)
                     if package_id.contains("_fb") {
-                        let listSplit = package_id.split(separator: "_", maxSplits: 2)
+                        let listSplit = package_id.split(separator: "_", maxSplits: 2, omittingEmptySubsequences: false).map { String($0) }
                         let numIdx = listSplit[listSplit.firstIndex(where: { $0.contains("fb") }) ?? 0]
                         let indexTap = Int(String(numIdx).substring(from: 2, to: numIdx.count)) ?? 0
                         return indexTap == idx
@@ -1436,7 +1436,7 @@ public class APIS: NSObject {
                 if filteredData.count != 0 {
                     let data = filteredData[0] as? [String: Any]
                     let package_id = data?["package_id"] as! String
-                    let listSplit = package_id.split(separator: "_", maxSplits: 2)
+                    let listSplit = package_id.split(separator: "_", maxSplits: 2, omittingEmptySubsequences: false).map { String($0) }
                     return String(listSplit[2])
                 }
             }
@@ -2308,6 +2308,22 @@ public class APIS: NSObject {
         }
     }
     
+    static func showMessageGuardFile(mime: String) {
+        alertControllerExpired = LibAlertController(
+            title: "⚠️ Message Guard Announcement".localized(),
+            message: mime == "image/jpeg" ? "Your image have been blocked by Message Guard. Please attach valid image.".localized() : "Your pdf file have been blocked by Message Guard. Please attach valid file.".localized() ,
+            preferredStyle: .alert
+        )
+        
+        alertControllerExpired.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: nil))
+        
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(alertControllerExpired, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(alertControllerExpired, animated: true, completion: nil)
+        }
+    }
+    
     private static func showEnableNotificationsAlert() {
         guard !isAlertPresented else { return }
         isAlertPresented = true
@@ -2458,8 +2474,9 @@ public class APIS: NSObject {
                                                 DispatchQueue.main.async {
                                                     Nexilis.hideLoader {
                                                         if result == 1 {
-                                                            copyData()
-                                                            sendIt()
+                                                            if copyData() {
+                                                                sendIt()
+                                                            }
                                                         } else {
                                                             APIS.showWarningFile(type: result)
                                                             resetPrefs()
@@ -2467,26 +2484,70 @@ public class APIS: NSObject {
                                                     }
                                                 }
                                             } else {
-                                                copyData()
-                                                sendIt()
+                                                if copyData() {
+                                                    sendIt()
+                                                }
                                             }
-                                            func copyData() {
-                                                do {
-                                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                                    if FileManager.default.fileExists(atPath: sharedImageURL.path) {
-                                                        let file = documentDir.appendingPathComponent(imageId)
-                                                        if !FileManager().fileExists(atPath: file.path) {
-                                                            try? FileManager.default.copyItem(at: sharedImageURL, to: file)
-                                                        }
+                                            func copyData() -> Bool {
+                                                var dataSanitized: Data!
+                                                func sanitizeFile(sanitizeAction: (Data) -> MessageGuardLite.Result) -> Data? {
+                                                    DispatchQueue.main.async {
+                                                        Nexilis.showLoader(text: "Sanitizing your image (Message Guard)".localized())
                                                     }
-                                                    if FileManager.default.fileExists(atPath: sharedThumbURL.path) {
-                                                        let file = documentDir.appendingPathComponent(thumb)
-                                                        if !FileManager().fileExists(atPath: file.path) {
-                                                            try? FileManager.default.copyItem(at: sharedThumbURL, to: file)
-                                                        }
+                                                    let res = sanitizeAction(try! Data(contentsOf: sharedImageURL))
+                                                    defer {
+                                                        DispatchQueue.main.async { Nexilis.hideLoader {} }
                                                     }
-                                                } catch {
-                                                    
+
+                                                    if res.verdict == .block {
+                                                        DispatchQueue.main.async {
+                                                            Nexilis.hideLoader {
+                                                                APIS.showMessageGuardFile(mime: res.mime)
+                                                            }
+                                                        }
+                                                        return nil
+                                                    }
+                                                    return res.data ?? Data()
+                                                }
+                                                func processIt() {
+                                                    do {
+                                                        let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                                        if FileManager.default.fileExists(atPath: sharedImageURL.path) {
+                                                            let file = documentDir.appendingPathComponent(imageId)
+                                                            if !FileManager().fileExists(atPath: file.path) {
+                                                                if dataSanitized != nil {
+                                                                    let file = documentDir.appendingPathComponent(imageId)
+                                                                    try? dataSanitized.write(to: file)
+                                                                } else {
+                                                                    try? FileManager.default.copyItem(at: sharedImageURL, to: file)
+                                                                }
+                                                            }
+                                                        }
+                                                        if FileManager.default.fileExists(atPath: sharedThumbURL.path) {
+                                                            let file = documentDir.appendingPathComponent(thumb)
+                                                            if !FileManager().fileExists(atPath: file.path) {
+                                                                try? FileManager.default.copyItem(at: sharedThumbURL, to: file)
+                                                            }
+                                                        }
+                                                    } catch {
+                                                        
+                                                    }
+                                                }
+                                                if Nexilis.checkingAccess(key: "message_guard") {
+                                                    DispatchQueue.global().async {
+                                                        let guardLite = MessageGuardLite(limits: .defaults())
+
+                                                        if let sanitized = sanitizeFile(sanitizeAction: guardLite.sanitizeImage) {
+                                                            dataSanitized = sanitized
+                                                        } else { return }
+
+                                                        processIt()
+                                                        sendIt()
+                                                    }
+                                                    return false
+                                                } else {
+                                                    processIt()
+                                                    return true
                                                 }
                                             }
                                         }
@@ -2548,8 +2609,9 @@ public class APIS: NSObject {
                                                 DispatchQueue.main.async {
                                                     Nexilis.hideLoader {
                                                         if result == 1 {
-                                                            copyData()
-                                                            sendIt()
+                                                            if copyData() {
+                                                                sendIt()
+                                                            }
                                                         } else {
                                                             APIS.showWarningFile(type: result)
                                                             resetPrefs()
@@ -2557,21 +2619,70 @@ public class APIS: NSObject {
                                                     }
                                                 }
                                             } else {
-                                                copyData()
-                                                sendIt()
+                                                if copyData() {
+                                                    sendIt()
+                                                }
                                             }
-                                            func copyData() {
-                                                do {
-                                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                                    if FileManager.default.fileExists(atPath: sharedFileURL.path) {
-                                                        let file = documentDir.appendingPathComponent(renamedFileId)
-                                                        if !FileManager().fileExists(atPath: file.path) {
-                                                            try? FileManager.default.copyItem(at: sharedFileURL, to: file)
-                                                        }
+                                            func copyData() -> Bool {
+                                                var dataSanitized: Data!
+                                                func sanitizeFile(sanitizeAction: (Data) -> MessageGuardLite.Result) -> Data? {
+                                                    DispatchQueue.main.async {
+                                                        Nexilis.showLoader(text: "Sanitizing your pdf file (Message Guard)".localized())
                                                     }
-                                                    data = "\(fileId)|\(data)"
-                                                } catch {
-                                                    
+                                                    let res = sanitizeAction(try! Data(contentsOf: sharedFileURL))
+                                                    defer {
+                                                        DispatchQueue.main.async { Nexilis.hideLoader {} }
+                                                    }
+
+                                                    if res.verdict == .block {
+                                                        DispatchQueue.main.async {
+                                                            Nexilis.hideLoader {
+                                                                APIS.showMessageGuardFile(mime: res.mime)
+                                                            }
+                                                        }
+                                                        return nil
+                                                    }
+                                                    return res.data ?? Data()
+                                                }
+                                                
+                                                func processIt() {
+                                                    do {
+                                                        let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                                        if FileManager.default.fileExists(atPath: sharedFileURL.path) {
+                                                            let file = documentDir.appendingPathComponent(renamedFileId)
+                                                            if !FileManager().fileExists(atPath: file.path) {
+                                                                if dataSanitized != nil {
+                                                                    let file = documentDir.appendingPathComponent(renamedFileId)
+                                                                    try? dataSanitized.write(to: file)
+                                                                } else {
+                                                                    try? FileManager.default.copyItem(at: sharedFileURL, to: file)
+                                                                }
+                                                            }
+                                                        }
+                                                        data = "\(fileId)|\(data)"
+                                                    } catch {
+                                                        
+                                                    }
+                                                }
+                                                
+                                                if Nexilis.checkingAccess(key: "message_guard") {
+                                                    DispatchQueue.global().async {
+                                                        let guardLite = MessageGuardLite(limits: .defaults())
+                                                        let mimeType = MessageGuardLite.sniffMime(try! Data(contentsOf: sharedFileURL))
+
+                                                        if mimeType == "application/pdf" {
+                                                            if let sanitized = sanitizeFile(sanitizeAction: guardLite.sanitizePdf) {
+                                                                dataSanitized = sanitized
+                                                            } else { return }
+                                                        }
+
+                                                        processIt()
+                                                        sendIt()
+                                                    }
+                                                    return false
+                                                } else {
+                                                    processIt()
+                                                    return true
                                                 }
                                             }
                                         }
