@@ -2784,7 +2784,7 @@ public class ValidationTransactionLimit: UIViewController, UITextFieldDelegate {
         super.viewDidLoad()
         
         navigationController?.navigationBar.tintColor = .white
-        navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
+        navigationController?.navigationBar.topItem?.backButtonTitle = ""
         
         let title = UILabel()
         title.text = "Set a transation validation amount".localized()
@@ -2817,7 +2817,7 @@ public class ValidationTransactionLimit: UIViewController, UITextFieldDelegate {
     }
     
     public override func viewDidAppear(_ animated: Bool) {
-        navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
+        navigationController?.navigationBar.topItem?.backButtonTitle = ""
         
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Submit".localized(), style: .plain, target: self, action: #selector(submit))
         

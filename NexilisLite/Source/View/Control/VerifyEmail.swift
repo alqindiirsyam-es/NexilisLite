@@ -22,6 +22,7 @@ class VerifyEmail: UIViewController, UITextFieldDelegate, OTPTextFieldDelegate {
     var isDismiss: ((String) -> ())?
     var showWrongOTP = ""
     var isMSISDN = false
+    var method = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -47,7 +48,11 @@ class VerifyEmail: UIViewController, UITextFieldDelegate, OTPTextFieldDelegate {
         descVerify.textAlignment = .center
         descVerify.text = "Your verification code has been sent to".localized() + "\n" + email + "\n" + "Please check your email and enter the code sent".localized()
         if isMSISDN {
-            descVerify.text = "Your verification code has been sent to".localized() + "\n" + msisdn + "\n" + "Please check in your message app and enter the code sent".localized()
+            if method == 0 {
+                descVerify.text = "Your verification code has been sent to".localized() + "\n" + msisdn + "\n" + "Please check in your message app and enter the code sent".localized()
+            } else {
+                descVerify.text = "Your verification code has been sent to".localized() + "\n" + msisdn + "\n" + "Please check in your Whatsapp and enter the code sent".localized()
+            }
         }
         view.addSubview(descVerify)
         descVerify.anchor(top: titleVerify.bottomAnchor, paddingTop: 8, centerX: view.centerXAnchor)

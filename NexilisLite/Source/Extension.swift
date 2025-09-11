@@ -1900,7 +1900,7 @@ extension UIApplication {
         if let button = sender as? UIButton {
             let title = button.titleLabel?.text ?? "Unnamed Button"
             DataCaptured.action = "CLICKED"
-            DataCaptured.textAction = "\(title)"
+            DataCaptured.textAction = title
             DispatchQueue.global().async {
                 DataCaptured.sendLogMonitorAction()
             }

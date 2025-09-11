@@ -29,7 +29,7 @@ public class SetInternalCSAccount: UITableViewController {
     public override func viewDidLoad() {
         super.viewDidLoad()
         
-        navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
+        navigationController?.navigationBar.topItem?.backButtonTitle = ""
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cellCSInternal")
         
         searchController = UISearchController(searchResultsController: nil)

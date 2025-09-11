@@ -91,7 +91,7 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
     var loadingView = UIViewController()
     
     override func viewWillAppear(_ animated: Bool) {
-        let backButton = UIBarButtonItem(title: "Back".localized(), style: .plain, target: nil, action: nil)
+        let backButton = UIBarButtonItem(title: "".localized(), style: .plain, target: nil, action: nil)
         let attributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
         
         backButton.setTitleTextAttributes(attributes, for: .normal)

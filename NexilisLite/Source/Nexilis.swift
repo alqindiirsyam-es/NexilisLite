@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.60"
+    public static var cpaasVersion = "5.0.61"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -173,7 +173,7 @@ public class Nexilis: NSObject {
         imageCache.countLimit = 100
         imageCache.totalCostLimit = 1024 * 1024 * 200
         
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .userInitiated).async {
             do {
                 func forceShowFB() {
                     DispatchQueue.main.async {

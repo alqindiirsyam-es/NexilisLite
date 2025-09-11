@@ -180,7 +180,9 @@ class ContactChatViewController: UITableViewController {
 //        searchController.searchBar.updateHeight(height: 36, radius: 18)
         searchController.searchBar.setImage(UIImage(), for: .search, state: .normal)
         searchController.searchBar.setPositionAdjustment(UIOffset(horizontal: 10, vertical: 0), for: .search)
-        searchController.searchBar.setCustomBackgroundImage(image: UIImage(named: self.traitCollection.userInterfaceStyle == .dark ? "nx_search_bar_dark" : "nx_search_bar", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        if #unavailable(iOS 26.0) {
+            searchController.searchBar.setCustomBackgroundImage(image: UIImage(named: self.traitCollection.userInterfaceStyle == .dark ? "nx_search_bar_dark" : "nx_search_bar", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        }
         searchController.searchBar.tintColor = .mainColor
         searchController.searchBar.searchTextField.attributedPlaceholder = NSAttributedString(string: "Search".localized(), attributes: [NSAttributedString.Key.foregroundColor: UIColor.gray, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)])
         
@@ -1963,8 +1965,9 @@ extension ContactChatViewController: UISearchControllerDelegate, UISearchBarDele
     
     func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
         searchBar.showsCancelButton = true
-        let cBtn = searchBar.value(forKey: "cancelButton") as! UIButton
-        cBtn.setTitle("Cancel".localized(), for: .normal)
+        if let cBtn = searchBar.value(forKey: "cancelButton") as? UIButton {
+            cBtn.setTitle("Cancel".localized(), for: .normal)
+        }
     }
     
     func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {

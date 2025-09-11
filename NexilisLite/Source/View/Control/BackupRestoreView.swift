@@ -43,7 +43,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
     public override func viewDidLoad() {
         super.viewDidLoad()
         
-        navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
+        navigationController?.navigationBar.topItem?.backButtonTitle = ""
         
         tableView = UITableView()
         tableView.backgroundColor = .clear
@@ -957,7 +957,15 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                     Network().uploadHTTP(fileUrl: zipFiles, completion: { result,progress in
                         if result {
                             DispatchQueue.main.async { [self] in
-                                labelPreparing.text = "Uploading...".localized() + " \(progress)%"
+                                let formatter = NumberFormatter()
+                                formatter.minimumFractionDigits = 1
+                                formatter.maximumFractionDigits = 1
+                                
+                                var prog = ""
+                                if let formatted = formatter.string(from: NSNumber(value: progress)) {
+                                    prog = formatted
+                                }
+                                labelPreparing.text = "Uploading...".localized() + " \(prog.isEmpty ? "\(progress)" : prog)%"
                                 if progress == 100 {
                                     do {
                                         let path = zipFiles.path

@@ -30,7 +30,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         title = "Message Info".localized()
         view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
         navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
-        navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
+        navigationController?.navigationBar.topItem?.backButtonTitle = ""
         
         tableStatus = UITableView(frame: .zero, style: .grouped)
         tableStatus.register(UITableViewCell.self, forCellReuseIdentifier: "cellStatus")

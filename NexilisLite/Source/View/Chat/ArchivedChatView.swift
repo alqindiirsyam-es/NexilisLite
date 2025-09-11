@@ -437,7 +437,7 @@ public class ArchivedChatView: UIViewController, UITableViewDataSource, UITableV
     public func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let data = archivedChats[indexPath.row]
         if !data.isParent {
-            let archiveAction = UIContextualAction(style: .normal, title: nil) { (_, _, completionHandler) in
+            let archiveAction = UIContextualAction(style: .normal, title: "Unarchive".localized()) { (_, _, completionHandler) in
                 DispatchQueue.global().async {
                     Database.shared.database?.inTransaction({ (fmdb, rollback) in
                         do {
@@ -461,7 +461,7 @@ public class ArchivedChatView: UIViewController, UITableViewDataSource, UITableV
                 completionHandler(true)
             }
             archiveAction.backgroundColor = .mainColor
-            let archiveIcon = UIImage(systemName: "arrow.up.bin.fill")!.createCustomIconWithText(text: "Unarchive".localized())
+            let archiveIcon = UIImage(systemName: "arrow.up.bin.fill")!
             archiveAction.image = archiveIcon
 
             let configuration = UISwipeActionsConfiguration(actions: [archiveAction])

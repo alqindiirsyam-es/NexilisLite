@@ -36,8 +36,9 @@ class BroadcastMembersTableViewController: UITableViewController, UISearchContro
     
     func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
         searchBar.showsCancelButton = true
-        let cBtn = searchBar.value(forKey: "cancelButton") as! UIButton
-        cBtn.setTitle("Cancel".localized(), for: .normal)
+        if let cBtn = searchBar.value(forKey: "cancelButton") as? UIButton {
+            cBtn.setTitle("Cancel".localized(), for: .normal)
+        }
     }
     
     func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
@@ -84,7 +85,9 @@ class BroadcastMembersTableViewController: UITableViewController, UISearchContro
 //        searchController.searchBar.setMagnifyingGlassColorTo(color: .white)
         searchController.searchBar.setImage(UIImage(), for: .search, state: .normal)
         searchController.searchBar.setPositionAdjustment(UIOffset(horizontal: 10, vertical: 0), for: .search)
-        searchController.searchBar.setCustomBackgroundImage(image: UIImage(named: self.traitCollection.userInterfaceStyle == .dark ? "nx_search_bar_dark" : "nx_search_bar", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        if #unavailable(iOS 26.0) {
+            searchController.searchBar.setCustomBackgroundImage(image: UIImage(named: self.traitCollection.userInterfaceStyle == .dark ? "nx_search_bar_dark" : "nx_search_bar", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        }
         searchController.searchBar.tintColor = .mainColor
         UIBarButtonItem.appearance(whenContainedInInstancesOf: [UISearchBar.self]).setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white], for: .normal)
         

@@ -144,7 +144,6 @@ public class ChangeDeviceViewController: UIViewController {
         Nexilis.showLoader()
         DispatchQueue.global().async {
             if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getCheckMSISDN(number: number)) {
-                print("KUKU: \(response.toLogString())")
                 if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") != "00" {
                     DispatchQueue.main.async {
                         self.showFailedSignUpIn(title: "Unregistered phone number".localized())
@@ -152,7 +151,7 @@ public class ChangeDeviceViewController: UIViewController {
                 } else {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader(completion: {
-                            self.sendOTP(to: number)
+                            self.showOTPSelectionAlert(self, number)
                         })
                     }
                 }
@@ -162,6 +161,43 @@ public class ChangeDeviceViewController: UIViewController {
                 }
             }
         }
+    }
+    
+    func showOTPSelectionAlert(_ viewController: UIViewController, _ number: String) {
+        let alert = UIAlertController(title: "Choose OTP Method".localized(),
+                                      message: "Select how you want to receive your OTP".localized(),
+                                      preferredStyle: .actionSheet) // use .alert if you want centered popup
+        
+        alert.addAction(UIAlertAction(title: "📩 SMS", style: .default, handler: { _ in
+            self.sendOTP(to: number)
+        }))
+        
+        alert.addAction(UIAlertAction(title: "💬 WhatsApp", style: .default, handler: { _ in
+            Nexilis.showLoader()
+            DispatchQueue.global().async {
+                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendOTPLogin(p_number: number), timeout: 30 * 1000) {
+                    if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") != "00" {
+                        DispatchQueue.main.async {
+                            self.showFailedSignUpIn(title: "Unregistered phone number".localized())
+                        }
+                    } else {
+                        DispatchQueue.main.async {
+                            Nexilis.hideLoader(completion: {
+                                self.showPageOTP(phone: number, method: 1)
+                            })
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.showFailedSignUpIn(title: "Unable to access servers. Try again later".localized())
+                    }
+                }
+            }
+        }))
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+        
+        viewController.present(alert, animated: true)
     }
     
     func sendOTP(to phoneNumber: String) {
@@ -176,20 +212,27 @@ public class ChangeDeviceViewController: UIViewController {
         }
     }
     
-    func verifyOTP(_ code: String, number: String, privateKey: SecKey) {
+    func verifyOTP(_ code: String, number: String, privateKey: SecKey, method: Int) {
         let verificationID = Utils.getUserMSISDN()
         let credential = PhoneAuthProvider.provider().credential(
             withVerificationID: verificationID,
             verificationCode: code
         )
 
-        Auth.auth().signIn(with: credential) { authResult, error in
-            if error != nil {
-                self.showFailedSignUpIn(title: "Invalid OTP".localized())
-                self.showPageOTP(phone: number)
-                return
+        if method == 0 {
+            Auth.auth().signIn(with: credential) { authResult, error in
+                if error != nil {
+                    self.showFailedSignUpIn(title: "Invalid OTP".localized())
+                    self.showPageOTP(phone: number)
+                    return
+                }
+                sendSVL()
             }
-
+        } else {
+            sendSVL()
+        }
+        
+        func sendSVL() {
             DispatchQueue.global().async {
                 if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
                     if response.isOk() {
@@ -211,9 +254,13 @@ public class ChangeDeviceViewController: UIViewController {
                         if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
                             pk = publicKey
                         }
-                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: "", p_vercode: "", number: number, deviceFingerprint: df, publicKey: pk, signature: sign), timeout: 30 * 1000) {
+                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: "", p_vercode: method == 0 ? "" : code, number: number, deviceFingerprint: df, publicKey: pk, signature: sign), timeout: 30 * 1000) {
                             if !response.isOk() {
-                                DispatchQueue.main.async {
+                                if method == 1 {
+                                    DispatchQueue.main.async {
+                                        self.showPageOTP(phone: number, errCode: response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99"), method: method)
+                                    }
+                                } else {
                                     DispatchQueue.main.async {
                                         self.showFailedSignUpIn(title: "Failed".localized())
                                     }
@@ -240,12 +287,13 @@ public class ChangeDeviceViewController: UIViewController {
         }
     }
     
-    func showPageOTP(email: String = "", phone: String = "", errCode:String = "") {
+    func showPageOTP(email: String = "", phone: String = "", errCode:String = "", method: Int = 0) {
         let showOTPVC = VerifyEmail()
         showOTPVC.email = email
         showOTPVC.msisdn = phone
         showOTPVC.isMSISDN = !phone.isEmpty
         showOTPVC.showWrongOTP = errCode
+        showOTPVC.method = method
         showOTPVC.isDismiss = { code in
             if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
                 self.showFailedSignUpIn(title: "Check your connection".localized(), withLoader: false)
@@ -271,7 +319,7 @@ public class ChangeDeviceViewController: UIViewController {
             }
             Nexilis.showLoader()
             if !phone.isEmpty {
-                self.verifyOTP(code, number: phone, privateKey: privateKey)
+                self.verifyOTP(code, number: phone, privateKey: privateKey, method: method)
                 return
             }
             DispatchQueue.global().async {

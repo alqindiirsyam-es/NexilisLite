@@ -1425,13 +1425,18 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
-    public static func getSendOTPLogin(p_email: String) -> TMessage {
+    public static func getSendOTPLogin(p_email: String = "", p_number: String = "") -> TMessage {
         let me = User.getMyPin()!
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.SEND_OTP_LOGIN
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
         tmessage.mPIN = me
-        tmessage.mBodies[CoreMessage_TMessageKey.EMAIL] = p_email
+        if !p_email.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.EMAIL] = p_email
+        }
+        if !p_number.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.PHONE_NUMBER] = p_number
+        }
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""

@@ -245,7 +245,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
         labelAcceptCall.text = "Accept Call".localized()
         buttonHistoryCC.setAttributedTitle(NSAttributedString(string: "Call Center History".localized(), attributes: [NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16), NSAttributedString.Key.foregroundColor : self.traitCollection.userInterfaceStyle == .dark ? UIColor.blackDarkMode : UIColor.white]), for: .normal)
 //        buttonQRCode.setAttributedTitle(NSAttributedString(string: "Show QR Code".localized(), attributes: [NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16), NSAttributedString.Key.foregroundColor : self.traitCollection.userInterfaceStyle == .dark ? UIColor.blackDarkMode : UIColor.white]), for: .normal)
-        navigationController?.navigationBar.topItem?.backButtonTitle = "Back".localized()
+        navigationController?.navigationBar.topItem?.backButtonTitle = ""
         
         switchPrivateAccount.onTintColor = .mainColor
         switchAcceptCall.onTintColor = .mainColor
