@@ -226,6 +226,8 @@
 		CD63125F2DA925960088964E /* CallModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD63125C2DA925960088964E /* CallModel.swift */; };
 		CD637E3D2D9534ED004780FB /* NexilisLite.podspec in Resources */ = {isa = PBXBuildFile; fileRef = CD46A0BE2A0CE4FD009E4C87 /* NexilisLite.podspec */; };
 		CD7054EA2AD39DE2003741BF /* ChatGPTBotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD7054E92AD39DE2003741BF /* ChatGPTBotView.swift */; };
+		CD71B2252E72A3E100D693EA /* Form.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD71B2232E72A3E100D693EA /* Form.swift */; };
+		CD71B2262E72A3E100D693EA /* FormItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD71B2242E72A3E100D693EA /* FormItem.swift */; };
 		CD9551592A664BDA00AF6476 /* Poppins-LightItalic.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD9551402A664BD400AF6476 /* Poppins-LightItalic.otf */; };
 		CD95515A2A664BDA00AF6476 /* Poppins-MediumItalic.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD95513F2A664BD400AF6476 /* Poppins-MediumItalic.otf */; };
 		CD95515B2A664BDA00AF6476 /* Poppins-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = CD9551412A664BD400AF6476 /* Poppins-Bold.otf */; };
@@ -518,6 +520,8 @@
 		CD63125C2DA925960088964E /* CallModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallModel.swift; sourceTree = "<group>"; };
 		CD63125D2DA925960088964E /* Group_NM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Group_NM.swift; sourceTree = "<group>"; };
 		CD7054E92AD39DE2003741BF /* ChatGPTBotView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ChatGPTBotView.swift; sourceTree = "<group>"; };
+		CD71B2232E72A3E100D693EA /* Form.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Form.swift; sourceTree = "<group>"; };
+		CD71B2242E72A3E100D693EA /* FormItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormItem.swift; sourceTree = "<group>"; };
 		CD9551332A664BD400AF6476 /* Poppins-SemiBoldItalic.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-SemiBoldItalic.otf"; sourceTree = "<group>"; };
 		CD9551342A664BD400AF6476 /* Poppins-ExtraBoldItalic.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-ExtraBoldItalic.otf"; sourceTree = "<group>"; };
 		CD9551352A664BD400AF6476 /* SIL Open Font License.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "SIL Open Font License.txt"; sourceTree = "<group>"; };
@@ -693,6 +697,8 @@
 		CD1E715E2A0BA86100BF871F /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				CD71B2232E72A3E100D693EA /* Form.swift */,
+				CD71B2242E72A3E100D693EA /* FormItem.swift */,
 				CD21CA5A2E0AA0C600DA6B77 /* CommunityModel.swift */,
 				CD63125C2DA925960088964E /* CallModel.swift */,
 				CD1E71622A0BA86100BF871F /* CategoryCC.swift */,
@@ -1501,6 +1507,8 @@
 				CD1E72162A0BA86100BF871F /* User.swift in Sources */,
 				CD1E720A2A0BA86100BF871F /* APIS.swift in Sources */,
 				CD1E72062A0BA86100BF871F /* OutgoingThread.swift in Sources */,
+				CD71B2252E72A3E100D693EA /* Form.swift in Sources */,
+				CD71B2262E72A3E100D693EA /* FormItem.swift in Sources */,
 				CD1E722F2A0BA86100BF871F /* ProfileView.swift in Sources */,
 				CD1E720D2A0BA86100BF871F /* InquiryThread.swift in Sources */,
 			);

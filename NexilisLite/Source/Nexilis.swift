@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.61"
+    public static var cpaasVersion = "5.0.63"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -477,7 +477,7 @@ public class Nexilis: NSObject {
     }
     
     private static func getPullPrefs() {
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .userInitiated).async {
             let urlString = Utils.getBEId().isEmpty ? Utils.getDomainOpr() + "nexilis/logics/get_baseurl_new?key=\(Nexilis.sAPIKey)" : Utils.getDomainOpr() + "nexilis/logics/get_prefs?be=\(Utils.getBEId())&appId=\(APIS.getAppNm().toStupidString())"
             Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
                 if let data = data, let responseString = String(data: data, encoding: .utf8) {
@@ -580,7 +580,7 @@ public class Nexilis: NSObject {
             return
         }
         isGettingFeatureAccess = true
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .userInitiated).async {
             if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getFeatureAccessAll(), timeout: 10000), response.isOk() {
                 let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
                 do {

@@ -3781,101 +3781,188 @@ class HtmlUtils {
     }
 }
 
-class FormView: UIView {
+enum FormFieldType: String {
+    case dateChooser
+    case dateTimeChooser
+    case timeChooser
+    case itemChooser
+    case inputRadio
+    case inputRadioHorizontal
+    case inputNumber
+    case inputText
+    case inputTextMultiline
+    case inputCheck
+    case inputFile
+    case inputPhoto
+    case inputProject
+    case header
+    case transId
+    case transStatus
+    case transAssigned
+    case signature
+    case image
+    case video
+}
+
+// Factory untuk membuat view sesuai tipe
+class FormViewFactory {
     
-    private var scrollView: UIScrollView!
-    private var stackView: UIStackView!
-    
-    private var resetButton: UIButton!
-    private var submitButton: UIButton!
-    private var rejectButton: UIButton!
-    private var approveButton: UIButton!
-    
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        setupView()
+    static func createView(
+        type: FormFieldType,
+        key: String,
+        keyLabel: String,
+        valueLabel: String,
+        background: UIColor? = nil,
+        color: UIColor? = nil
+    ) -> UIView {
+        
+        var result: UIView
+        
+        switch type {
+        case .dateChooser:
+            result = createDateChooser(keyLabel: keyLabel, valueLabel: valueLabel)
+        case .dateTimeChooser:
+            result = createDateTimeChooser()
+        case .timeChooser:
+            result = createTimeChooser()
+        case .itemChooser:
+            result = createItemChooser(keyLabel: keyLabel, valueLabel: valueLabel)
+        case .inputRadio:
+            result = createRadio(keyLabel: keyLabel, valueLabel: valueLabel, color: color)
+        case .inputRadioHorizontal:
+            result = createRadioHorizontal(keyLabel: keyLabel, valueLabel: valueLabel, color: color)
+        case .inputNumber:
+            result = createNumberField(keyLabel: keyLabel, valueLabel: valueLabel)
+        case .inputText:
+            result = createTextField(keyLabel: keyLabel, valueLabel: valueLabel)
+        case .inputTextMultiline:
+            result = createMultilineTextField(keyLabel: keyLabel, valueLabel: valueLabel)
+        case .inputCheck:
+            result = createCheckbox(keyLabel: keyLabel, valueLabel: valueLabel)
+        case .inputFile:
+            result = createButton(title: "Upload File")
+        case .inputPhoto:
+            result = createButton(title: "Take Photo")
+        case .inputProject:
+            result = createLabel("\(keyLabel): [Project Picker]")
+        case .header:
+            result = createHeader(title: keyLabel)
+        case .transId:
+            result = createLabel("Transaction ID: \(valueLabel)")
+        case .transStatus:
+            result = createLabel("Status: \(keyLabel)")
+        case .transAssigned:
+            result = createLabel("Assigned to: \(valueLabel)")
+        case .signature:
+            result = createButton(title: "Add Signature")
+        case .image:
+            result = createButton(title: "Pick Image")
+        case .video:
+            result = createButton(title: "Pick Video")
+        }
+        
+        // optional background
+        if let bg = background {
+            result.backgroundColor = bg
+        }
+        
+        return result
     }
     
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setupView()
+    // MARK: - Builder sederhana
+    
+    private static func createLabel(_ text: String) -> UIView {
+        let label = UILabel()
+        label.text = text
+        return label
     }
     
-    private func setupView() {
-        backgroundColor = .white
-        
-        // ScrollView + Stack
-        scrollView = UIScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(scrollView)
-        
-        stackView = UIStackView()
-        stackView.axis = .vertical
-        stackView.spacing = 10
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(stackView)
-        
-        // Buttons
-        resetButton = createButton(title: "Reset".localized(), color: .gray, action: #selector(resetTapped))
-        submitButton = createButton(title: "Submit".localized(), color: .systemBlue, action: #selector(submitTapped))
-        rejectButton = createButton(title: "Reject".localized(), color: .gray, action: #selector(rejectTapped))
-        approveButton = createButton(title: "Approve".localized(), color: .systemBlue, action: #selector(approveTapped))
-        
-        let buttonStack = UIStackView(arrangedSubviews: [resetButton, rejectButton, submitButton, approveButton])
-        buttonStack.axis = .horizontal
-        buttonStack.spacing = 8
-        buttonStack.distribution = .fillEqually
-        buttonStack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(buttonStack)
-        
-        // Layout
-        NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.leftAnchor.constraint(equalTo: leftAnchor),
-            scrollView.rightAnchor.constraint(equalTo: rightAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: buttonStack.topAnchor, constant: -10),
-            
-            stackView.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            stackView.leftAnchor.constraint(equalTo: scrollView.leftAnchor),
-            stackView.rightAnchor.constraint(equalTo: scrollView.rightAnchor),
-            stackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
-            stackView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
-            
-            buttonStack.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            buttonStack.leftAnchor.constraint(equalTo: leftAnchor, constant: 8),
-            buttonStack.rightAnchor.constraint(equalTo: rightAnchor, constant: -8),
-            buttonStack.heightAnchor.constraint(equalToConstant: 50)
-        ])
+    private static func createHeader(title: String) -> UIView {
+        let label = UILabel()
+        label.text = title
+        label.font = UIFont.boldSystemFont(ofSize: 18)
+        return label
     }
     
-    private func createButton(title: String, color: UIColor, action: Selector) -> UIButton {
+    private static func createButton(title: String) -> UIView {
         let button = UIButton(type: .system)
         button.setTitle(title, for: .normal)
-        button.backgroundColor = color
-        button.setTitleColor(.white, for: .normal)
-        button.layer.cornerRadius = 8
-        button.addTarget(self, action: action, for: .touchUpInside)
         return button
     }
     
-    // MARK: - Actions
-    @objc private func resetTapped() { print("Reset tapped") }
-    @objc private func submitTapped() { print("Submit tapped") }
-    @objc private func rejectTapped() { print("Reject tapped") }
-    @objc private func approveTapped() { print("Approve tapped") }
-    
-    // MARK: - Add Dynamic Fields
-    func addField(_ view: UIView) {
-        stackView.addArrangedSubview(view)
+    private static func createTextField(keyLabel: String, valueLabel: String) -> UIView {
+        let textField = UITextField()
+        textField.placeholder = keyLabel
+        textField.text = valueLabel
+        textField.borderStyle = .roundedRect
+        return textField
     }
-}
-
-// MARK: - UILabel convenience init
-extension UILabel {
-    convenience init(text: String) {
-        self.init()
-        self.text = text
-        self.font = UIFont.systemFont(ofSize: 14)
+    
+    private static func createMultilineTextField(keyLabel: String, valueLabel: String) -> UIView {
+        let textView = UITextView()
+        textView.text = valueLabel.isEmpty ? keyLabel : valueLabel
+        textView.layer.borderWidth = 1
+        textView.layer.borderColor = UIColor.gray.cgColor
+        textView.layer.cornerRadius = 6
+        return textView
+    }
+    
+    private static func createNumberField(keyLabel: String, valueLabel: String) -> UIView {
+        let textField = createTextField(keyLabel: keyLabel, valueLabel: valueLabel) as! UITextField
+        textField.keyboardType = .numberPad
+        return textField
+    }
+    
+    private static func createDateChooser(keyLabel: String, valueLabel: String) -> UIView {
+        let picker = UIDatePicker()
+        picker.datePickerMode = .date
+        return picker
+    }
+    
+    private static func createDateTimeChooser() -> UIView {
+        let picker = UIDatePicker()
+        picker.datePickerMode = .dateAndTime
+        return picker
+    }
+    
+    private static func createTimeChooser() -> UIView {
+        let picker = UIDatePicker()
+        picker.datePickerMode = .time
+        return picker
+    }
+    
+    private static func createItemChooser(keyLabel: String, valueLabel: String) -> UIView {
+        return createButton(title: "\(keyLabel): \(valueLabel)")
+    }
+    
+    private static func createRadio(keyLabel: String, valueLabel: String, color: UIColor?) -> UIView {
+        let button = UIButton(type: .system)
+        button.setTitle("○ \(valueLabel)", for: .normal)
+        button.tintColor = color ?? .blue
+        return button
+    }
+    
+    private static func createRadioHorizontal(keyLabel: String, valueLabel: String, color: UIColor?) -> UIView {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.spacing = 8
+        
+        let label = UILabel()
+        label.text = keyLabel
+        
+        let button = UIButton(type: .system)
+        button.setTitle(valueLabel, for: .normal)
+        button.tintColor = color ?? .blue
+        
+        stack.addArrangedSubview(label)
+        stack.addArrangedSubview(button)
+        return stack
+    }
+    
+    private static func createCheckbox(keyLabel: String, valueLabel: String) -> UIView {
+        let button = UIButton(type: .system)
+        button.setTitle("☐ \(keyLabel)", for: .normal)
+        return button
     }
 }
 

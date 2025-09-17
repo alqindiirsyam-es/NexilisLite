@@ -304,7 +304,41 @@ public class SignUpSignIn: UIViewController {
             }
             KeyManagerNexilis.generateKey()
             KeyManagerNexilis.saveMarker()
-            guard let privateKey = KeyManagerNexilis.getPrivateKey() else {
+            let dataTxn = Utils.getTxnLevel()
+            var policyLevel = "1,2"
+            if !dataTxn.isEmpty {
+                if let data = dataTxn.data(using: .utf8) {
+                    do {
+                        // Parse to generic JSON array
+                        if let jsonArray = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]] {
+                            for json in jsonArray {
+                                let min = json["min"] as? Double ?? 0
+                                let max = json["max"] as? Double ?? 0
+                                let policy = json["policy"] as? String ?? ""
+                                let amount = 0.0
+                                if max == -1 {
+                                    if amount >= min {
+                                        policyLevel = policy
+                                        break
+                                    }
+                                } else {
+                                    if amount >= min && amount <= max {
+                                        policyLevel = policy
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    } catch {
+                        print("Error converting string to JSONArray:", error)
+                    }
+                }
+            }
+            var isBiometricOn = false
+            if policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFACE || policyLevel == MFAViewController.STEP_FIDO_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_BIOFACE {
+                isBiometricOn = true
+            }
+            guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: isBiometricOn) else {
                 KeyManagerNexilis.deleteKey()
                 KeyManagerNexilis.deleteMarker()
                 UIApplication.shared.visibleViewController?.view.makeToast("Biometric or passcode authentication required".localized(), duration: 3, position: .center)
@@ -459,7 +493,41 @@ public class SignUpSignIn: UIViewController {
         }
         KeyManagerNexilis.generateKey()
         KeyManagerNexilis.saveMarker()
-        guard let privateKey = KeyManagerNexilis.getPrivateKey() else {
+        let dataTxn = Utils.getTxnLevel()
+        var policyLevel = "1,2"
+        if !dataTxn.isEmpty {
+            if let data = dataTxn.data(using: .utf8) {
+                do {
+                    // Parse to generic JSON array
+                    if let jsonArray = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]] {
+                        for json in jsonArray {
+                            let min = json["min"] as? Double ?? 0
+                            let max = json["max"] as? Double ?? 0
+                            let policy = json["policy"] as? String ?? ""
+                            let amount = 0.0
+                            if max == -1 {
+                                if amount >= min {
+                                    policyLevel = policy
+                                    break
+                                }
+                            } else {
+                                if amount >= min && amount <= max {
+                                    policyLevel = policy
+                                    break
+                                }
+                            }
+                        }
+                    }
+                } catch {
+                    print("Error converting string to JSONArray:", error)
+                }
+            }
+        }
+        var isBiometricOn = false
+        if policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFACE || policyLevel == MFAViewController.STEP_FIDO_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_BIOFACE {
+            isBiometricOn = true
+        }
+        guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: isBiometricOn) else {
             KeyManagerNexilis.deleteKey()
             KeyManagerNexilis.deleteMarker()
             UIApplication.shared.visibleViewController?.view.makeToast("Biometric or passcode authentication required".localized(), duration: 3, position: .center)

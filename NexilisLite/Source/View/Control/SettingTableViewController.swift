@@ -109,182 +109,96 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         SecureUserDefaults.shared.set(switchAutoDownload.isOn, forKey: "autoDownload")
     }
     
-    func makeMenu(imageSignIn: String = ""){
+    func makeMenu(){
         let isChangeProfile = Utils.getSetProfile()
         if Database.shared.database == nil {
             Item.menus["Personal"] = [
                 Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
+                Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
                 Item(icon: UIImage(systemName: "arrow.up.and.person.rectangle.portrait"), title: "Sign-Up/Sign-In".localized()),
             ]
         } else {
             Database.shared.database?.inTransaction({ fmdb, rollback in
-                do {
-                    let idMe = User.getMyPin() as String?
-                    if let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT user_type, image_id, official_account FROM BUDDY where f_pin='\(idMe!)'"), cursorUser.next() {
-                        if (User.isInternal(userType: cursorUser.string(forColumnIndex: 0) ?? "") && User.isAdmin(fmdb: fmdb)) || User.isOfficial(official_account: cursorUser.string(forColumnIndex: 2) ?? "") || User.isOfficial(official_account: cursorUser.string(forColumnIndex: 2) ?? "") {
-                            Item.menus["Personal"] = [
-                                Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
-                                Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
-                                Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
-//                                Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
-                                Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
-//                                Item(icon: UIImage(systemName: "person.crop.rectangle"), title: "Change Admin / Internal Password".localized()),
-                                Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
-//                                Item(icon: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, title: "Set Internal Account".localized()),
-                                Item(icon: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, title: "Set CS Account".localized()),
-                            ]
-                        } else if User.isInternal(userType: cursorUser.string(forColumnIndex: 0) ?? "") || User.isCallCenter(userType: cursorUser.string(forColumnIndex: 0) ?? "") || User.isVerified(official_account: cursorUser.string(forColumnIndex: 2) ?? "") {
-                            Item.menus["Personal"] = [
-                                Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
-                                Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
-                                Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
-//                                Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
-                                Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
-                                Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
-                            ]
-                        } else {
-                            Item.menus["Personal"] = [
-                                Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
-                                    Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
-                                Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
-//                                Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
-                                Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
-//                                Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
-                            ]
-                        }
-                        if !isChangeProfile {
-                            Item.menus["Personal"]?.append(Item(icon: UIImage(systemName: "arrow.up.and.person.rectangle.portrait"), title: "Sign-Up/Sign-In".localized()))
-                        } else if isChangeProfile {
-                            if Nexilis.checkingAccess(key: "backup_restore") {
-                                Item.menus["Personal"]?.append(Item(icon: UIImage(systemName: "arrow.clockwise.icloud"), title: "Backup & Restore".localized()))
-                            }
-                            if Utils.getLimitValidTrans() == "1" {
-                                Item.menus["Personal"]?.insert(Item(icon: UIImage(systemName: "lessthan.circle"), title: "Validation Transaction Limit".localized()), at: 1)
-                            }
-                        }
-                        let image = cursorUser.string(forColumnIndex: 1)
-                        if image != nil {
-                            if !image!.isEmpty {
-                                do {
-                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                    let file = documentDir.appendingPathComponent(image!)
-                                    if FileManager().fileExists(atPath: file.path) {
-                                        let image = UIImage(contentsOfFile: file.path)
-                                        Item.menus["Personal"]?[0].icon = image?.circleMasked
-                                        if !imageSignIn.isEmpty {
-                                            var dataImage: [AnyHashable : Any] = [:]
-                                            dataImage["name"] = imageSignIn
-                                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
-                                        }
-                                    } else if FileEncryption.shared.isSecureExists(filename: imageSignIn) {
-                                        do {
-                                            if var data = try FileEncryption.shared.readSecure(filename: imageSignIn) {
-                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                                if dataDecrypt != nil {
-                                                    data = dataDecrypt!
-                                                }
-                                                let image = UIImage(data: data)
-                                                Item.menus["Personal"]?[0].icon = image?.circleMasked
-                                                if !imageSignIn.isEmpty {
-                                                    var dataImage: [AnyHashable : Any] = [:]
-                                                    dataImage["name"] = imageSignIn
-                                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
-                                                }
-                                            }
-                                        } catch {
-                                            
-                                        }
-                                    } else {
-                                        Download().startHTTP(forKey: image!) { (name, progress) in
-                                            guard progress == 100 else {
-                                                return
-                                            }
-
-                                            DispatchQueue.main.async {
-                                                if FileEncryption.shared.isSecureExists(filename: imageSignIn) {
-                                                    do {
-                                                        if var data = try FileEncryption.shared.readSecure(filename: imageSignIn) {
-                                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                                            if dataDecrypt != nil {
-                                                                data = dataDecrypt!
-                                                            }
-                                                            let image = UIImage(data: data)
-                                                            Item.menus["Personal"]?[0].icon = image?.circleMasked
-                                                            if !imageSignIn.isEmpty {
-                                                                var dataImage: [AnyHashable : Any] = [:]
-                                                                dataImage["name"] = imageSignIn
-                                                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
-                                                            }
-                                                        }
-                                                    } catch {
-                                                        
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                } catch {}
-                            }
-                        }
-                        cursorUser.close()
+                let idMe = User.getMyPin() as String?
+                if let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT user_type, image_id, official_account FROM BUDDY where f_pin='\(idMe!)'"), cursorUser.next() {
+                    if (User.isInternal(userType: cursorUser.string(forColumnIndex: 0) ?? "") && User.isAdmin(fmdb: fmdb)) || User.isOfficial(official_account: cursorUser.string(forColumnIndex: 2) ?? "") || User.isOfficial(official_account: cursorUser.string(forColumnIndex: 2) ?? "") {
+                        Item.menus["Personal"] = [
+                            Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
+                            Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                            Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
+//                            Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
+//                            Item(icon: UIImage(systemName: "person.crop.rectangle"), title: "Change Admin / Internal Password".localized()),
+                            Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
+//                            Item(icon: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, title: "Set Internal Account".localized()),
+                            Item(icon: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, title: "Set CS Account".localized()),
+                        ]
+                    } else if User.isInternal(userType: cursorUser.string(forColumnIndex: 0) ?? "") || User.isCallCenter(userType: cursorUser.string(forColumnIndex: 0) ?? "") || User.isVerified(official_account: cursorUser.string(forColumnIndex: 2) ?? "") {
+                        Item.menus["Personal"] = [
+                            Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
+                            Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                            Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
+//                            Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
+                            Item(icon: UIImage(systemName: "laptopcomputer.and.iphone"), title: "Sign-In to Web".localized()),
+                        ]
                     } else {
                         Item.menus["Personal"] = [
                             Item(icon: UIImage(systemName: "person"), title: "Personal Information".localized()),
-                                Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
+                            Item(icon: UIImage(systemName: "textformat.abc"), title: "Change Language".localized()),
                             Item(icon: UIImage(systemName: "textformat.size"), title: "Chat Font Size".localized()),
 //                            Item(icon: UIImage(systemName: "photo"), title: "Chat Wallpaper".localized()),
-//                            Item(icon: UIImage(systemName: "lock"), title: "Secure Folder"),
 //                            Item(icon: UIImage(systemName: "person.badge.key"), title: "Access Admin / Internal Features".localized()),
                         ]
+                    }
+                    if !isChangeProfile {
                         Item.menus["Personal"]?.append(Item(icon: UIImage(systemName: "arrow.up.and.person.rectangle.portrait"), title: "Sign-Up/Sign-In".localized()))
-                        if !imageSignIn.isEmpty {
+                    } else if isChangeProfile {
+                        if Nexilis.checkingAccess(key: "backup_restore") {
+                            Item.menus["Personal"]?.append(Item(icon: UIImage(systemName: "arrow.clockwise.icloud"), title: "Backup & Restore".localized()))
+                        }
+                        if Utils.getLimitValidTrans() == "1" {
+                            Item.menus["Personal"]?.insert(Item(icon: UIImage(systemName: "lessthan.circle"), title: "Validation Transaction Limit".localized()), at: 1)
+                        }
+                    }
+                    let image = cursorUser.string(forColumnIndex: 1)
+                    if image != nil {
+                        if !image!.isEmpty {
                             do {
                                 let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                let file = documentDir.appendingPathComponent(imageSignIn)
+                                let file = documentDir.appendingPathComponent(image!)
                                 if FileManager().fileExists(atPath: file.path) {
                                     let image = UIImage(contentsOfFile: file.path)
                                     Item.menus["Personal"]?[0].icon = image?.circleMasked
-                                    var dataImage: [AnyHashable : Any] = [:]
-                                    dataImage["name"] = imageSignIn
-                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
-                                } else if FileEncryption.shared.isSecureExists(filename: imageSignIn) {
+                                } else if FileEncryption.shared.isSecureExists(filename: image!) {
                                     do {
-                                        if var data = try FileEncryption.shared.readSecure(filename: imageSignIn) {
+                                        if var data = try FileEncryption.shared.readSecure(filename: image!) {
                                             let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
                                             if dataDecrypt != nil {
                                                 data = dataDecrypt!
                                             }
                                             let image = UIImage(data: data)
                                             Item.menus["Personal"]?[0].icon = image?.circleMasked
-                                            if !imageSignIn.isEmpty {
-                                                var dataImage: [AnyHashable : Any] = [:]
-                                                dataImage["name"] = imageSignIn
-                                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
-                                            }
                                         }
                                     } catch {
                                         
                                     }
                                 } else {
-                                    Download().startHTTP(forKey: imageSignIn) { (name, progress) in
+                                    Download().startHTTP(forKey: image!) { (name, progress) in
                                         guard progress == 100 else {
                                             return
                                         }
+                                        
                                         DispatchQueue.main.async {
-                                            if FileEncryption.shared.isSecureExists(filename: imageSignIn) {
+                                            if FileEncryption.shared.isSecureExists(filename: image!) {
                                                 do {
-                                                    if var data = try FileEncryption.shared.readSecure(filename: imageSignIn) {
+                                                    if var data = try FileEncryption.shared.readSecure(filename: image!) {
                                                         let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
                                                         if dataDecrypt != nil {
                                                             data = dataDecrypt!
                                                         }
                                                         let image = UIImage(data: data)
                                                         Item.menus["Personal"]?[0].icon = image?.circleMasked
-                                                        if !imageSignIn.isEmpty {
-                                                            var dataImage: [AnyHashable : Any] = [:]
-                                                            dataImage["name"] = imageSignIn
-                                                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil, userInfo: dataImage)
-                                                        }
+                                                        self.tableView.reloadData()
                                                     }
                                                 } catch {
                                                     
@@ -296,9 +210,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                             } catch {}
                         }
                     }
-                } catch {
-                    rollback.pointee = true
-                    print("Access database error: \(error.localizedDescription)")
+                    cursorUser.close()
                 }
             })
         }
@@ -314,7 +226,11 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             Item.menus["Config"]?.append(Item(icon: UIImage(systemName: "paintbrush"), title: "Switch Style".localized()))
         }
         if Utils.getIsLoadThemeFromOther() {
-            Item.menus["Config"]?.insert(Item(icon: UIImage(systemName: "iphone"), title: "Back to Company App".localized()), at: 1)
+            if Item.menus["Config"]!.count > 0 {
+                Item.menus["Config"]?.insert(Item(icon: UIImage(systemName: "iphone"), title: "Back to Company App".localized()), at: 1)
+            } else {
+                Item.menus["Config"]?.append(Item(icon: UIImage(systemName: "iphone"), title: "Back to Company App".localized()))
+            }
         }
         
         Item.menus["Call"] = [
@@ -801,16 +717,14 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 Utils.setIsLoadThemeFromOther(value: false)
                                 Utils.resetValueSuperApp()
                                 Utils.setValueInitialApp(data: Utils.getPrefTheme())
+                                Utils.setLastTabSelected(value: 0)
+                                Utils.setIsWATheme(value: false)
+                                UIApplication.shared.setAlternateIconName(nil)
                                 Database.shared.database?.inTransaction({ fmdb, rollback in
-                                    do {
-                                        _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ", _where: "")
-                                        _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ_MEMBER", _where: "")
-                                        _ = Database.shared.deleteRecord(fmdb: fmdb, table: "DISCUSSION_FORUM", _where: "")
-                                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: User.getMyPin() ?? ""))
-                                    } catch {
-                                        rollback.pointee = true
-                                        print("Access database error: \(error.localizedDescription)")
-                                    }
+                                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ", _where: "")
+                                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ_MEMBER", _where: "")
+                                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "DISCUSSION_FORUM", _where: "")
+                                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: User.getMyPin() ?? ""))
                                 })
                                 Nexilis.hideLoader {
                                     let alert = LibAlertController(title: "Successfully changed".localized(), message: "Please open the app again to see the changes".localized(), preferredStyle: .alert)
