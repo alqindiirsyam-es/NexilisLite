@@ -4135,3 +4135,289 @@ public final class MessageGuardLite {
         return input.range(of: pattern, options: .regularExpression) != nil
     }
 }
+
+class QRScannerViewController: UIViewController {
+    
+    private var captureSession: AVCaptureSession!
+    private var previewLayer: AVCaptureVideoPreviewLayer!
+    
+    private let scanAreaSize: CGFloat = 280
+    
+    // Overlay
+    private let overlayView = UIView()
+    
+    private let backButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "chevron.left"), for: .normal)
+        button.setTitle(" " + "Scan".localized(), for: .normal)
+        button.tintColor = .white
+        button.setTitleColor(.white, for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .medium)
+        button.contentHorizontalAlignment = .leading
+        return button
+    }()
+    
+    private let showCodeButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(named: "promo-code_white", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.resized(to: CGSize(width: 20, height: 20)), for: .normal)
+        button.tintColor = .white
+        button.setTitle(" " + "Show Code".localized(), for: .normal)
+        button.setTitleColor(.white, for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 14)
+        button.contentHorizontalAlignment = .center
+        button.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        button.layer.cornerRadius = 25
+        return button
+    }()
+    
+    private let promoButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(named: "discount_white", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.resized(to: CGSize(width: 20, height: 20)), for: .normal)
+        button.tintColor = .white
+        button.setTitle(" " + "Promo".localized(), for: .normal)
+        button.setTitleColor(.white, for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        button.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        button.layer.cornerRadius = 22
+        return button
+    }()
+    
+    private let transferButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(named: "bank-transfer_white", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.resized(to: CGSize(width: 20, height: 20)), for: .normal)
+        button.tintColor = .white
+        button.setTitle(" " + "Transfer".localized(), for: .normal)
+        button.setTitleColor(.white, for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 14)
+        button.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        button.layer.cornerRadius = 25
+        return button
+    }()
+    
+    private let labelPoweredBy: UILabel = {
+        let label = UILabel()
+        label.text = "Powered by".localized()
+        label.font = UIFont.boldSystemFont(ofSize: 22)
+        label.textColor = .white
+        return label
+    }()
+    
+    private let qrisLogo: UIImageView = {
+        let imageView = UIImageView()
+        imageView.image = UIImage(named: "qris_logo_white", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!
+        imageView.contentMode = .scaleAspectFit
+        return imageView
+    }()
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        setupCamera()
+        setupOverlay()
+        setupUI()
+    }
+    
+    private func setupCamera() {
+        captureSession = AVCaptureSession()
+        
+        guard let videoCaptureDevice = AVCaptureDevice.default(for: .video),
+              let videoInput = try? AVCaptureDeviceInput(device: videoCaptureDevice)
+        else { return }
+        
+        if captureSession.canAddInput(videoInput) { captureSession.addInput(videoInput) }
+        
+        let metadataOutput = AVCaptureMetadataOutput()
+        if captureSession.canAddOutput(metadataOutput) {
+            captureSession.addOutput(metadataOutput)
+            metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+            metadataOutput.metadataObjectTypes = [.qr]
+        }
+        
+        previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        previewLayer.videoGravity = .resizeAspectFill
+        previewLayer.frame = view.bounds
+        view.layer.addSublayer(previewLayer)
+        
+        captureSession.startRunning()
+    }
+    
+    private func setupOverlay() {
+        overlayView.frame = view.bounds
+        overlayView.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        
+        // Create mask with transparent hole
+        let path = UIBezierPath(rect: overlayView.bounds)
+        let cutoutRect = CGRect(
+            x: (view.frame.width - scanAreaSize) / 2,
+            y: (view.frame.height - scanAreaSize) / 2,
+            width: scanAreaSize,
+            height: scanAreaSize
+        )
+        let cutoutPath = UIBezierPath(roundedRect: cutoutRect, cornerRadius: 8)
+        path.append(cutoutPath.reversing())
+        
+        let maskLayer = CAShapeLayer()
+        maskLayer.path = path.cgPath
+        overlayView.layer.mask = maskLayer
+        
+        view.addSubview(overlayView)
+        
+        // Add orange corners
+        addCornerIndicators(to: overlayView, rect: cutoutRect)
+        
+        // Combine label + logo
+        let poweredStack = UIStackView(arrangedSubviews: [labelPoweredBy, qrisLogo])
+        poweredStack.axis = .horizontal
+        poweredStack.alignment = .center
+        poweredStack.spacing = 6
+
+        view.addSubview(poweredStack)
+        poweredStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            poweredStack.topAnchor.constraint(equalTo: overlayView.topAnchor, constant: cutoutRect.maxY + 16),
+            poweredStack.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+        ])
+        
+        qrisLogo.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            qrisLogo.widthAnchor.constraint(equalToConstant: 80),
+            qrisLogo.heightAnchor.constraint(equalToConstant: 80)
+        ])
+    }
+    
+    private func addCornerIndicators(to view: UIView, rect: CGRect) {
+        let lineLength: CGFloat = 30
+        let lineWidth: CGFloat = 4
+        let color = UIColor.mainColor.cgColor
+        
+        func addLine(from: CGPoint, to: CGPoint) {
+            let line = CAShapeLayer()
+            let path = UIBezierPath()
+            path.move(to: from)
+            path.addLine(to: to)
+            line.path = path.cgPath
+            line.strokeColor = color
+            line.lineWidth = lineWidth
+            view.layer.addSublayer(line)
+        }
+        
+        // Top-left
+        addLine(from: rect.origin, to: CGPoint(x: rect.minX + lineLength, y: rect.minY))
+        addLine(from: rect.origin, to: CGPoint(x: rect.minX, y: rect.minY + lineLength))
+        
+        // Top-right
+        addLine(from: CGPoint(x: rect.maxX, y: rect.minY),
+                to: CGPoint(x: rect.maxX - lineLength, y: rect.minY))
+        addLine(from: CGPoint(x: rect.maxX, y: rect.minY),
+                to: CGPoint(x: rect.maxX, y: rect.minY + lineLength))
+        
+        // Bottom-left
+        addLine(from: CGPoint(x: rect.minX, y: rect.maxY),
+                to: CGPoint(x: rect.minX + lineLength, y: rect.maxY))
+        addLine(from: CGPoint(x: rect.minX, y: rect.maxY),
+                to: CGPoint(x: rect.minX, y: rect.maxY - lineLength))
+        
+        // Bottom-right
+        addLine(from: CGPoint(x: rect.maxX, y: rect.maxY),
+                to: CGPoint(x: rect.maxX - lineLength, y: rect.maxY))
+        addLine(from: CGPoint(x: rect.maxX, y: rect.maxY),
+                to: CGPoint(x: rect.maxX, y: rect.maxY - lineLength))
+    }
+    
+    private func setupUI() {
+        // Back button
+        view.addSubview(backButton)
+        backButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            backButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8)
+        ])
+        backButton.addTarget(self, action: #selector(didTapBack), for: .touchUpInside)
+        
+        // Bottom buttons
+        let stack = UIStackView(arrangedSubviews: [showCodeButton, promoButton, transferButton])
+        stack.axis = .horizontal
+        stack.spacing = 20
+        stack.alignment = .center
+        view.addSubview(stack)
+        
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+        ])
+        
+        showCodeButton.translatesAutoresizingMaskIntoConstraints = false
+        transferButton.translatesAutoresizingMaskIntoConstraints = false
+        promoButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        showCodeButton.addTarget(self, action: #selector(didTapShowCode), for: .touchUpInside)
+        transferButton.addTarget(self, action: #selector(didTapTransfer), for: .touchUpInside)
+        promoButton.addTarget(self, action: #selector(didTapPromo), for: .touchUpInside)
+        
+        NSLayoutConstraint.activate([
+            showCodeButton.widthAnchor.constraint(equalToConstant: 120),
+            showCodeButton.heightAnchor.constraint(equalToConstant: 50),
+            transferButton.widthAnchor.constraint(equalToConstant: 100),
+            transferButton.heightAnchor.constraint(equalToConstant: 50),
+            promoButton.widthAnchor.constraint(equalToConstant: 80),
+            promoButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+    
+    @objc private func didTapBack() {
+        captureSession.stopRunning()
+        dismiss(animated: true, completion: nil)
+    }
+    
+    @objc private func didTapShowCode() {
+        showWebview(url: Utils.getURLBase() + "nexilis/pages/read-qr?qr=")
+    }
+    
+    @objc private func didTapTransfer() {
+        showWebview(url: Utils.getURLBase() + "nexilis/pages/read-qr?qr=")
+    }
+    
+    @objc private func didTapPromo() {
+        showWebview(url: Utils.getURLBase() + "nexilis/pages/read-qr?qr=")
+    }
+    
+    func showWebview(url: String) {
+        let controller = BNIBookingWebView()
+        controller.customUrl = url
+        controller.onDismiss = {
+            self.captureSession.startRunning()
+        }
+        present(controller, animated: true)
+    }
+}
+
+extension QRScannerViewController: AVCaptureMetadataOutputObjectsDelegate {
+    func metadataOutput(_ output: AVCaptureMetadataOutput,
+                        didOutput metadataObjects: [AVMetadataObject],
+                        from connection: AVCaptureConnection) {
+        
+        if let metadataObject = metadataObjects.first,
+           let readableObject = metadataObject as? AVMetadataMachineReadableCodeObject,
+           let stringValue = readableObject.stringValue {
+            
+            captureSession.stopRunning()
+//            print("Scanned: \(stringValue)")
+            showWebview(url: Utils.getURLBase() + "nexilis/pages/read-qr?qr=" + stringValue)
+//            let alert = UIAlertController(title: "QR Result", message: stringValue, preferredStyle: .alert)
+//            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+//                self.captureSession.startRunning()
+//            })
+//            present(alert, animated: true, completion: nil)
+        }
+    }
+}
+
+extension UIImage {
+    func resized(to size: CGSize) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            self.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+}

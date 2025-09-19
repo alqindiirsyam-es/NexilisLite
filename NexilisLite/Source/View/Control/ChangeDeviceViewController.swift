@@ -234,54 +234,59 @@ public class ChangeDeviceViewController: UIViewController {
         
         func sendSVL() {
             DispatchQueue.global().async {
-                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
-                    if response.isOk() {
-                        let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
-                        if data.isEmpty {
-                            DispatchQueue.main.async {
-                                self.showFailedSignUpIn(title: "Failed to get auth, please try again".localized())
+                do {
+                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
+                        if response.isOk() {
+                            let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
+                            if data.isEmpty {
+                                DispatchQueue.main.async {
+                                    self.showFailedSignUpIn(title: "Failed to get auth, please try again".localized())
+                                }
+                                return
                             }
-                            return
-                        }
-                        var pk = ""
-                        var sign = ""
-                        let df = HMACDeviceFingerprintNexilis.generate()
-                        if let dataSign = "\(data)!\(df)".data(using: .utf8) {
-                            if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
-                                sign = signature.base64EncodedString()
+                            var pk = ""
+                            var sign = ""
+                            let df = HMACDeviceFingerprintNexilis.generate()
+                            if let dataSign = "\(data)!\(df)".data(using: .utf8) {
+                                if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
+                                    sign = signature.base64EncodedString()
+                                }
                             }
-                        }
-                        if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
-                            pk = publicKey
-                        }
-                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: "", p_vercode: method == 0 ? "" : code, number: number, deviceFingerprint: df, publicKey: pk, signature: sign), timeout: 30 * 1000) {
-                            if !response.isOk() {
-                                if method == 1 {
-                                    DispatchQueue.main.async {
-                                        self.showPageOTP(phone: number, errCode: response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99"), method: method)
+                            if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
+                                pk = publicKey
+                            }
+                            let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 30)
+                            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: "", p_vercode: method == 0 ? "" : code, number: number, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp), timeout: 30 * 1000) {
+                                if !response.isOk() {
+                                    if method == 1 {
+                                        DispatchQueue.main.async {
+                                            self.showPageOTP(phone: number, errCode: response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99"), method: method)
+                                        }
+                                    } else {
+                                        DispatchQueue.main.async {
+                                            self.showFailedSignUpIn(title: "Failed".localized())
+                                        }
                                     }
                                 } else {
-                                    DispatchQueue.main.async {
-                                        self.showFailedSignUpIn(title: "Failed".localized())
-                                    }
+                                    self.successSubmit(response: response, name: "", number: number)
                                 }
                             } else {
-                                self.successSubmit(response: response, name: "", number: number)
+                                DispatchQueue.main.async {
+                                    self.showFailedSignUpIn(title: "Unable to access servers. Try again later".localized())
+                                }
                             }
                         } else {
                             DispatchQueue.main.async {
-                                self.showFailedSignUpIn(title: "Unable to access servers. Try again later".localized())
+                                self.showFailedSignUpIn(title: "Failed to get auth, please try again".localized())
                             }
                         }
                     } else {
                         DispatchQueue.main.async {
-                            self.showFailedSignUpIn(title: "Failed to get auth, please try again".localized())
+                            self.showFailedSignUpIn(title: "Unable to access servers. Try again later".localized())
                         }
                     }
-                } else {
-                    DispatchQueue.main.async {
-                        self.showFailedSignUpIn(title: "Unable to access servers. Try again later".localized())
-                    }
+                } catch {
+                    
                 }
             }
         }
@@ -357,50 +362,55 @@ public class ChangeDeviceViewController: UIViewController {
                 return
             }
             DispatchQueue.global().async {
-                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
-                    if response.isOk() {
-                        let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
-                        if data.isEmpty {
-                            DispatchQueue.main.async {
-                                self.showFailedSignUpIn(title: "Failed to get auth, please try again".localized())
-                            }
-                            return
-                        }
-                        var pk = ""
-                        var sign = ""
-                        let df = HMACDeviceFingerprintNexilis.generate()
-                        if let dataSign = "\(data)!\(df)".data(using: .utf8) {
-                            if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
-                                sign = signature.base64EncodedString()
-                            }
-                        }
-                        if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
-                            pk = publicKey
-                        }
-                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: email, p_vercode: code, deviceFingerprint: df, publicKey: pk, signature: sign), timeout: 30 * 1000) {
-                            if !response.isOk() {
+                do {
+                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
+                        if response.isOk() {
+                            let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
+                            if data.isEmpty {
                                 DispatchQueue.main.async {
-                                    Nexilis.hideLoader {
-                                        self.showPageOTP(email: email, errCode: response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99"))
+                                    self.showFailedSignUpIn(title: "Failed to get auth, please try again".localized())
+                                }
+                                return
+                            }
+                            var pk = ""
+                            var sign = ""
+                            let df = HMACDeviceFingerprintNexilis.generate()
+                            if let dataSign = "\(data)!\(df)".data(using: .utf8) {
+                                if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
+                                    sign = signature.base64EncodedString()
+                                }
+                            }
+                            if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
+                                pk = publicKey
+                            }
+                            let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 30)
+                            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: email, p_vercode: code, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp), timeout: 30 * 1000) {
+                                if !response.isOk() {
+                                    DispatchQueue.main.async {
+                                        Nexilis.hideLoader {
+                                            self.showPageOTP(email: email, errCode: response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99"))
+                                        }
                                     }
+                                } else {
+                                    self.successSubmit(response: response, name: "", email: email)
                                 }
                             } else {
-                                self.successSubmit(response: response, name: "", email: email)
+                                DispatchQueue.main.async {
+                                    self.showFailedSignUpIn(title: "Unable to access servers. Try again later".localized())
+                                }
                             }
                         } else {
                             DispatchQueue.main.async {
-                                self.showFailedSignUpIn(title: "Unable to access servers. Try again later".localized())
+                                self.showFailedSignUpIn(title: "Failed to get auth, please try again".localized())
                             }
                         }
                     } else {
                         DispatchQueue.main.async {
-                            self.showFailedSignUpIn(title: "Failed to get auth, please try again".localized())
+                            self.showFailedSignUpIn(title: "Unable to access servers. Try again later".localized())
                         }
                     }
-                } else {
-                    DispatchQueue.main.async {
-                        self.showFailedSignUpIn(title: "Unable to access servers. Try again later".localized())
-                    }
+                } catch {
+                    
                 }
             }
         }

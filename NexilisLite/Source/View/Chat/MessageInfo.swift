@@ -63,17 +63,22 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     private func getData() {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, status, time_delivered, time_read, time_ack, longitude, latitude FROM MESSAGE_STATUS where message_id='\(data["message_id"]!!)' ORDER BY time_ack DESC, time_read DESC, time_delivered DESC") {
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, status, time_delivered, time_read, time_ack, longitude, latitude, message_id FROM MESSAGE_STATUS where message_id='\(data["message_id"]!!)' ORDER BY time_ack DESC, time_read DESC, time_delivered DESC") {
                     var listStatus: [Int] = []
                     while cursorData.next() {
+                        let messageId = cursorData.string(forColumnIndex: 7) ?? ""
                         var row: [String: Any?] = [:]
                         row["f_pin"] = cursorData.string(forColumnIndex: 0) ?? ""
+                        if dataStatus.count > 0 && dataStatus.contains(where: { $0["message_id"] as? String == messageId && $0["f_pin"] as? String == row["f_pin"] as? String }) {
+                            continue
+                        }
                         row["status"] = cursorData.string(forColumnIndex: 1) ?? ""
                         row["time_delivered"] = cursorData.string(forColumnIndex: 2) ?? ""
                         row["time_read"] = cursorData.string(forColumnIndex: 3) ?? ""
                         row["time_ack"] = cursorData.string(forColumnIndex: 4) ?? ""
                         row["longitude"] = cursorData.string(forColumnIndex: 5) ?? ""
                         row["latitude"] = cursorData.string(forColumnIndex: 6) ?? ""
+                        row["message_id"] = messageId
                         dataStatus.append(row)
                         listStatus.append(Int(row["status"] as! String)!)
                     }

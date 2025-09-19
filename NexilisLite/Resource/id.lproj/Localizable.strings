@@ -86,6 +86,7 @@
 "Version" = "Versi";
 "Powered by Qmera" = "Dipersembahkan oleh Qmera";
 "Powered by Nexilis" = "Dipersembahkan oleh Nexilis";
+"Powered by" = "Dipersembahkan oleh";
 "Sign-Up (Change profile)" = "Daftar (Ubah Profil)";
 "Set Profile" = "Atur Profil";
 "Sign-In (Change Device)" = "Masuk (Ubah Perangkat)";
@@ -102,6 +103,7 @@
 "No call center history" = "Tidak ada riwayat pusat panggilan";
 "Username has been registered, please use another name" = "Nama yang kamu masukkan sudah terdaftar, silahkan gunakan nama lain";
 "Scan Gaspol QR" = "Memindai Gaspol QR";
+"Scan" = "Pindai";
 "Scan QR Code" = "Memindai kode QR";
 "To use Gaspol Web, go to gaspol.co.id on your computer." = "Untuk dapat menggunakan Gaspol Web, pergi ke halaman gaspol.co.id pada komputer kamu.";
 "Select" = "Pilih";
@@ -421,3 +423,4 @@
 "Later" = "Nanti";
 "Restart Required" = "Perlu Memulai Ulang Aplikasi";
 "Oops! Something went wrong. Please restart the app to continue." = "Ups! Terjadi kesalahan. Silakan mulai ulang aplikasi untuk melanjutkan.";
+"Show Code" = "Tunjukkan Kode";

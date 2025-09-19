@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.63"
+    public static var cpaasVersion = "5.0.64"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1680,6 +1680,7 @@ public class Nexilis: NSObject {
                         if scope == MessageScope.GROUP {
                             for pin in getGroupMembers(fmdb: fmdb, l_pin: l_pin) {
                                 if f_pin == pin { continue }
+//                                print("REPLACE STATUS MESSAGE: \(message_id) <><> \(status) <><> \(pin)")
                                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "message_id" : message_id,
                                     "status" : status,
@@ -2204,6 +2205,8 @@ public class Nexilis: NSObject {
         let latitude = message.getBody(key : CoreMessage_TMessageKey.LATITUDE, default_value : "")
         let longitude = message.getBody(key : CoreMessage_TMessageKey.LONGITUDE, default_value : "")
         let desc = message.getBody(key : CoreMessage_TMessageKey.DESCRIPTION, default_value : "")
+        let time = message.getBody(key : CoreMessage_TMessageKey.SERVER_DATE, default_value : String(Date().currentTimeMillis()))
+        let lastUpdate = message.getBody(key : CoreMessage_TMessageKey.LAST_UPDATE, default_value : String(Date().currentTimeMillis()))
         guard !status.isEmpty else {
             return
         }
@@ -2211,6 +2214,7 @@ public class Nexilis: NSObject {
         guard !l_pin.isEmpty else {
             return
         }
+//        print("COMING STATUS: \(message_id) <><> \(status) <><> \(l_pin) <><> \(time) <><> \(lastUpdate)")
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if message_id.starts(with: "-1") || message_id.starts(with: "-2") {
@@ -2228,31 +2232,31 @@ public class Nexilis: NSObject {
                                         "longitude" : longitude,
                                         "latitude" : latitude,
                                         "location" : desc,
-                                        "time_delivered" : String(Date().currentTimeMillis()),
-                                        "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
+                                        "time_delivered" : time,
+                                        "last_update" : lastUpdate], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
                                 } else if status == "4" {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                         "status" : status,
-                                        "time_read" : String(Date().currentTimeMillis()),
+                                        "time_read" : time,
                                         "longitude" : longitude,
                                         "latitude" : latitude,
                                         "location" : desc,
-                                        "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
+                                        "last_update" : lastUpdate], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
                                 } else if status == "8" {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                         "status" : status,
-                                        "time_ack" : String(Date().currentTimeMillis()),
+                                        "time_ack" : time,
                                         "longitude" : longitude,
                                         "latitude" : latitude,
                                         "location" : desc,
-                                        "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
+                                        "last_update" : lastUpdate], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
                                 } else {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                         "status" : status,
                                         "longitude" : longitude,
                                         "latitude" : latitude,
                                         "location" : desc,
-                                        "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
+                                        "last_update" : lastUpdate], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                                 }
                             }
                             cursorStatus.close()
@@ -2261,11 +2265,11 @@ public class Nexilis: NSObject {
                                 if Int(status)! == 2 {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                         "status" : status,
-                                        "time_ack" : String(Date().currentTimeMillis()),
+                                        "time_ack" : time,
                                         "longitude" : longitude,
                                         "latitude" : latitude,
                                         "location" : desc,
-                                        "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(t)'")
+                                        "last_update" : lastUpdate], _where: "message_id = '\(t)'")
                                 }
                                 cursorStatus.close()
                             }
@@ -2278,34 +2282,34 @@ public class Nexilis: NSObject {
                             if status == "3" {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "status" : status,
-                                    "time_delivered" : String(Date().currentTimeMillis()),
+                                    "time_delivered" : time,
                                     "longitude" : longitude,
                                     "latitude" : latitude,
                                     "location" : desc,
-                                    "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
+                                    "last_update" : lastUpdate], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                             } else if status == "4" {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "status" : status,
-                                    "time_read" : String(Date().currentTimeMillis()),
+                                    "time_read" : time,
                                     "longitude" : longitude,
                                     "latitude" : latitude,
                                     "location" : desc,
-                                    "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
+                                    "last_update" : lastUpdate], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                             } else if status == "8" {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "status" : status,
-                                    "time_ack" : String(Date().currentTimeMillis()),
+                                    "time_ack" : time,
                                     "longitude" : longitude,
                                     "latitude" : latitude,
                                     "location" : desc,
-                                    "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
+                                    "last_update" : lastUpdate], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                             } else {
                                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                     "status" : status,
                                     "longitude" : longitude,
                                     "latitude" : latitude,
                                     "location" : desc,
-                                    "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
+                                    "last_update" : lastUpdate], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
                             }
                         }
                         cursorStatus.close()
@@ -2313,11 +2317,11 @@ public class Nexilis: NSObject {
                         if Int(status)! == 2 {
                             _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                 "status" : status,
-                                "time_ack" : String(Date().currentTimeMillis()),
+                                "time_ack" : time,
                                 "longitude" : longitude,
                                 "latitude" : latitude,
                                 "location" : desc,
-                                "last_update" : String(Date().currentTimeMillis())], _where: "message_id = '\(message_id)'")
+                                "last_update" : lastUpdate], _where: "message_id = '\(message_id)'")
                         }
                         cursorStatus.close()
                     }

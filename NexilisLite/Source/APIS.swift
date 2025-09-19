@@ -839,8 +839,8 @@ public class APIS: NSObject {
                                     message.mBodies[CoreMessage_TMessageKey.PUBLIC_KEY] = publicKey
                                 }
                             }
-                            let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
-                            let otp = try TOTPGenerator.generateTOTP(base32Secret: secret, digits: 6, timeStepSeconds: 300)
+//                            let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
+                            let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 30)
                             message.mBodies[CoreMessage_TMessageKey.TOTP] = otp
                             if let response = Nexilis.writeAndWait(message: message) {
                                 if response.isOk() {
@@ -3038,8 +3038,15 @@ public class APIS: NSObject {
         return nameGroupShared
     }
     
-    
-    
+    public static func openQris() {
+        let scannerVC = QRScannerViewController()
+        scannerVC.modalPresentationStyle = .fullScreen
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(scannerVC, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(scannerVC, animated: true, completion: nil)
+        }
+    }
 }
 
 extension UINavigationController {

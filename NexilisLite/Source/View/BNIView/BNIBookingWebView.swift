@@ -33,8 +33,17 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     var allowedURLs = Set<String>()
     var loadingURL = false
     
+    var onDismiss: (() -> Void)?
+    
     public override var preferredStatusBarStyle: UIStatusBarStyle {
         return .default
+    }
+    
+    public override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if self.isBeingDismissed || self.isMovingFromParent {
+            onDismiss?()
+        }
     }
     
     public override func viewDidLoad() {

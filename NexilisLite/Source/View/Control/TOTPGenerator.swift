@@ -86,4 +86,43 @@ class TOTPGenerator {
         CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA1), key, key.count, data, data.count, &macData)
         return macData
     }
+    
+    static func getTOTP() -> String {
+        var session_id = Utils.getConnectionID()
+        if session_id.isEmpty {
+            let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
+            session_id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...]) + "\(Date().currentTimeMillis())"
+            Utils.setConnectionID(value: session_id)
+        }
+        let base32Secret = Base32.encode([UInt8](session_id.data(using: .utf8)!))
+        return base32Secret
+    }
+}
+
+struct Base32 {
+    private static let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+
+    static func encode(_ bytes: [UInt8]) -> String {
+        var result = ""
+        var buffer = 0
+        var bitsLeft = 0
+
+        for b in bytes {
+            buffer = (buffer << 8) | Int(b & 0xFF)
+            bitsLeft += 8
+
+            while bitsLeft >= 5 {
+                let index = (buffer >> (bitsLeft - 5)) & 0x1F
+                result.append(alphabet[index])
+                bitsLeft -= 5
+            }
+        }
+
+        if bitsLeft > 0 {
+            let index = (buffer << (5 - bitsLeft)) & 0x1F
+            result.append(alphabet[index])
+        }
+
+        return result
+    }
 }

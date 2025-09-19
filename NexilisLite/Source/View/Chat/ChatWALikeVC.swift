@@ -49,7 +49,20 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     
     var selectedTag = 0
     
+    var archivedChats: [Chat] = []
+    var listMaxArchived: [String: [String]] = [:]
+    var isGettingData = false
+    
     public override func viewDidLoad() {
+        NotificationCenter.default.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onReceiveMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onReload(notification:)), name: NSNotification.Name(rawValue: "onMember"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onReload(notification:)), name: NSNotification.Name(rawValue: "onUpdatePersonInfo"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onReloadTab(notification:)), name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onReloadTab(notification:)), name: NSNotification.Name(rawValue: "onTopic"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onDisconnected(notification:)), name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(onDatabaseOpened(notification:)), name: NSNotification.Name(rawValue: "databaseOpened"), object: nil)
+        
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cellChatWA")
         tableView.dataSource = self
         tableView.delegate = self
@@ -63,6 +76,53 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         }
         
         setupTableView()
+    }
+    
+    @objc func onDatabaseOpened(notification: NSNotification) {
+        DispatchQueue.main.async {
+            if self.loadingData {
+                self.refresh()
+            }
+        }
+    }
+    
+    @objc func onDisconnected(notification: NSNotification) {
+        DispatchQueue.main.async {
+            self.loadingData = true
+            self.chatGroupMaps.removeAll()
+            self.chats.removeAll()
+            self.tableView.reloadData()
+            self.refresh()
+        }
+    }
+    
+    @objc func onReloadTab(notification: NSNotification) {
+        DispatchQueue.main.async {
+            self.refresh()
+        }
+    }
+    
+    @objc func onReload(notification: NSNotification) {
+        DispatchQueue.main.async {
+            let data:[AnyHashable : Any] = notification.userInfo!
+            if data["member"] as? String == User.getMyPin()! {
+                self.refresh()
+            } else if data["state"] as? Int == 99 {
+                self.refresh()
+            }
+        }
+    }
+    
+    @objc func onReceiveMessage(notification: NSNotification) {
+        DispatchQueue.main.async {
+            self.refresh()
+        }
+    }
+    
+    @objc func onStatusChat(notification: NSNotification) {
+        DispatchQueue.main.async {
+            self.refresh()
+        }
     }
     
     public override func viewWillAppear(_ animated: Bool) {
@@ -126,6 +186,9 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     }
     
     private func refresh() {
+        if self.isGettingData {
+            return
+        }
         getData { [self] in
             if tempChats.count == 0 {
                 searchController.searchBar.isHidden = true
@@ -151,6 +214,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 }
                 searchController.searchBar.isHidden = false
             }
+            self.isGettingData = false
         }
     }
     
@@ -173,14 +237,21 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     
     func getChats(completion: @escaping ()->()) {
         DispatchQueue.global().async {
+            self.isGettingData = true
             self.chatGroupMaps.removeAll()
+            self.listMaxArchived.removeAll()
             let previousChat = self.chats
             let allChats = Chat.getData()
+            self.archivedChats = Chat.getData(isArchived: true)
             var tempChats: [Chat] = []
+            var lowestPinned: [String: Int64] = [:]
 
             for singleChat in allChats {
                 guard !singleChat.groupId.isEmpty else {
                     tempChats.append(singleChat)
+                    if singleChat.pinned > 0 {
+                        self.listMaxArchived[singleChat.pin] = [""]
+                    }
                     continue
                 }
                 
@@ -194,6 +265,31 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                         if let counterParent = Int(tempChats[parentChatIndex].counter), let counterSingle = Int(singleChat.counter) {
                             tempChats[parentChatIndex].counter = "\(counterParent + counterSingle)"
                         }
+                        if singleChat.pinned != 0 && (lowestPinned[singleChat.groupId] == 0 || lowestPinned[singleChat.groupId]! > singleChat.pinned) {
+                            lowestPinned[singleChat.groupId] = singleChat.pinned
+                        }
+                        if singleChat.pinned != 0 {
+                            if !self.listMaxArchived.keys.contains(singleChat.groupId) {
+                                self.listMaxArchived[singleChat.groupId] = [singleChat.pin]
+                            } else {
+                                self.listMaxArchived[singleChat.groupId]?.append(singleChat.pin)
+                            }
+                        }
+                        if tempChats[parentChatIndex].pinned < singleChat.pinned {
+                            tempChats[parentChatIndex].pinned = singleChat.pinned
+                        }
+                        if tempChats[parentChatIndex].pinned > 0 {
+                            if singleChat.pinned == 0 {
+                                singleChat.pinned = lowestPinned[singleChat.groupId]! - 1
+                                singleChat.isFolPinned = true
+                            }
+                            tempChats.forEach { chat in
+                                if chat.groupId == singleChat.groupId && (chat.pinned == 0 || (chat.isFolPinned && chat.pinned != lowestPinned[singleChat.groupId]! - 1)) {
+                                    chat.pinned = lowestPinned[singleChat.groupId]! - 1
+                                    chat.isFolPinned = true
+                                }
+                            }
+                        }
                     }
                     
                     if let parentExist = chatParentInPreviousChats, parentExist.isSelected,
@@ -201,9 +297,20 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                         tempChats.insert(singleChat, at: min(indexParent + existingGroup.count, tempChats.count))
                     }
                 } else {
+                    if lowestPinned[singleChat.groupId] == nil {
+                        lowestPinned[singleChat.groupId] = 0
+                    }
+                    if singleChat.pinned != 0 {
+                        lowestPinned[singleChat.groupId] = singleChat.pinned
+                    }
                     self.chatGroupMaps[singleChat.groupId] = [singleChat]
                     let parentChat = Chat(profile: singleChat.profile, groupName: singleChat.groupName, counter: singleChat.counter, groupId: singleChat.groupId)
                     parentChat.isParent = true
+                    
+                    if parentChat.pinned != singleChat.pinned {
+                        parentChat.pinned = singleChat.pinned
+                        self.listMaxArchived[singleChat.groupId] = [singleChat.pin]
+                    }
                     
                     if let parentExist = chatParentInPreviousChats, parentExist.isSelected {
                         parentChat.isSelected = true
@@ -214,14 +321,11 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                     }
                 }
             }
-            self.tempChats = tempChats
-            if ChatWALikeVC.filterMain == 0 {
-                self.chats = tempChats
-            } else if ChatWALikeVC.filterMain == 1 {
-                self.chats = tempChats.filter({ Int($0.counter) ?? 0 > 0 })
-            } else {
-                self.chats = tempChats.filter({ !$0.groupId.isEmpty })
+            tempChats.sort(by: { $0.pinned > $1.pinned })
+            if self.archivedChats.count > 0 {
+                tempChats.insert(Chat(pin: "Archived"), at: 0)
             }
+            self.chats = tempChats
             completion()
         }
     }
@@ -325,6 +429,9 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         }
         let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0")
         var finalHeight = 75.0
+        if self.archivedChats.count > 0 && indexPath.row == 0 {
+            finalHeight = 50.0
+        }
         if fontSize == 4 {
             finalHeight += 10
         } else if fontSize == 6 {
@@ -340,6 +447,102 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         } else if scrollView.contentOffset.y >= sectionHeaderHeight {
             scrollView.contentInset.top = -sectionHeaderHeight
         }
+    }
+    
+    public func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        let data: Chat
+        if isFiltering {
+            data = fillteredData[indexPath.row] as! Chat
+        } else {
+            data = chats[indexPath.row]
+        }
+        if !data.isParent {
+            if self.archivedChats.count > 0 && indexPath.row == 0 {
+                return nil
+            }
+            let archiveAction = UIContextualAction(style: .normal, title: "Archive".localized()) { (_, _, completionHandler) in
+                DispatchQueue.global().async {
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        do {
+                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+                                "pinned" : 0,
+                                "archived" : Date().currentTimeMillis()
+                            ], _where: "l_pin = '\(data.pin)'")
+                        } catch {
+                            rollback.pointee = true
+                            print("Access database error: \(error.localizedDescription)")
+                        }
+                    })
+                }
+                self.chats.remove(at: indexPath.row)
+                tableView.deleteRows(at: [indexPath], with: .right)
+                self.getChats() {
+                    DispatchQueue.main.async {
+                        self.tableView.reloadData()
+                        self.isGettingData = false
+                    }
+                }
+                completionHandler(true)
+            }
+            let archiveIcon = UIImage(systemName: "archivebox.fill")!
+            archiveAction.backgroundColor = UIColor.mainColor
+            archiveAction.image = archiveIcon
+
+            var textPinned = "Pin".localized()
+            var pinnedDate = Date().currentTimeMillis()
+            var imagePinned = UIImage(systemName: "pin.fill")!
+            if data.pinned != 0 && !data.isFolPinned {
+                textPinned = "Unpin".localized()
+                pinnedDate = 0
+                imagePinned = UIImage(systemName: "pin.slash.fill")!
+            }
+            let unpinAction = UIContextualAction(style: .normal, title: textPinned) { (_, _, completionHandler) in
+                if pinnedDate != 0 && ((self.listMaxArchived[data.groupId] != nil && self.listMaxArchived[data.groupId]!.count == 3) || (self.listMaxArchived.count == 3)) {
+                    let alertController = LibAlertController(
+                        title: "You can only pin 3 chats".localized(),
+                        message: nil,
+                        preferredStyle: .alert
+                    )
+                    
+                    alertController.addAction(UIAlertAction(title: "OK".localized(), style: .cancel, handler: nil))
+                    
+                    if UIApplication.shared.visibleViewController?.navigationController != nil {
+                        UIApplication.shared.visibleViewController?.navigationController?.present(alertController, animated: true, completion: nil)
+                    } else {
+                        UIApplication.shared.visibleViewController?.present(alertController, animated: true, completion: nil)
+                    }
+                } else {
+                    DispatchQueue.global().async {
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            do {
+                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+                                    "pinned" : pinnedDate
+                                ], _where: "l_pin = '\(data.pin)'")
+                            } catch {
+                                rollback.pointee = true
+                                print("Access database error: \(error.localizedDescription)")
+                            }
+                        })
+                    }
+                    self.chats.remove(at: indexPath.row)
+                    tableView.deleteRows(at: [indexPath], with: .right)
+                    self.getChats() {
+                        DispatchQueue.main.async {
+                            self.tableView.reloadData()
+                            self.isGettingData = false
+                        }
+                    }
+                }
+                completionHandler(true)
+            }
+            let pinIcon = imagePinned
+            unpinAction.backgroundColor = UIColor.darkGray
+            unpinAction.image = pinIcon
+
+            let configuration = UISwipeActionsConfiguration(actions: [archiveAction, unpinAction])
+            return configuration
+        }
+        return nil
     }
     
     public func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -662,6 +865,35 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                     }
                 }
             }
+            return cell
+        }
+        
+        if self.archivedChats.count > 0 && indexPath.row == 0 {
+            let imageView = UIImageView()
+            content.addSubview(imageView)
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                imageView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                imageView.widthAnchor.constraint(equalToConstant: 20.0),
+                imageView.heightAnchor.constraint(equalToConstant: 20.0),
+                imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 25.0)
+            ])
+            imageView.image = UIImage(systemName: "archivebox")!
+            imageView.tintColor = .darkGray
+            
+            let titleView = UILabel()
+            content.addSubview(titleView)
+            titleView.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 25.0),
+                titleView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40.0),
+                titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            ])
+            titleView.font = UIFont.boldSystemFont(ofSize: 14 + String.offset())
+            titleView.text = "Archived".localized()
+            titleView.textColor = .darkGray
+            cell.backgroundColor = .clear
+            cell.separatorInset = UIEdgeInsets(top: 0, left: 60.0, bottom: 0, right: 0)
             return cell
         }
         
@@ -1042,6 +1274,13 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             data = fillteredData[indexPath.row] as! Chat
         } else {
             data = chats[indexPath.row]
+        }
+        if self.archivedChats.count > 0 && indexPath.row == 0 {
+            let controller = ArchivedChatView()
+            controller.archivedChats = archivedChats
+            controller.hidesBottomBarWhenPushed = true
+            navigationController?.show(controller, sender: nil)
+            return
         }
         if data.isParent {
             expandCollapseChats(tableView: tableView, indexPath: indexPath)

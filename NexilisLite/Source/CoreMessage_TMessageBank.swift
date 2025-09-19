@@ -1443,7 +1443,7 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
 
-    public static func getSendVerifyChangeDevice(p_email: String, p_vercode: String, number: String = "", deviceFingerprint: String = "", publicKey: String = "", signature: String = "") -> TMessage {
+    public static func getSendVerifyChangeDevice(p_email: String, p_vercode: String, number: String = "", deviceFingerprint: String = "", publicKey: String = "", signature: String = "", totp: String = "") -> TMessage {
         let me = User.getMyPin()!
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.SEND_VERIFY_LOGIN
@@ -1464,6 +1464,9 @@ public class CoreMessage_TMessageBank {
         }
         if !signature.isEmpty {
             tmessage.mBodies[CoreMessage_TMessageKey.SIGNATURE] = signature
+        }
+        if !totp.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.TOTP] = totp
         }
         return tmessage;
     }
@@ -2327,7 +2330,7 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
-    public static func getSignUpSignInAPI(p_name: String, p_password: String, deviceFingerprint: String = "", publicKey: String = "", signature: String = "") -> TMessage {
+    public static func getSignUpSignInAPI(p_name: String, p_password: String, deviceFingerprint: String = "", publicKey: String = "", signature: String = "", totp: String = "") -> TMessage {
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.SIGN_UP_AND_SIGN_IN_API
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
@@ -2346,6 +2349,9 @@ public class CoreMessage_TMessageBank {
         }
         if !signature.isEmpty {
             tmessage.mBodies[CoreMessage_TMessageKey.SIGNATURE] = signature
+        }
+        if !totp.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.TOTP] = totp
         }
         return tmessage
     }

@@ -4071,10 +4071,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
             if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
                 if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 && (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" {
-                    let date = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
-                    let pastDate = date.addingTimeInterval(-10 * 60)
-                    let differenceInSeconds = date.timeIntervalSince(pastDate)
-                    if abs(differenceInSeconds) <= 15 * 60 {
+                    let valueDate = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
+                    let nowDate = Date()
+                    let diffInSeconds = nowDate.timeIntervalSince(valueDate)
+                    if diffInSeconds <= 15 * 60 {
                         children.insert(edit, at: children.count - 1)
                     }
                 }

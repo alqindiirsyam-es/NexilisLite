@@ -349,8 +349,8 @@ class MFAViewController: UIViewController {
                                 tMessage.mBodies[CoreMessage_TMessageKey.PUBLIC_KEY] = publicKey
                             }
                         }
-                        let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
-                        let otp = try TOTPGenerator.generateTOTP(base32Secret: secret, digits: 6, timeStepSeconds: 300)
+//                        let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
+                        let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 30)
                         tMessage.mBodies[CoreMessage_TMessageKey.TOTP] = otp
                         if let response = Nexilis.writeAndWait(message: tMessage) {
                             if response.isOk() {
