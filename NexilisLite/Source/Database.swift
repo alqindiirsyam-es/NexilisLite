@@ -118,6 +118,7 @@ public class Database {
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "story_thumb", columnType: "TEXT", defaultValue: "")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "story_pin", columnType: "TEXT", defaultValue: "")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "attachment_speciality", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "is_bot", columnType: "INTEGER", defaultValue: "0")
                 
                 //COMMUNITY
                 changeNameColumn(database: fmdb, tableName: "COMMUNITY", oldColumnName: "group_type", newColumnName: "community_type")
@@ -365,7 +366,8 @@ public class Database {
                                "'story_thumb' TEXT," +
                                "'story_pin' TEXT," +
                                "'is_pinned' INTEGER DEFAULT 0," +
-                               "'attachment_speciality' TEXT" +
+                               "'attachment_speciality' TEXT," +
+                               "'is_bot' INTEGER DEFAULT 0" +
                                 ")", values: nil)
         
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_opposite on MESSAGE (opposite_pin, chat_id)", values: nil)

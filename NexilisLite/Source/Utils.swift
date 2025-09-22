@@ -4012,7 +4012,7 @@ public final class MessageGuardLite {
                           mime: "application/octet-stream",
                           data: nil)
         }
-        let pattern = "[\\p{C}\\u200B-\\u200F\\uFEFF\\u202A-\\u202E]"
+        let pattern = #"[\p{C}&&[^\t\n\r]][\u200B-\u200F\uFEFF\u202A-\u202E]"#
         let regex = try! NSRegularExpression(pattern: pattern)
         let clean = regex.stringByReplacingMatches(in: input,
                                                    options: [],

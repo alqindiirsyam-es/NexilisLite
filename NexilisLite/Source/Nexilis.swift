@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.64"
+    public static var cpaasVersion = "5.0.65"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1629,6 +1629,7 @@ public class Nexilis: NSObject {
                 let is_delete_retention = message.getBodyAsLong(key: CoreMessage_TMessageKey.IS_DELETED_RETENTION, default_value: 0)
                 let is_forwarded_message = message.getBodyAsLong(key: CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE, default_value: 0)
                 let opposite_pin = message.getBody(key: CoreMessage_TMessageKey.OPPOSITE_PIN, default_value: "")
+                let is_bot = message.getBodyAsInteger(key: CoreMessage_TMessageKey.IS_BOT, default_value: 0)
                 //print("prepare save db")
                 do {
                     _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
@@ -1667,7 +1668,8 @@ public class Nexilis: NSObject {
                         "is_secret" : is_secret,
                         "is_deleted_retention" : is_delete_retention,
                         "is_forwarded_message" : is_forwarded_message,
-                        "attachment_speciality" : message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY, default_value:  "")
+                        "attachment_speciality" : message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY, default_value:  ""),
+                        "is_bot" : is_bot
                     ], replace: true)
                 } catch {
                     print("ERROR: \(error)")
@@ -1710,7 +1712,7 @@ public class Nexilis: NSObject {
                     }
                 }
                 if pin == me {
-                    pin = l_pin
+                    pin = l_pin != me ? l_pin : f_pin
                 }
                 var counter : Int? = nil
                 if !withStatus {

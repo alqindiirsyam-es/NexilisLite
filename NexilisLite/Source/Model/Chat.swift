@@ -34,6 +34,7 @@ public class Chat: Model {
     public var isSelected: Bool
     public var isParent: Bool
     public var pinned: Int64
+    public var isBot: Int
     public var isFolPinned: Bool
     
     public init(pin: String) {
@@ -62,6 +63,7 @@ public class Chat: Model {
         self.isSelected = false
         self.isParent = false
         self.pinned = 0
+        self.isBot = 0
         self.isFolPinned = false
     }
     
@@ -91,10 +93,11 @@ public class Chat: Model {
         self.isSelected = false
         self.isParent = false
         self.pinned = 0
+        self.isBot = 0
         self.isFolPinned = false
     }
     
-    public init(fpin:String, pin: String, messageId: String, counter: String, messageText: String, serverDate: String, image: String, video: String, file: String, attachmentFlag: String, messageScope: String, name: String, profile: String, official: String, status: String, credential: String, lock: String, thumb: String = "", audio: String = "", gif: String = "", groupId: String = "", groupName: String = "", isSelected: Bool = false, isParent: Bool = false, pinned: Int64 = 0, isFolPinned: Bool = false) {
+    public init(fpin:String, pin: String, messageId: String, counter: String, messageText: String, serverDate: String, image: String, video: String, file: String, attachmentFlag: String, messageScope: String, name: String, profile: String, official: String, status: String, credential: String, lock: String, thumb: String = "", audio: String = "", gif: String = "", groupId: String = "", groupName: String = "", isSelected: Bool = false, isParent: Bool = false, pinned: Int64 = 0, isBot: Int = 0, isFolPinned: Bool = false) {
         self.fpin = fpin
         self.pin = pin
         self.messageId = messageId
@@ -120,6 +123,7 @@ public class Chat: Model {
         self.isSelected = isSelected
         self.isParent = isParent
         self.pinned = pinned
+        self.isBot = isBot
         self.isFolPinned = isFolPinned
     }
     
@@ -278,15 +282,15 @@ public class Chat: Model {
                     lastQuery = "m.audio_id IS NOT NULL AND m.audio_id != ''"
                 }
                 var query = """
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and ms.message_id = m.message_id \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and ms.message_id = m.message_id \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and ms.message_id = m.message_id \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and ms.message_id = m.message_id \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, ms.pinned from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, ms.pinned from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
                             order by 6 desc
                             """
                 if !lastQuery.isEmpty {
@@ -328,7 +332,8 @@ public class Chat: Model {
                                         gif: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 17) ?? "" : cursorData.string(forColumnIndex: 18) ?? "",
                                         groupId: cursorData.string(forColumnIndex: 19) ?? "",
                                         groupName: cursorData.string(forColumnIndex: 20) ?? "",
-                                        pinned: cursorData.longLongInt(forColumnIndex: 21))
+                                        pinned: cursorData.longLongInt(forColumnIndex: 21),
+                                        isBot: Int(cursorData.string(forColumnIndex: 22) ?? "0") ?? 0)
                         chats.append(chat)
                     }
                     cursorData.close()

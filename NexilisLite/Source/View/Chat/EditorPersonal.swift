@@ -38,6 +38,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     @IBOutlet weak var constraintLeftTextField: NSLayoutConstraint!
     @IBOutlet weak var constraintBottomTableViewWithTextfield: NSLayoutConstraint!
     @IBOutlet weak var viewAttachment: UIStackView!
+    @IBOutlet weak var tableMention: UITableView!
+    @IBOutlet weak var heightTableMention: NSLayoutConstraint!
+    @IBOutlet weak var contraintBottomMention: NSLayoutConstraint!
     public var dataPerson: [String: String?] = [:]
     var dataMessages: [[String: Any?]] = []
     var dataDates: [String] = []
@@ -104,9 +107,16 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var multipleOffsetUp = 1
     var lastOffsetDown = 1
     var gettingDataMessage = true
+    var keyboardHeightForMention: CGFloat?
+    var listMentionWithText:[User] = []
+    var listMentionInTextField:[User] = []
+    var tempListMentionWithText:[User] = []
+    var tempListMentionInTextField:[User] = []
     var showingLink = ""
     var isAlwaysHideLinkPreview = false
     var timerCheckLink: Timer?
+    var lastPositionCursorMention = 0
+    var lastTextLength = 0
     var timerFakeProgress: Timer?
     var showMenuContext = false
     var touchedSubview = UIView()
@@ -143,6 +153,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var tableViewConfigFile: UITableView!
     var specFileString = ""
     var contextCC = ""
+    
+    var tableMentionEdit = UITableView()
+    var heightTableEditMention: NSLayoutConstraint!
     
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
@@ -305,6 +318,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             }
             dataMessageForward = nil
         }
+        
+        tableMention.register(UITableViewCell.self, forCellReuseIdentifier: "cellMention")
+        tableMention.dataSource = self
+        tableMention.delegate = self
+        tableMention.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
         
         if isContactCenter && !isRequestContactCenter && !onGoingCC {
             var companyName = ""
@@ -662,8 +680,22 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                        let dataJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
                         let last_m = dataJson["text"] ?? ""
                         let last_r = dataJson["reffId"] ?? ""
+                        let list_m = dataJson["list_mention"] as? [[String: String]] ?? []
+                        
+                        if list_m.count > 0 {
+                            for list in list_m {
+                                let f_pin = list["f_pin_mention"] ?? ""
+                                let upper = list["upper"] ?? ""
+                                let userFromBuddy = User.getData(pin: f_pin, lPin: l_pin)
+                                if userFromBuddy != nil {
+                                    userFromBuddy!.ex_block = upper
+                                    listMentionInTextField.append(userFromBuddy!)
+                                }
+                            }
+                        }
+                        
                         if !last_m.isEmpty {
-                            textFieldSend.attributedText = last_m.richText(isEditing: true)
+                            textFieldSend.attributedText = last_m.richText(isEditing: true, listMentionInTextField: listMentionInTextField)
                             textFieldSend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black
                         }
                         
@@ -964,7 +996,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func addDataMessage() {
         multipleOffsetUp += 1
         let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0"
-        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
+        let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned, is_bot FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20*\(multipleOffsetUp-1) ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
@@ -999,6 +1031,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row[TypeDataMessage.is_forwarded] = Int(cursorData.int(forColumnIndex: 25))
                         row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 26)
                         row[TypeDataMessage.is_pinned] = cursorData.string(forColumnIndex: 27)
+                        row[TypeDataMessage.is_bot] = cursorData.string(forColumnIndex: 28)
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"]  as? String ?? "")'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -1110,7 +1143,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func getData(offset: Int64 = 0) {
 //        let queryCount = "SELECT COUNT(*) FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0"
 //        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '3' OR message_scope_id = '18') AND is_call_center = 0 order by server_date asc LIMIT CASE WHEN (\(queryCount))-\(dataMessages.count)>=20 THEN 20 ELSE (\(queryCount))-\(dataMessages.count) END OFFSET CASE WHEN (\(queryCount))>=\(20*multipleOffsetUp) THEN (\(queryCount))-\(20*multipleOffsetUp) ELSE 0 END"
-        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc LIMIT -1 OFFSET \(offset)"
+        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned, is_bot FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc LIMIT -1 OFFSET \(offset)"
         if isContactCenter {
             if complaintId.isEmpty {
                 query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc LIMIT -1 OFFSET \(offset)"
@@ -1180,6 +1213,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row[TypeDataMessage.is_forwarded] = Int(cursorData.int(forColumnIndex: 25))
                         row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 26) ?? ""
                         row[TypeDataMessage.is_pinned] = cursorData.string(forColumnIndex: 27) ?? ""
+                        row[TypeDataMessage.is_bot] = Int (cursorData.string(forColumnIndex: 28) ?? "0")
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as? String ?? "")'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -1772,6 +1806,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     row["is_stared"] = "0"
                     row[TypeDataMessage.spec_file] = chatData[CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY]
                     row[TypeDataMessage.is_forwarded] = Int(chatData[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE] ?? "0")
+                    row[TypeDataMessage.is_bot] = Int(chatData[CoreMessage_TMessageKey.IS_BOT] ?? "0")
                     row["isSelected"] = false
                     if !self.dataDates.contains("Today".localized()) {
                         self.dataDates.append("Today".localized())
@@ -2029,7 +2064,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func appendNewMessage(messageId: String) {
         var row: [String: Any?] = [:]
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned from MESSAGE where message_id = '\(messageId)'"), cursorData.next() {
+            if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned, is_bot from MESSAGE where message_id = '\(messageId)'"), cursorData.next() {
                 row["message_id"] = cursorData.string(forColumnIndex: 0)
                 row["f_pin"] = cursorData.string(forColumnIndex: 1)
                 row["l_pin"] = cursorData.string(forColumnIndex: 2)
@@ -2058,6 +2093,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 row[TypeDataMessage.is_forwarded] = Int(cursorData.int(forColumnIndex: 25))
                 row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 26)
                 row[TypeDataMessage.is_pinned] = cursorData.string(forColumnIndex: 27)
+                row[TypeDataMessage.is_bot] = Int (cursorData.string(forColumnIndex: 28) ?? "0")
                 row["progress"] = 0.0
                 row["isSelected"] = false
                 row["chat_date"] = "Today".localized()
@@ -2630,7 +2666,17 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         self.removeFromParent()
         if !self.isContactCenter {
             let l_pin = self.dataPerson["f_pin"]!!
-            let data: [String: String] = ["text": self.textFieldSend.textColor != UIColor.lightGray ? self.textFieldSend.text! : "", "reffId": self.reffId ?? ""]
+            var data: [String: Any] = ["text": self.textFieldSend.textColor != UIColor.lightGray ? self.textFieldSend.text! : "", "reffId": self.reffId ?? ""]
+            if listMentionInTextField.count > 0 {
+                var dataMention: [[String: String]] = []
+                for list in listMentionInTextField {
+                    var dataTemp: [String: String] = [:]
+                    dataTemp["f_pin_mention"] = list.pin
+                    dataTemp["upper"] = list.ex_block
+                    dataMention.append(dataTemp)
+                }
+                data["list_mention"] = dataMention
+            }
             if let jsonData = try? JSONSerialization.data(withJSONObject: data, options: []),
                let jsonString = String(data: jsonData, encoding: .utf8) {
                 SecureUserDefaults.shared.set(jsonString, forKey: "new_saved_\(l_pin)")
@@ -2691,6 +2737,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             self.constraintViewTextField.constant = 0
             self.constraintBottomAttachment.constant = 0
             self.constraintBottomContainerMultpileSelectSession.constant = 0
+            if self.contraintBottomMention.constant > 0 {
+                self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
+            }
+            keyboardHeightForMention = nil
             UIView.animate(withDuration: TimeInterval(duration), animations: {
                 self.view.layoutIfNeeded()
             })
@@ -2714,6 +2764,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             if self.constraintBottomAttachment.constant != keyboardHeight || self.constraintViewTextField.constant != keyboardHeight - 60 {
 //                self.constraintViewTextField.constant = keyboardHeight - 60
                 self.constraintBottomAttachment.constant = keyboardHeight
+                if self.contraintBottomMention.constant > 0 {
+                    self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
+                }
+                self.keyboardHeightForMention = keyboardHeight
                 if isSearching {
                     self.constraintBottomContainerMultpileSelectSession.constant = -keyboardHeight
                 }
@@ -2812,7 +2866,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if isContactCenter {
             opposite_pin = ""
         } else {
-            opposite_pin = idMe ?? ""
+            opposite_pin = l_pin
         }
         var credential = credential
         if isConfidential {
@@ -2821,6 +2875,37 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         var read_receipts = read_receipts
         if isAck {
             read_receipts = "8"
+        }
+        if message_text.contains("@") && listMentionInTextField.count > 0 {
+            var diff: Int = 0
+            for i in 0..<listMentionInTextField.count {
+                let mention = listMentionInTextField[i]
+                guard let exBlockStr = mention.ex_block, let exBlock = Int(exBlockStr) else {
+                    continue // skip if ex_block is nil or not an integer
+                }
+                let nameWithMention = ("@" + mention.fullName).trimmingCharacters(in: .whitespaces)
+                let pinString = "@\(mention.pin)"
+                let upperBound = exBlock + diff
+                let lowerBound = upperBound - nameWithMention.count + 1
+                guard lowerBound >= 0, upperBound < message_text.count else {
+                    continue // prevent index out-of-range
+                }
+                var afterMention = ""
+                let nextCharIndex = message_text.index(message_text.startIndex, offsetBy: upperBound + 1, limitedBy: message_text.endIndex)
+                if let index = nextCharIndex, index < message_text.endIndex {
+                    let nextChar = message_text[index]
+                    if nextChar != "\n" && nextChar != " " {
+                        afterMention = " "
+                    }
+                }
+                let startIndex = message_text.index(message_text.startIndex, offsetBy: lowerBound)
+                let endIndex = message_text.index(message_text.startIndex, offsetBy: upperBound + 1)
+                let range = startIndex..<endIndex
+                if message_text[range] == nameWithMention {
+                    message_text.replaceSubrange(range, with: pinString + afterMention)
+                    diff += (pinString + afterMention).count - nameWithMention.count
+                }
+            }
         }
         var is_secret = is_secret
         if isSecret {
@@ -2840,10 +2925,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     if res2.verdict == .sanitized {
                         isSanitizedHtml = true
                     }
-                    if let clean2 = res.data, let str2 = String(data: clean, encoding: .utf8) {
+                    if let str2 = String(data: clean, encoding: .utf8), isSanitizedHtml {
                         message_text = str2
                     }
-                } else {
+                } else if isSanitizedText {
                     message_text = str
                 }
             }
@@ -2858,7 +2943,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             
             if !protectionType.isEmpty {
                 DispatchQueue.main.async {
-                    self.view.makeToast("Your message is protected with sanitized \(protectionType) (Message Guard)".localized(), duration: 3)
+                    self.view.makeToast("Your message is protected with sanitized \(protectionType) (Message Guard)".localized(), duration: 3, position: .center)
                 }
             }
             
@@ -2900,6 +2985,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         row[TypeDataMessage.opposite_pin] = opposite_pin
         row[TypeDataMessage.spec_file] = specFileString
         specFileString = ""
+        lastTextLength = 0
         if !dataDates.contains("Today".localized()) {
             dataDates.append("Today".localized())
             tableChatView.insertSections(IndexSet(integer: dataDates.count - 1), with: .none)
@@ -2954,6 +3040,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
         deleteReplyView()
         deleteLinkPreview()
+        listMentionInTextField.removeAll()
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
         self.tableChatView.scrollToBottom()
         if self.markerCounter != nil {
@@ -4282,6 +4369,31 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     public func textViewDidChangeSelection(_ textView: UITextView) {
+        lastPositionCursorMention = textView.selectedRange.location
+        var isShowMention = false
+
+        let fulltextForMention = textView.text.prefix(lastPositionCursorMention)
+        let lines = fulltextForMention.split(separator: "\n")
+        if let lastLineIndex = lines.lastIndex(where: { !$0.isEmpty }) {
+            let words = lines[lastLineIndex].split(separator: " ")
+            if let lastWordIndex = words.lastIndex(where: { !$0.isEmpty }) {
+                let mentionText = words[lastWordIndex]
+                let lastChar = fulltextForMention.last
+                if lastChar != "\n" && lastChar != " " {
+                    if mentionText.starts(with: "@") || (mentionText.count >= 2 && (self.textFieldSend.textColor != UIColor.lightGray || heightTableEditMention != nil) && extractFromAtIfSymbolsBefore(String(mentionText)) == nil) {
+                        showMention(text: mentionText.starts(with: "@") ? String(mentionText.dropFirst()) : String(mentionText))
+                        isShowMention = true
+                    } else if let textM = extractFromAtIfSymbolsBefore(String(mentionText)) {
+                        showMention(text: String(textM.dropFirst()))
+                        isShowMention = true
+                    }
+                }
+            }
+        }
+        
+        if !isShowMention {
+            hideMention()
+        }
         if var nowTextFieldSend = self.textFieldSend {
             if isEditingMessage {
                 nowTextFieldSend = editTextView
@@ -4342,7 +4454,6 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         let cursorPositionIndent = textView.selectedRange.location
 
         // Prevent moving cursor before the 2-space indent
-        let lines = text.components(separatedBy: "\n")
         var adjustedCursorPosition = cursorPositionIndent
         
         for line in lines {
@@ -4362,6 +4473,21 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         if adjustedCursorPosition != cursorPositionIndent {
             textView.selectedRange = NSRange(location: adjustedCursorPosition, length: 0)
         }
+    }
+    
+    func extractFromAtIfSymbolsBefore(_ text: String) -> String? {
+        guard let atIndex = text.firstIndex(of: "@") else {
+            return nil
+        }
+        
+        let beforeAt = text[..<atIndex]
+        let afterAt = text[atIndex...]
+
+        // Define symbols as anything that's not a letter or digit
+        let symbolSet = CharacterSet.letters.union(.decimalDigits).inverted
+        let isAllSymbols = beforeAt.unicodeScalars.allSatisfy { symbolSet.contains($0) }
+
+        return isAllSymbols ? String(afterAt) : nil
     }
     
     public func textViewDidChange(_ textView: UITextView) {
@@ -4386,6 +4512,26 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         //indention code:
         let text = textView.text ?? ""
         let cursorPosition = textView.selectedRange.location
+        
+        let tempListMention = listMentionInTextField
+        if listMentionInTextField.count > 0 {
+            for j in 0..<listMentionInTextField.count {
+                var index = j
+                if tempListMention.count != listMentionInTextField.count {
+                    index = j - (tempListMention.count - listMentionInTextField.count)
+                }
+                var upper = (Int(listMentionInTextField[index].ex_block ?? "0") ?? 0)
+                if cursorPosition <= upper {
+                    upper += text.count - lastTextLength
+                    listMentionInTextField[index].ex_block = "\(upper)"
+                }
+                let lower = upper - listMentionInTextField[index].fullName.count
+                let name = listMentionInTextField[index].fullName.trimmingCharacters(in: .whitespaces)
+                if textView.text.substring(from: lower, to: upper) != "@\(name)" {
+                    listMentionInTextField.remove(at: index)
+                }
+            }
+        }
         
         // Handle Bullets (- [space] + letter → • )
         let bulletPattern = #"(?<=\n|^)- (\S)"#
@@ -4418,6 +4564,72 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         }
         
         handleRichText(textView)
+        lastTextLength = text.count
+    }
+    
+    private func showMention(text: String) {
+        if self.contraintBottomMention.constant < 0 {
+            if !isEditingMessage {
+                self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
+                UIView.animate(withDuration: 0.5, animations: {
+                    self.view.layoutIfNeeded()
+                })
+            }
+        }
+        listMentionWithText.removeAll()
+        Database.shared.database?.inTransaction({ fmdb, rollback in
+            do {
+                if "GPT SmartBot".lowercased().contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let gptUser = User(pin: "-997",
+                                    firstName: "GPT SmartBot",
+                                    lastName: "",
+                                    thumb: "",
+                                    userType: "0",
+                                    official: "1")
+                    listMentionWithText.insert(gptUser, at: 0)
+                }
+                listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
+                var nowTableMention = tableMention!
+                var nowHeightTableMention = heightTableMention!
+                if isEditingMessage {
+                    nowTableMention = tableMentionEdit
+                    if heightTableEditMention != nil {
+                        nowHeightTableMention = heightTableEditMention
+                    } else {
+                        return
+                    }
+                }
+                if listMentionWithText.count > 0 {
+                    if listMentionWithText.count < 5 {
+                        nowHeightTableMention.constant = CGFloat(44 * listMentionWithText.count)
+                    } else {
+                        nowHeightTableMention.constant = 44 * 4
+                    }
+                    nowTableMention.reloadData()
+                } else {
+                    nowHeightTableMention.constant = 44
+                    self.hideMention()
+                }
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+    }
+    
+    private func hideMention() {
+        if self.contraintBottomMention.constant > 0 {
+            listMentionWithText.removeAll()
+            tableMention.reloadData()
+            self.contraintBottomMention.constant = 0 - self.heightTableMention.constant
+            UIView.animate(withDuration: 0.5, animations: {
+                self.view.layoutIfNeeded()
+            })
+        } else if self.heightTableEditMention != nil && self.heightTableEditMention.constant != 0 {
+            listMentionWithText.removeAll()
+            tableMentionEdit.reloadData()
+            self.heightTableEditMention.constant = 0
+        }
     }
     
     private func checkLink(fullText: String) {
@@ -4565,6 +4777,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         if !self.viewTextfield.subviews.contains(self.containerLink){
             UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
                 self.constraintTopTextField.constant = self.constraintTopTextField.constant + 80
+                if self.contraintBottomMention.constant > 0 {
+                    self.contraintBottomMention.constant = self.contraintBottomMention.constant + 80 + self.heightTextFieldSend.constant
+                }
             }, completion: nil)
         }
         
@@ -4664,6 +4879,38 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        if listMentionInTextField.count > 0 {
+            for i in 0..<listMentionInTextField.count {
+                if lastPositionCursorMention == Int(listMentionInTextField[i].ex_block!)! + 1 {
+                    let fulltextForMention = textView.text.substring(from: 0, to: lastPositionCursorMention - 1)
+                    let diff = textView.text.count - fulltextForMention.count
+                    var text = textView.text ?? ""
+                    let nameMention = listMentionInTextField[i].fullName.trimmingCharacters(in: .whitespaces)
+                    let rangeReplacement = NSRange(location: lastPositionCursorMention - nameMention.count - 1, length: nameMention.count + 1)
+                    let replacementText = ""
+                    
+                    let copyAttributedText = text.richText(isEditing: true, listMentionInTextField: listMentionInTextField)
+                    copyAttributedText.removeAttribute(.foregroundColor, range: rangeReplacement)
+                    
+                    textView.attributedText = copyAttributedText
+
+                    // Replace the old text with the new text using the replaceSubrange(_:with:) method
+                    if let startIndex = text.index(text.startIndex, offsetBy: rangeReplacement.location, limitedBy: text.endIndex),
+                       let endIndex = text.index(startIndex, offsetBy: rangeReplacement.length, limitedBy: text.endIndex) {
+                        text.replaceSubrange(startIndex..<endIndex, with: replacementText)
+                    }
+                    listMentionInTextField.remove(at: i)
+                    
+                    textView.attributedText = text.richText(isEditing: true, listMentionInTextField: listMentionInTextField)
+                    
+                    let newPosition = textView.position(from: textView.beginningOfDocument, offset: textView.text.count - diff)
+                    textView.selectedTextRange = textView.textRange(from: newPosition!, to: newPosition!)
+                    textViewDidChangeSelection(textView)
+                    handleRichText(textView)
+                    return false
+                }
+            }
+        }
         let indent = handleIndent(textView, range, text)
         if !indent {
             handleRichText(textView)
@@ -4740,7 +4987,7 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
     
     private func handleRichText(_ textView: UITextView) {
         textView.preserveCursorPosition(withChanges: { _ in
-            textView.attributedText = textView.text.richText(isEditing: true)
+            textView.attributedText = textView.text.richText(isEditing: true, listMentionInTextField: self.listMentionInTextField)
             return .preserveCursor
         })
     }
@@ -5323,8 +5570,72 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
     }
     
     func showEditMessageView(at indexPath: IndexPath) {
+        tempListMentionWithText = listMentionWithText
+        tempListMentionInTextField = listMentionInTextField
+        listMentionWithText.removeAll()
+        listMentionInTextField.removeAll()
         let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         let oldText = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
+        var oldTextForTextview = oldText
+        let pattern = "@[\\w]+"
+        do {
+            let regex = try NSRegularExpression(pattern: pattern)
+            let nsrange = NSRange(oldText.startIndex..., in: oldText)
+            let matches = regex.matches(in: oldText, range: nsrange)
+            
+            let results = matches.map {
+                String(oldText[Range($0.range, in: oldText)!])
+            }
+            for result in results {
+                let pinRes = result.components(separatedBy: "@")[1]
+                Database.shared.database?.inTransaction({ fmdb, rollback in
+                    do {
+                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name || ' ' || ifnull(last_name, '') name FROM GROUPZ_MEMBER where f_pin = '\(pinRes)'"), cursor.next() {
+                            let user = User(pin: "")
+                            user.pin = cursor.string(forColumnIndex: 0) ?? ""
+                            user.firstName = cursor.string(forColumnIndex: 1) ?? ""
+                            if !user.pin.isEmpty {
+                                var fixUser = User.getDataCanNil(pin: user.pin, fmdb: fmdb)
+                                if fixUser == nil {
+                                    fixUser = user
+                                }
+                                var indexAt = 0
+                                if let range = oldTextForTextview.range(of: result) {
+                                    indexAt = oldTextForTextview.distance(from: oldTextForTextview.startIndex, to: range.lowerBound)
+                                }
+                                fixUser?.ex_block = "\(indexAt + fixUser!.fullName.count)"
+                                listMentionWithText.append(fixUser!)
+                                listMentionInTextField.append(fixUser!)
+                                oldTextForTextview = oldTextForTextview.replacingOccurrences(of: result, with: "@\(fixUser!.fullName)")
+                                lastTextLength = oldTextForTextview.count
+                            }
+                            cursor.close()
+                        } else if pinRes == "-997" {
+                            let gptUser = User(pin: "-997",
+                                            firstName: "GPT SmartBot",
+                                            lastName: "",
+                                            thumb: "",
+                                            userType: "0",
+                                            official: "1")
+                            var indexAt = 0
+                            if let range = oldTextForTextview.range(of: result) {
+                                indexAt = oldTextForTextview.distance(from: oldTextForTextview.startIndex, to: range.lowerBound)
+                            }
+                            gptUser.ex_block = "\(indexAt + gptUser.fullName.count)"
+                            listMentionWithText.append(gptUser)
+                            listMentionInTextField.append(gptUser)
+                            oldTextForTextview = oldTextForTextview.replacingOccurrences(of: result, with: "@\(gptUser.fullName)")
+                            lastTextLength = oldTextForTextview.count
+                        }
+                    } catch {
+                        rollback.pointee = true
+                        print("Access database error: \(error.localizedDescription)")
+                    }
+                })
+            }
+        } catch {
+            print("Invalid regex pattern")
+        }
         editVC = UIViewController()
         if let view = editVC.view {
             view.backgroundColor = .clear
@@ -5359,7 +5670,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             constraintHeighteditTextView = editTextView.heightAnchor.constraint(equalToConstant: 40)
             constraintBottomeditTextView.isActive = true
             constraintHeighteditTextView.isActive = true
-            editTextView.attributedText = oldText.richText(isEditing: true)
+            editTextView.attributedText = oldText.richText(isEditing: true, listMentionInTextField: listMentionInTextField)
             editTextView.becomeFirstResponder()
             
             buttonSendEdit.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
@@ -5367,7 +5678,38 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             buttonSendEdit.isEnabled = true
             buttonSendEdit.actionHandle(controlEvents: .touchUpInside,
              ForAction:{() -> Void in
-                let newText = self.editTextView.text ?? ""
+                var newText = self.editTextView.text ?? ""
+                if newText.contains("@") && self.listMentionInTextField.count > 0 {
+                    var diff: Int = 0
+                    for i in 0..<self.listMentionInTextField.count {
+                        let mention = self.listMentionInTextField[i]
+                        guard let exBlockStr = mention.ex_block, let exBlock = Int(exBlockStr) else {
+                            continue // skip if ex_block is nil or not an integer
+                        }
+                        let nameWithMention = ("@" + mention.firstName + " " + mention.lastName).trimmingCharacters(in: .whitespaces)
+                        let pinString = "@\(mention.pin)"
+                        let upperBound = exBlock + diff
+                        let lowerBound = upperBound - nameWithMention.count + 1
+                        guard lowerBound >= 0, upperBound < newText.count else {
+                            continue // prevent index out-of-range
+                        }
+                        var afterMention = ""
+                        let nextCharIndex = newText.index(newText.startIndex, offsetBy: upperBound + 1, limitedBy: newText.endIndex)
+                        if let index = nextCharIndex, index < newText.endIndex {
+                            let nextChar = newText[index]
+                            if nextChar != "\n" && nextChar != " " {
+                                afterMention = " "
+                            }
+                        }
+                        let startIndex = newText.index(newText.startIndex, offsetBy: lowerBound)
+                        let endIndex = newText.index(newText.startIndex, offsetBy: upperBound + 1)
+                        let range = startIndex..<endIndex
+                        if newText[range] == nameWithMention {
+                            newText.replaceSubrange(range, with: pinString + afterMention)
+                            diff += (pinString + afterMention).count - nameWithMention.count
+                        }
+                    }
+                }
                 if !newText.isEmpty && newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
                     let lastEdited = Int64(Date().currentTimeMillis())
                     let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id]  as? String ?? "", l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin]  as? String ?? "", message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id]  as? String ?? "", status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential]  as? String ?? "", attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag]  as? String ?? "", ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id]  as? String ?? "", message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id]  as? String ?? "", audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id]  as? String ?? "", video_id: dataMessages[indexPath.row][TypeDataMessage.video_id]  as? String ?? "", file_id: dataMessages[indexPath.row][TypeDataMessage.file_id]  as? String ?? "", thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id]  as? String ?? "", reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id]  as? String ?? "", read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts]  as? String ?? "", chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id]  as? String ?? "", is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center]  as? String ?? "", call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id]  as? String ?? "", opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin]  as? String ?? "", server_date: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", local_time_stamp: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", last_edit: lastEdited)
@@ -5394,6 +5736,10 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     }
                 }
                 self.isEditingMessage = false
+                self.listMentionWithText = self.tempListMentionWithText
+                self.listMentionInTextField = self.tempListMentionWithText
+                self.lastTextLength = self.textFieldSend.text?.count ?? 0
+                self.heightTableEditMention = nil
                 self.editVC.dismiss(animated: true)
              })
             buttonSendEdit.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
@@ -5434,6 +5780,17 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
             messageText.font = .systemFont(ofSize: 12 + offset())
             messageText.attributedText = oldText.richText()
+            
+            tableMentionEdit = UITableView()
+            tableMentionEdit.register(UITableViewCell.self, forCellReuseIdentifier: "cellEditMention")
+            tableMentionEdit.dataSource = self
+            tableMentionEdit.delegate = self
+            tableMentionEdit.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
+            tableMentionEdit.backgroundColor = .white
+            view.addSubview(tableMentionEdit)
+            tableMentionEdit.anchor(left: view.leftAnchor, bottom: editTextView.topAnchor, right: view.rightAnchor)
+            heightTableEditMention = tableMentionEdit.heightAnchor.constraint(equalToConstant: 0)
+            self.heightTableEditMention.isActive = true
         }
         editVC.modalTransitionStyle = .crossDissolve
         editVC.modalPresentationStyle = .overFullScreen
@@ -5448,16 +5805,25 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
     @objc func dismissEditVC(_ sender: ObjectGesture) {
         if editTextView.text == sender.message_id {
             self.isEditingMessage = false
+            listMentionWithText = tempListMentionWithText
+            listMentionInTextField = tempListMentionWithText
+            lastTextLength = textFieldSend.text?.count ?? 0
+            heightTableEditMention = nil
             editVC.dismiss(animated: true)
         } else if self.isEditingMessage {
             let alert = LibAlertController(title: "".localized(), message: "Discard edit?".localized(), preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "Cancel".localized(), style: UIAlertAction.Style.cancel, handler: nil))
             alert.addAction(UIAlertAction(title: "Discard".localized(), style: UIAlertAction.Style.default, handler: {(_) in
                 self.isEditingMessage = false
+                self.listMentionWithText = self.tempListMentionWithText
+                self.listMentionInTextField = self.tempListMentionWithText
+                self.lastTextLength = self.textFieldSend.text?.count ?? 0
+                self.heightTableEditMention = nil
                 self.editVC.dismiss(animated: true)
             }))
             editVC.present(alert, animated: true, completion: nil)
         } else {
+            lastTextLength = self.textFieldSend.text?.count ?? 0
             editVC.dismiss(animated: true)
         }
     }
@@ -6019,6 +6385,9 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             self.reffId = nil
             UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
                 self.constraintTopTextField.constant = self.constraintTopTextField.constant - 50 - (self.offset()*3)
+                if self.contraintBottomMention.constant > 0 {
+                    self.contraintBottomMention.constant = self.contraintBottomMention.constant - 50
+                }
             }, completion: nil)
         }
     }
@@ -6035,6 +6404,9 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             self.containerLink.removeFromSuperview()
             UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
                 self.constraintTopTextField.constant = self.constraintTopTextField.constant - 80
+                if self.contraintBottomMention.constant > 0 {
+                    self.contraintBottomMention.constant = self.contraintBottomMention.constant - 80
+                }
             }, completion: nil)
             self.showingLink = ""
         }
@@ -6136,6 +6508,50 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
             tableView.reloadData()
             return
+        }
+        if tableView == tableMention || tableView == tableMentionEdit {
+            tableView.deselectRow(at: indexPath, animated: true)
+            var nowTextField = textFieldSend!
+            if tableView == tableMentionEdit {
+                nowTextField = editTextView
+            }
+            let fulltextForMention = nowTextField.text.substring(from: 0, to: lastPositionCursorMention - 1)
+            let diff = nowTextField.text.count - fulltextForMention.count
+            let lines = fulltextForMention.split(separator: "\n")
+            if let lastLineIndex = lines.lastIndex(where: { !$0.isEmpty }) {
+                let words = lines[lastLineIndex].split(separator: " ")
+                if let lastWordIndex = words.lastIndex(where: { !$0.isEmpty }) {
+                    var lastWord = words[lastWordIndex]
+                    if let textM = extractFromAtIfSymbolsBefore(String(lastWord)) {
+                        lastWord = textM[textM.startIndex..<textM.endIndex]
+                    }
+                    if let rangeLastWord = fulltextForMention.range(of: lastWord, options: .backwards) {
+                        listMentionInTextField.append(listMentionWithText[indexPath.row])
+                        
+                        var addSpaceAfterReplacement = ""
+                        if diff == 0 {
+                            addSpaceAfterReplacement = " "
+                        }
+                        
+                        var text = nowTextField.text ?? ""
+                        let nameMention = listMentionWithText[indexPath.row].fullName.trimmingCharacters(in: .whitespaces)
+                        listMentionInTextField.last?.ex_block = "\(fulltextForMention.distance(from: fulltextForMention.startIndex, to: rangeLastWord.lowerBound) + nameMention.count)" //upperbound
+                        let replacementText = "@\(nameMention)"
+                        
+                        // Replace the old text with the new text using the replaceSubrange(_:with:) method
+                        text.replaceSubrange(rangeLastWord, with: replacementText + addSpaceAfterReplacement)
+                        
+                        nowTextField.attributedText = text.richText(isEditing: true, listMentionInTextField: listMentionInTextField)
+                        
+                        let newPosition = nowTextField.position(from: nowTextField.beginningOfDocument, offset: nowTextField.text.count - diff)
+                        nowTextField.selectedTextRange = nowTextField.textRange(from: newPosition!, to: newPosition!)
+                        
+                        hideMention()
+                        lastTextLength = nowTextField.text.count
+                        return
+                    }
+                }
+            }
         }
         if isContactCenter && indexPath.row == 0 && isRequestContactCenter {
             return
@@ -6268,6 +6684,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if tableView == tableViewConfigFile {
             return nil
         }
+        if tableView == tableMention || tableView == tableMentionEdit {
+            return .none
+        }
         let containerView = UIView()
         containerView.backgroundColor = .clear
         
@@ -6309,7 +6728,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     }
     
     public func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        if tableView == tableViewConfigFile {
+        if tableView == tableMention || tableView == tableMentionEdit || tableView == tableViewConfigFile {
             return 0
         }
         return 30
@@ -6335,6 +6754,31 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             cell.contentConfiguration = content
             cell.tintColor = .black
             return cell
+        }
+        if tableView == tableMention || tableView == tableMentionEdit {
+            let cellMention = tableView.dequeueReusableCell(withIdentifier: tableView == tableMention ? "cellMention" : "cellEditMention", for: indexPath as IndexPath)
+            var content = cellMention.defaultContentConfiguration()
+            content.textProperties.font = UIFont.systemFont(ofSize: 11 + offset())
+            content.imageProperties.tintColor = .black
+            content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+            if indexPath.row < listMentionWithText.count {
+                if listMentionWithText[indexPath.row].pin == "-997" {
+                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif"), let data = try? Data(contentsOf: urlGif), let source = CGImageSourceCreateWithData(data as CFData, nil), let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                        let staticImage = UIImage(cgImage: cgImage)
+                        content.image = staticImage.circleMasked
+                    } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif"), let data = try? Data(contentsOf: urlGif), let source = CGImageSourceCreateWithData(data as CFData, nil), let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                        let staticImage = UIImage(cgImage: cgImage)
+                        content.image = staticImage.circleMasked
+                    }
+                } else {
+                    getImage(name: listMentionWithText[indexPath.row].thumb, placeholderImage: UIImage(systemName: "person"), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                        content.image = image
+                    })
+                }
+                content.text = listMentionWithText[indexPath.row].firstName + " " + listMentionWithText[indexPath.row].lastName
+            }
+            cellMention.contentConfiguration = content
+            return cellMention
         }
         let idMe = User.getMyPin() as String?
         let dataMessages = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
@@ -6563,12 +7007,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         let audioChat = (dataMessages[indexPath.row]["audio_id"] as? String) ?? ""
         let gifChat = (dataMessages[indexPath.row]["gif_id"] as? String) ?? ""
         let dataTimer = listTimerCredential[(dataMessages[indexPath.row]["message_id"]  as? String ?? "")]
+        let is_bot = (dataMessages[indexPath.row][TypeDataMessage.is_bot] as? Int) ?? 0
         
         cell.backgroundColor = .clear
         cell.selectionStyle = .none
         let nameSender = UILabel()
         
-        if isContactCenter {
+        if isContactCenter || is_bot == 1 {
             profileMessage.frame.size = CGSize(width: 35, height: 35)
             cell.contentView.addSubview(profileMessage)
             profileMessage.translatesAutoresizingMaskIntoConstraints = false
@@ -6590,9 +7035,33 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             profileMessage.image = UIImage(systemName: "person")
             profileMessage.tintColor = .white
             profileMessage.contentMode = .scaleAspectFit
-            let user = User.getData(pin: dataMessages[indexPath.row]["f_pin"] as? String)
-            getImage(name: user?.thumb ?? "", placeholderImage: UIImage(systemName: "person.circle.fill")!, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
-                profileMessage.image = image
+            if is_bot == 1 {
+                if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                    profileMessage.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                        if error == nil {
+                            profileMessage.animationImages = image?.images
+                            profileMessage.animationDuration = image?.duration ?? 0.0
+                            profileMessage.animationRepeatCount = 0
+                            profileMessage.startAnimating()
+                        }
+                    }
+                } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                    profileMessage.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                        if error == nil {
+                            profileMessage.animationImages = image?.images
+                            profileMessage.animationDuration = image?.duration ?? 0.0
+                            profileMessage.animationRepeatCount = 0
+                            profileMessage.startAnimating()
+                        }
+                    }
+                }
+                nameSender.text = "GPT SmartBot"
+            } else {
+                let user = User.getData(pin: dataMessages[indexPath.row]["f_pin"] as? String)
+                getImage(name: user?.thumb ?? "", placeholderImage: UIImage(systemName: "person.circle.fill")!, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                    profileMessage.image = image
+                }
+                nameSender.text = user?.fullName ?? ""
             }
             profileMessage.contentMode = .scaleAspectFill
             
@@ -6604,7 +7073,6 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 nameSender.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 5).isActive = true
             }
             nameSender.font = UIFont.systemFont(ofSize: 12 + offset(), weight: UIFont.Weight(800))
-            nameSender.text = user?.fullName ?? ""
             nameSender.textAlignment = .right
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
                 nameSender.trailingAnchor.constraint(equalTo:profileMessage.leadingAnchor, constant: -5).isActive = true
@@ -6707,7 +7175,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         
         if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cell.contentView.leadingAnchor, constant: 60).isActive = true
-            if isContactCenter {
+            if isContactCenter || is_bot == 1 {
                 containerMessage.topAnchor.constraint(equalTo: nameSender.bottomAnchor).isActive = true
                 containerMessage.trailingAnchor.constraint(equalTo: profileMessage.leadingAnchor, constant: -5).isActive = true
             } else {
@@ -6750,7 +7218,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             
         } else {
             if markerCounter != nil && dataMessages[indexPath.row]["message_id"] as? String == markerCounter {
-                if isContactCenter {
+                if isContactCenter || is_bot == 1 {
                     containerMessage.topAnchor.constraint(equalTo: nameSender.bottomAnchor).isActive = true
                 } else {
                     containerMessage.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 35).isActive = true
@@ -6785,13 +7253,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 labelNewMessages.text = "Unread Messages".localized()
                 
             } else {
-                if isContactCenter {
+                if isContactCenter || is_bot == 1 {
                     containerMessage.topAnchor.constraint(equalTo: nameSender.bottomAnchor).isActive = true
                 } else {
                     containerMessage.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 5).isActive = true
                 }
             }
-            if isContactCenter {
+            if isContactCenter || is_bot == 1 {
                 containerMessage.leadingAnchor.constraint(equalTo: profileMessage.trailingAnchor, constant: 5).isActive = true
             } else {
                 if copySession || forwardSession || deleteSession {
@@ -8580,13 +9048,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
 //    }
     
     public func numberOfSections(in tableView: UITableView) -> Int {
-        if tableView == tableViewConfigFile {
+        if tableView == tableMention || tableView == tableMentionEdit || tableView == tableViewConfigFile {
             return 1
         }
         return dataDates.count
     }
     
     public func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        if tableView == tableMention || tableView == tableMentionEdit {
+            return listMentionWithText.count
+        }
         if tableView == tableViewConfigFile {
             return 2
         }
@@ -9256,6 +9727,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
         UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
             self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50 + (self.offset()*3)
+            if self.contraintBottomMention.constant > 0 {
+                self.contraintBottomMention.constant = self.contraintBottomMention.constant + self.heightTextFieldSend.constant
+            }
         }, completion: nil)
         if (self.currentIndexpath != nil) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
@@ -9664,6 +10138,7 @@ public class TypeDataMessage {
     public static let is_pinned = "is_pinned"
     public static let is_secret = "is_secret"
     public static let spec_file = "spec_file"
+    public static let is_bot = "is_bot"
 }
 
 extension String {

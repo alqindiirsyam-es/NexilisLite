@@ -2000,10 +2000,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     if res2.verdict == .sanitized {
                         isSanitizedHtml = true
                     }
-                    if let clean2 = res.data, let str2 = String(data: clean, encoding: .utf8) {
+                    if let str2 = String(data: clean, encoding: .utf8), isSanitizedHtml {
                         message_text = str2
                     }
-                } else {
+                } else if isSanitizedText {
                     message_text = str
                 }
             }
@@ -2018,7 +2018,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             
             if !protectionType.isEmpty {
                 DispatchQueue.main.async {
-                    self.view.makeToast("Your message is protected with sanitized \(protectionType) (Message Guard)".localized(), duration: 3)
+                    self.view.makeToast("Your message is protected with sanitized \(protectionType) (Message Guard)".localized(), duration: 3, position: .center)
                 }
             }
         }
@@ -3182,6 +3182,15 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                             }
                         }
                     }
+                    if "GPT SmartBot".lowercased().contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let gptUser = User(pin: "-997",
+                                        firstName: "GPT SmartBot",
+                                        lastName: "",
+                                        thumb: "",
+                                        userType: "0",
+                                        official: "1")
+                        listMentionWithText.insert(gptUser, at: 0)
+                    }
                     cursor.close()
                 }
                 listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
@@ -4248,6 +4257,22 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                 lastTextLength = oldTextForTextview.count
                             }
                             cursor.close()
+                        } else if pinRes == "-997" {
+                            let gptUser = User(pin: "-997",
+                                            firstName: "GPT SmartBot",
+                                            lastName: "",
+                                            thumb: "",
+                                            userType: "0",
+                                            official: "1")
+                            var indexAt = 0
+                            if let range = oldTextForTextview.range(of: result) {
+                                indexAt = oldTextForTextview.distance(from: oldTextForTextview.startIndex, to: range.lowerBound)
+                            }
+                            gptUser.ex_block = "\(indexAt + gptUser.fullName.count)"
+                            listMentionWithText.append(gptUser)
+                            listMentionInTextField.append(gptUser)
+                            oldTextForTextview = oldTextForTextview.replacingOccurrences(of: result, with: "@\(gptUser.fullName)")
+                            lastTextLength = oldTextForTextview.count
                         }
                     } catch {
                         rollback.pointee = true
@@ -5315,9 +5340,19 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             content.imageProperties.tintColor = .black
             content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
             if indexPath.row < listMentionWithText.count {
-                getImage(name: listMentionWithText[indexPath.row].thumb, placeholderImage: UIImage(systemName: "person"), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
-                    content.image = image
-                })
+                if listMentionWithText[indexPath.row].pin == "-997" {
+                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif"), let data = try? Data(contentsOf: urlGif), let source = CGImageSourceCreateWithData(data as CFData, nil), let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                        let staticImage = UIImage(cgImage: cgImage)
+                        content.image = staticImage.circleMasked
+                    } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif"), let data = try? Data(contentsOf: urlGif), let source = CGImageSourceCreateWithData(data as CFData, nil), let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                        let staticImage = UIImage(cgImage: cgImage)
+                        content.image = staticImage.circleMasked
+                    }
+                } else {
+                    getImage(name: listMentionWithText[indexPath.row].thumb, placeholderImage: UIImage(systemName: "person"), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                        content.image = image
+                    })
+                }
                 content.text = listMentionWithText[indexPath.row].firstName + " " + listMentionWithText[indexPath.row].lastName
             }
             cellMention.contentConfiguration = content

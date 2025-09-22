@@ -1624,6 +1624,9 @@ extension ContactChatViewController {
                                 }
                                 stringMessage.append(NSAttributedString(string: fullname + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                             }
+                            if data.messageScope == MessageScope.WHISPER && data.isBot == 1 {
+                                stringMessage.append(NSAttributedString(string: "GPT SmartBot" + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
+                            }
                             if data.lock == "1" {
                                 stringMessage.append(("🚫 _"+"This message was deleted".localized()+"_").richText())
                             } else {

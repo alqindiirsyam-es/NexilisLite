@@ -70,8 +70,12 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         let rightButton = UIButton(type: .system)
         let imageRight = UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .bold))
         rightButton.setImage(imageRight, for: .normal)
-        rightButton.tintColor = .white
-        rightButton.backgroundColor = .whatsappGreenColor
+        if #unavailable(iOS 26.0) {
+            rightButton.tintColor = .white
+            rightButton.backgroundColor = .whatsappGreenColor
+        } else {
+            rightButton.tintColor = .black
+        }
         rightButton.layer.cornerRadius = 15
         rightButton.clipsToBounds = true
         rightButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)

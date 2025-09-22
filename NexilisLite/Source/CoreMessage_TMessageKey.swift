@@ -527,4 +527,5 @@ public class CoreMessage_TMessageKey {
     public static let ACT_TIME = "ACTMS";
     
     public static let TOTP = "TOTP";
+    public static let IS_BOT = "ibot";
 }

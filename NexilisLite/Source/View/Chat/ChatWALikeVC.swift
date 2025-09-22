@@ -162,8 +162,12 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         let rightButton = UIButton(type: .system)
         let imageRight = UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .bold))
         rightButton.setImage(imageRight, for: .normal)
-        rightButton.tintColor = .white
-        rightButton.backgroundColor = .whatsappGreenColor
+        if #unavailable(iOS 26.0) {
+            rightButton.tintColor = .white
+            rightButton.backgroundColor = .whatsappGreenColor
+        } else {
+            rightButton.tintColor = .black
+        }
         rightButton.layer.cornerRadius = 15
         rightButton.clipsToBounds = true
         rightButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
@@ -214,7 +218,6 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 }
                 searchController.searchBar.isHidden = false
             }
-            self.isGettingData = false
         }
     }
     
@@ -230,6 +233,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             DispatchQueue.main.async {
                 self.tableView.reloadData()
                 self.loadingData = false
+                self.isGettingData = false
                 completion()
             }
         }
@@ -326,6 +330,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 tempChats.insert(Chat(pin: "Archived"), at: 0)
             }
             self.chats = tempChats
+            self.tempChats = tempChats
             completion()
         }
     }

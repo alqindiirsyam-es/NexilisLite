@@ -1096,7 +1096,7 @@ extension String {
     }
 
     private func processMentions(in text: NSMutableAttributedString, groupID: String, isEditing: Bool, listMentionInTextField: [User] = []) {
-        let regex = try? NSRegularExpression(pattern: "@(\\w+)", options: [])
+        let regex = try? NSRegularExpression(pattern: "@([\\w-]+)", options: [])
         let matches = regex?.matches(in: text.string, options: [], range: NSRange(location: 0, length: text.length)) ?? []
 
         for match in matches.reversed() {
@@ -1116,7 +1116,7 @@ extension String {
                 if let member = Member.getMember(f_pin: username) {
                     let fullName = "\(member.fullName)".trimmingCharacters(in: .whitespaces)
                     text.replaceCharacters(in: range, with: fullName)
-                    if !groupID.isEmpty, Member.getMemberInGroup(f_pin: username, group_id: groupID) != nil {
+                    if ((!groupID.isEmpty && Member.getMemberInGroup(f_pin: username, group_id: groupID) != nil) || username == "-997") {
                         let newRange = (text.string as NSString).range(of: "@\(fullName)")
                         text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: newRange.lowerBound, length: 1))
                         text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: newRange.lowerBound + 1, length: fullName.count))

@@ -179,6 +179,13 @@ public class Member: User {
                                         thumb: cursor.string(forColumnIndex: 3) ?? "",
                                         position: cursor.string(forColumnIndex: 4) ?? "")
                     }
+                    if f_pin == "-997" {
+                        member = Member(pin: "-997",
+                                        firstName: "GPT SmartBot",
+                                        lastName: "",
+                                        thumb: "",
+                                        position: "")
+                    }
                     cursor.close()
                 }
             } catch {
@@ -200,6 +207,13 @@ public class Member: User {
                                         lastName: cursor.string(forColumnIndex: 2) ?? "",
                                         thumb: cursor.string(forColumnIndex: 3) ?? "",
                                         position: cursor.string(forColumnIndex: 4) ?? "")
+                    }
+                    if f_pin == "-997" {
+                        member = Member(pin: "-997",
+                                        firstName: "GPT SmartBot",
+                                        lastName: "",
+                                        thumb: "",
+                                        position: "")
                     }
                     cursor.close()
                 }

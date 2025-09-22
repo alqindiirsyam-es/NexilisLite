@@ -940,6 +940,9 @@ extension PreviewAttachmentImageVideo: UITableViewDelegate, UITableViewDataSourc
     }
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        if tableView == tableViewConfigFile {
+            return 2
+        }
         return listMentionWithText.count
     }
     
