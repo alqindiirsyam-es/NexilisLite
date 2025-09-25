@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.65"
+    public static var cpaasVersion = "5.0.66"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1732,8 +1732,10 @@ public class Nexilis: NSObject {
                 if is_call_center == "0" {
                     do {
                         var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND message_scope_id = '\(MessageScope.WHISPER)' order by server_date desc LIMIT 1"
-                        if scope == "4" {
+                        if scope == MessageScope.GROUP {
                             queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(chat_id.isEmpty ? pin : l_pin)' AND chat_id = '\(chat_id)' AND message_scope_id = '\(MessageScope.GROUP)' order by server_date desc LIMIT 1"
+                        } else if scope == MessageScope.GPT_CHATBOT {
+                            queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND message_scope_id = '\(MessageScope.GPT_CHATBOT)' order by server_date desc LIMIT 1"
                         }
                         var messageId = ""
                         var pinned = 0

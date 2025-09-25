@@ -947,6 +947,9 @@ public final class Utils {
                     if Array(json.keys)[i] == "gptbot_url" {
                         Utils.setGPTBotUrl(value: Array(json.values)[i] as? String ?? "")
                     }
+                    if Array(json.keys)[i] == "gptbot_name" {
+                        Utils.setGPTBotName(value: Array(json.values)[i] as? String ?? "")
+                    }
                     if Array(json.keys)[i] == "default_sound_incmsg" {
                         Utils.setDefaultIncomingMsg(value: Array(json.values)[i] as? String ?? "")
                     }
@@ -1440,6 +1443,15 @@ public final class Utils {
             return value
         }
         return Utils.decrypt(str: "3wsj<B67B=rl;vlol0hq<<=vswwk")
+    }
+    public static func setGPTBotName(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "gptbot_name")
+    }
+    public static func getGPTBotName() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "gptbot_name") {
+            return value
+        }
+        return "GPT SmartBot"
     }
     static func setDebugBC(value: [String: String]) {
         SecureUserDefaults.shared.set(value, forKey: "debugBc")

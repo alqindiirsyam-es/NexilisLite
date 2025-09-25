@@ -540,7 +540,7 @@ class ContactChatViewController: UITableViewController {
                 do {
                     if self.isChooser == nil {
                         let gptUser = User(pin: "-997",
-                                        firstName: "GPT SmartBot",
+                                        firstName: Utils.getGPTBotName(),
                                         lastName: "",
                                         thumb: "",
                                         userType: "0",
@@ -1590,7 +1590,7 @@ extension ContactChatViewController {
                                 stringMessage.append(("🚫 _"+"You were deleted this message".localized()+"_").richText())
                             } else {
                                 let imageStatus = NSTextAttachment()
-                                if data.messageScope != MessageScope.CALL && data.messageScope != MessageScope.MISSED_CALL && !data.messageId.contains("NTFPIN_") {
+                                if data.messageScope != MessageScope.CALL && data.messageScope != MessageScope.MISSED_CALL && !data.messageId.contains("NTFPIN_") && data.messageScope != MessageScope.GPT_CHATBOT {
                                     let status = getRealStatus(messageId: data.messageId)
                                     if status == "0" {
                                         imageStatus.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
@@ -1625,7 +1625,7 @@ extension ContactChatViewController {
                                 stringMessage.append(NSAttributedString(string: fullname + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                             }
                             if data.messageScope == MessageScope.WHISPER && data.isBot == 1 {
-                                stringMessage.append(NSAttributedString(string: "GPT SmartBot" + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
+                                stringMessage.append(NSAttributedString(string: Utils.getGPTBotName() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                             }
                             if data.lock == "1" {
                                 stringMessage.append(("🚫 _"+"This message was deleted".localized()+"_").richText())

@@ -13,12 +13,12 @@ import nuSDKService
 public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     public var dataPerson : [String: String?] = [
         "f_pin" : "-997",
-        "firstName" : "GPT SmartBot",
+        "firstName" : Utils.getGPTBotName(),
         "picture" : ""
     ]
     var dataMessages: [[String: Any?]] = []
     var dataDates: [String] = []
-    var chatGPTMessages: [[String: String]] = []
+    var chatGPTMessages: [[String: Any?]] = []
     
     @IBOutlet var tableChatView: UITableView!
     @IBOutlet var viewTextField: UIView!
@@ -118,7 +118,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     
     public override func viewDidLoad() {
         super.viewDidLoad()
-        navigationController?.navigationBar.topItem?.title = "GPT SmartBot"
+        navigationController?.navigationBar.topItem?.title = Utils.getGPTBotName()
         if Nexilis.fromMAB {
             Nexilis.floatingButton.isHidden = true
         }
@@ -189,7 +189,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                     "message_id" : message_id ,
                     "f_pin" : "-997",
-                    "f_display_name" : "GPT SmartBot",
+                    "f_display_name" : Utils.getGPTBotName(),
                     "l_pin" : me,
                     "l_user_id" : String(user_id!),
                     "message_scope_id" : "31",
@@ -369,7 +369,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             self.tableChatView.endUpdates()
         }
         var gptRow : [String: String] = [:]
-        gptRow["role"] = row["f_pin"] as! String == "-997" ? "assistant" : "user"
+        gptRow["role"] = "user"
         gptRow["content"] = row["message_text"] as? String
         chatGPTMessages.append(gptRow)
         request(mesage: row["message_text"] as! String)
@@ -390,17 +390,15 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         }
         DispatchQueue.global().async {
             do {
-                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.requestGPTBot(message: mesage)) {
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.requestGPTBot(message: mesage), timeout: 30000) {
                     if response.isOk() {
                         let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
                         if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any?] {
                             DispatchQueue.main.async {
                                 self.dataMessages.removeAll(where: { $0["is_loading"] as? Bool == true })
                                 self.tableChatView.reloadData()
-                                var gptRow : [String: String] = [:]
-                                gptRow["role"] = json["role"] as? String
-                                gptRow["content"] = json["content"] as? String
-                                self.chatGPTMessages.append(gptRow)
+                                self.chatGPTMessages.append(json)
+                                print("HOHO: \(json)")
                                 guard let me = User.getMyPin() else {
                                     return
                                 }
@@ -425,13 +423,13 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                         _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                                             "message_id" : message_id ,
                                             "f_pin" : "-997",
-                                            "f_display_name" : "GPT SmartBot",
+                                            "f_display_name" : Utils.getGPTBotName(),
                                             "l_pin" : me,
                                             "l_user_id" : String(user_id!),
                                             "message_scope_id" : "31",
                                             "server_date" : server_date,
                                             "status" : "3",
-                                            "message_text" : gptRow["content"],
+                                            "message_text" : json["content"],
                                             "audio_id" : "",
                                             "video_id" : "",
                                             "image_id" : "",
@@ -483,7 +481,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                 row["message_scope_id"] = "31"
                                 row["server_date"] = server_date
                                 row["status"] = "3"
-                                row["message_text"] = gptRow["content"]
+                                row["message_text"] = json["content"]
                                 row["audio_id"] = ""
                                 row["video_id"] = ""
                                 row["image_id"] = ""
@@ -593,7 +591,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             }
             let titleNavigation = UILabel(frame: CGRect(x: 35, y: 0, width: viewAppBar.frame.size.width - 250, height: 44))
             viewAppBar.addSubview(titleNavigation)
-            titleNavigation.text = "GPT SmartBot"
+            titleNavigation.text = Utils.getGPTBotName()
             titleNavigation.textColor = .white
             titleNavigation.font = UIFont.systemFont(ofSize: 12 + offset()).bold
             
@@ -1851,24 +1849,6 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             containerMessage.clipsToBounds = true
             
             timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
-            
-            if (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"] as! String == "0") && (dataMessages[indexPath.row]["lock"] as? String != "2") {
-                cell.contentView.addSubview(statusMessage)
-                statusMessage.translatesAutoresizingMaskIntoConstraints = false
-                statusMessage.bottomAnchor.constraint(equalTo: timeMessage.topAnchor).isActive = true
-                statusMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
-                statusMessage.widthAnchor.constraint(equalToConstant: 15).isActive = true
-                statusMessage.heightAnchor.constraint(equalToConstant: 15).isActive = true
-                if (dataMessages[indexPath.row]["status"]! as! String == "1" || dataMessages[indexPath.row]["status"]! as! String == "2" ) {
-                    statusMessage.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
-                } else if (dataMessages[indexPath.row]["status"]! as! String == "3") {
-                    statusMessage.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
-                } else if (dataMessages[indexPath.row]["status"]! as! String == "8") {
-                    statusMessage.image = UIImage(named: "message_status_ack", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
-                } else {
-                    statusMessage.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.systemBlue)
-                }
-            }
             
         } else {
             if markerCounter != nil && dataMessages[indexPath.row]["message_id"] as? String == markerCounter {

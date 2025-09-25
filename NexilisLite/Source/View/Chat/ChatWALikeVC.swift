@@ -52,6 +52,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     var archivedChats: [Chat] = []
     var listMaxArchived: [String: [String]] = [:]
     var isGettingData = false
+    var timerReloadData: Timer?
     
     public override func viewDidLoad() {
         NotificationCenter.default.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
@@ -79,11 +80,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     }
     
     @objc func onDatabaseOpened(notification: NSNotification) {
-        DispatchQueue.main.async {
-            if self.loadingData {
-                self.refresh()
-            }
-        }
+        reloadAllData()
     }
     
     @objc func onDisconnected(notification: NSNotification) {
@@ -92,36 +89,48 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             self.chatGroupMaps.removeAll()
             self.chats.removeAll()
             self.tableView.reloadData()
-            self.refresh()
+            self.reloadAllData()
         }
     }
     
     @objc func onReloadTab(notification: NSNotification) {
-        DispatchQueue.main.async {
-            self.refresh()
-        }
+        reloadAllData()
     }
     
     @objc func onReload(notification: NSNotification) {
         DispatchQueue.main.async {
             let data:[AnyHashable : Any] = notification.userInfo!
             if data["member"] as? String == User.getMyPin()! {
-                self.refresh()
+                self.reloadAllData()
             } else if data["state"] as? Int == 99 {
-                self.refresh()
+                self.reloadAllData()
             }
         }
     }
     
     @objc func onReceiveMessage(notification: NSNotification) {
-        DispatchQueue.main.async {
-            self.refresh()
-        }
+        reloadAllData()
     }
     
     @objc func onStatusChat(notification: NSNotification) {
-        DispatchQueue.main.async {
-            self.refresh()
+        reloadAllData()
+    }
+    
+    private func reloadAllData() {
+//        print("reloadAllData")
+        DispatchQueue.main.async { [weak self] in
+            if self?.timerReloadData == nil && !self!.isGettingData {
+                self?.refresh()
+            } else {
+                self?.timerReloadData?.invalidate()
+                self?.timerReloadData = nil
+                self?.timerReloadData = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+                    if self != nil && !self!.isGettingData {
+                        self?.refresh()
+                        self?.timerReloadData = nil
+                    }
+                }
+            }
         }
     }
     
@@ -1083,7 +1092,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                         stringMessage.append(("🚫 _"+"You were deleted this message".localized()+"_").richText())
                     } else {
                         let imageStatus = NSTextAttachment()
-                        if data.messageScope != MessageScope.CALL && data.messageScope != MessageScope.MISSED_CALL {
+                        if data.messageScope != MessageScope.CALL && data.messageScope != MessageScope.MISSED_CALL && data.messageScope != MessageScope.GPT_CHATBOT {
                             let status = getRealStatus(messageId: data.messageId)
                             if status == "0" {
                                 imageStatus.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
@@ -1116,6 +1125,9 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                             fullname = components.prefix(2).joined(separator: " ")
                         }
                         stringMessage.append(NSAttributedString(string: fullname + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
+                    }
+                    if data.messageScope == MessageScope.WHISPER && data.isBot == 1 {
+                        stringMessage.append(NSAttributedString(string: Utils.getGPTBotName() + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                     }
                     if data.lock == "1" {
                         stringMessage.append(("🚫 _"+"This message was deleted".localized()+"_").richText())

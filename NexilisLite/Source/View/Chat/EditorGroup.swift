@@ -639,6 +639,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 data["name"] = c.string(forColumnIndex: 0)!
                 data["image_id"] = ""
                 c.close()
+            } else if f_pin == "-997" {
+                data["name"] = Utils.getGPTBotName()
+                data["image_id"] = ""
             } else {
                 data["name"] = "Unknown".localized()
             }
@@ -3182,9 +3185,9 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                             }
                         }
                     }
-                    if "GPT SmartBot".lowercased().contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if Utils.getGPTBotName().lowercased().contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         let gptUser = User(pin: "-997",
-                                        firstName: "GPT SmartBot",
+                                        firstName: Utils.getGPTBotName(),
                                         lastName: "",
                                         thumb: "",
                                         userType: "0",
@@ -4259,7 +4262,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                             cursor.close()
                         } else if pinRes == "-997" {
                             let gptUser = User(pin: "-997",
-                                            firstName: "GPT SmartBot",
+                                            firstName: Utils.getGPTBotName(),
                                             lastName: "",
                                             thumb: "",
                                             userType: "0",
@@ -5593,6 +5596,27 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 }
                 profileMessage.contentMode = .scaleAspectFill
             }
+            else if dataMessages[indexPath.row]["f_pin"] as? String == "-997" {
+                if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                    profileMessage.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                        if error == nil {
+                            profileMessage.animationImages = image?.images
+                            profileMessage.animationDuration = image?.duration ?? 0.0
+                            profileMessage.animationRepeatCount = 0
+                            profileMessage.startAnimating()
+                        }
+                    }
+                } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                    profileMessage.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                        if error == nil {
+                            profileMessage.animationImages = image?.images
+                            profileMessage.animationDuration = image?.duration ?? 0.0
+                            profileMessage.animationRepeatCount = 0
+                            profileMessage.startAnimating()
+                        }
+                    }
+                }
+            }
             else if (pictureImage != "" && pictureImage != nil) {
                 profileMessage.setImage(name: pictureImage!)
                 profileMessage.contentMode = .scaleAspectFill
@@ -5658,6 +5682,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             nameSender.font = UIFont.systemFont(ofSize: 12 + offset()).bold
             if dataMessages[indexPath.row]["f_pin"] as? String == "-999" {
                 nameSender.text = "Bot"
+            }
+            else if dataMessages[indexPath.row]["f_pin"] as? String == "-997" {
+                nameSender.text = Utils.getGPTBotName()
             }
             else {
                 nameSender.text = dataProfile["name"]

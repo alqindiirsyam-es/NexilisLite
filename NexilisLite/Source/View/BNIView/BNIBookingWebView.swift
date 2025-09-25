@@ -549,17 +549,17 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                 } catch {
                 }
             }
-            Database.shared.database?.inTransaction({ fmdb, rollback in
-                do {
-                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ", _where: "")
-                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ_MEMBER", _where: "")
-                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "DISCUSSION_FORUM", _where: "")
-                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: User.getMyPin() ?? ""))
-                } catch {
-                    rollback.pointee = true
-                    print("Access database error: \(error.localizedDescription)")
-                }
-            })
+//            Database.shared.database?.inTransaction({ fmdb, rollback in
+//                do {
+//                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ", _where: "")
+//                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ_MEMBER", _where: "")
+//                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "DISCUSSION_FORUM", _where: "")
+//                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: User.getMyPin() ?? ""))
+//                } catch {
+//                    rollback.pointee = true
+//                    print("Access database error: \(error.localizedDescription)")
+//                }
+//            })
             let alert = LibAlertController(title: "Successfully changed".localized(), message: "Please open the app again to see the changes".localized(), preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: {(_) in
                 exit(0)

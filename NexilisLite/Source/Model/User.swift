@@ -173,7 +173,7 @@ public class User: Model {
                             ex_block: "")
             } else if pin == "-997" {
                 user = User(pin: "-997",
-                            firstName: "GPT SmartBot",
+                            firstName: Utils.getGPTBotName(),
                             lastName: "",
                             thumb: "",
                             userType: "0",
@@ -225,6 +225,13 @@ public class User: Model {
                                     privacy_flag: "",
                                     offline_mode: "",
                                     ex_block: "")
+                    } else if pin == "-997" {
+                        user = User(pin: "-997",
+                                    firstName: Utils.getGPTBotName(),
+                                    lastName: "",
+                                    thumb: "",
+                                    userType: "0",
+                                    official: "1")
                     } else {
                         user = User(pin: pin,
                                     firstName: "User".localized(),

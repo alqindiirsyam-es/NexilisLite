@@ -255,7 +255,7 @@ public class ChangeDeviceViewController: UIViewController {
                             if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
                                 pk = publicKey
                             }
-                            let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 30)
+                            let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 300)
                             if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: "", p_vercode: method == 0 ? "" : code, number: number, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp), timeout: 30 * 1000) {
                                 if !response.isOk() {
                                     if method == 1 {
@@ -383,7 +383,7 @@ public class ChangeDeviceViewController: UIViewController {
                             if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
                                 pk = publicKey
                             }
-                            let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 30)
+                            let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 300)
                             if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: email, p_vercode: code, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp), timeout: 30 * 1000) {
                                 if !response.isOk() {
                                     DispatchQueue.main.async {

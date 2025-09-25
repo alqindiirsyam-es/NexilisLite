@@ -181,7 +181,7 @@ public class Member: User {
                     }
                     if f_pin == "-997" {
                         member = Member(pin: "-997",
-                                        firstName: "GPT SmartBot",
+                                        firstName: Utils.getGPTBotName(),
                                         lastName: "",
                                         thumb: "",
                                         position: "")
@@ -210,7 +210,7 @@ public class Member: User {
                     }
                     if f_pin == "-997" {
                         member = Member(pin: "-997",
-                                        firstName: "GPT SmartBot",
+                                        firstName: Utils.getGPTBotName(),
                                         lastName: "",
                                         thumb: "",
                                         position: "")

@@ -4579,9 +4579,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         listMentionWithText.removeAll()
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
-                if "GPT SmartBot".lowercased().contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if Utils.getGPTBotName().lowercased().contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     let gptUser = User(pin: "-997",
-                                    firstName: "GPT SmartBot",
+                                    firstName: Utils.getGPTBotName(),
                                     lastName: "",
                                     thumb: "",
                                     userType: "0",
@@ -5612,7 +5612,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                             cursor.close()
                         } else if pinRes == "-997" {
                             let gptUser = User(pin: "-997",
-                                            firstName: "GPT SmartBot",
+                                            firstName: Utils.getGPTBotName(),
                                             lastName: "",
                                             thumb: "",
                                             userType: "0",
@@ -7055,7 +7055,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         }
                     }
                 }
-                nameSender.text = "GPT SmartBot"
+                nameSender.text = Utils.getGPTBotName()
             } else {
                 let user = User.getData(pin: dataMessages[indexPath.row]["f_pin"] as? String)
                 getImage(name: user?.thumb ?? "", placeholderImage: UIImage(systemName: "person.circle.fill")!, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in

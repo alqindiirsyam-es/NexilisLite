@@ -720,12 +720,12 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                 Utils.setLastTabSelected(value: 0)
                                 Utils.setIsWATheme(value: false)
                                 UIApplication.shared.setAlternateIconName(nil)
-                                Database.shared.database?.inTransaction({ fmdb, rollback in
-                                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ", _where: "")
-                                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ_MEMBER", _where: "")
-                                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "DISCUSSION_FORUM", _where: "")
-                                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: User.getMyPin() ?? ""))
-                                })
+//                                Database.shared.database?.inTransaction({ fmdb, rollback in
+//                                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ", _where: "")
+//                                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "GROUPZ_MEMBER", _where: "")
+//                                    _ = Database.shared.deleteRecord(fmdb: fmdb, table: "DISCUSSION_FORUM", _where: "")
+//                                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: User.getMyPin() ?? ""))
+//                                })
                                 Nexilis.hideLoader {
                                     let alert = LibAlertController(title: "Successfully changed".localized(), message: "Please open the app again to see the changes".localized(), preferredStyle: .alert)
                                     alert.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: {(_) in
