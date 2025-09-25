@@ -294,21 +294,26 @@ class OutgoingThread {
             }
         } else {
             if let response = Nexilis.writeSync(message: message) {
-                //print("sendChat", response.toLogString())
-                let messageId = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
-                Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                    do {
-                        _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                            "status" : response.getBody(key: CoreMessage_TMessageKey.STATUS, default_value: "2")
-                        ], _where: "message_id = '\(messageId)'")
-                        self.delOutgoing(fmdb: fmdb, messageId: message.getStatus())
-                    } catch {
-                        rollback.pointee = true
-                        print("Access database error: \(error.localizedDescription)")
-                    }
-                })
+//                print("sendChatRESP", response.toLogString())
+                if !response.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID).isEmpty {
+                    let messageId = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        do {
+                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                "status" : response.getBody(key: CoreMessage_TMessageKey.STATUS, default_value: "2")
+                            ], _where: "message_id = '\(messageId)'")
+                            self.delOutgoing(fmdb: fmdb, messageId: message.getStatus())
+                        } catch {
+                            rollback.pointee = true
+                            print("Access database error: \(error.localizedDescription)")
+                        }
+                    })
+                } else {
+//                    print("retry sendChat")
+                    OutgoingThread.default.addQueue(message: message)
+                }
             } else {
-//                InquiryThread.default.addQueue(message: message)
+//                print("retry sendChat")
                 OutgoingThread.default.addQueue(message: message)
             }
         }

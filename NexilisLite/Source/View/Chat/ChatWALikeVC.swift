@@ -191,7 +191,6 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         searchController.searchBar.delegate = self
 
         navigationItem.searchController = searchController
-        navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
         DispatchQueue.main.async {
             self.navigationController?.navigationBar.sizeToFit()

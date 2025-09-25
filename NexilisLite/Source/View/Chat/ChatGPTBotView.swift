@@ -275,6 +275,67 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     }
     
     @objc func sendTapped() {
+        if self.chatGPTMessages.last?["confirmation"] as? String == "1" {
+            DispatchQueue.global().async {
+                let dataTxn = Utils.getTxnLevel()
+                var policyLevel = "1,2"
+                if !dataTxn.isEmpty {
+                    if let data = dataTxn.data(using: .utf8) {
+                        do {
+                            // Parse to generic JSON array
+                            if let jsonArray = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]] {
+                                for json in jsonArray {
+                                    let min = json["min"] as? Double ?? 0
+                                    let max = json["max"] as? Double ?? 0
+                                    let policy = json["policy"] as? String ?? ""
+                                    let amount = 0.0
+                                    if max == -1 {
+                                        if amount >= min {
+                                            policyLevel = policy
+                                            break
+                                        }
+                                    } else {
+                                        if amount >= min && amount <= max {
+                                            policyLevel = policy
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+                        } catch {
+                            print("Error converting string to JSONArray:", error)
+                        }
+                    }
+                }
+                var isBiometricOn = false
+                var result = false
+                if policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFACE || policyLevel == MFAViewController.STEP_FIDO_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_BIOFACE {
+                    isBiometricOn = true
+                }
+                if isBiometricOn {
+                    let semaphore = DispatchSemaphore(value: 0)
+
+                    Utils.authenticateWithBioOrPass { success, errorMessage in
+                        if success {
+                            result = true
+                        }
+                        semaphore.signal()
+                    }
+
+                    semaphore.wait()
+                } else {
+                    result = true
+                }
+
+                DispatchQueue.main.async { [self] in
+                    if !result {
+                        return
+                    }
+                    sendChat(message_text: textFieldSend.text!, viewController: self)
+                }
+            }
+            return
+        }
         sendChat(message_text: textFieldSend.text!, viewController: self)
     }
     
@@ -377,7 +438,11 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             textFieldSend.text = "Send message".localized()
             textFieldSend.textColor = UIColor.lightGray
         } else if constraintViewTextField.constant != 0 {
-            textFieldSend.text = ""
+            if textFieldSend.text.lowercased().contains("@bsb") {
+                textFieldSend.text = "@bsb "
+            } else {
+                textFieldSend.text = ""
+            }
             heightTextFieldSend.constant = 40
         }
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
@@ -398,7 +463,6 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                 self.dataMessages.removeAll(where: { $0["is_loading"] as? Bool == true })
                                 self.tableChatView.reloadData()
                                 self.chatGPTMessages.append(json)
-                                print("HOHO: \(json)")
                                 guard let me = User.getMyPin() else {
                                     return
                                 }

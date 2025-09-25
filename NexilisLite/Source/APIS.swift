@@ -1724,6 +1724,18 @@ public class APIS: NSObject {
     static func ackAPN(id: String) {
         DispatchQueue.global().async {
 //            Nexilis.sendStateToServer(s: "send ack from apn")
+//            if API.nGetCLXConnState() == 0 {
+//                do {
+//                    let id = Utils.getConnectionID()
+//                    try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+//                } catch {}
+//            }
+//            while API.nGetCLXConnState() == 0 {
+//                Thread.sleep(forTimeInterval: 0.5)
+//            }
+//            let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getAckMessage(messageId: id), timeout: 30000)
+            
+            //HTTPS
             let parameter: [String : Any] = [
                 "pin": User.getMyPin() ?? "",
                 "message_id": id
@@ -1734,108 +1746,37 @@ public class APIS: NSObject {
     }
     
     private static func getMessageById(id: String, retry: Int = 0, completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        if API.nGetCLXConnState() == 0 {
-            do {
-                let id = Utils.getConnectionID()
-                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-            } catch {}
-        }
-        while API.nGetCLXConnState() == 0 {
-            Thread.sleep(forTimeInterval: 0.5)
-        }
-        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getMessageById(messageId: id), timeout: 30000) {
-            if response.isOk() {
-                let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
-                if let decodedData = Data(base64Encoded: data, options: .ignoreUnknownCharacters) {
-                    if let respData = String(data: decodedData, encoding: .utf8) {
-                        let message = TMessage(data: respData)
-                        if Utils.getSecureFolderOffline() == "0" && IncomingThread.dispatch == nil {
-                            if FileEncryption.shared.aesKey == nil {
-                                IncomingThread.dispatch = DispatchGroup()
-                                IncomingThread.dispatch?.enter()
-                                Nexilis.getFeatureAccess()
-                                IncomingThread.dispatch?.wait()
-                                IncomingThread.dispatch = nil
-                            }
-                        }
-//                                print("save from APIS")
-                        Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
-                        ackAPN(id: id)
-                        DispatchQueue.main.async {
-                            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
-                        }
-                    }
-                }
-            } else {
-                let ret = retry + 1
-                if ret <= 5 {
-                    getMessageById(id: id, retry: ret, completionHandler: completionHandler)
-                } else {
-                    completionHandler(.failed)
-                }
-            }
-        } else {
-            let ret = retry + 1
-            if ret <= 5 {
-                getMessageById(id: id, retry: ret, completionHandler: completionHandler)
-            } else {
-                completionHandler(.failed)
-            }
-        }
-//        let parameter: [String : Any] = [
-//            "pin": User.getMyPin() ?? "",
-//            "message_id": id
-//        ]
-//        Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
-//            if error != nil {
-//                let ret = retry + 1
-//                if ret <= 5 {
-//                    getMessageById(id: id, retry: ret, completionHandler: completionHandler)
-//                } else {
-//                    completionHandler(.failed)
-//                }
-//            } else if let data = data {
-//                do {
-//                    if let dataString = String(data: data, encoding: .utf8) {
-//                        if let jsonObj = try JSONSerialization.jsonObject(with: dataString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
-//                            let dataObj = jsonObj["data"] as? String ?? ""
-//                            let message = TMessage(data: dataObj)
-//                            if Utils.getSecureFolderOffline() == "0" && IncomingThread.dispatch == nil {
-//                                if API.nGetCLXConnState() == 0 {
-//                                    do {
-//                                        let id = Utils.getConnectionID()
-//                                        try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-//                                    } catch {}
-//                                }
-//                                if FileEncryption.shared.aesKey == nil {
-//                                    IncomingThread.dispatch = DispatchGroup()
-//                                    IncomingThread.dispatch?.enter()
-//                                    Nexilis.getFeatureAccess()
-//                                    IncomingThread.dispatch?.wait()
-//                                    IncomingThread.dispatch = nil
-//                                }
-//                            }
-////                                print("save from APIS")
-//                            Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
-//                            ackAPN(id: id)
-//                            DispatchQueue.main.async {
-//                                UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
-//                            }
-//                        } else {
-//                            let ret = retry + 1
-//                            if ret <= 5 {
-//                                getMessageById(id: id, retry: ret, completionHandler: completionHandler)
-//                            } else {
-//                                completionHandler(.failed)
+//        if API.nGetCLXConnState() == 0 {
+//            do {
+//                let id = Utils.getConnectionID()
+//                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+//            } catch {}
+//        }
+//        while API.nGetCLXConnState() == 0 {
+//            Thread.sleep(forTimeInterval: 0.5)
+//        }
+//        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getMessageById(messageId: id), timeout: 30000) {
+//            if response.isOk() {
+//                let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
+//                if let decodedData = Data(base64Encoded: data, options: .ignoreUnknownCharacters) {
+//                    if let respData = String(data: decodedData, encoding: .utf8) {
+//                        let message = TMessage(data: respData)
+//                        if Utils.getSecureFolderOffline() == "0" && IncomingThread.dispatch == nil {
+//                            if FileEncryption.shared.aesKey == nil {
+//                                IncomingThread.dispatch = DispatchGroup()
+//                                IncomingThread.dispatch?.enter()
+//                                Nexilis.getFeatureAccess()
+//                                IncomingThread.dispatch?.wait()
+//                                IncomingThread.dispatch = nil
 //                            }
 //                        }
-//                    }
-//                } catch {
-//                    let ret = retry + 1
-//                    if ret <= 5 {
-//                        getMessageById(id: id, retry: ret, completionHandler: completionHandler)
-//                    } else {
-//                        completionHandler(.failed)
+////                                print("save from APIS")
+//                        Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
+//                        ackAPN(id: id)
+//                        DispatchQueue.main.async {
+//                            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+//                        }
+//                        completionHandler(.newData)
 //                    }
 //                }
 //            } else {
@@ -1846,7 +1787,81 @@ public class APIS: NSObject {
 //                    completionHandler(.failed)
 //                }
 //            }
+//        } else {
+//            let ret = retry + 1
+//            if ret <= 5 {
+//                getMessageById(id: id, retry: ret, completionHandler: completionHandler)
+//            } else {
+//                completionHandler(.failed)
+//            }
 //        }
+        //HTTPS
+        let parameter: [String : Any] = [
+            "pin": User.getMyPin() ?? "",
+            "message_id": id
+        ]
+        Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
+            if error != nil {
+                let ret = retry + 1
+                if ret <= 5 {
+                    getMessageById(id: id, retry: ret, completionHandler: completionHandler)
+                } else {
+                    completionHandler(.failed)
+                }
+            } else if let data = data {
+                do {
+                    if let dataString = String(data: data, encoding: .utf8) {
+                        if let jsonObj = try JSONSerialization.jsonObject(with: dataString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
+                            let dataObj = jsonObj["data"] as? String ?? ""
+                            let message = TMessage(data: dataObj)
+                            if Utils.getSecureFolderOffline() == "0" && IncomingThread.dispatch == nil {
+                                if API.nGetCLXConnState() == 0 {
+                                    do {
+                                        let id = Utils.getConnectionID()
+                                        try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+                                    } catch {}
+                                }
+                                if FileEncryption.shared.aesKey == nil {
+                                    IncomingThread.dispatch = DispatchGroup()
+                                    IncomingThread.dispatch?.enter()
+                                    Nexilis.getFeatureAccess()
+                                    IncomingThread.dispatch?.wait()
+                                    IncomingThread.dispatch = nil
+                                }
+                            }
+//                                print("save from APIS")
+                            Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
+                            ackAPN(id: id)
+                            DispatchQueue.main.async {
+                                UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+                            }
+                            completionHandler(.newData)
+                        } else {
+                            let ret = retry + 1
+                            if ret <= 5 {
+                                getMessageById(id: id, retry: ret, completionHandler: completionHandler)
+                            } else {
+                                completionHandler(.failed)
+                            }
+                        }
+                    }
+                } catch {
+                    let ret = retry + 1
+                    if ret <= 5 {
+                        getMessageById(id: id, retry: ret, completionHandler: completionHandler)
+                    } else {
+                        completionHandler(.failed)
+                    }
+                }
+            } else {
+                let ret = retry + 1
+                if ret <= 5 {
+                    getMessageById(id: id, retry: ret, completionHandler: completionHandler)
+                } else {
+                    completionHandler(.failed)
+                }
+            }
+        }
     }
     
     public static func addNotificationNexilis(_ message: TMessage) {

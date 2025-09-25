@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.66"
+    public static var cpaasVersion = "5.0.67"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1207,6 +1207,7 @@ public class Nexilis: NSObject {
         } catch {
             //print(error)
         }
+        isProcessWriteSync = false
         return nil
     }
     

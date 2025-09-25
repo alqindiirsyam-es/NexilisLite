@@ -1645,6 +1645,30 @@ public final class Utils {
             completion(false, "Biometric authentication is not available")
         }
     }
+    
+    public static func authenticateWithBioOrPass(completion: @escaping (Bool, String?) -> Void) {
+        let context = LAContext()
+        var error: NSError?
+
+        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
+            let reason = "Authenticate to continue"
+
+            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, authenticationError in
+                DispatchQueue.main.async {
+                    if success {
+                        completion(true, nil)
+                    } else {
+                        let message = authenticationError?.localizedDescription ?? "Authentication failed"
+                        completion(false, message)
+                    }
+                }
+            }
+        } else {
+            // Device doesn’t support biometrics or passcode is not set
+            let message = error?.localizedDescription ?? "Authentication not available"
+            completion(false, message)
+        }
+    }
 }
 public extension UIImage {
     var jpeg: Data? { jpegData(compressionQuality: 1) }  // QUALITY min = 0 / max = 1

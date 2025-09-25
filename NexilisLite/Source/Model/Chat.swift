@@ -204,15 +204,59 @@ public class Chat: Model {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 let query = """
-                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, m.thumb_id from MESSAGE m, BUDDY b where (m.l_pin = b.f_pin OR m.f_pin = b.f_pin) and m.attachment_flag = '3' and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   b.first_name || ' ' || ifnull(b.last_name, '') as name,
+                                   b.image_id as profile, b.official_account,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   '' as group_id, '' as group_name, m.is_bot
+                            from MESSAGE m
+                            join BUDDY b on m.l_pin = b.f_pin
+                            where m.is_call_center = 0
+                              and m.message_id = '\(message_id)'
                             union
-                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, m.thumb_id from MESSAGE m where m.f_pin = '-999' and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   'Bot' as name, '' as profile, '' as official_account,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   '' as group_id, '' as group_name, m.is_bot
+                            from MESSAGE m
+                            where m.l_pin = '-999'
+                              and m.is_call_center = 0
+                              and m.message_id = '\(message_id)'
                             union
-                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, m.thumb_id from MESSAGE m where m.f_pin = '-997' and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   'GPT SmartBot' as name, '' as profile, '' as official_account,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   '' as group_id, '' as group_name, m.is_bot
+                            from MESSAGE m
+                            where m.l_pin = '-997'
+                              and m.is_call_center = 0
+                              and m.message_id = '\(message_id)'
                             union
-                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, m.thumb_id from MESSAGE m, GROUPZ b where m.l_pin = b.group_id and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   '\("Lounge".localized())' as name,
+                                   g.image_id as profile, g.official,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   g.group_id, g.f_name as group_name, m.is_bot
+                            from MESSAGE m
+                            join GROUPZ g on m.l_pin = g.group_id
+                            where m.is_call_center = 0
+                              and m.message_id = '\(message_id)'
                             union
-                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, m.thumb_id from MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and m.l_pin = b.chat_id and m.message_id = '\(message_id)' and m.is_call_center = 0
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   d.title, g.image_id as profile, '' as official_account,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   g.group_id, g.f_name as group_name, m.is_bot
+                            from MESSAGE m
+                            join DISCUSSION_FORUM d on m.l_pin = d.chat_id
+                            join GROUPZ g on d.group_id = g.group_id
+                            where m.is_call_center = 0
+                              and m.message_id = '\(message_id)'
+
                             order by 6 desc
                             """
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
@@ -234,11 +278,13 @@ public class Chat: Model {
                                         status: cursorData.string(forColumnIndex: 13) ?? "",
                                         credential: cursorData.string(forColumnIndex: 14) ?? "",
                                         lock: cursorData.string(forColumnIndex: 15) ?? "",
-                                        thumb: cursorData.string(forColumnIndex: 20) ?? "",
-                                        audio: cursorData.string(forColumnIndex: 16) ?? "",
-                                        gif: cursorData.string(forColumnIndex: 17) ?? "",
-                                        groupId: cursorData.string(forColumnIndex: 18) ?? "",
-                                        groupName: cursorData.string(forColumnIndex: 19) ?? "")
+                                        thumb: cursorData.string(forColumnIndex: 16) ?? "",
+                                        audio: cursorData.string(forColumnIndex: 17) ?? "",
+                                        gif: cursorData.string(forColumnIndex: 18) ?? "",
+                                        groupId: cursorData.string(forColumnIndex: 19) ?? "",
+                                        groupName: cursorData.string(forColumnIndex: 20) ?? "",
+                                        pinned: 0,
+                                        isBot: Int(cursorData.string(forColumnIndex: 21) ?? "0") ?? 0)
                         messages.append(chat)
                     }
                     cursorData.close()

@@ -9585,7 +9585,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 
                 self.containerPin.addSubview(textPin)
                 self.textPin.anchor(left: contIconPin.rightAnchor, right: self.containerPin.rightAnchor, paddingLeft: 10, paddingRight: 10, centerY: self.containerPin.centerYAnchor)
-                self.textPin.attributedText = (dataMessages[dataMessages.count - 1][TypeDataMessage.message_text] as? String ?? "").richText(fontSize: 14)
+                let chat = Chat.getMessageFromId(message_id: dataMessages[dataMessages.count - 1][TypeDataMessage.message_id] as? String ?? "")
+                if chat.count > 0 {
+                    let text = Utils.previewMessageText(chat: chat[0])
+                    if let attributeText = text as? NSMutableAttributedString {
+                        self.textPin.attributedText = attributeText
+                    }
+                }
                 self.textPin.numberOfLines = 1
                 self.textPin.textColor = .white
             } else {
@@ -9629,7 +9635,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     same = true
                 }
                 if !same{
-                    animateLabelTextChange(label: self.textPin, newText: dataMessages[dataMessages.count - 1][TypeDataMessage.message_text] as? String ?? "")
+                    let chat = Chat.getMessageFromId(message_id: dataMessages[dataMessages.count - 1][TypeDataMessage.message_id] as? String ?? "")
+                    if chat.count > 0 {
+                        let text = Utils.previewMessageText(chat: chat[0])
+                        if let attributeText = text as? NSMutableAttributedString {
+                            animateLabelTextChange(label: self.textPin, newText: attributeText.string)
+                        }
+                    }
                 }
             }
         } else if self.containerPin.isDescendant(of: self.view) {
@@ -9680,7 +9692,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     viewSign.clipsToBounds = true
                     self.signSelectedPin.addArrangedSubview(viewSign)
                 }
-                self.animateLabelTextChange(label: self.textPin, newText: dataMessagesPin[self.nextPinShowed][TypeDataMessage.message_text] as? String ?? "")
+                let chat = Chat.getMessageFromId(message_id: dataMessagesPin[dataMessagesPin.count - 1][TypeDataMessage.message_id] as? String ?? "")
+                if chat.count > 0 {
+                    let text = Utils.previewMessageText(chat: chat[0])
+                    if let attributeText = text as? NSMutableAttributedString {
+                        self.animateLabelTextChange(label: self.textPin, newText: attributeText.string)
+                    }
+                }
             }
         }
     }
