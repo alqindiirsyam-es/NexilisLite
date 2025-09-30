@@ -82,6 +82,29 @@ class CustomTextView: UITextView {
                 let dataGif = UIPasteboard.general.data(forPasteboardType: "com.compuserve.gif")
                 customDelegate?.customTextViewDidPasteText(image: pasteboardItems["public.png"] as? UIImage ?? pasteboardItems["public.jpeg"] as? UIImage, dataGIF: dataGif)
                 return
+            } else if let string = UIPasteboard.general.string {
+                var formattedText = string
+                // Replace "- " only if it starts a line (after \n or at beginning)
+                if let bulletRegex = try? NSRegularExpression(pattern: #"(?m)^(?:- |\* |• )"#) {
+                    formattedText = bulletRegex.stringByReplacingMatches(
+                        in: formattedText,
+                        options: [],
+                        range: NSRange(location: 0, length: formattedText.utf16.count),
+                        withTemplate: "  • "
+                    )
+                }
+
+                // Replace numbered lists "1.", "2.", etc. only if they start a line
+                if let numberRegex = try? NSRegularExpression(pattern: #"(?m)^(\d+)\."#) {
+                    formattedText = numberRegex.stringByReplacingMatches(
+                        in: formattedText,
+                        options: [],
+                        range: NSRange(location: 0, length: formattedText.utf16.count),
+                        withTemplate: "  $1."
+                    )
+                }
+                self.replace(self.selectedTextRange!, withText: formattedText)
+                return
             }
         } else if let string = UIPasteboard.general.string {
             self.replace(self.selectedTextRange!, withText: string)

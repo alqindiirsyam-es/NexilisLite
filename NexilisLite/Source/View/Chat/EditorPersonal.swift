@@ -966,14 +966,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             do {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     if cursorData.next() {
-                        dataPerson["f_pin"] = cursorData.string(forColumnIndex: 0)
-                        dataPerson["name"] = cursorData.string(forColumnIndex: 1)?.trimmingCharacters(in: .whitespaces)
-                        dataPerson["picture"] = cursorData.string(forColumnIndex: 3)
-                        dataPerson["isOfficial"] = cursorData.string(forColumnIndex: 2)
+                        dataPerson["f_pin"] = cursorData.string(forColumnIndex: 0) ?? ""
+                        dataPerson["name"] = (cursorData.string(forColumnIndex: 1) ?? "").trimmingCharacters(in: .whitespaces)
+                        dataPerson["picture"] = cursorData.string(forColumnIndex: 3) ?? ""
+                        dataPerson["isOfficial"] = cursorData.string(forColumnIndex: 2) ?? ""
                         if isContactCenter && isRequestContactCenter {
                             dataPerson["user_type"] = "0"
                         } else {
-                            dataPerson["user_type"] = cursorData.string(forColumnIndex: 6)
+                            dataPerson["user_type"] = cursorData.string(forColumnIndex: 6) ?? ""
                         }
                     } else {
                         dataPerson["f_pin"] = "-999"
@@ -2852,12 +2852,19 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             }
         }
         var message_text = message_text
-        let bulletPoint = "  • "
-        let numberPattern = #"  \d+\.\ "#
-        let firstLine = message_text.components(separatedBy: .newlines).first ?? ""
+        message_text = message_text.replacingOccurrences(of: "\n  •", with: "\n•")
+        if message_text.hasPrefix("  •") {
+            message_text = message_text.replacingOccurrences(of: "  •", with: "•")
+        }
+        let regex = try! NSRegularExpression(pattern: #"(?m)^\s{2}([0-9]+\.)"#)
+        message_text = regex.stringByReplacingMatches(in: message_text,
+                                                     options: [],
+                                                     range: NSRange(location: 0, length: message_text.utf16.count),
+                                                     withTemplate: "$1")
+        
 
         // Check if text contains bullet points or numbered list using regex
-        if !message_text.isEmpty && !firstLine.contains(bulletPoint) && firstLine.range(of: numberPattern, options: .regularExpression) == nil {
+        if !message_text.isEmpty {
             message_text = message_text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         
@@ -4449,29 +4456,29 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                 buttonSendEdit.isEnabled = true
             }
         }
+        
         //indention code:
         let text = textView.text ?? ""
-        let cursorPositionIndent = textView.selectedRange.location
+        let cursorLocation = textView.selectedRange.location
 
-        // Prevent moving cursor before the 2-space indent
-        var adjustedCursorPosition = cursorPositionIndent
-        
-        for line in lines {
-            if let range = text.range(of: line), NSRange(range, in: text).contains(cursorPositionIndent) {
-                if line.hasPrefix("  •") || line.range(of: #"^\s{2}\d+\."#, options: .regularExpression) != nil {
-                    let startOfLine = text.distance(from: text.startIndex, to: range.lowerBound)
-                    let minCursorPosition = startOfLine + 2 // Prevent cursor before indentation
-                    
-                    if cursorPositionIndent < minCursorPosition {
-                        adjustedCursorPosition = minCursorPosition
+        // Find current line range where cursor is
+        if let lineRange = (text as NSString).lineRange(for: NSRange(location: cursorLocation, length: 0)) as NSRange? {
+            let line = (text as NSString).substring(with: lineRange)
+
+            // Detect bullet ("  •") or numbered ("  1.") list
+            if line.hasPrefix("  •") || line.range(of: #"^\s{2}\d+\."#, options: .regularExpression) != nil {
+                var bulletEnd = lineRange.location + 2
+                if !line.hasPrefix("  •") {
+                    bulletEnd = lineRange.location + 3
+                }
+
+                // Prevent cursor before bullet/number
+                if cursorLocation < bulletEnd {
+                    DispatchQueue.main.async {
+                        textView.selectedRange = NSRange(location: bulletEnd, length: 0)
                     }
                 }
-                break
             }
-        }
-        
-        if adjustedCursorPosition != cursorPositionIndent {
-            textView.selectedRange = NSRange(location: adjustedCursorPosition, length: 0)
         }
     }
     
@@ -4509,7 +4516,6 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         timerCheckLink = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
             self.checkLink(fullText: textView.text)
         })
-        //indention code:
         let text = textView.text ?? ""
         let cursorPosition = textView.selectedRange.location
         
@@ -4533,6 +4539,7 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
             }
         }
         
+        //indention code:
         // Handle Bullets (- [space] + letter → • )
         let bulletPattern = #"(?<=\n|^)- (\S)"#
         if let match = text.range(of: bulletPattern, options: .regularExpression) {
@@ -4544,7 +4551,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
 
                 let newCursorPosition = cursorPosition + 2  // Adjust cursor position
                 textView.text = replacedText
-                textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
+                DispatchQueue.main.async {
+                    textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
+                }
             }
         }
 
@@ -4553,12 +4562,11 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         if let match = text.range(of: numberPattern, options: .regularExpression) {
             let matchedText = text[match]
 
-            if let spaceIndex = matchedText.firstIndex(of: " ") {
-                let firstLetter = matchedText[matchedText.index(after: spaceIndex)...]
-                let replacedText = text.replacingOccurrences(of: matchedText, with: "  \(matchedText)", range: match)
+            let replacedText = text.replacingOccurrences(of: matchedText, with: "  \(matchedText)", range: match)
 
-                let newCursorPosition = cursorPosition + 2  // Adjust cursor
-                textView.text = replacedText
+            let newCursorPosition = cursorPosition + 2  // Adjust cursor
+            textView.text = replacedText
+            DispatchQueue.main.async {
                 textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
             }
         }
@@ -4934,17 +4942,6 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         guard affectedLineIndex >= 0, affectedLineIndex < lines.count else { return true }
         
         let affectedLine = lines[affectedLineIndex]
-        
-        // Prevent deleting two-space indentation before bullet/number
-        if affectedLine.hasPrefix("  •") || affectedLine.range(of: #"^\s{2}\d+\."#, options: .regularExpression) != nil {
-            if let lineStart = textView.text.range(of: affectedLine)?.lowerBound,
-               let startIndex = textView.text.distance(of: lineStart) {
-                if range.location == startIndex || range.location == startIndex + 1 {
-                    return false
-                }
-            }
-        }
-        
         // Auto-indent new lines based on previous line
         if text == "\n" {
             let previousLine = lines[affectedLineIndex]
@@ -4952,7 +4949,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
             if previousLine.hasPrefix("  •") {
                 let newBullet = "\n  • "
                 textView.text = nsText.replacingCharacters(in: range, with: newBullet)
-                textView.selectedRange = NSRange(location: range.location + newBullet.utf16.count, length: 0)
+                DispatchQueue.main.async {
+                    textView.selectedRange = NSRange(location: range.location + newBullet.utf16.count, length: 0)
+                }
                 return false
             }
             
@@ -4962,7 +4961,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                 
                 let newNumber = "\n  \(number + 1). "
                 textView.text = nsText.replacingCharacters(in: range, with: newNumber)
-                textView.selectedRange = NSRange(location: range.location + newNumber.utf16.count, length: 0)
+                DispatchQueue.main.async {
+                    textView.selectedRange = NSRange(location: range.location + newNumber.utf16.count, length: 0)
+                }
                 return false
             }
         }
@@ -4971,25 +4972,31 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         if text.isEmpty && affectedLine.trimmingCharacters(in: .whitespaces) == "•" {
             lines[affectedLineIndex] = "- "  // Replace "  • " with "- "
             textView.text = lines.joined(separator: "\n")
-            textView.selectedRange = NSRange(location: range.location - 1, length: 0)
+            DispatchQueue.main.async {
+                textView.selectedRange = NSRange(location: range.location - 1, length: 0)
+            }
+            return false
+        }
+        
+        // Handle Backspace on bullet
+        if text.isEmpty, newText.hasPrefix(" •"), newText.substring(with: NSRange(location: range.location - 1, length: 2)) == " •" {
             return false
         }
         
         // Handle Backspace on Numbered List
-        if text.isEmpty, affectedLine.range(of: #"^\s{2}(\d+)\.$"#, options: .regularExpression) != nil {
+        if text.isEmpty, newText.hasPrefix("  "), newText.substring(with: NSRange(location: range.location - 2, length: 2)) == "  " {
             lines[affectedLineIndex] = affectedLine.trimmingCharacters(in: .whitespaces)
             textView.text = lines.joined(separator: "\n")
-            textView.selectedRange = NSRange(location: range.location - 1, length: 0)
+            DispatchQueue.main.async {
+                textView.selectedRange = NSRange(location: range.location - 2, length: 0)
+            }
             return false
         }
         return true
     }
     
     private func handleRichText(_ textView: UITextView) {
-        textView.preserveCursorPosition(withChanges: { _ in
-            textView.attributedText = textView.text.richText(isEditing: true, listMentionInTextField: self.listMentionInTextField)
-            return .preserveCursor
-        })
+        textView.attributedText = textView.text.richText(isEditing: true, listMentionInTextField: self.listMentionInTextField)
     }
     
     func isGIFData(_ data: Data) -> Bool {
@@ -8578,7 +8585,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 containerReply.clipsToBounds = true
                 
                 if (thumbChat != "" || fileChat != "") && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
-                    topMarginText = messageText.topAnchor.constraint(greaterThanOrEqualTo: containerMessage.topAnchor, constant: topMarginText.constant + 50 + (self.offset()*3))
+                    topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: topMarginText.constant + 50 + (self.offset()*3))
                 }
                 
                 let leftReply = UIView()
@@ -9492,11 +9499,40 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if stringURl.lowercased().starts(with: "www.") {
             stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
         }
-        if Nexilis.checkingAccess(key: "secure_browser") {
-            APIS.openUrl(url: stringURl)
-        } else {
-            guard let url = URL(string: stringURl) else { return }
-            UIApplication.shared.open(url)
+        let app: UIApplication = UIApplication.shared
+        var appURL: URL? = nil
+        if let url = URL(string: stringURl) {
+            if url.host?.contains("instagram.com") == true {
+                // Convert to Instagram deep link
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let path = components.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
+                    appURL = URL(string: "instagram://\(path)")
+                }
+            } else if url.host?.contains("x.com") == true || url.host?.contains("twitter.com") == true {
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let path = components.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
+                    appURL = URL(string: "twitter://\(path)")
+                }
+            } else if url.host?.contains("youtube.com") == true || url.host?.contains("youtu.be") == true {
+                appURL = URL(string: "youtube://\(url.absoluteString)")
+            }
+            if let appURL = appURL, app.canOpenURL(appURL) {
+                app.open(appURL, options: [:]) { success in
+                    if !success {
+                        if Nexilis.checkingAccess(key: "secure_browser") {
+                            APIS.openUrl(url: stringURl)
+                        } else {
+                            app.open(url)
+                        }
+                    }
+                }
+            } else {
+                if Nexilis.checkingAccess(key: "secure_browser") {
+                    APIS.openUrl(url: stringURl)
+                } else {
+                    app.open(url)
+                }
+            }
         }
     }
     

@@ -1722,7 +1722,7 @@ public class APIS: NSObject {
     }
     
     static func ackAPN(id: String) {
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .userInitiated).async {
 //            Nexilis.sendStateToServer(s: "send ack from apn")
 //            if API.nGetCLXConnState() == 0 {
 //                do {

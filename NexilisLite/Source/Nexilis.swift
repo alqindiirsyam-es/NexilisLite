@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.67"
+    public static var cpaasVersion = "5.0.68"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -725,7 +725,7 @@ public class Nexilis: NSObject {
             if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
                 return false
             } else {
-                return true
+                return false
             }
         } else if let jsonArray = try? JSONSerialization.jsonObject(with: dataAccess.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
             if jsonArray[key] != nil {
@@ -734,7 +734,7 @@ public class Nexilis: NSObject {
                 if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
                     return false
                 } else {
-                    return true
+                    return false
                 }
             }
         }

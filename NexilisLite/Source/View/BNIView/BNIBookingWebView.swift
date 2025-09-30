@@ -17,6 +17,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     public var customUrl = ""
     public var isSecureBrowser = false
     let textField = UITextField()
+    var progressView: UIProgressView!
     
     var isAllowSpeech = false
     
@@ -128,6 +129,23 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.delegate = self
         
+        progressView = UIProgressView(progressViewStyle: .default)
+        progressView.sizeToFit()
+        progressView.tintColor = .systemBlue
+        view.addSubview(progressView)
+        
+        // Auto Layout for progress bar (stick to top)
+        progressView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            progressView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            progressView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            progressView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            progressView.heightAnchor.constraint(equalToConstant: 4)
+        ])
+        
+        // Observe estimatedProgress
+        webView.addObserver(self, forKeyPath: "estimatedProgress", options: .new, context: nil)
+        
         let contentController = webView.configuration.userContentController
         contentController.add(self, name: "sendQueueBNI")
         contentController.add(self, name: "checkProfile")
@@ -140,6 +158,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         contentController.add(self, name: "finishForm")
         contentController.add(self, name: "shareText")
         contentController.add(self, name: "openGalleryiOS")
+        contentController.add(self, name: "openChannel")
         
         let source: String = "var meta = document.createElement('meta');" +
             "meta.name = 'viewport';" +
@@ -203,6 +222,14 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
             if let url = URL(string: "https://google.com/") {
                 loadURLWithCookie(url: url)
             }
+        }
+    }
+    
+    public override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == "estimatedProgress" {
+            progressView.progress = Float(webView.estimatedProgress)
+            
+            progressView.isHidden = webView.estimatedProgress >= 1
         }
     }
     

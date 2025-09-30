@@ -7,6 +7,7 @@
 
 import Foundation
 import UIKit
+import NotificationBannerSwift
 
 public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UISearchBarDelegate {
     private let tableView = UITableView(frame: .zero, style: .plain)
@@ -14,6 +15,16 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         
     private var calls: [CallModel] = []
     private let textCallEmpty = UILabel()
+    
+    private var filteredCalls: [CallModel] = []
+    
+    private var isSearchBarEmpty: Bool {
+        return searchController.searchBar.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
+    private var isFilltering: Bool {
+        return searchController.isActive && !isSearchBarEmpty
+    }
     
     public override func viewDidLoad() {
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cellCallLog")
@@ -29,7 +40,6 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         }
         
         setupTableView()
-        refresh()
         NotificationCenter.default.addObserver(self, selector: #selector(onRefreshCallLog(notification:)), name: NSNotification.Name(rawValue: "refreshCallLog"), object: nil)
     }
     
@@ -94,6 +104,8 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         DispatchQueue.main.async {
             self.navigationController?.navigationBar.sizeToFit()
         }
+        
+        refresh()
     }
     
     public override func viewDidAppear(_ animated: Bool) {
@@ -110,7 +122,6 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                 textCallEmpty.removeFromSuperview()
             }
             searchController.searchBar.isHidden = false
-            tableView.reloadData()
         } else {
             searchController.searchBar.isHidden = true
             textCallEmpty.numberOfLines = 0
@@ -126,6 +137,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
             view.addSubview(textCallEmpty)
             textCallEmpty.anchor(left: view.leftAnchor, right: view.rightAnchor, paddingLeft: 20, paddingRight: 20, centerX: view.centerXAnchor, centerY: view.centerYAnchor)
         }
+        tableView.reloadData()
     }
     
     @objc func onRefreshCallLog(notification: NSNotification) {
@@ -189,7 +201,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                         }
                     }
                     if dataPin != nil {
-                        tempCall.append(CallModel(fPin: fPin, name: dataPin!.fullName, image: dataPin!.thumb, time: timeCall, isVideo: text.lowercased().contains("audio") ? false : true, status: statusCall))
+                        tempCall.append(CallModel(fPin: pin, name: dataPin!.fullName, image: dataPin!.thumb, time: timeCall, isVideo: text.lowercased().contains("audio") ? false : true, status: statusCall))
                     }
                 }
                 calls = tempCall
@@ -250,8 +262,73 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         return calls.count
     }
     
-    public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+    public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
         let call = calls[indexPath.row]
+        if call.isVideo {
+            if !Nexilis.checkingAccess(key: "video_call") {
+                self.view.makeToast("Feature disabled..".localized(), duration: 3)
+                return
+            }
+            let goAudioCall = Nexilis.checkMicPermission()
+            let goVideoCall = Nexilis.checkCameraPermission()
+            if goVideoCall == 0 {
+                let alert = LibAlertController(title: "Attention!".localized(), message: !goAudioCall && goVideoCall == 0 ? "Please allow microphone & camera permission in your settings".localized() : !goAudioCall ? "Please allow microphone permission in your settings".localized() : "Please allow camera permission in your settings", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {_ in
+                    if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
+                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                    }
+                }))
+                self.navigationController?.present(alert, animated: true, completion: nil)
+                return
+            } else if goVideoCall == -1 {
+                return
+            }
+            if !CheckConnection.isConnectedToNetwork() {
+                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                imageView.tintColor = .white
+                let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                banner.show()
+                return
+            }
+            if let user = User.getDataCanNil(pin: call.fPin) {
+                let videoVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
+                videoVC.fPin = user.pin
+                self.show(videoVC, sender: nil)
+            }
+        } else {
+            if !Nexilis.checkingAccess(key: "audio_call") {
+                self.view.makeToast("Feature disabled..".localized(), duration: 3)
+                return
+            }
+            if !CheckConnection.isConnectedToNetwork() {
+                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                imageView.tintColor = .white
+                let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                banner.show()
+                return
+            }
+            if let user = User.getDataCanNil(pin: call.fPin) {
+                let controller = QmeraAudioViewController()
+                controller.user = user
+                controller.isOutgoing = true
+                controller.modalPresentationStyle = .overCurrentContext
+                let navigationController = CustomNavigationController(rootViewController: controller)
+                navigationController.modalPresentationStyle = .fullScreen
+                if UIApplication.shared.visibleViewController?.navigationController != nil {
+                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                } else {
+                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                }
+            }
+        }
+    }
+    
+    public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        var call = calls[indexPath.row]
+        if isFilltering {
+            call = filteredCalls[indexPath.row]
+        }
         let cell = tableView.dequeueReusableCell(withIdentifier: "cellCallLog", for: indexPath)
         cell.backgroundColor = .clear
         let textTime = UILabel()
@@ -263,6 +340,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         textTime.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         
         let detailButton = UIButton(type: .detailDisclosure)
+        detailButton.restorationIdentifier = call.fPin
         detailButton.addTarget(self, action: #selector(detailButtonTapped), for: .touchUpInside)
 
         let stack = UIStackView(arrangedSubviews: [textTime, detailButton])
@@ -307,11 +385,34 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         return cell
     }
     
-    @objc func detailButtonTapped() {
-        print("Detail button tapped")
+    @objc func detailButtonTapped(_ sender: UIButton) {
+        if(Nexilis.checkIsChangePerson()){
+            if let id = sender.restorationIdentifier {
+                if let data = User.getDataCanNil(pin: id) {
+                    let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
+                    controller.flag = .friend
+                    controller.user = data
+                    controller.name = data.fullName
+                    controller.data = id
+                    controller.picture = data.thumb
+                    self.navigationController?.navigationBar.prefersLargeTitles = false
+                    self.navigationController?.navigationItem.largeTitleDisplayMode = .never
+                    self.navigationController?.show(controller, sender: nil)
+                }
+            }
+        }
     }
     
     public func updateSearchResults(for searchController: UISearchController) {
+        filterContentForSearchText(searchController.searchBar.text!.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    
+    private func filterContentForSearchText(_ searchText: String) {
+        filteredCalls = calls.filter({ d in
+            let name = d.name.trimmingCharacters(in: .whitespaces)
+            return name.lowercased().contains(searchText.lowercased())
+        })
+        tableView.reloadData()
     }
     
     private func typeCallLog(type: String, isVideo: Bool) -> NSMutableAttributedString {

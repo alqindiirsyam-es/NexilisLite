@@ -1004,11 +1004,40 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         if stringURl.lowercased().starts(with: "www.") {
             stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
         }
-        if Nexilis.checkingAccess(key: "secure_browser") {
-            APIS.openUrl(url: stringURl)
-        } else {
-            guard let url = URL(string: stringURl) else { return }
-            UIApplication.shared.open(url)
+        let app: UIApplication = UIApplication.shared
+        var appURL: URL? = nil
+        if let url = URL(string: stringURl) {
+            if url.host?.contains("instagram.com") == true {
+                // Convert to Instagram deep link
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let path = components.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
+                    appURL = URL(string: "instagram://\(path)")
+                }
+            } else if url.host?.contains("x.com") == true || url.host?.contains("twitter.com") == true {
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let path = components.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
+                    appURL = URL(string: "twitter://\(path)")
+                }
+            } else if url.host?.contains("youtube.com") == true || url.host?.contains("youtu.be") == true {
+                appURL = URL(string: "youtube://\(url.absoluteString)")
+            }
+            if let appURL = appURL, app.canOpenURL(appURL) {
+                app.open(appURL, options: [:]) { success in
+                    if !success {
+                        if Nexilis.checkingAccess(key: "secure_browser") {
+                            APIS.openUrl(url: stringURl)
+                        } else {
+                            app.open(url)
+                        }
+                    }
+                }
+            } else {
+                if Nexilis.checkingAccess(key: "secure_browser") {
+                    APIS.openUrl(url: stringURl)
+                } else {
+                    app.open(url)
+                }
+            }
         }
     }
     

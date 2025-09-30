@@ -1003,6 +1003,11 @@ extension String {
         return String(self[startIndex ..< endIndex])
     }
     
+    public func substring(with nsRange: NSRange) -> String? {
+        guard let range = Range(nsRange, in: self) else { return nil }
+        return String(self[range])
+    }
+    
     static public func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
         return CGFloat(fontSize)
@@ -1039,6 +1044,10 @@ extension String {
         }
         
         processMentions(in: finalText, groupID: group_id, isEditing: isEditing, listMentionInTextField: listMentionInTextField)
+        
+        if !isEditing {
+            applyParagraphStyles(to: finalText, font: font)
+        }
         
         if isSearching {
             highlightSearchText(in: finalText, searchText: textSearch)
@@ -1092,6 +1101,37 @@ extension String {
                 text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.lowerBound, length: sign.count))
                 text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: fullRange.upperBound - sign.count, length: sign.count))
             }
+        }
+    }
+    
+    private func applyParagraphStyles(to text: NSMutableAttributedString, font: UIFont) {
+        let fullString = text.string as NSString
+        let lines = fullString.components(separatedBy: .newlines)
+        var location = 0
+        
+        for line in lines {
+            let nsRange = NSRange(location: location, length: line.count)
+            
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("•") ||
+                line.trimmingCharacters(in: .whitespaces).range(of: #"^[0-9]+\."#, options: .regularExpression) != nil {
+                
+                let paragraphStyle = NSMutableParagraphStyle()
+                paragraphStyle.lineSpacing = 0
+                paragraphStyle.paragraphSpacing = 0
+                paragraphStyle.firstLineHeadIndent = 0
+                if line.trimmingCharacters(in: .whitespaces).hasPrefix("•") {
+                    paragraphStyle.headIndent = 12 + String.offset() - 1
+                } else {
+                    paragraphStyle.headIndent = 12 + String.offset()
+                }
+                
+                text.addAttributes([
+                    .font: font,
+                    .paragraphStyle: paragraphStyle
+                ], range: nsRange)
+            }
+            
+            location += line.count + 1 // +1 untuk newline
         }
     }
 
@@ -1949,6 +1989,9 @@ class DataCaptured: NSObject {
         }
     }
     static func sendLogMonitorAction() {
+        if !Nexilis.checkingAccess(key: "activity_monitoring") {
+            return
+        }
         var type = "1"
         var value = "1"
         if action == "TEXT_CHANGED" {
@@ -1956,16 +1999,19 @@ class DataCaptured: NSObject {
             value = textAction
         }
 //        print("sendLogMonitorAction: \(type) <><> \(textAction) <><> \(value)")
-//        _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getLogMonitor(type: type, label: textAction, value: value))
+        _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getLogMonitor(type: type, label: textAction, value: value))
     }
     
     static func sendLogMonitorActivity() {
+        if !Nexilis.checkingAccess(key: "activity_monitoring") {
+            return
+        }
         var act = actNC
         if !actVC.isEmpty {
             act = actVC
         }
 //        print("sendLogMonitorActivity: \(act)")
-//        _ = Nexilis.write(message: CoreMessage_TMessageBank.getLogActivity(pActivityClassName: act))
+        _ = Nexilis.write(message: CoreMessage_TMessageBank.getLogActivity(pActivityClassName: act))
     }
     
     static func sendErrorDLP(fileName: String, code: Int) {
