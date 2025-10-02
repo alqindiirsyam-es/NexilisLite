@@ -1038,16 +1038,16 @@ extension String {
             ("$", [NSAttributedString.Key.font: italicFont,
                    NSAttributedString.Key.foregroundColor: UIColor.darkGray])
         ]
+        
+        if !isEditing {
+            applyParagraphStyles(to: finalText, font: font)
+        }
 
         for (sign, attributes) in rules {
             applyTextFormatting(to: finalText, sign: sign, attributes: attributes, isEditing: isEditing, boldItalicFont: boldItalicFont)
         }
         
         processMentions(in: finalText, groupID: group_id, isEditing: isEditing, listMentionInTextField: listMentionInTextField)
-        
-        if !isEditing {
-            applyParagraphStyles(to: finalText, font: font)
-        }
         
         if isSearching {
             highlightSearchText(in: finalText, searchText: textSearch)
@@ -1105,34 +1105,59 @@ extension String {
     }
     
     private func applyParagraphStyles(to text: NSMutableAttributedString, font: UIFont) {
-        let fullString = text.string as NSString
-        let lines = fullString.components(separatedBy: .newlines)
-        var location = 0
-        
-        for line in lines {
-            let nsRange = NSRange(location: location, length: line.count)
-            
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("•") ||
-                line.trimmingCharacters(in: .whitespaces).range(of: #"^[0-9]+\."#, options: .regularExpression) != nil {
-                
-                let paragraphStyle = NSMutableParagraphStyle()
-                paragraphStyle.lineSpacing = 0
-                paragraphStyle.paragraphSpacing = 0
-                paragraphStyle.firstLineHeadIndent = 0
-                if line.trimmingCharacters(in: .whitespaces).hasPrefix("•") {
-                    paragraphStyle.headIndent = 12 + String.offset() - 1
+        let original = text.string
+        let lines = original.components(separatedBy: .newlines)
+        let result = NSMutableAttributedString()
+
+        // regex untuk deteksi dan menghapus leading space/tab hanya jika diikuti bullet / number.
+        let leadingPattern = #"^[ \t]+(?=(•|[0-9]+\.) )"#
+        let numPattern = #"^[0-9]+\."#
+        let leadingRegex = try? NSRegularExpression(pattern: leadingPattern, options: [])
+        let numRegex = try? NSRegularExpression(pattern: numPattern, options: [])
+
+        for (index, var line) in lines.enumerated() {
+            // jika ada leading spaces/tabs sebelum bullet/number -> hapus
+            if let regex = leadingRegex {
+                let nsLine = line as NSString
+                let fullRange = NSRange(location: 0, length: nsLine.length)
+                if let match = regex.firstMatch(in: line, options: [], range: fullRange) {
+                    line = nsLine.replacingCharacters(in: match.range, with: "")
+                }
+            }
+
+            // cek apakah setelah pembersihan ini baris diawali bullet atau number.
+            let trimmedLeading = line.trimmingCharacters(in: .whitespaces)
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.lineSpacing = 0
+            paragraphStyle.paragraphSpacing = 0
+            paragraphStyle.firstLineHeadIndent = 0
+
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font
+            ]
+
+            if trimmedLeading.hasPrefix("•") ||
+                (numRegex?.firstMatch(in: trimmedLeading, options: [], range: NSRange(location: 0, length: (trimmedLeading as NSString).length)) != nil) {
+                // list detected -> atur headIndent sesuai tipe
+                if trimmedLeading.hasPrefix("•") {
+                    paragraphStyle.headIndent = 12 + String.offset() - 3
                 } else {
                     paragraphStyle.headIndent = 12 + String.offset()
                 }
-                
-                text.addAttributes([
-                    .font: font,
-                    .paragraphStyle: paragraphStyle
-                ], range: nsRange)
+                attributes[.paragraphStyle] = paragraphStyle
             }
-            
-            location += line.count + 1 // +1 untuk newline
+
+            // gabungkan baris (ikutkan newline kecuali baris terakhir) dan tambahkan ke result
+            var content = line
+            if index < lines.count - 1 {
+                content += "\n"
+            }
+            let attrLine = NSAttributedString(string: content, attributes: attributes)
+            result.append(attrLine)
         }
+
+        // replace seluruh attributed string dengan yang telah dibangun ulang
+        text.setAttributedString(result)
     }
 
     private func processMentions(in text: NSMutableAttributedString, groupID: String, isEditing: Bool, listMentionInTextField: [User] = []) {

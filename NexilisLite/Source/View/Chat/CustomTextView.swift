@@ -31,7 +31,7 @@ class CustomTextView: UITextView {
             } else {
                 self.replace(self.textRange(from: range.start, to: range.end)!, withText: " ~\(self.text(in: range)!)~")
             }
-            UIMenuController.shared.isMenuVisible = false
+            UIMenuController.shared.hide(for: self)
         }
     }
 
@@ -43,7 +43,7 @@ class CustomTextView: UITextView {
             } else {
                 self.replace(self.textRange(from: range.start, to: range.end)!, withText: " *\(self.text(in: range)!)*")
             }
-            UIMenuController.shared.isMenuVisible = false
+            UIMenuController.shared.hide(for: self)
         }
     }
     
@@ -55,7 +55,7 @@ class CustomTextView: UITextView {
             } else {
                 self.replace(self.textRange(from: range.start, to: range.end)!, withText: " ^\(self.text(in: range)!)^")
             }
-            UIMenuController.shared.isMenuVisible = false
+            UIMenuController.shared.hide(for: self)
         }
     }
     
@@ -67,7 +67,7 @@ class CustomTextView: UITextView {
             } else {
                 self.replace(self.textRange(from: range.start, to: range.end)!, withText: " _\(self.text(in: range)!)_")
             }
-            UIMenuController.shared.isMenuVisible = false
+            UIMenuController.shared.hide(for: self)
         }
     }
     
@@ -112,4 +112,14 @@ class CustomTextView: UITextView {
         super.paste(sender)
     }
 
+}
+
+extension UIMenuController {
+    func hide(for view: UIView) {
+        if #available(iOS 13.0, *) {
+            self.hideMenu(from: view)
+        } else {
+            self.setMenuVisible(false, animated: true)
+        }
+    }
 }

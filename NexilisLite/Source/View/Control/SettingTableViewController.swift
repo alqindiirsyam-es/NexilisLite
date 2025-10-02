@@ -225,13 +225,13 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         if isChangeProfile && Nexilis.checkingAccess(key: "can_switch_style") {
             Item.menus["Config"]?.append(Item(icon: UIImage(systemName: "paintbrush"), title: "Switch Style".localized()))
         }
-        if Utils.getIsLoadThemeFromOther() {
-            if Item.menus["Config"]!.count > 0 {
-                Item.menus["Config"]?.insert(Item(icon: UIImage(systemName: "iphone"), title: "Back to Company App".localized()), at: 1)
-            } else {
-                Item.menus["Config"]?.append(Item(icon: UIImage(systemName: "iphone"), title: "Back to Company App".localized()))
-            }
-        }
+//        if Utils.getIsLoadThemeFromOther() {
+//            if Item.menus["Config"]!.count > 0 {
+//                Item.menus["Config"]?.insert(Item(icon: UIImage(systemName: "iphone"), title: "Back to Company App".localized()), at: 1)
+//            } else {
+//                Item.menus["Config"]?.append(Item(icon: UIImage(systemName: "iphone"), title: "Back to Company App".localized()))
+//            }
+//        }
         
         Item.menus["Call"] = [
             Item(icon: UIImage(systemName: "message"), title: "Notification Message(s)".localized()),
