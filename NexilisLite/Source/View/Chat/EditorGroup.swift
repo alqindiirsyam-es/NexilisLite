@@ -193,16 +193,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         navigationController?.navigationBar.prefersLargeTitles = false
         navigationController?.navigationItem.largeTitleDisplayMode = .never
         updateProfile()
-        let indexPath = tableChatView.indexPathsForVisibleRows?.first
-        if indexPath != nil && currentIndexpath != nil {
-            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-            let isPinned = headerRect.origin.y <= tableChatView.contentOffset.y
-            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
-                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                let headerView = listViewOnSection[sect]
-                headerView.isHidden = true
-            }
-        }
+//        let indexPath = tableChatView.indexPathsForVisibleRows?.first
+//        if indexPath != nil && currentIndexpath != nil {
+//            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+//            let isPinned = headerRect.origin.y <= tableChatView.contentOffset.y
+//            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
+//                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+//                let headerView = listViewOnSection[sect]
+//                headerView.isHidden = true
+//            }
+//        }
     }
     
     public override func viewDidLoad() {
@@ -321,6 +321,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         tableMention.dataSource = self
         tableMention.delegate = self
         tableMention.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
+        
+        tableChatView.rowHeight = UITableView.automaticDimension
+        tableChatView.estimatedRowHeight = 100
     }
     
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
@@ -2496,13 +2499,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     }
                 }
             }
-            let indexPathFirst = tableChatView.indexPathsForVisibleRows?.first
-            if indexPathFirst != nil && listViewOnSection.count != 0 && listViewOnSection.count - 1 >= indexPathFirst!.section {
-                let headerView = listViewOnSection[indexPathFirst!.section]
-                if headerView.isHidden {
-                    headerView.isHidden = false
-                }
-            }
+//            let indexPathFirst = tableChatView.indexPathsForVisibleRows?.first
+//            if indexPathFirst != nil && listViewOnSection.count != 0 && listViewOnSection.count - 1 >= indexPathFirst!.section {
+//                let headerView = listViewOnSection[indexPathFirst!.section]
+//                if headerView.isHidden {
+//                    headerView.isHidden = false
+//                }
+//            }
             if dataMessages.count - 1 < currentIndexpath!.row {
                 return
             }
@@ -8136,33 +8139,33 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         }
     }
     
-    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        let indexPath = tableChatView.indexPathsForVisibleRows?.first
-        if indexPath != nil {
-            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-            let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
-                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                let headerView = listViewOnSection[sect]
-                headerView.isHidden = true
-            }
-        }
-    }
-    
-    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate {
-            let indexPath = tableChatView.indexPathsForVisibleRows?.first
-            if indexPath != nil {
-                let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-                let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
-                    let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                    let headerView = listViewOnSection[sect]
-                    headerView.isHidden = true
-                }
-            }
-        }
-    }
+//    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+//        let indexPath = tableChatView.indexPathsForVisibleRows?.first
+//        if indexPath != nil {
+//            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+//            let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
+//            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
+//                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+//                let headerView = listViewOnSection[sect]
+//                headerView.isHidden = true
+//            }
+//        }
+//    }
+//    
+//    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+//        if !decelerate {
+//            let indexPath = tableChatView.indexPathsForVisibleRows?.first
+//            if indexPath != nil {
+//                let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+//                let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
+//                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
+//                    let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+//                    let headerView = listViewOnSection[sect]
+//                    headerView.isHidden = true
+//                }
+//            }
+//        }
+//    }
 }
     
 extension EditorGroup: UISearchBarDelegate {

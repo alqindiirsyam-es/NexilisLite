@@ -104,16 +104,16 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             self.navigationController?.setNavigationBarHidden(false, animated: false)
         }
         gettingDataMessage = false
-        let indexPath = tableChatView.indexPathsForVisibleRows?.first
-        if indexPath != nil {
-            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-            let isPinned = headerRect.origin.y <= tableChatView.contentOffset.y
-            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
-                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                let headerView = listViewOnSection[sect]
-                headerView.isHidden = true
-            }
-        }
+//        let indexPath = tableChatView.indexPathsForVisibleRows?.first
+//        if indexPath != nil {
+//            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+//            let isPinned = headerRect.origin.y <= tableChatView.contentOffset.y
+//            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
+//                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+//                let headerView = listViewOnSection[sect]
+//                headerView.isHidden = true
+//            }
+//        }
     }
     
     public override func viewDidLoad() {
@@ -1253,13 +1253,13 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                     }
                 }
             }
-            let indexPathFirst = tableChatView.indexPathsForVisibleRows?.first
-            if indexPathFirst != nil && listViewOnSection.count != 0 && listViewOnSection.count - 1 >= indexPathFirst!.section {
-                let headerView = listViewOnSection[indexPathFirst!.section]
-                if headerView.isHidden {
-                    headerView.isHidden = false
-                }
-            }
+//            let indexPathFirst = tableChatView.indexPathsForVisibleRows?.first
+//            if indexPathFirst != nil && listViewOnSection.count != 0 && listViewOnSection.count - 1 >= indexPathFirst!.section {
+//                let headerView = listViewOnSection[indexPathFirst!.section]
+//                if headerView.isHidden {
+//                    headerView.isHidden = false
+//                }
+//            }
             var listData = dataMessages[0...currentIndexpath!.row]
             listData = listData.filter({$0["status"] as? String != "4" && $0["status"] as? String != "8"})
             if listData.count != 0 {
@@ -2323,33 +2323,33 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
         }
     }
     
-    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        let indexPath = tableChatView.indexPathsForVisibleRows?.first
-        if indexPath != nil {
-            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-            let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
-                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                let headerView = listViewOnSection[sect]
-                headerView.isHidden = true
-            }
-        }
-    }
-    
-    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate {
-            let indexPath = tableChatView.indexPathsForVisibleRows?.first
-            if indexPath != nil {
-                let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-                let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
-                    let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                    let headerView = listViewOnSection[sect]
-                    headerView.isHidden = true
-                }
-            }
-        }
-    }
+//    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+//        let indexPath = tableChatView.indexPathsForVisibleRows?.first
+//        if indexPath != nil {
+//            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+//            let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
+//            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
+//                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+//                let headerView = listViewOnSection[sect]
+//                headerView.isHidden = true
+//            }
+//        }
+//    }
+//    
+//    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+//        if !decelerate {
+//            let indexPath = tableChatView.indexPathsForVisibleRows?.first
+//            if indexPath != nil {
+//                let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+//                let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
+//                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
+//                    let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+//                    let headerView = listViewOnSection[sect]
+//                    headerView.isHidden = true
+//                }
+//            }
+//        }
+//    }
 }
 
 extension ChatGPTBotView: UITextViewDelegate {

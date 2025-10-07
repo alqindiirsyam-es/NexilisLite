@@ -742,14 +742,19 @@ public final class Utils {
         request.setValue(Utils.getUserAgent(), forHTTPHeaderField: "User-Agent")
         request.setValue(Utils.getCookiesMobile(), forHTTPHeaderField: "Cookie")
         //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
+        let task = self.sharedSession.dataTask(with: request, completionHandler: completion)
+        task.resume()
+    }
+    
+    private static let sharedSession: URLSession = {
         let urlConfig = URLSessionConfiguration.default
         urlConfig.timeoutIntervalForRequest = 30.0
         urlConfig.timeoutIntervalForResource = 60.0
-        let sessionDelegate = SelfSignedURLSessionDelegate()
-        let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
-        let task = session.dataTask(with: request, completionHandler: completion)
-        task.resume()
-    }
+        urlConfig.waitsForConnectivity = true
+        urlConfig.isDiscretionary = false
+        urlConfig.sessionSendsLaunchEvents = true
+        return URLSession(configuration: urlConfig, delegate: SelfSignedURLSessionDelegate(), delegateQueue: nil)
+    }()
     
     public static func postDataWithCookiesAndUserAgent(from url: URL, parameter: [String: Any] = [:], parameters: [[String: Any]] = [], isFormData: Bool = false, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
         let apiKey: String = SecureUserDefaults.shared.value(forKey: "apiKey") ?? ""
@@ -777,6 +782,7 @@ public final class Utils {
         request.httpMethod = "POST"
         request.setValue(Utils.getUserAgent(), forHTTPHeaderField: "User-Agent")
         request.setValue(Utils.getCookiesMobile(), forHTTPHeaderField: "Cookie")
+        request.setValue("keep-alive", forHTTPHeaderField: "Connection")
         if isFormData {
             request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         } else {
@@ -785,14 +791,7 @@ public final class Utils {
         }
         request.httpBody = jsonData
         //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
-        let urlConfig = URLSessionConfiguration.default
-        urlConfig.timeoutIntervalForRequest = 30.0
-        urlConfig.timeoutIntervalForResource = 60.0
-        urlConfig.isDiscretionary = false
-        urlConfig.sessionSendsLaunchEvents = true
-        let sessionDelegate = SelfSignedURLSessionDelegate()
-        let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
-        let task = session.dataTask(with: request, completionHandler: completion)
+        let task = self.sharedSession.dataTask(with: request, completionHandler: completion)
         task.resume()
     }
     

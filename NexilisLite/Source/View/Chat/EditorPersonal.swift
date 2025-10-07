@@ -187,16 +187,16 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         navigationController?.navigationItem.largeTitleDisplayMode = .never
         updateProfile()
         gettingDataMessage = false
-        let indexPath = tableChatView.indexPathsForVisibleRows?.first
-        if indexPath != nil && currentIndexpath != nil {
-            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-            let isPinned = headerRect.origin.y <= tableChatView.contentOffset.y
-            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
-                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                let headerView = listViewOnSection[sect]
-                headerView.isHidden = true
-            }
-        }
+//        let indexPath = tableChatView.indexPathsForVisibleRows?.first
+//        if indexPath != nil && currentIndexpath != nil {
+//            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+//            let isPinned = headerRect.origin.y <= tableChatView.contentOffset.y
+//            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
+//                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+//                let headerView = listViewOnSection[sect]
+//                headerView.isHidden = true
+//            }
+//        }
     }
     
     public override func viewDidLoad() {
@@ -323,6 +323,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         tableMention.dataSource = self
         tableMention.delegate = self
         tableMention.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
+        
+        tableChatView.rowHeight = UITableView.automaticDimension
+        tableChatView.estimatedRowHeight = 100
         
         if isContactCenter && !isRequestContactCenter && !onGoingCC {
             var companyName = ""
@@ -3897,13 +3900,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     }
                 }
             }
-            let indexPathFirst = tableChatView.indexPathsForVisibleRows?.first
-            if indexPathFirst != nil && listViewOnSection.count != 0 && listViewOnSection.count - 1 >= indexPathFirst!.section {
-                let headerView = listViewOnSection[indexPathFirst!.section]
-                if headerView.isHidden {
-                    headerView.isHidden = false
-                }
-            }
+//            let indexPathFirst = tableChatView.indexPathsForVisibleRows?.first
+//            if indexPathFirst != nil && listViewOnSection.count != 0 && listViewOnSection.count - 1 >= indexPathFirst!.section {
+//                let headerView = listViewOnSection[indexPathFirst!.section]
+//                if headerView.isHidden {
+//                    headerView.isHidden = false
+//                }
+//            }
             var listData = dataMessages[0...currentIndexpath!.row]
             listData = listData.filter({$0["status"] as? String != "4" && $0["status"] as? String != "8"})
             if listData.count != 0 && !isContactCenter {
@@ -8557,9 +8560,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
         
         if (!reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM) {
-            let data = queryMessageReply(message_id: reffChat)
             let chatGroup = Chat.getMessageFromId(message_id: reffChat)
-            if data.count != 0 {
+            if chatGroup.count != 0 {
                 let containerReply = UIView()
                 containerMessage.addSubview(containerReply)
                 containerReply.translatesAutoresizingMaskIntoConstraints = false
@@ -8606,21 +8608,19 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 titleReply.topAnchor.constraint(equalTo: containerReply.topAnchor, constant: 10).isActive = true
                 titleReply.trailingAnchor.constraint(lessThanOrEqualTo: containerReply.trailingAnchor, constant: -20).isActive = true
                 titleReply.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-                let f_pin = chatGroup.count == 0 ? data["f_pin"] as? String : chatGroup[0].fpin
+                let f_pin = chatGroup[0].fpin
                 if f_pin == idMe {
-                    if chatGroup.count == 0 {
+                    if chatGroup[0].messageScope != MessageScope.GROUP {
                         titleReply.text = "You".localized()
                     } else {
-                        if let dataPerson = User.getData(pin: f_pin) {
-                            titleReply.text = "You".localized() + " ● " + "\(chatGroup[0].groupName)(\(chatGroup[0].name))"
-                        }
+                        titleReply.text = "You".localized() + " ● " + "\(chatGroup[0].groupName)(\(chatGroup[0].name))"
                     }
                 } else {
                     if isContactCenter {
-                        let user: [User] = users.filter({$0.pin == data["f_pin"] as? String})
+                        let user: [User] = users.filter({$0.pin == chatGroup[0].fpin})
                         titleReply.text = user.first!.fullName
                     } else {
-                        if chatGroup.count == 0 {
+                        if chatGroup[0].messageScope != MessageScope.GROUP {
                             titleReply.text = self.dataPerson["name"]!!
                         } else {
                             if let dataPerson = User.getData(pin: f_pin) {
@@ -8648,12 +8648,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 topConstraintContent.priority = .defaultHigh
                 topConstraintContent.isActive = true
                 contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
-                let message_text = chatGroup.count == 0 ? (data["message_text"] as? String ?? "") : chatGroup[0].messageText
-                let attachment_flag = chatGroup.count == 0 ? (data["attachment_flag"] as? String ?? "") : chatGroup[0].attachmentFlag
-                let thumb_chat = chatGroup.count == 0 ? (data["thumb_id"] as? String ?? "") : chatGroup[0].thumb
-                let image_chat = chatGroup.count == 0 ? (data["image_id"] as? String ?? "") : chatGroup[0].image
-                let video_chat = chatGroup.count == 0 ? (data["video_id"] as? String ?? "") : chatGroup[0].video
-                let file_chat = chatGroup.count == 0 ? (data["file_id"] as? String ?? "") : chatGroup[0].file
+                let message_text = chatGroup[0].messageText
+                let attachment_flag = chatGroup[0].attachmentFlag
+                let thumb_chat = chatGroup[0].thumb
+                let image_chat = chatGroup[0].image
+                let video_chat = chatGroup[0].video
+                let file_chat = chatGroup[0].file
                 if (attachment_flag == "0" && thumb_chat == "") {
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
                     contentReply.attributedText = message_text.richText()
@@ -8739,7 +8739,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
                     containerReply.addGestureRecognizer(objectTap)
                     objectTap.indexPath = indexPath
-                    objectTap.message_id = data["message_id"]  as? String ?? ""
+                    objectTap.message_id = chatGroup[0].messageId
                 }
             }
         }
@@ -10019,33 +10019,33 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
     }
     
-    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        let indexPath = tableChatView.indexPathsForVisibleRows?.first
-        if indexPath != nil {
-            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-            let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
-                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                let headerView = listViewOnSection[sect]
-                headerView.isHidden = true
-            }
-        }
-    }
-    
-    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate {
-            let indexPath = tableChatView.indexPathsForVisibleRows?.first
-            if indexPath != nil {
-                let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
-                let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
-                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
-                    let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
-                    let headerView = listViewOnSection[sect]
-                    headerView.isHidden = true
-                }
-            }
-        }
-    }
+//    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+//        let indexPath = tableChatView.indexPathsForVisibleRows?.first
+//        if indexPath != nil {
+//            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+//            let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
+//            if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && indexPath!.row > 0 {
+//                let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+//                let headerView = listViewOnSection[sect]
+//                headerView.isHidden = true
+//            }
+//        }
+//    }
+//    
+//    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+//        if !decelerate {
+//            let indexPath = tableChatView.indexPathsForVisibleRows?.first
+//            if indexPath != nil {
+//                let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
+//                let isPinned = headerRect.origin.y <= scrollView.contentOffset.y
+//                if listViewOnSection.count != 0 && listViewOnSection.count - 1 == indexPath!.section && isPinned {
+//                    let sect = listViewOnSection.count - 1 < currentIndexpath!.section ? listViewOnSection.count - 1 : currentIndexpath!.section
+//                    let headerView = listViewOnSection[sect]
+//                    headerView.isHidden = true
+//                }
+//            }
+//        }
+//    }
 }
 
 extension UITableView {

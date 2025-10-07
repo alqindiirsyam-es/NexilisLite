@@ -10,6 +10,8 @@ import UIKit
 import WebKit
 import Speech
 import CommonCrypto
+import nuSDKService
+import NotificationBannerSwift
 
 public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScrollViewDelegate, UIGestureRecognizerDelegate, WKScriptMessageHandler, SFSpeechRecognizerDelegate, ImageVideoPickerDelegate {
     var webView: WKWebView!
@@ -159,6 +161,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         contentController.add(self, name: "shareText")
         contentController.add(self, name: "openGalleryiOS")
         contentController.add(self, name: "openChannel")
+        contentController.add(self, name: "setFirstTheme")
         
         let source: String = "var meta = document.createElement('meta');" +
             "meta.name = 'viewport';" +
@@ -624,6 +627,60 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
             }
             alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
             self.present(alertController, animated: true)
+        } else if message.name == "setFirstTheme" {
+            if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
+                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                imageView.tintColor = .white
+                let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                banner.show()
+                return
+            }
+            Nexilis.showLoader()
+            DispatchQueue.global().async {
+                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.backToSuperApp(), timeout: 30 * 1000) {
+                    DispatchQueue.main.async {
+                        if response.isOk() {
+                            Utils.setMyTheme(value: "")
+                            Utils.setIsLoadThemeFromOther(value: false)
+                            Utils.resetValueSuperApp()
+                            Utils.setValueInitialApp(data: Utils.getPrefTheme())
+                            Utils.setLastTabSelected(value: 0)
+                            Utils.setIsWATheme(value: false)
+                            UIApplication.shared.setAlternateIconName(nil)
+                            Nexilis.hideLoader {
+                                let alert = LibAlertController(title: "Successfully changed".localized(), message: "Please open the app again to see the changes".localized(), preferredStyle: .alert)
+                                alert.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: {(_) in
+                                    exit(0)
+                                }))
+                                self.present(alert, animated: true, completion: nil)
+                            }
+                        } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "10" {
+                            Nexilis.hideLoader(completion: {
+                                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(title: "Failed to back to Company App".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                banner.show()
+                            })
+                        } else {
+                            Nexilis.hideLoader(completion: {
+                                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                banner.show()
+                            })
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader(completion: {
+                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                            banner.show()
+                        })
+                    }
+                }
+            }
         }
     }
     

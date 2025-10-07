@@ -1568,7 +1568,7 @@ public class APIS: NSObject {
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
         DispatchQueue.main.async {
             if checkAppStateisBackground() {
-                DispatchQueue.global(qos: .userInitiated).async {
+                DispatchQueue.global(qos: .background).async {
                     if let payload = userInfo["payload"] as? [String: Any] {
                         if let messagePayload = payload["message"] as? [String: Any] {
                             if let data = messagePayload["data"] as? [String: Any] {
@@ -1660,6 +1660,10 @@ public class APIS: NSObject {
                             }
                         }
                     } else if let message_id = userInfo["message_id"] as? String {
+                        DispatchQueue.main.async {
+                            let lastBadgeNumber = UIApplication.shared.applicationIconBadgeNumber
+                            UIApplication.shared.applicationIconBadgeNumber = lastBadgeNumber + 1
+                        }
                         getMessageById(id: message_id)
                     }
                 }
@@ -1718,7 +1722,7 @@ public class APIS: NSObject {
     }
     
     static func ackAPN(id: String) {
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .background).async {
 //            Nexilis.sendStateToServer(s: "send ack from apn")
 //            if API.nGetCLXConnState() == 0 {
 //                do {
@@ -1797,7 +1801,7 @@ public class APIS: NSObject {
                 let ret = retry + 1
                 if ret <= 5 {
                     let delay = pow(2.0, Double(ret)) // 2, 4, 8, 16...
-                    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay) {
+                    DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + delay) {
                         getMessageById(id: id, retry: ret)
                     }
                 }
@@ -1807,34 +1811,38 @@ public class APIS: NSObject {
             guard let data = data else {
                 let ret = retry + 1
                 if ret <= 5 {
-                    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1) {
+                    DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1) {
                         getMessageById(id: id, retry: ret)
                     }
                 }
                 return
             }
-            
-            do {
-                if let jsonObj = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
-                    let dataObj = jsonObj["data"] as? String ?? ""
-                    let message = TMessage(data: dataObj)
-                    
-                    // simpan message
-                    Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
-                    ackAPN(id: id)
-                    
-                    DispatchQueue.main.async {
-                        UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
-                    }
-                } else {
-                    throw NSError(domain: "Invalid JSON", code: -1)
+            DispatchQueue.main.async {
+                if !APIS.checkAppStateisBackground() {
+                    return
                 }
-            } catch {
-                print("Parsing error: \(error)")
-                let ret = retry + 1
-                if ret <= 5 {
-                    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1) {
-                        getMessageById(id: id, retry: ret)
+                do {
+                    if let jsonObj = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                        let dataObj = jsonObj["data"] as? String ?? ""
+                        let message = TMessage(data: dataObj)
+                        
+                        // simpan message
+                        Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
+                        ackAPN(id: id)
+                        
+                        DispatchQueue.main.async {
+                            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+                        }
+                    } else {
+                        throw NSError(domain: "Invalid JSON", code: -1)
+                    }
+                } catch {
+                    print("Parsing error: \(error)")
+                    let ret = retry + 1
+                    if ret <= 5 {
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                            getMessageById(id: id, retry: ret)
+                        }
                     }
                 }
             }
