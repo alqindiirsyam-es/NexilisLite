@@ -4084,7 +4084,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             if (Nexilis.checkingAccess(key: "secure_folder_forward") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty) || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" && dataMessages[indexPath!.row]["attachment_flag"] as? String ?? "" != "11" {
                 children.insert(forward, at: 2)
             }
-            if dataMessages[indexPath!.row]["f_pin"] as? String ?? "" != "-999" && dataMessages[indexPath!.row]["f_pin"] as? String != User.getMyPin() && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11" {
+            if dataMessages[indexPath!.row]["f_pin"] as? String ?? "" != "-999" && dataMessages[indexPath!.row]["f_pin"] as? String != User.getMyPin() && dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" != "11" && dataMessages[indexPath!.row]["f_pin"] as? String ?? "" != "-997" {
                 children.insert(replyP, at: 2)
             }
             if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
@@ -4092,11 +4092,17 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
             if !(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
                 if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 && (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" {
-                    let valueDate = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
-                    let nowDate = Date()
-                    let diffInSeconds = nowDate.timeIntervalSince(valueDate)
-                    if diffInSeconds <= 15 * 60 {
-                        children.insert(edit, at: children.count - 1)
+                    var textFile = dataMessages[indexPath!.row][TypeDataMessage.message_text] as? String ?? ""
+                    if !(dataMessages[indexPath!.row][TypeDataMessage.file_id] as? String ?? "").isEmpty {
+                        textFile = textFile.components(separatedBy: "|")[1]
+                    }
+                    if !textFile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let valueDate = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
+                        let nowDate = Date()
+                        let diffInSeconds = nowDate.timeIntervalSince(valueDate)
+                        if diffInSeconds <= 15 * 60 {
+                            children.insert(edit, at: children.count - 1)
+                        }
                     }
                 }
                 if (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty{
@@ -4234,7 +4240,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         listMentionWithText.removeAll()
         listMentionInTextField.removeAll()
         let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
-        let oldText = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
+        var oldText = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
+        if !(dataMessages[indexPath.row][TypeDataMessage.file_id] as? String ?? "").isEmpty {
+            oldText = oldText.components(separatedBy: "|")[1]
+        }
         var oldTextForTextview = oldText
         let pattern = "@[\\w]+"
         do {
@@ -4342,6 +4351,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             buttonSendEdit.actionHandle(controlEvents: .touchUpInside,
              ForAction:{() -> Void in
                 var newText = self.editTextView.text ?? ""
+                if !(dataMessages[indexPath.row][TypeDataMessage.file_id] as? String ?? "").isEmpty {
+                    let firstText = dataMessages[indexPath.row][TypeDataMessage.message_text] as? String ?? ""
+                    newText = firstText.components(separatedBy: "|")[0] + "|" + newText
+                }
                 if newText.contains("@") && self.listMentionInTextField.count > 0 {
                     var diff: Int = 0
                     for i in 0..<self.listMentionInTextField.count {
@@ -4374,28 +4387,38 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     }
                 }
                 if !newText.isEmpty && newText.trimmingCharacters(in: .whitespacesAndNewlines) != oldText {
-                    let lastEdited = Int64(Date().currentTimeMillis())
-                    let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id]  as? String ?? "", l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin]  as? String ?? "", message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id]  as? String ?? "", status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential]  as? String ?? "", attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag]  as? String ?? "", ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id]  as? String ?? "", message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id]  as? String ?? "", audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id]  as? String ?? "", video_id: dataMessages[indexPath.row][TypeDataMessage.video_id]  as? String ?? "", file_id: dataMessages[indexPath.row][TypeDataMessage.file_id]  as? String ?? "", thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id]  as? String ?? "", reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id]  as? String ?? "", read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts]  as? String ?? "", chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id]  as? String ?? "", is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center]  as? String ?? "", call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id]  as? String ?? "", opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin]  as? String ?? "", server_date: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", local_time_stamp: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", last_edit: lastEdited)
-                    Nexilis.addQueueMessage(message: message, isEditMessage: true)
-                    DispatchQueue.global().async {
-                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            do {
-                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                                    "message_text" : newText,
-                                    "last_edited" : lastEdited
-                                ], _where: "message_id = '\(dataMessages[indexPath.row]["message_id"]  as? String ?? "")'")
-                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
-                            }
-                        })
+                    if !(dataMessages[indexPath.row][TypeDataMessage.file_id] as? String ?? "").isEmpty {
+                        let firstText = dataMessages[indexPath.row][TypeDataMessage.message_text] as? String ?? ""
+                        if newText != firstText {
+                            excEdit()
+                        }
+                    } else {
+                        excEdit()
                     }
-                    let idx = self.dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == dataMessages[indexPath.row][TypeDataMessage.message_id] as? String})
-                    if idx != nil{
-                        self.dataMessages[idx!][TypeDataMessage.message_text] = newText
-                        self.dataMessages[idx!][TypeDataMessage.last_edit] = lastEdited
-                        self.tableChatView.reloadRows(at: [indexPath], with: .none)
+                    func excEdit() {
+                        let lastEdited = Int64(Date().currentTimeMillis())
+                        let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id]  as? String ?? "", l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin]  as? String ?? "", message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id]  as? String ?? "", status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential]  as? String ?? "", attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag]  as? String ?? "", ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id]  as? String ?? "", message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id]  as? String ?? "", audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id]  as? String ?? "", video_id: dataMessages[indexPath.row][TypeDataMessage.video_id]  as? String ?? "", file_id: dataMessages[indexPath.row][TypeDataMessage.file_id]  as? String ?? "", thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id]  as? String ?? "", reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id]  as? String ?? "", read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts]  as? String ?? "", chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id]  as? String ?? "", is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center]  as? String ?? "", call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id]  as? String ?? "", opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin]  as? String ?? "", server_date: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", local_time_stamp: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", last_edit: lastEdited)
+                        Nexilis.addQueueMessage(message: message, isEditMessage: true)
+                        DispatchQueue.global().async {
+                            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                do {
+                                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                        "message_text" : newText,
+                                        "last_edited" : lastEdited
+                                    ], _where: "message_id = '\(dataMessages[indexPath.row]["message_id"]  as? String ?? "")'")
+                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                                } catch {
+                                    rollback.pointee = true
+                                    print("Access database error: \(error.localizedDescription)")
+                                }
+                            })
+                        }
+                        let idx = self.dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == dataMessages[indexPath.row][TypeDataMessage.message_id] as? String})
+                        if idx != nil{
+                            self.dataMessages[idx!][TypeDataMessage.message_text] = newText
+                            self.dataMessages[idx!][TypeDataMessage.last_edit] = lastEdited
+                            self.tableChatView.reloadRows(at: [indexPath], with: .none)
+                        }
                     }
                 }
                 self.isEditingMessage = false
@@ -7253,6 +7276,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+        let indexPath = sender.indexPath
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         func showMedia(data: Data? = nil, url: URL? = nil, type: Int = 0) {
             let image = UIImage(data: data ?? Data())
             let imageViewer = MediaViewerViewController()
@@ -7275,7 +7300,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
             let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
             imageViewer.navigationItem.leftBarButtonItem = backButton
-            if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
+            if (Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share")) && dataMessages[indexPath.row]["credential"] as? String != "1" {
                 let shareAction = UIAction { _ in
                     var activityViewController = UIActivityViewController(activityItems: [""], applicationActivities: nil)
                     if type == 1 {
@@ -7468,7 +7493,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 }
                 let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
                 vcHandleFile.navigationItem.leftBarButtonItem = backButton
-                if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
+                if (Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share")) && dataMessages[indexPath.row]["credential"] as? String != "1" {
                     let shareAction = UIAction { _ in
                         let fileManager = FileManager.default
                         let tempURL = fileManager.temporaryDirectory.appendingPathComponent(urlFile.lastPathComponent)

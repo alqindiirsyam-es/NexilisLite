@@ -61,6 +61,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     var lastScrollIdxSearch = 0
     var buttonUp: UIButton!
     var buttonDown: UIButton!
+    var amountTx = "0"
     
     public var fromNotification = true
     
@@ -277,8 +278,11 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     @objc func sendTapped() {
         if self.chatGPTMessages.last?["confirmation"] as? String == "1" {
             DispatchQueue.global().async {
-                let dataTxn = Utils.getTxnLevel()
+                var dataTxn = Utils.getTxnLevel()
                 var policyLevel = "1,2"
+                dataTxn = dataTxn.replacingOccurrences(of: "\\\"", with: "\"")
+                                            .replacingOccurrences(of: "\"[", with: "[")
+                                            .replacingOccurrences(of: "]\"", with: "]")
                 if !dataTxn.isEmpty {
                     if let data = dataTxn.data(using: .utf8) {
                         do {
@@ -288,7 +292,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                                     let min = json["min"] as? Double ?? 0
                                     let max = json["max"] as? Double ?? 0
                                     let policy = json["policy"] as? String ?? ""
-                                    let amount = 0.0
+                                    let amount = Double(self.amountTx) ?? 0.0
                                     if max == -1 {
                                         if amount >= min {
                                             policyLevel = policy
@@ -309,7 +313,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                 }
                 var isBiometricOn = false
                 var result = false
-                if policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFACE || policyLevel == MFAViewController.STEP_FIDO_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_BIOFACE {
+                if policyLevel == MFAViewController.STEP_FIDO_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_BIOFACE {
                     isBiometricOn = true
                 }
                 if isBiometricOn {
@@ -322,6 +326,28 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                         semaphore.signal()
                     }
 
+                    semaphore.wait()
+                } else if policyLevel == MFAViewController.STEP_FIDO_PWD || policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFACE || policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFINGER {
+                    let semaphore = DispatchSemaphore(value: 0)
+                    APIS.setMFACallback { res in
+                        if res == 0 {
+                            result = true
+                        }
+                        semaphore.signal()
+                    }
+                    DispatchQueue.main.async {
+                        let controller = MFAViewController()
+                        controller.METHOD = ""
+                        controller.STEP_NEEDED = policyLevel
+                        let navigationController = CustomNavigationController(rootViewController: controller)
+                        navigationController.defaultStyle()
+                        
+                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                        } else {
+                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                        }
+                    }
                     semaphore.wait()
                 } else {
                     result = true
@@ -462,6 +488,10 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                             DispatchQueue.main.async {
                                 self.dataMessages.removeAll(where: { $0["is_loading"] as? Bool == true })
                                 self.tableChatView.reloadData()
+                                if json["parameters"] != nil {
+                                    let param = json["parameters"] as! [String: Any]
+                                    self.amountTx = param["amount"] as? String ?? "0"
+                                }
                                 self.chatGPTMessages.append(json)
                                 guard let me = User.getMyPin() else {
                                     return

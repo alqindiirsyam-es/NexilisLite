@@ -580,6 +580,10 @@ public class APIS: NSObject {
         return mfaCallback
     }
     
+    static func setMFACallback(mfaCallback: @escaping (Int) -> Void) {
+        self.mfaCallback = mfaCallback
+    }
+    
     public static func signUp(userId: String, mfaCallback: @escaping (Int) -> Void) {
         self.mfaCallback = mfaCallback
         let method = "Sign Up"
@@ -602,7 +606,10 @@ public class APIS: NSObject {
         if !methodSetted.isEmpty {
             method = methodSetted
         }
-        let dataTxn = Utils.getTxnLevel()
+        var dataTxn = Utils.getTxnLevel()
+        dataTxn = dataTxn.replacingOccurrences(of: "\\\"", with: "\"")
+                                    .replacingOccurrences(of: "\"[", with: "[")
+                                    .replacingOccurrences(of: "]\"", with: "]")
         var policyLevel = "1,2"
 //        print("txnAuth: \(dataTxn)")
         if !dataTxn.isEmpty {

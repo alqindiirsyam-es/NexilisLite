@@ -13,6 +13,7 @@ import Photos
 import SwiftLinkPreview
 import nuSDKService
 import NotificationBannerSwift
+import SDWebImage
 
 public class EditorStarMessages: UIViewController, UITableViewDataSource, UITableViewDelegate, UIContextMenuInteractionDelegate, QLPreviewControllerDataSource, UITextViewDelegate {
     @IBOutlet var tableChatView: UITableView!
@@ -512,15 +513,16 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
         timeMessage.textColor = .lightGray
         
-        let thumbChat = dataMessages[indexPath.row]["thumb_id"] as! String
-        let imageChat = dataMessages[indexPath.row]["image_id"] as! String
-        let videoChat = dataMessages[indexPath.row]["video_id"] as! String
-        let fileChat = dataMessages[indexPath.row]["file_id"] as! String
+        let thumbChat = (dataMessages[indexPath.row]["thumb_id"] as? String) ?? ""
+        let imageChat = (dataMessages[indexPath.row]["image_id"] as? String) ?? ""
+        let videoChat = (dataMessages[indexPath.row]["video_id"] as? String) ?? ""
+        let fileChat = (dataMessages[indexPath.row]["file_id"] as? String) ?? ""
+        let gifChat = (dataMessages[indexPath.row]["gif_id"] as? String) ?? ""
         
         let imageThumb = UIImageView()
         let containerViewFile = UIView()
         
-        if (!thumbChat.isEmpty) {
+        if (!thumbChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             topMarginText.constant = topMarginText.constant + 205
             
             containerMessage.addSubview(imageThumb)
@@ -539,28 +541,74 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
             if let dirPath = paths.first {
                 let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumbChat)
-                let image    = UIImage(contentsOfFile: thumbURL.path)
-                imageThumb.image = image
+                if FileManager.default.fileExists(atPath: thumbURL.path) {
+                    DispatchQueue.main.async {
+                        let image : UIImage? =  {
+                            if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
+                                return img
+                            }
+                            else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
+                                    Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                                    return img
+                            }
+                            return nil
+                        }()
+                        imageThumb.image = image
+                    }
+                } else if FileEncryption.shared.isSecureExists(filename: thumbChat) {
+                    do {
+                        if var data = try FileEncryption.shared.readSecure(filename: thumbChat) {
+                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                            if dataDecrypt != nil {
+                                data = dataDecrypt!
+                            }
+                            DispatchQueue.main.async {
+                                let image : UIImage? =  {
+                                    if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
+                                        return img
+                                    }
+                                    else if let img = UIImage(data: data)?.resize(target: CGSize(width: 500, height: 500)) {
+                                        Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
+                                        return img
+                                    }
+                                    return nil
+                                }()
+                                imageThumb.image = image
+                            }
+                        }
+                    } catch {
+                        
+                    }
+                } else {
+                    Download().startHTTP(forKey: thumbChat) { (name, progress) in
+                        guard progress == 100 else {
+                            return
+                        }
+                        tableView.reloadRows(at: [indexPath], with: .none)
+                    }
+                }
                 
-                let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(videoChat)
                 let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
-                if !FileManager.default.fileExists(atPath: imageURL.path) && !FileManager.default.fileExists(atPath: videoURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) && !FileEncryption.shared.isSecureExists(filename: videoURL.lastPathComponent){
+                if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
                     let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
                     let blurEffectView = UIVisualEffectView(effect: blurEffect)
                     blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
                     blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                    let imageDownload = UIImageView(image: UIImage(systemName: "arrow.down.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .bold, scale: .default)))
                     imageThumb.addSubview(blurEffectView)
-                    imageThumb.addSubview(imageDownload)
-                    imageDownload.tintColor = .black.withAlphaComponent(0.3)
-                    imageDownload.translatesAutoresizingMaskIntoConstraints = false
-                    imageDownload.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
-                    imageDownload.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+                    if !imageChat.isEmpty {
+                        let imageDownload = UIImageView(image: UIImage(systemName: "arrow.down.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .bold, scale: .default)))
+                        imageThumb.addSubview(blurEffectView)
+                        imageThumb.addSubview(imageDownload)
+                        imageDownload.tintColor = .black.withAlphaComponent(0.3)
+                        imageDownload.translatesAutoresizingMaskIntoConstraints = false
+                        imageDownload.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
+                        imageDownload.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+                    }
                 }
                 
             }
             
-            if (videoChat != "") {
+            if (videoChat != "" && gifChat.isEmpty) {
                 let imagePlay = UIImageView(image: UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold, scale: .default))?.imageWithInsets(insets: UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10))?.withTintColor(.white))
                 imagePlay.circle()
                 imageThumb.addSubview(imagePlay)
@@ -568,6 +616,47 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imagePlay.translatesAutoresizingMaskIntoConstraints = false
                 imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
                 imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+            } else if !gifChat.isEmpty {
+                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                if let dirPath = paths.first {
+                    let gifURL = URL(fileURLWithPath: dirPath).appendingPathComponent(gifChat)
+                    if !FileManager.default.fileExists(atPath: gifURL.path) && !FileEncryption.shared.isSecureExists(filename: gifChat) {
+                        Download().startHTTP(forKey: gifChat) { (name, progress) in
+                            guard progress == 100 else {
+                                return
+                            }
+                            tableView.reloadRows(at: [indexPath], with: .none)
+                        }
+                    } else {
+                        imageThumb.addSubview(imageGif)
+                        imageGif.translatesAutoresizingMaskIntoConstraints = false
+                        imageGif.anchor(top: imageThumb.topAnchor, left: imageThumb.leftAnchor, bottom: imageThumb.bottomAnchor, right: imageThumb.rightAnchor)
+                        if FileManager.default.fileExists(atPath: gifURL.path) {
+                            imageGif.image = SDAnimatedImage(contentsOfFile: gifURL.path)
+//                                imageGif.shouldCustomLoopCount = true
+//                                imageGif.animationRepeatCount = 4
+                        } else if FileEncryption.shared.isSecureExists(filename: gifChat){
+                            do {
+                                if var data = try FileEncryption.shared.readSecure(filename: gifChat) {
+                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
+                                    if dataDecrypt != nil {
+                                        data = dataDecrypt!
+                                    }
+                                    if let imageData = SDAnimatedImage(data: data) {
+                                        imageGif.image = imageData
+//                                        imageGif.shouldCustomLoopCount = true
+//                                        imageGif.animationRepeatCount = 4
+                                    }
+                                }
+                            }
+                            catch {
+                                print("Error reading secure file")
+                            }
+                        }
+                    }
+                }
             }
             
             if (dataMessages[indexPath.row]["progress"] as! Double != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
