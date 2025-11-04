@@ -152,11 +152,7 @@ extension CallManager: CXProviderDelegate {
                     DispatchQueue.global().async {
                         do {
                             if API.nGetCLXConnState() == 0 {
-                                let id = Utils.getConnectionID()
-                                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-                                while API.nGetCLXConnState() == 0 {
-                                    Thread.sleep(forTimeInterval: 1)
-                                }
+                                _ = Nexilis.justInit()
                                 sendCancel()
                             } else {
                                 sendCancel()

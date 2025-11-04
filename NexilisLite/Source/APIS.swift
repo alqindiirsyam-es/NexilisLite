@@ -645,7 +645,13 @@ public class APIS: NSObject {
     private static func signUpSignInMFA(method: String, userId: String, policyLevel: String) {
         Nexilis.showLoader()
         DispatchQueue.global().async {
-            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpSignInAPI(p_name: userId, p_password: ""), timeout: 15 * 1000) {
+            var id = ""
+            if Utils.isMiddleMode() || Utils.isHSAMode() {
+                id = Nexilis.justInit()
+            } else {
+                id = User.getMyPin() ?? ""
+            }
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpSignInAPI(p_name: userId, p_password: "", xPin: id), timeout: 15 * 1000) {
                 if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "20" {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
@@ -813,7 +819,13 @@ public class APIS: NSObject {
                         }
                         return
                     }
-                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
+                    var id = ""
+                    if Utils.isMiddleMode() || Utils.isHSAMode() {
+                        id = Nexilis.justInit()
+                    } else {
+                        id = User.getMyPin() ?? ""
+                    }
+                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger(xPin: id)) {
                         if response.isOk() {
                             let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
                             if data.isEmpty {
@@ -2264,20 +2276,14 @@ public class APIS: NSObject {
             self.notifTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { _ in
                 stopNotif = false
             }
-            do {
-                if !Nexilis.afterConnect && API.nGetCLXConnState() == 0 {
-                    let id = Utils.getConnectionID()
-                    try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-                }
-//                listIdentifierNotif.removeAll()
-                Nexilis.afterConnect = false
-            } catch {
+            if !Utils.isHSAMode() && !Utils.isMiddleMode(){
+                _ = Nexilis.justInit(isChecking: true)
             }
         }
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-        if Utils.getSecureFolderOffline() == "0" && afterEnterBackground && Database.shared.database == nil && Utils.getSetProfile() {
+        if Utils.getSecureFolderOffline() == "0" && afterEnterBackground && Database.shared.database == nil && Utils.getSetProfile() && !Utils.isHSAMode() {
             Database.recreateInstance()
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil, userInfo: nil)
             if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
@@ -2303,6 +2309,22 @@ public class APIS: NSObject {
                     }
                 }
                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "checkNewMessagesNexilis"), object: nil, userInfo: nil)
+            }
+            
+            DispatchQueue.global(qos: .userInitiated).async {
+                if Utils.shouldRequestAuthentication() && Utils.getSetProfile() && (Utils.isMiddleMode() || Utils.isHSAMode()) && Nexilis.hasInit {
+                    DispatchQueue.main.async {
+                        var viewController = UIApplication.shared.windows.first?.rootViewController
+                        var notNull = false
+                        while !notNull {
+                            viewController = UIApplication.shared.windows.first?.rootViewController
+                            if viewController != nil {
+                                notNull = true
+                            }
+                        }
+                        Nexilis.showPassSignIn()
+                    }
+                }
             }
         }
         afterEnterBackground = true
@@ -2786,6 +2808,8 @@ public class APIS: NSObject {
                                                 }
                                             }
                                         }
+                                    } else {
+                                        sendIt()
                                     }
                                     func sendIt() {
                                         message = CoreMessage_TMessageBank.sendMessage(l_pin: groupId.isEmpty ? idContact : groupId, message_scope_id: scopeId, status: scopeId == "3" ? "1" : "2", message_text: data, credential: "0", attachment_flag: attachmentFlag, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageId, audio_id: renamedAudioId, video_id: videoId, file_id: renamedFileId, thumb_id: thumb, reff_id: "", read_receipts: "4", chat_id: chatId, is_call_center: "0", call_center_id: "", opposite_pin: scopeId == "3" ? (User.getMyPin() ?? "") : idContact, gif_id: "", isForwarded: "0", isSecret: "0", specFile: "")
@@ -3019,6 +3043,10 @@ public class APIS: NSObject {
         } else {
             UIApplication.shared.visibleViewController?.present(playerVC, animated: true, completion: nil)
         }
+    }
+    
+    public static func setAppMode(mode: Int) {
+        Utils.selectedAppMode = mode
     }
     
     public static func checkSignMethod() -> (Int, Int) {

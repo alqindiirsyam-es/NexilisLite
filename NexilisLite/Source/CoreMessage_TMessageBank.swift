@@ -41,6 +41,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
+        tmessage.mBodies[CoreMessage_TMessageKey.API] = Nexilis.sAPIKey
         tmessage.mPIN = p_pin
         return tmessage
     }
@@ -55,6 +56,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
+        tmessage.mBodies[CoreMessage_TMessageKey.API] = Nexilis.sAPIKey
 //        tmessage.mBodies[CoreMessage_TMessageKey.BUSINESS_ENTITY] = "74"
         return tmessage
     }
@@ -1425,12 +1427,11 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
-    public static func getSendOTPLogin(p_email: String = "", p_number: String = "") -> TMessage {
-        let me = User.getMyPin()!
+    public static func getSendOTPLogin(p_email: String = "", p_number: String = "", xpin: String) -> TMessage {
         let tmessage = TMessage()
         tmessage.mCode = CoreMessage_TMessageCode.SEND_OTP_LOGIN
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
-        tmessage.mPIN = me
+        tmessage.mPIN = xpin
         if !p_email.isEmpty {
             tmessage.mBodies[CoreMessage_TMessageKey.EMAIL] = p_email
         }
@@ -1440,15 +1441,15 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
+        tmessage.mBodies[CoreMessage_TMessageKey.API] = Nexilis.sAPIKey
         return tmessage
     }
 
-    public static func getSendVerifyChangeDevice(p_email: String, p_vercode: String, number: String = "", deviceFingerprint: String = "", publicKey: String = "", signature: String = "", totp: String = "") -> TMessage {
-        let me = User.getMyPin()!
+    public static func getSendVerifyChangeDevice(p_email: String, p_vercode: String, xpin: String, number: String = "", deviceFingerprint: String = "", publicKey: String = "", signature: String = "", totp: String = "") -> TMessage {
         let tmessage = TMessage()
-        tmessage.mCode = CoreMessage_TMessageCode.SEND_VERIFY_LOGIN
+        tmessage.mCode = CoreMessage_TMessageCode.SEND_VERIFY_LOGIN_V2
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
-        tmessage.mPIN = me
+        tmessage.mPIN = xpin
         tmessage.mBodies[CoreMessage_TMessageKey.EMAIL] = p_email
         tmessage.mBodies[CoreMessage_TMessageKey.OTP] = p_vercode
         tmessage.mBodies[CoreMessage_TMessageKey.PHONE_NUMBER] = number
@@ -1456,6 +1457,7 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
+        tmessage.mBodies[CoreMessage_TMessageKey.API] = Nexilis.sAPIKey
         if !deviceFingerprint.isEmpty {
             tmessage.mBodies[CoreMessage_TMessageKey.FINGERPRINT] = deviceFingerprint
         }
@@ -1469,6 +1471,21 @@ public class CoreMessage_TMessageBank {
             tmessage.mBodies[CoreMessage_TMessageKey.TOTP] = totp
         }
         return tmessage;
+    }
+    
+    public static func getSetPassword(pPassword: String) -> TMessage {
+        let tmessage = TMessage()
+        let me = User.getMyPin()!
+        tmessage.mCode = CoreMessage_TMessageCode.SET_PASSWORD_SIGN_UP
+        tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tmessage.mPIN = me
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_ID] = Utils.M_USER_ANDROID_ID
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
+        tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
+        tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
+        tmessage.mBodies[CoreMessage_TMessageKey.PSWD] = pPassword
+        tmessage.mBodies[CoreMessage_TMessageKey.API] = Nexilis.sAPIKey
+        return tmessage
     }
     
     public static func getChangePersonMSISDN(msisdn: String) -> TMessage {
@@ -2229,7 +2246,7 @@ public class CoreMessage_TMessageBank {
     
     public static func pullFloatingButton() -> TMessage {
         let tmessage = TMessage()
-        let me = User.getMyPin()!
+        let me = User.getMyPin() ?? ""
         tmessage.mCode = CoreMessage_TMessageCode.PULL_FLOATING_BUTTON
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
         tmessage.mPIN = me
@@ -2330,17 +2347,19 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
-    public static func getSignUpSignInAPI(p_name: String, p_password: String, deviceFingerprint: String = "", publicKey: String = "", signature: String = "", totp: String = "") -> TMessage {
+    public static func getSignUpSignInAPI(p_name: String, p_password: String, xPin: String, deviceFingerprint: String = "", publicKey: String = "", signature: String = "", totp: String = "", forceSU: String = "") -> TMessage {
         let tmessage = TMessage()
-        tmessage.mCode = CoreMessage_TMessageCode.SIGN_UP_AND_SIGN_IN_API
+        tmessage.mCode = CoreMessage_TMessageCode.SIGN_UP_AND_SIGN_IN_API_V2
         tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
-        tmessage.mPIN = User.getMyPin()!
+        tmessage.mPIN = xPin
         tmessage.mBodies[CoreMessage_TMessageKey.NAME] = p_name
         tmessage.mBodies[CoreMessage_TMessageKey.PSWD] = p_password
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_ID] = Utils.M_USER_ANDROID_ID
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_APP_NAME] = APIS.getAppNm()
         tmessage.mBodies[CoreMessage_TMessageKey.CPAAS_VERSION] = Utils.CPAAS_VERSION
         tmessage.mBodies[CoreMessage_TMessageKey.ANDROID_PACKAGE_NAME] = (Bundle.main.infoDictionary?["CFBundleIdentifier"] as? String) ?? ""
+        tmessage.mBodies[CoreMessage_TMessageKey.API] = Nexilis.sAPIKey
+        tmessage.mBodies[CoreMessage_TMessageKey.SUBMIT_DATE] = "\(Date().currentTimeMillis())"
         if !deviceFingerprint.isEmpty {
             tmessage.mBodies[CoreMessage_TMessageKey.FINGERPRINT] = deviceFingerprint
         }
@@ -2352,6 +2371,9 @@ public class CoreMessage_TMessageBank {
         }
         if !totp.isEmpty {
             tmessage.mBodies[CoreMessage_TMessageKey.TOTP] = totp
+        }
+        if !forceSU.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.FORCE_LOGIN_AUTH] = forceSU
         }
         return tmessage
     }
@@ -2774,10 +2796,9 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
-    public static func getChalanger() -> TMessage {
+    public static func getChalanger(xPin: String) -> TMessage {
         let tMessage = NexilisLite.TMessage()
-        let me = User.getMyPin() ?? ""
-        tMessage.mPIN = me
+        tMessage.mPIN = xPin
         tMessage.mCode = CoreMessage_TMessageCode.AUTH_REQUEST
         tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
         return tMessage

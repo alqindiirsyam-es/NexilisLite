@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.72"
+    public static var cpaasVersion = "5.0.73"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -61,8 +61,8 @@ public class Nexilis: NSObject {
     public static var defaultFloatingButton: [Int] = []
     
     public static var showButtonFB = false
-    public static var isShowForceSignIn = true
-    public static var afterConnect = true
+    
+    static var hasInit = false
     
     public static var imageCache = NSCache<NSString, UIImage>()
     
@@ -168,201 +168,51 @@ public class Nexilis: NSObject {
         } catch {
         }
         
+        let api: String? = SecureUserDefaults.shared.value(forKey: "apiKey") ?? nil
+        if api == nil {
+            SecureUserDefaults.shared.set(apiKey, forKey: "apiKey")
+        }
+        
+        Utils.setAppMode(value: Utils.selectedAppMode)
+        
         IncomingThread.default.run()
         
         imageCache.countLimit = 100
         imageCache.totalCostLimit = 1024 * 1024 * 200
         
         DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                func forceShowFB() {
+            let bExpectedMode = Utils.isHSAMode() || Utils.isMiddleMode()
+            if bExpectedMode {
+                if !fromMAB && !Utils.getSetProfile() {
                     DispatchQueue.main.async {
                         var viewController = UIApplication.shared.windows.first?.rootViewController
                         var notNull = false
                         while !notNull {
                             viewController = UIApplication.shared.windows.first?.rootViewController
-                            if viewController != nil && Utils.getFinishInitPrefsr() {
+                            if viewController != nil {
                                 notNull = true
                             }
                         }
-                        if showButton {
-                            addFB()
-                        }
-                        if let rootViewController = viewController {
-                            let isDarkMode = rootViewController.traitCollection.userInterfaceStyle == .dark
-                            if isDarkMode {
-                                UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
-                                let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
-                            } else {
-                                UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
-                                let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+                        showForceSignIn()
+                    }
+                } else if Utils.getSetProfile() {
+                    DispatchQueue.main.async {
+                        var viewController = UIApplication.shared.windows.first?.rootViewController
+                        var notNull = false
+                        while !notNull {
+                            viewController = UIApplication.shared.windows.first?.rootViewController
+                            if viewController != nil {
+                                notNull = true
                             }
                         }
+                        showPassSignIn()
                     }
                 }
-                if Utils.getFinishInitPrefsr() {
-                    Utils.setFinishInitPrefs(value: false)
-                }
-                if !Utils.getPrefTheme().isEmpty {
-                    forceShowFB()
-                    Utils.setFinishInitPrefs(value: true)
-                }
-                let address = Nexilis.getAddressNew(apiKey:apiKey)
-                if address.isEmpty {
-                    return
-                }
-//                print("HUHU>> \(API.sGetVersion())")
-                var id = Utils.getConnectionID()
-                Nexilis.ADDRESS = address.components(separatedBy: ":")[0]
-                Nexilis.PORT = Int(address.components(separatedBy: ":")[1]) ?? 0
-                if id.isEmpty {
-                    let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
-                    id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...]) + "\(Date().currentTimeMillis())"
-                    Utils.setConnectionID(value: id)
-                }
-                try API.initConnection(sAPIK: apiKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-                while (API.nGetCLXConnState() == 0) {
-                    Thread.sleep(forTimeInterval: 0.5)
-                }
-                if(User.getMyPin() == nil) {
-                    iRetryCheckSignInSignUp = 0
-                    let maxWaitTime: TimeInterval = 60 * 60 // 1 hour in seconds
-                    let t0 = Date().currentTimeMillis()
-                    
-                    do {
-                        while iRetryCheckSignInSignUp <= 30 || Date().currentTimeMillis() - t0 <= Int(maxWaitTime) {
-                            var tmessage = CoreMessage_TMessageBank.getSignUpApi(api: apiKey, p_pin: id)
-                            if !userId.isEmpty {
-                                tmessage = CoreMessage_TMessageBank.getSignInApi(api: apiKey, p_pin: id, name: userId)
-                            }
-                            if let response = Nexilis.writeSync(message: tmessage, timeout: 30 * 1000) {
-                                if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "11" {
-                                    let message = "94:Unregistered user"
-                                    delegate.onFailed(error: message)
-                                    sendStateToServer(s: message)
-                                    print("checkSignInSignUp sleep 30s before retrying send to server..\(response.toLogString())")
-                                    Thread.sleep(forTimeInterval: 30)
-                                } else if !response.isOk() {
-                                    let message = "99:Something went wrong. Invalid response, please check your connection.."
-                                    delegate.onFailed(error: message)
-                                    sendStateToServer(s: message)
-                                    print("checkSignInSignUp sleep 30s before retrying send to server..\(response.toLogString())")
-                                    Thread.sleep(forTimeInterval: 30)
-                                } else {
-                                    SecureUserDefaults.shared.set(id, forKey: "device_id")
-                                    id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
-                                    var enable_signup = (response.getBody(key: CoreMessage_TMessageKey.IS_ENABLED_ANONYMOUS, default_value: "0")) == "1"
-                                    if !enable_signup && !userId.isEmpty {
-                                        enable_signup = true
-                                        Utils.setProfile(value: true)
-                                    }
-                                    KeyManagerNexilis.deleteKey()
-                                    KeyManagerNexilis.deleteMarker()
-                                    Utils.setForceAnonymous(value: enable_signup)
-                                    if(!id.isEmpty) {
-                                        SecureUserDefaults.shared.set(id, forKey: "me")
-                                    }
-                                    break
-                                }
-                            } else {
-                                iRetryCheckSignInSignUp += 1
-
-                                if iRetryCheckSignInSignUp >= 30 {
-                                    let message: String
-                                    if !userId.isEmpty {
-                                        message = "99:Something went wrong while Sign-In. Please check your connection.."
-                                    } else {
-                                        message = "99:Something went wrong while Sign-Up. Please check your connection.."
-                                    }
-                                    delegate.onFailed(error: message)
-                                    sendStateToServer(s: message)
-                                }
-
-                                print("checkSignInSignUp sleep 30s before retrying send to server..")
-                                Thread.sleep(forTimeInterval: 30)
-                            }
-                        }
-                    } catch {
-                        print("checkSignInSignUp error: \(error.localizedDescription)")
-                    }
-                }
-
-                let api: String? = SecureUserDefaults.shared.value(forKey: "apiKey") ?? nil
-                if api == nil {
-                    SecureUserDefaults.shared.set(apiKey, forKey: "apiKey")
-                }
-                
-                sendVersionToBE()
-                getPullPrefs()
-                getFeatureAccess()
-                
-                if let me = User.getMyPin() {
-                    if Utils.getSetProfile() {
-                        if Utils.getSecureFolderOffline() != "0" || !userId.isEmpty {
-                            while FileEncryption.shared.aesKey == nil {
-                                Thread.sleep(forTimeInterval: 1)
-                            }
-                            _ = Database.shared.openDatabase()
-                        }
-                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            do {
-                                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT * FROM BUDDY where f_pin = '\(me)' ") {
-                                    if !cursorData.next() {
-                                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: me))
-                                    }
-                                    cursorData.close()
-                                }
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
-                            }
-                        })
-                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            do {
-                                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT image_id FROM GROUPZ where group_type = 1 AND official = 1"), cursorData.next() {
-                                    do {
-                                        let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                        let file = documentDir.appendingPathComponent(cursorData.string(forColumnIndex: 0)!)
-                                        if !FileManager().fileExists(atPath: file.path) && !FileEncryption.shared.isSecureExists(filename: cursorData.string(forColumnIndex: 0)!) {
-                                            Download().startHTTP(forKey: cursorData.string(forColumnIndex: 0)!) { (name, progress) in}
-                                        }
-                                    } catch {}
-                                    cursorData.close()
-                                }
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
-                            }
-                        })
-                    } else if isShowForceSignIn && !Utils.getForceAnonymous() && !Utils.getSetProfile() {
-                        DispatchQueue.main.async {
-                            print("MASUK showForceSignIn")
-                            showForceSignIn()
-                        }
-                    }
-//                    getServiceBank()
-                    getPullWorkingArea()
-                    getPullGroupNoMember()
-                    getWhitelistFileExt()
-                    delegate.onSuccess(userId: me)
-                    forceShowFB()
-                    if (Utils.getSetProfile() && !Utils.getFinishInitPrefsr()) || (!Utils.getForceAnonymous() && !Utils.getFinishInitPrefsr()) {
-                        Utils.setFinishInitPrefs(value: true)
-                    }
-                    Nexilis.destroyAll()
-                    if !Utils.getLoginMultipleFPin().isEmpty {
-                        let dialog = DialogUnableAccess()
-                        dialog.modalTransitionStyle = .crossDissolve
-                        dialog.modalPresentationStyle = .overCurrentContext
-                        UIApplication.shared.visibleViewController?.present(dialog, animated: true)
-                    }
-                }
-            } catch {
-                delegate.onFailed(error: "99:Something went wrong")
+            } else {
+                self.startConnect(showButton: showButton, apiKey: apiKey, delegate: delegate)
             }
         }
+        
         NetworkMonitor.shared.startMonitoring()
         
         OutgoingThread.default.run()
@@ -375,6 +225,228 @@ public class Nexilis: NSObject {
         
         _ = LocationManager()
         FileEncryption.shared.wipeFolderOldSecure()
+    }
+    
+    private static var initCallback: ((Int) -> Void)?
+    static var successSui: (() -> Void)?
+    static func setInitCallback(initCallback: @escaping (Int) -> Void) {
+        self.initCallback = initCallback
+    }
+    public static func setSuccessSui(successSui: @escaping () -> Void) {
+        self.successSui = successSui
+    }
+    
+    static func justInit(isChecking: Bool = false) -> String {
+//        print("justInit: \(Nexilis.sAPIKey)")
+        do {
+            var id = Utils.getConnectionID()
+            if !hasInit {
+                hasInit = true
+                let address = Nexilis.getAddressNew(apiKey:Nexilis.sAPIKey)
+                if address.isEmpty {
+                    return ""
+                }
+//                print("ADDRESS LEWAT: \(address)")
+                Nexilis.ADDRESS = address.components(separatedBy: ":")[0]
+                Nexilis.PORT = Int(address.components(separatedBy: ":")[1]) ?? 0
+                if id.isEmpty {
+                    let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
+                    id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...]) + "\(Date().currentTimeMillis())"
+                    Utils.setConnectionID(value: id)
+                }
+//                print("INIT CONNECTION: \(id)")
+                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+            }
+            if !isChecking {
+                while (API.nGetCLXConnState() == 0) {
+//                    print("API.nGetCLXConnState() == 0")
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+            }
+            return id
+        } catch {
+            return ""
+        }
+    }
+    
+    static func startConnect(showButton: Bool = Nexilis.showButtonFB, apiKey: String = Nexilis.sAPIKey, userId: String = "", delegate: ConnectDelegate? = nil, withInit: Bool = true) {
+//        print("startConnect")
+        do {
+            func forceShowFB() {
+                DispatchQueue.main.async {
+                    var viewController = UIApplication.shared.windows.first?.rootViewController
+                    var notNull = false
+                    while !notNull {
+                        viewController = UIApplication.shared.windows.first?.rootViewController
+                        if viewController != nil && Utils.getFinishInitPrefsr() {
+                            notNull = true
+                        }
+                    }
+                    if showButton {
+                        addFB()
+                    }
+                    if let rootViewController = viewController {
+                        let isDarkMode = rootViewController.traitCollection.userInterfaceStyle == .dark
+                        if isDarkMode {
+                            UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
+                            let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+                        } else {
+                            UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
+                            let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+                        }
+                    }
+                }
+            }
+            if withInit {
+                if Utils.getFinishInitPrefsr() {
+                    Utils.setFinishInitPrefs(value: false)
+                }
+                if !Utils.getPrefTheme().isEmpty {
+                    forceShowFB()
+                    Utils.setFinishInitPrefs(value: true)
+                }
+            }
+            var id = User.getMyPin() ?? ""
+            if withInit {
+                id = justInit()
+                if id.isEmpty {
+                    return
+                }
+            }
+            if(User.getMyPin() == nil) {
+                iRetryCheckSignInSignUp = 0
+                let maxWaitTime: TimeInterval = 60 * 60 // 1 hour in seconds
+                let t0 = Date().currentTimeMillis()
+                
+                do {
+                    while iRetryCheckSignInSignUp <= 30 || Date().currentTimeMillis() - t0 <= Int(maxWaitTime) {
+                        var tmessage = CoreMessage_TMessageBank.getSignUpApi(api: apiKey, p_pin: id)
+                        if !userId.isEmpty {
+                            tmessage = CoreMessage_TMessageBank.getSignInApi(api: apiKey, p_pin: id, name: userId)
+                        }
+                        if let response = Nexilis.writeSync(message: tmessage, timeout: 30 * 1000) {
+                            if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "11" {
+                                let message = "94:Unregistered user"
+                                delegate?.onFailed(error: message)
+                                initCallback?(0)
+                                sendStateToServer(s: message)
+                                print("checkSignInSignUp sleep 30s before retrying send to server..\(response.toLogString())")
+                                Thread.sleep(forTimeInterval: 30)
+                            } else if !response.isOk() {
+                                let message = "99:Something went wrong. Invalid response, please check your connection.."
+                                delegate?.onFailed(error: message)
+                                initCallback?(0)
+                                sendStateToServer(s: message)
+                                print("checkSignInSignUp sleep 30s before retrying send to server..\(response.toLogString())")
+                                Thread.sleep(forTimeInterval: 30)
+                            } else {
+                                SecureUserDefaults.shared.set(id, forKey: "device_id")
+                                id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
+                                var enable_signup = (response.getBody(key: CoreMessage_TMessageKey.IS_ENABLED_ANONYMOUS, default_value: "0")) == "1"
+                                if !enable_signup && !userId.isEmpty {
+                                    enable_signup = true
+                                    Utils.setProfile(value: true)
+                                }
+                                KeyManagerNexilis.deleteKey()
+                                KeyManagerNexilis.deleteMarker()
+                                Utils.setForceAnonymous(value: enable_signup)
+                                if(!id.isEmpty) {
+                                    SecureUserDefaults.shared.set(id, forKey: "me")
+                                }
+                                break
+                            }
+                        } else {
+                            iRetryCheckSignInSignUp += 1
+
+                            if iRetryCheckSignInSignUp >= 30 {
+                                let message: String
+                                if !userId.isEmpty {
+                                    message = "99:Something went wrong while Sign-In. Please check your connection.."
+                                } else {
+                                    message = "99:Something went wrong while Sign-Up. Please check your connection.."
+                                }
+                                delegate?.onFailed(error: message)
+                                initCallback?(0)
+                                sendStateToServer(s: message)
+                            }
+
+                            print("checkSignInSignUp sleep 30s before retrying send to server..")
+                            Thread.sleep(forTimeInterval: 30)
+                        }
+                    }
+                } catch {
+                    print("checkSignInSignUp error: \(error.localizedDescription)")
+                }
+            }
+            
+            sendVersionToBE()
+            getPullPrefs()
+            getFeatureAccess()
+            
+            if let me = User.getMyPin() {
+                if Utils.getSetProfile() {
+                    if Utils.getSecureFolderOffline() != "0" || !userId.isEmpty || !withInit {
+//                        print("MASUK OPEN DB")
+                        while FileEncryption.shared.aesKey == nil {
+                            Thread.sleep(forTimeInterval: 1)
+                        }
+                        _ = Database.shared.openDatabase()
+                    }
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        do {
+                            if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT * FROM BUDDY where f_pin = '\(me)' ") {
+                                if !cursorData.next() {
+                                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: me))
+                                }
+                                cursorData.close()
+                            }
+                        } catch {
+                            rollback.pointee = true
+                            print("Access database error: \(error.localizedDescription)")
+                        }
+                    })
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        do {
+                            if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT image_id FROM GROUPZ where group_type = 1 AND official = 1"), cursorData.next() {
+                                do {
+                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                                    let file = documentDir.appendingPathComponent(cursorData.string(forColumnIndex: 0)!)
+                                    if !FileManager().fileExists(atPath: file.path) && !FileEncryption.shared.isSecureExists(filename: cursorData.string(forColumnIndex: 0)!) {
+                                        Download().startHTTP(forKey: cursorData.string(forColumnIndex: 0)!) { (name, progress) in}
+                                    }
+                                } catch {}
+                                cursorData.close()
+                            }
+                        } catch {
+                            rollback.pointee = true
+                            print("Access database error: \(error.localizedDescription)")
+                        }
+                    })
+                }
+//                    getServiceBank()
+                getPullWorkingArea()
+                getPullGroupNoMember()
+                getWhitelistFileExt()
+                delegate?.onSuccess(userId: me)
+                initCallback?(1)
+                forceShowFB()
+                if (Utils.getSetProfile() && !Utils.getFinishInitPrefsr()) || (!Utils.getForceAnonymous() && !Utils.getFinishInitPrefsr()) {
+                    Utils.setFinishInitPrefs(value: true)
+                }
+                Nexilis.destroyAll()
+                if !Utils.getLoginMultipleFPin().isEmpty {
+                    let dialog = DialogUnableAccess()
+                    dialog.modalTransitionStyle = .crossDissolve
+                    dialog.modalPresentationStyle = .overCurrentContext
+                    UIApplication.shared.visibleViewController?.present(dialog, animated: true)
+                }
+            }
+        } catch {
+            delegate?.onFailed(error: "99:Something went wrong")
+            initCallback?(0)
+        }
     }
     
     private static var ringtoneID: SystemSoundID = 0
@@ -707,13 +779,14 @@ public class Nexilis: NSObject {
                 print("gagal getfeatureaccess:")
                 isGettingFeatureAccess = false
                 if Utils.getSecureFolderOffline() == "0" || (Utils.getSecureFolderOffline() == "1" && !Utils.getSetProfile()) {
-                    DispatchQueue.main.async {
-                        if !APIS.checkAppStateisBackground() {
-                            APIS.showRestartApp()
-                        } else {
-                            getFeatureAccess()
-                        }
-                    }
+                    getFeatureAccess()
+//                    DispatchQueue.main.async {
+//                        if !APIS.checkAppStateisBackground() {
+//                            APIS.showRestartApp()
+//                        } else {
+//                            getFeatureAccess()
+//                        }
+//                    }
                 }
             }
         }
@@ -722,7 +795,12 @@ public class Nexilis: NSObject {
     public static func checkingAccess(key: String) -> Bool {
         let dataAccess = Utils.getFeatureAccess()
         if dataAccess.isEmpty {
-            if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
+            if key == "sign_in_up_username" {
+                return true
+            }
+            if Utils.selectedAppMode == 1 && key == "sign_in_up_email" {
+                return true
+            } else if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
                 return false
             } else {
                 return false
@@ -731,7 +809,12 @@ public class Nexilis: NSObject {
             if jsonArray[key] != nil {
                 return jsonArray[key] as! String == "1"
             } else {
-                if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
+                if key == "sign_in_up_username" {
+                    return true
+                }
+                if Utils.selectedAppMode == 1 && key == "sign_in_up_email" {
+                    return true
+                } else if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
                     return false
                 } else {
                     return false
@@ -793,11 +876,13 @@ public class Nexilis: NSObject {
     }
     
     public static func showForceSignIn(completion: (() -> Void)? = nil) {
-        guard let controller = APIS.getControllerSign(forceSignIn: true) else { return }
-        if let controller = controller as? ChangeDeviceViewController {
+        guard let controller = APIS.getControllerSign() else { return }
+        if let controller = controller as? SignUpSignIn {
             controller.forceLogin = true
+            controller.forceSignIn = true
         } else if let controller = controller as? SignInOption {
             controller.forceLogin = true
+            controller.forceSignIn = true
         }
         let navigationController = CustomNavigationController(rootViewController: controller)
         navigationController.modalPresentationStyle = .fullScreen
@@ -812,7 +897,26 @@ public class Nexilis: NSObject {
         navigationController.navigationBar.titleTextAttributes = textAttributes
         navigationController.modalPresentationStyle = .fullScreen
         navigationController.modalTransitionStyle = .crossDissolve
-        UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: completion)
+        UIApplication.shared.windows.first?.rootViewController?.present(navigationController, animated: false, completion: completion)
+    }
+    
+    static func showPassSignIn(isFromSU: Bool = false) {
+        let controller = TFAPasswordVC()
+        controller.isFromSU = isFromSU
+        let navigationController = CustomNavigationController(rootViewController: controller)
+        navigationController.modalPresentationStyle = .fullScreen
+        navigationController.navigationBar.tintColor = .white
+        navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        navigationController.navigationBar.isTranslucent = false
+        navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+        navigationController.navigationBar.barStyle = .black
+        let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+        UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+        let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+        navigationController.navigationBar.titleTextAttributes = textAttributes
+        navigationController.modalPresentationStyle = .fullScreen
+        navigationController.modalTransitionStyle = .crossDissolve
+        UIApplication.shared.windows.first?.rootViewController?.present(navigationController, animated: false)
     }
     
     public static func destroyAll() {
@@ -1021,8 +1125,7 @@ public class Nexilis: NSObject {
             result = Utils.getHarcodedIp()
             return result
         }
-        
-        let url = URL(string: "\(Utils.getDomainOpr())dipp/NuN1v3rs3/Qm3r4i0/get_ip_domain?account=\(apiKey)")!
+        let url = URL(string: Utils.getDomainOpr() + Utils.decrypt(str: "2?vpwqeec[pkcoqf{rk{vgi;2k6t5oS;5ut5x3PwP;rrkf") + apiKey)!
         let urlConfig = URLSessionConfiguration.default
         let sessionDelegate = SelfSignedURLSessionDelegate()
         urlConfig.requestCachePolicy = .returnCacheDataElseLoad
@@ -1614,8 +1717,12 @@ public class Nexilis: NSObject {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 var messageExist = false
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
+                var lastEditedMessageExist: Int64 = 0
+                var lastLockedMessageExist = "0"
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select last_edited, lock from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
                     messageExist = true
+                    lastEditedMessageExist = cursor.longLongInt(forColumnIndex: 0)
+                    lastLockedMessageExist = cursor.string(forColumnIndex: 1) ?? "0"
                     cursor.close()
                 }
                 let l_pin = message.getBody(key : CoreMessage_TMessageKey.L_PIN, default_value : "")
@@ -1632,50 +1739,52 @@ public class Nexilis: NSObject {
                 let opposite_pin = message.getBody(key: CoreMessage_TMessageKey.OPPOSITE_PIN, default_value: "")
                 let is_bot = message.getBodyAsInteger(key: CoreMessage_TMessageKey.IS_BOT, default_value: 0)
                 //print("prepare save db")
-                do {
-                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                        "message_id" : message_id,
-                        "f_pin" : f_pin,
-                        "f_display_name" : message.getBody(key : CoreMessage_TMessageKey.F_DISPLAY_NAME, default_value : ""),
-                        "l_pin" : l_pin,
-                        "l_user_id" : message.getBody(key : CoreMessage_TMessageKey.L_USER_ID, default_value : ""),
-                        "message_scope_id" : scope,
-                        "server_date" : message.getBody(key: CoreMessage_TMessageKey.SERVER_DATE, default_value : String(Date().currentTimeMillis())),
-                        "status" : status,
-                        "message_text" : message.getBody(key : CoreMessage_TMessageKey.MESSAGE_TEXT, default_value : "").toNormalString(),
-                        "audio_id" : message.getBody(key : CoreMessage_TMessageKey.AUDIO_ID, default_value : ""),
-                        "video_id" : message.getBody(key : CoreMessage_TMessageKey.VIDEO_ID, default_value : ""),
-                        "image_id" : message.getBody(key : CoreMessage_TMessageKey.IMAGE_ID, default_value : ""),
-                        "file_id" : message.getBody(key : CoreMessage_TMessageKey.FILE_ID, default_value : ""),
-                        "gif_id" : message.getBody(key : CoreMessage_TMessageKey.GIF_ID, default_value : ""),
-                        "thumb_id" : message.getBody(key : CoreMessage_TMessageKey.THUMB_ID, default_value : ""),
-                        "opposite_pin" : message.getBody(key : CoreMessage_TMessageKey.OPPOSITE_PIN, default_value : ""),
-                        "format" : message.getBody(key : CoreMessage_TMessageKey.FORMAT, default_value : ""),
-                        "blog_id" : message.getBody(key : CoreMessage_TMessageKey.BLOG_ID, default_value : ""),
-                        "read_receipts" : message.getBody(key: CoreMessage_TMessageKey.READ_RECEIPTS, default_value:  "0"),
-                        "chat_id" : chat_id,
-                        "account_type" : message.getBody(key : CoreMessage_TMessageKey.BUSINESS_CATEGORY, default_value : "1"),
-                        "credential" : message.getBody(key : CoreMessage_TMessageKey.CREDENTIAL, default_value : ""),
-                        "reff_id" : message.getBody(key : CoreMessage_TMessageKey.REF_ID, default_value : ""),
-                        "message_large_text" : message.getBody(key : CoreMessage_TMessageKey.BODY, default_value : "").toNormalString(),
-                        "attachment_flag" : message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_FLAG, default_value:  "0"),
-                        "local_timestamp" : message.getBody(key: CoreMessage_TMessageKey.LOCAL_TIMESTAMP, default_value : String(Date().currentTimeMillis())),
-                        "broadcast_flag" : broadcast_flag,
-                        "is_call_center" : is_call_center,
-                        "ex_book" : message.getBody(key: CoreMessage_TMessageKey.EX_BOOK, default_value:  "0"),
-                        "ex_book1" : message.getBody(key: CoreMessage_TMessageKey.EX_BOOK1, default_value:  "0"),
-                        "call_center_id" : call_center_id,
-                        "last_edited" : last_edited,
-                        "is_secret" : is_secret,
-                        "is_deleted_retention" : is_delete_retention,
-                        "is_forwarded_message" : is_forwarded_message,
-                        "attachment_speciality" : message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY, default_value:  ""),
-                        "is_bot" : is_bot
-                    ], replace: true)
-                } catch {
-                    print("ERROR: \(error)")
-                    rollback.pointee = true
-                    //print(error)
+                if !messageExist || (lastEditedMessageExist == 0 && lastLockedMessageExist != "1") {
+                    do {
+                        _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                            "message_id" : message_id,
+                            "f_pin" : f_pin,
+                            "f_display_name" : message.getBody(key : CoreMessage_TMessageKey.F_DISPLAY_NAME, default_value : ""),
+                            "l_pin" : l_pin,
+                            "l_user_id" : message.getBody(key : CoreMessage_TMessageKey.L_USER_ID, default_value : ""),
+                            "message_scope_id" : scope,
+                            "server_date" : message.getBody(key: CoreMessage_TMessageKey.SERVER_DATE, default_value : String(Date().currentTimeMillis())),
+                            "status" : status,
+                            "message_text" : message.getBody(key : CoreMessage_TMessageKey.MESSAGE_TEXT, default_value : "").toNormalString(),
+                            "audio_id" : message.getBody(key : CoreMessage_TMessageKey.AUDIO_ID, default_value : ""),
+                            "video_id" : message.getBody(key : CoreMessage_TMessageKey.VIDEO_ID, default_value : ""),
+                            "image_id" : message.getBody(key : CoreMessage_TMessageKey.IMAGE_ID, default_value : ""),
+                            "file_id" : message.getBody(key : CoreMessage_TMessageKey.FILE_ID, default_value : ""),
+                            "gif_id" : message.getBody(key : CoreMessage_TMessageKey.GIF_ID, default_value : ""),
+                            "thumb_id" : message.getBody(key : CoreMessage_TMessageKey.THUMB_ID, default_value : ""),
+                            "opposite_pin" : message.getBody(key : CoreMessage_TMessageKey.OPPOSITE_PIN, default_value : ""),
+                            "format" : message.getBody(key : CoreMessage_TMessageKey.FORMAT, default_value : ""),
+                            "blog_id" : message.getBody(key : CoreMessage_TMessageKey.BLOG_ID, default_value : ""),
+                            "read_receipts" : message.getBody(key: CoreMessage_TMessageKey.READ_RECEIPTS, default_value:  "0"),
+                            "chat_id" : chat_id,
+                            "account_type" : message.getBody(key : CoreMessage_TMessageKey.BUSINESS_CATEGORY, default_value : "1"),
+                            "credential" : message.getBody(key : CoreMessage_TMessageKey.CREDENTIAL, default_value : ""),
+                            "reff_id" : message.getBody(key : CoreMessage_TMessageKey.REF_ID, default_value : ""),
+                            "message_large_text" : message.getBody(key : CoreMessage_TMessageKey.BODY, default_value : "").toNormalString(),
+                            "attachment_flag" : message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_FLAG, default_value:  "0"),
+                            "local_timestamp" : message.getBody(key: CoreMessage_TMessageKey.LOCAL_TIMESTAMP, default_value : String(Date().currentTimeMillis())),
+                            "broadcast_flag" : broadcast_flag,
+                            "is_call_center" : is_call_center,
+                            "ex_book" : message.getBody(key: CoreMessage_TMessageKey.EX_BOOK, default_value:  "0"),
+                            "ex_book1" : message.getBody(key: CoreMessage_TMessageKey.EX_BOOK1, default_value:  "0"),
+                            "call_center_id" : call_center_id,
+                            "last_edited" : last_edited,
+                            "is_secret" : is_secret,
+                            "is_deleted_retention" : is_delete_retention,
+                            "is_forwarded_message" : is_forwarded_message,
+                            "attachment_speciality" : message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY, default_value:  ""),
+                            "is_bot" : is_bot
+                        ], replace: true)
+                    } catch {
+                        print("ERROR: \(error)")
+                        rollback.pointee = true
+                        //print(error)
+                    }
                 }
                 
                 if withStatus {
@@ -1719,7 +1828,7 @@ public class Nexilis: NSObject {
                 if !withStatus {
                     if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select counter from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
                         counter = Int(cursor.int(forColumnIndex: 0))
-                        if last_edited == 0 && !messageExist {
+                        if !messageExist {
                             counter! += 1
                         }
                         cursor.close()

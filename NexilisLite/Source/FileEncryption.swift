@@ -18,7 +18,7 @@ public class FileEncryption {
 
     private init() {}
     
-    public func readSecure(filename: String) throws -> Data? {
+    public func readSecure(filename: String, withoutBiometric: Bool = false) throws -> Data? {
         if Utils.getFeatureAccess().isEmpty {
             return nil
         }
@@ -28,12 +28,12 @@ public class FileEncryption {
 
         let encryptedData = try Data(contentsOf: fileURL)
         let sealedBox = try AES.GCM.SealedBox(combined: encryptedData)
-        let decryptedData = try AES.GCM.open(sealedBox, using: MasterKeyUtil.shared.getMasterKey())
+        let decryptedData = try AES.GCM.open(sealedBox, using: MasterKeyUtil.shared.getMasterKey(withoutBiometric: withoutBiometric))
 
         return decryptedData
     }
     
-    public func writeSecure(filename: String? = nil, data: Data? = nil) throws {
+    public func writeSecure(filename: String? = nil, data: Data? = nil, withoutBiometric: Bool = false) throws {
         do {
             let fileManager = FileManager.default
 
@@ -50,7 +50,7 @@ public class FileEncryption {
             let fileURL = secureDir.appendingPathComponent(filename ?? "")
 
             // Encrypt the data
-            let sealedBox = try AES.GCM.seal(data ?? Data(), using: MasterKeyUtil.shared.getMasterKey())
+            let sealedBox = try AES.GCM.seal(data ?? Data(), using: MasterKeyUtil.shared.getMasterKey(withoutBiometric: withoutBiometric))
             let encryptedData = sealedBox.combined!
 
             // Write encrypted data to file

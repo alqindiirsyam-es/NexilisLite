@@ -488,8 +488,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         tableChatView.dataSource = self
         tableChatView.reloadData()
         if !referenceMessageId.isEmpty {
-            if dataMessages.firstIndex(where: {$0["message_id"] as? String == referenceMessageId} ) != 0 {
+            if dataMessages.firstIndex(where: {$0["message_id"] as? String == referenceMessageId} ) != nil {
                 DispatchQueue.main.async {
+                    if self.referenceChatDate.isEmpty {
+                        self.referenceChatDate = self.chatDate(stringDate: self.dataMessages[self.dataMessages.firstIndex(where: {$0["message_id"] as? String == self.referenceMessageId} )!][TypeDataMessage.server_date] as! String)
+                    }
                     let section = self.dataDates.firstIndex(of: self.referenceChatDate)
                     let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.referenceChatDate}).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
                     if row != nil && section != nil {
@@ -503,7 +506,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 }
             }
         } else if counter != 0 {
-            if dataMessages.firstIndex(where: {$0["message_id"] as? String == markerCounter} ) != 0 {
+            if dataMessages.firstIndex(where: {$0["message_id"] as? String == markerCounter} ) != nil {
                 DispatchQueue.main.async {
                     let data = self.dataMessages.filter({ $0["message_id"] as? String == self.markerCounter })
                     if data.count > 0 {
@@ -4061,6 +4064,9 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
 //        let copyOption = self.copyOption(indexPath: indexPath!)
         let idMe = User.getMyPin() as String?
         
+        if !(dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty {
+            children.remove(at: 3)
+        }
         if dataMessages[indexPath!.row]["status"]  as? String ?? "" == "0" {
             children = [resend, delete]
         } else if (dataMessages[indexPath!.row]["lock"] != nil && dataMessages[indexPath!.row]["lock"]  as? String ?? "" == "1") || dataMessages[indexPath!.row]["message_scope_id"]  as? String ?? "" == "18" || dataMessages[indexPath!.row]["credential"]  as? String ?? "" == "1" {
@@ -6086,7 +6092,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                                     audioData = dataDecrypt!
                                 }
                                 let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                                let tempPath = cachesDirectory.appendingPathComponent(audioChat)
+                                let tempPath = cachesDirectory.appendingPathComponent(audioChat.contains(".aac") ? "\(audioChat.components(separatedBy: ".")[0]).m4a" : audioChat)
                                 try audioData.write(to: tempPath)
                                 url = tempPath
                             }

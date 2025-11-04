@@ -1,8 +1,8 @@
 //
-//  MFAViewController.swift
+//  TFAPasswordVC.swift
 //  Pods
 //
-//  Created by Maronakins on 01/08/25.
+//  Created by Qindi on 22/10/25.
 //
 
 import UIKit
@@ -11,8 +11,8 @@ import os
 import LocalAuthentication
 import nuSDKService
 
-// MARK: - MFA Class
-class MFAViewController: UIViewController {
+
+class TFAPasswordVC: UIViewController {
     
     static let STEP_FIDO = "1";
     static let STEP_FIDO_PWD = "1,2";
@@ -22,7 +22,7 @@ class MFAViewController: UIViewController {
     static let STEP_FIDO_BIOFACE = "1,4";
     
     var STEP_NEEDED = STEP_FIDO_PWD
-    var METHOD = ""
+    var METHOD = "Sign In"
 
     private let imageViewBackground = UIImageView()
     private let scrollView = UIScrollView()
@@ -34,14 +34,18 @@ class MFAViewController: UIViewController {
     private let passwordTextField = UITextField()
     private let passwordVisibilityButton = UIButton(type: .system)
     private let poweredStackView = UIStackView()
+    private let noteLabel = UILabel()
     private let poweredLabel = UILabel()
     private let poweredImageView = UIImageView()
 
     private var isPasswordVisible = false
+    var isFromSU = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancel(sender:)))
+        if isFromSU {
+            SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
+        }
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Submit".localized(), style: .plain, target: self, action: #selector(submitAction))
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tapGesture.cancelsTouchesInView = false
@@ -50,6 +54,11 @@ class MFAViewController: UIViewController {
         setupLayout()
         loadData()
         updateUIBasedOnMethod()
+        DispatchQueue.global().async {
+            if Utils.isMiddleMode() && Utils.getBiometricState() != nil {
+                self.biometricAuth()
+            }
+        }
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -92,7 +101,6 @@ class MFAViewController: UIViewController {
     }
     
     @objc func cancel(sender: Any) {
-        APIS.getMFACallback()?(99)
         navigationController?.dismiss(animated: true, completion: nil)
     }
     
@@ -123,7 +131,7 @@ class MFAViewController: UIViewController {
 
         // Header Images
         headerImageView1.contentMode = .scaleAspectFit
-        headerImageView1.image = UIImage(named: "pb_mfa_bjb", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        headerImageView1.image = UIImage(named: "pb_ic_attach_spc_badge", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
         headerImageView1.heightAnchor.constraint(equalToConstant: 100).isActive = true
         mainStackView.addArrangedSubview(headerImageView1)
 
@@ -170,6 +178,14 @@ class MFAViewController: UIViewController {
         passwordVisibilityButton.tintColor = .black
         passwordContainerView.addSubview(passwordVisibilityButton)
         
+        if isFromSU {
+            print("MASUK SINI GA?")
+            noteLabel.attributedText = "_Note: If you have not changed the password provided by this user or are unsure of it, please note that the default password is *abcd1234*_".localized().richText()
+            noteLabel.numberOfLines = 0
+            mainStackView.addArrangedSubview(noteLabel)
+        }
+        
+        
         mainStackView.setCustomSpacing(12, after: subtitleLabel)
         mainStackView.setCustomSpacing(24, after: passwordContainerView)
 
@@ -201,8 +217,8 @@ class MFAViewController: UIViewController {
 
             // Scroll View
             scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             scrollView.bottomAnchor.constraint(equalTo: poweredStackView.topAnchor, constant: -8),
 
             // Main Stack View
@@ -247,10 +263,6 @@ class MFAViewController: UIViewController {
     }
 
     @objc private func submitAction() {
-        if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
-            self.view.makeToast("Check your connection".localized(), duration: 2.0, position: .center)
-            return
-        }
         guard let password = passwordTextField.text, !password.trimmingCharacters(in: .whitespaces).isEmpty else {
             self.view.makeToast("Password cannot be empty.".localized(), duration: 2.0, position: .center)
             return
@@ -264,7 +276,7 @@ class MFAViewController: UIViewController {
         submit()
     }
 
-    private func submit() {
+    private func submit(fromBiometric: Bool = false) {
         guard let password = passwordTextField.text else { return }
         Nexilis.showLoader()
         
@@ -276,33 +288,20 @@ class MFAViewController: UIViewController {
                 // 2. Create message for the server
                 let me = User.getMyPin() ?? ""
                 let tMessage = CoreMessage_TMessageBank.getMFAValidation(data: me)
-                tMessage.mBodies[CoreMessage_TMessageKey.PSWD] = encryptedPwd
-                tMessage.mBodies[CoreMessage_TMessageKey.ACTVITY] = self.METHOD
-                var hasKey = false
-                if !KeyManagerNexilis.hasGeneratedKey() {
-                    KeyManagerNexilis.generateKey()
-                    KeyManagerNexilis.saveMarker()
-                } else {
-                    hasKey = true
+                if !fromBiometric {
+                    tMessage.mBodies[CoreMessage_TMessageKey.PSWD] = encryptedPwd
                 }
-                guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: false) else {
-                    KeyManagerNexilis.deleteKey()
-                    KeyManagerNexilis.deleteMarker()
+                tMessage.mBodies[CoreMessage_TMessageKey.SUBMIT_DATE] = "\(Date().currentTimeMillis())"
+                tMessage.mBodies[CoreMessage_TMessageKey.ACTVITY] = self.METHOD
+                guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: Utils.isHSAMode()) else {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
-                            let errorMessage = "PPKey Generated Failed".localized()
+                            let errorMessage = "Biometric Failed".localized()
                             let dialog = DialogErrorMFA()
                             dialog.modalTransitionStyle = .crossDissolve
                             dialog.modalPresentationStyle = .overCurrentContext
                             dialog.errorDesc = errorMessage
                             dialog.method = self.METHOD
-                            dialog.isDismiss = { res in
-                                if res == 0 {
-                                    self.navigationController?.dismiss(animated: true, completion: {
-                                        APIS.getMFACallback()?(5)
-                                    })
-                                }
-                            }
                             UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                         }
                     }
@@ -319,8 +318,6 @@ class MFAViewController: UIViewController {
                         let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
                         if data.isEmpty {
                             DispatchQueue.main.async {
-                                KeyManagerNexilis.deleteKey()
-                                KeyManagerNexilis.deleteMarker()
                                 Nexilis.hideLoader {
                                     let errorMessage = "Auth Failure".localized()
                                     let dialog = DialogErrorMFA()
@@ -328,13 +325,6 @@ class MFAViewController: UIViewController {
                                     dialog.modalPresentationStyle = .overCurrentContext
                                     dialog.errorDesc = errorMessage
                                     dialog.method = self.METHOD
-                                    dialog.isDismiss = { res in
-                                        if res == 0 {
-                                            self.navigationController?.dismiss(animated: true, completion: {
-                                                APIS.getMFACallback()?(2)
-                                            })
-                                        }
-                                    }
                                     UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                                 }
                             }
@@ -342,33 +332,33 @@ class MFAViewController: UIViewController {
                         }
                         let df = HMACDeviceFingerprintNexilis.generate()
                         tMessage.mBodies[CoreMessage_TMessageKey.FINGERPRINT] = df
-                        if hasKey {
-                            var sign = ""
-                            if let dataSign = "\(data)!\(df)".data(using: .utf8) {
-                                if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
-                                    sign = signature.base64EncodedString()
-                                }
-                            }
-                            tMessage.mBodies[CoreMessage_TMessageKey.SIGNATURE] = sign
-                        } else {
-                            if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
-                                tMessage.mBodies[CoreMessage_TMessageKey.PUBLIC_KEY] = publicKey
+                        var sign = ""
+                        if let dataSign = "\(data)!\(df)".data(using: .utf8) {
+                            if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
+                                sign = signature.base64EncodedString()
                             }
                         }
-//                        let secret = "JBSWY3DPEHPK3PXP" // Google Authenticator example
+                        tMessage.mBodies[CoreMessage_TMessageKey.SIGNATURE] = sign
                         let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 300)
                         tMessage.mBodies[CoreMessage_TMessageKey.TOTP] = otp
                         if let response = Nexilis.writeAndWait(message: tMessage) {
                             if response.isOk() {
-                                if self.STEP_NEEDED == MFAViewController.STEP_FIDO_PWD_BIOFINGER || self.STEP_NEEDED == MFAViewController.STEP_FIDO_PWD_BIOFACE {
-                                    self.biometricAuth()
-                                } else {
+                                if Utils.isMiddleMode() && Utils.getBiometricState() == nil {
+                                    SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
+                                }
+                                Nexilis.setInitCallback() { res in
+                                    if res == 1 {
+                                        Nexilis.successSui?()
+                                        closePage()
+                                    }
+                                }
+                                Nexilis.startConnect(withInit: false)
+                                func closePage() {
                                     DispatchQueue.main.async {
                                         Nexilis.hideLoader {
                                             self.navigationController?.dismiss(animated: true, completion: {
                                                 UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
                                                 self.dismissKeyboard()
-                                                APIS.getMFACallback()?(0)
                                             })
                                         }
                                     }
@@ -376,23 +366,13 @@ class MFAViewController: UIViewController {
                             }
                             else {
                                 DispatchQueue.main.async {
-                                    KeyManagerNexilis.deleteKey()
-                                    KeyManagerNexilis.deleteMarker()
                                     Nexilis.hideLoader {
                                         let errorMessage = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT, default_value: "Auth Failure".localized())
-                                        let errCode = response.getBodyAsInteger(key: CoreMessage_TMessageKey.ERRAPICOD, default_value: 2)
                                         let dialog = DialogErrorMFA()
                                         dialog.modalTransitionStyle = .crossDissolve
                                         dialog.modalPresentationStyle = .overCurrentContext
                                         dialog.errorDesc = errorMessage
                                         dialog.method = self.METHOD
-                                        dialog.isDismiss = { res in
-                                            if res == 0 {
-                                                self.navigationController?.dismiss(animated: true, completion: {
-                                                    APIS.getMFACallback()?(errCode)
-                                                })
-                                            }
-                                        }
                                         UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                                     }
                                 }
@@ -401,8 +381,6 @@ class MFAViewController: UIViewController {
                     }
                 } else {
                     DispatchQueue.main.async {
-                        KeyManagerNexilis.deleteKey()
-                        KeyManagerNexilis.deleteMarker()
                         Nexilis.hideLoader {
                             let errorMessage = "Unable to access servers. Check your internet connection and try again later".localized()
                             let dialog = DialogErrorMFA()
@@ -410,13 +388,6 @@ class MFAViewController: UIViewController {
                             dialog.modalPresentationStyle = .overCurrentContext
                             dialog.errorDesc = errorMessage
                             dialog.method = self.METHOD
-                            dialog.isDismiss = { res in
-                                if res == 0 {
-                                    self.navigationController?.dismiss(animated: true, completion: {
-                                        APIS.getMFACallback()?(13)
-                                    })
-                                }
-                            }
                             UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                         }
                     }
@@ -432,54 +403,30 @@ class MFAViewController: UIViewController {
         var result = true
         var stateErr = 0
         let manager = BiometricStateManager()
-        if self.METHOD == "Sign Up" {
-            manager.authenticateAndSaveState { res in
-                result = res
-                semaphore.signal()
-            }
-        } else {
-            manager.hasBiometricStateChanged { (res, state) in
-                result = res
-                stateErr = state
-                semaphore.signal()
-            }
+        manager.hasBiometricStateChanged { (res, state) in
+            result = res
+            stateErr = state
+            semaphore.signal()
         }
         
         semaphore.wait()
 
         if result {
-            DispatchQueue.main.async {
-                Nexilis.hideLoader {
-                    self.navigationController?.dismiss(animated: true, completion: {
-                        UIApplication.shared.visibleViewController?.view.makeToast("Successfully Authenticated".localized(), duration: 3)
-                        self.dismissKeyboard()
-                        APIS.getMFACallback()?(0)
-                    })
+            if Utils.isMiddleMode() {
+                DispatchQueue.main.async {
+                    self.submit(fromBiometric: true)
                 }
             }
-        } else {
-            KeyManagerNexilis.deleteKey()
-            KeyManagerNexilis.deleteMarker()
+        } else if stateErr == 1 {
             DispatchQueue.main.async {
                 Nexilis.hideLoader {
-                    var errorMessage = "Gagal mendeteksi Biometric (Touch/Face ID)"
-                    var errCode = 10
-                    if stateErr == 1 {
-                        errorMessage = "Terjadi Perubahan Biometric (Touch/Face ID)"
-                        errCode = 14
-                    }
+                    let errorMessage = "Terjadi Perubahan Biometric (Touch/Face ID)"
                     let dialog = DialogErrorMFA()
                     dialog.modalTransitionStyle = .crossDissolve
                     dialog.modalPresentationStyle = .overCurrentContext
                     dialog.errorDesc = errorMessage
                     dialog.method = self.METHOD
                     dialog.hideTryAgain = (stateErr == 1)
-                    dialog.isDismiss = { res in
-                        if res == 0 {
-                            APIS.logOut()
-                            APIS.getMFACallback()?(errCode)
-                        }
-                    }
                     UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                 }
             }
@@ -490,4 +437,3 @@ class MFAViewController: UIViewController {
         headerTitleLabel.text = METHOD
     }
 }
-

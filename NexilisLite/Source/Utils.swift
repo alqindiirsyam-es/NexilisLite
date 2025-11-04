@@ -289,7 +289,7 @@ public final class Utils {
         if let value: String = SecureUserDefaults.shared.value(forKey: "authentication_duration") {
             return value
         }
-        return "5"
+        return ""
     }
     
     static func setMaxRetryTimeUpload(value: String) {
@@ -838,6 +838,18 @@ public final class Utils {
                     if Array(json.keys)[i] == "app_builder_url_third_tab" {
                         Utils.setURLThirdTab(value: Array(json.values)[i] as? String ?? "")
                     }
+                    if Array(json.keys)[i] == "app_builder_url_webview_3" {
+                        Utils.setURLWv3(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "app_builder_url_webview_4" {
+                        Utils.setURLWv4(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "app_builder_url_webview_5" {
+                        Utils.setURLWv5(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "app_builder_url_webview_6" {
+                        Utils.setURLWv6(value: Array(json.values)[i] as? String ?? "")
+                    }
                     if Array(json.keys)[i] == "app_builder_url_status_update" {
                         Utils.setURLStatusUpdate(value: Array(json.values)[i] as? String ?? "")
                     }
@@ -939,6 +951,12 @@ public final class Utils {
                     }
                     if Array(json.keys)[i] == "tab4_icon" {
                         Utils.setTab4Icon(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "tab5_icon" {
+                        Utils.setTab5Icon(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "tab6_icon" {
+                        Utils.setTab6Icon(value: Array(json.values)[i] as? String ?? "")
                     }
                     if Array(json.keys)[i] == "indicator_tab_image" {
                         Utils.setIndicatorTabImage(value: Array(json.values)[i] as? String ?? "")
@@ -1581,6 +1599,29 @@ public final class Utils {
         return ""
     }
     
+    private static let APP_HSA_MODE = 1
+    private static let APP_MIDDLE_MODE = 2
+    private static let APP_REGULAR_MODE = 3
+    static var selectedAppMode = APP_REGULAR_MODE
+    static func setAppMode(value: Int) {
+        SecureUserDefaults.shared.set(value, forKey: "pb_app_mode")
+    }
+
+    public static func getAppMode() -> Int {
+        if let value: Int = SecureUserDefaults.shared.value(forKey: "pb_app_mode") {
+            return value
+        }
+        return APP_REGULAR_MODE
+    }
+    
+    public static func isHSAMode() -> Bool {
+        return getAppMode() == APP_HSA_MODE
+    }
+    
+    public static func isMiddleMode() -> Bool {
+        return getAppMode() == APP_MIDDLE_MODE
+    }
+    
     static func getPasswordDB() -> String? {
         do {
             let p = getPassEncDB()
@@ -1613,14 +1654,13 @@ public final class Utils {
     public static func shouldRequestAuthentication() -> Bool {
         if let lastAuthTime: Date = SecureUserDefaults.shared.value(forKey: "lastAuthenticationTime") {
             let elapsedTime = Date().timeIntervalSince(lastAuthTime)
-            let durationAuth = Double(Utils.getAuthenticationDuration()) ?? 5
-//            print("durationAuth \(durationAuth)")
+            let durationAuth = Double(Utils.getAuthenticationDuration()) ?? (Utils.isMiddleMode() ? 60 : 30)
             return elapsedTime > durationAuth
         }
         return true
     }
 
-    public static func authenticateWithBiometrics(completion: @escaping (Bool, String?) -> Void) {
+    public static func authenticateWithBiometrics(isSaveState: Bool = false, completion: @escaping (Bool, String?) -> Void) {
         guard shouldRequestAuthentication() else {
             completion(true, nil)
             return
@@ -1633,6 +1673,9 @@ public final class Utils {
             context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, error in
                 if success {
                     // Store the time of successful authentication
+                    if let domainState = context.evaluatedPolicyDomainState, isSaveState {
+                        Utils.setBiometricState(value: domainState)
+                    }
                     SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
                     completion(true, nil)
                 } else {

@@ -19,8 +19,13 @@ public class SignUpSignIn: UIViewController {
     @IBOutlet weak var topConstDesc: NSLayoutConstraint!
     
     public var forceLogin = false
+    public var forceSignIn = false
     public var isEmail = false
     public var isMSISDN = false
+    
+    private var nameReg = ""
+    private var passReg = ""
+    private var isBioMetricOnReg = false
     
     public override func viewDidLoad() {
         super.viewDidLoad()
@@ -56,18 +61,16 @@ public class SignUpSignIn: UIViewController {
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tapGesture.cancelsTouchesInView = false
         view.addGestureRecognizer(tapGesture)
+        self.title = "Sign-Up/Sign-In".localized()
         if isEmail || isMSISDN {
-            self.title = "Sign-In".localized()
             passwordField.isHidden = true
             showPasswordButton.isHidden = true
             if isMSISDN{
                 usernameField.keyboardType = .numberPad
             }
-        } else {
-            self.title = "Sign-Up/Sign-In".localized()
         }
         let controllers = self.navigationController?.viewControllers
-        if forceLogin && (controllers!.count < 2 || !(controllers![controllers!.count - 2] is SignInOption)) {
+        if forceLogin && !forceSignIn && (controllers!.count < 2 || !(controllers![controllers!.count - 2] is SignInOption)) {
             navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(didTapCancel(sender:)))
         }
         self.navigationController?.navigationBar.topItem?.backButtonTitle = ""
@@ -83,7 +86,7 @@ public class SignUpSignIn: UIViewController {
         navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
         navigationController?.navigationBar.tintColor = .white
         
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Submit".localized(), style: .plain, target: self, action: #selector(didTapSubmit(sender:)))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Submit".localized(), style: .plain, target: self, action: #selector(checkSubmit))
     }
     
     @objc func didTapCancel(sender: Any) {
@@ -124,13 +127,10 @@ public class SignUpSignIn: UIViewController {
     }
     
     func checkEmail(email: String) {
-        if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
-            self.showFailedSignUpIn(title: "Check your connection".localized(), withLoader: false)
-            return
-        }
         Nexilis.showLoader()
         DispatchQueue.global().async {
-            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendOTPLogin(p_email: email), timeout: 30 * 1000) {
+            let id = Nexilis.justInit()
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendOTPLogin(p_email: email, xpin: id), timeout: 30 * 1000) {
                 if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") != "00" {
                     DispatchQueue.main.async {
                         self.showFailedSignUpIn(title: "Unregistered email account".localized())
@@ -155,10 +155,6 @@ public class SignUpSignIn: UIViewController {
         if number.hasPrefix("0") {
             number = number.replacingCharacters(in: number.startIndex...number.startIndex, with: "+62")
         }
-        if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
-            self.showFailedSignUpIn(title: "Check your connection".localized(), withLoader: false)
-            return
-        }
         self.showOTPSelectionAlert(self, number)
     }
     
@@ -168,13 +164,22 @@ public class SignUpSignIn: UIViewController {
                                       preferredStyle: .actionSheet) // use .alert if you want centered popup
         
         alert.addAction(UIAlertAction(title: "📩 SMS", style: .default, handler: { _ in
+            if !CheckConnection.isConnectedToNetwork() {
+                self.showFailedSignUpIn(title: "Check your connection".localized(), withLoader: false)
+                return
+            }
             self.sendOTP(to: number)
         }))
         
         alert.addAction(UIAlertAction(title: "💬 WhatsApp", style: .default, handler: { _ in
+            if !CheckConnection.isConnectedToNetwork() {
+                self.showFailedSignUpIn(title: "Check your connection".localized(), withLoader: false)
+                return
+            }
             Nexilis.showLoader()
             DispatchQueue.global().async {
-                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendOTPLogin(p_number: number), timeout: 30 * 1000) {
+                let id = Nexilis.justInit()
+                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendOTPLogin(p_number: number, xpin: id), timeout: 30 * 1000) {
                     if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") != "00" {
                         DispatchQueue.main.async {
                             self.showFailedSignUpIn(title: "Unregistered phone number".localized())
@@ -234,7 +239,13 @@ public class SignUpSignIn: UIViewController {
         func sendSVL() {
             DispatchQueue.global().async {
                 do {
-                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
+                    var id = ""
+                    if Utils.isMiddleMode() {
+                        id = Nexilis.justInit()
+                    } else {
+                        id = User.getMyPin() ?? ""
+                    }
+                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger(xPin: id)) {
                         if response.isOk() {
                             let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
                             if data.isEmpty {
@@ -255,7 +266,7 @@ public class SignUpSignIn: UIViewController {
                                 pk = publicKey
                             }
                             let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 300)
-                            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: "", p_vercode: method == 0 ? "" : code, number: number, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp), timeout: 30 * 1000) {
+                            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: "", p_vercode: method == 0 ? "" : code, xpin: id, number: number, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp), timeout: 30 * 1000) {
                                 if !response.isOk() {
                                     if method == 1 {
                                         DispatchQueue.main.async {
@@ -298,29 +309,28 @@ public class SignUpSignIn: UIViewController {
         showOTPVC.isMSISDN = !phone.isEmpty
         showOTPVC.showWrongOTP = errCode
         showOTPVC.method = method
+        let isBiometricOn = self.isBioMetricOnReg
         showOTPVC.isDismiss = { code in
-            if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
+            if !CheckConnection.isConnectedToNetwork() {
                 self.showFailedSignUpIn(title: "Check your connection".localized(), withLoader: false)
                 return
             }
             if KeyManagerNexilis.hasGeneratedKey() {
+                SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
                 KeyManagerNexilis.deleteKey()
                 KeyManagerNexilis.deleteMarker()
             }
             KeyManagerNexilis.generateKey()
             KeyManagerNexilis.saveMarker()
-            let policyLevel = Utils.getSignInLevel()
-            var isBiometricOn = false
-            if policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFACE || policyLevel == MFAViewController.STEP_FIDO_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_BIOFACE {
-                isBiometricOn = true
-            }
-            guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: isBiometricOn) else {
+            guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: isBiometricOn, isSaveState: isBiometricOn) else {
+                SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
                 KeyManagerNexilis.deleteKey()
                 KeyManagerNexilis.deleteMarker()
                 UIApplication.shared.visibleViewController?.view.makeToast("Biometric or passcode authentication required".localized(), duration: 3, position: .center)
                 return
             }
-            if Database.shared.openDatabase() == 0 {
+            if Database.shared.openDatabase() == 0 && !Utils.isMiddleMode() {
+                SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
                 APIS.showRestartApp()
                 KeyManagerNexilis.deleteKey()
                 KeyManagerNexilis.deleteMarker()
@@ -333,7 +343,13 @@ public class SignUpSignIn: UIViewController {
             }
             DispatchQueue.global().async {
                 do {
-                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
+                    var id = ""
+                    if Utils.isMiddleMode() {
+                        id = Nexilis.justInit()
+                    } else {
+                        id = User.getMyPin() ?? ""
+                    }
+                    if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger(xPin: id)) {
                         if response.isOk() {
                             let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
                             if data.isEmpty {
@@ -354,7 +370,7 @@ public class SignUpSignIn: UIViewController {
                                 pk = publicKey
                             }
                             let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 300)
-                            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: email, p_vercode: code, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp), timeout: 30 * 1000) {
+                            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSendVerifyChangeDevice(p_email: email, p_vercode: code, xpin: id, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp), timeout: 30 * 1000) {
                                 if !response.isOk() {
                                     DispatchQueue.main.async {
                                         Nexilis.hideLoader {
@@ -389,10 +405,25 @@ public class SignUpSignIn: UIViewController {
         })
     }
     
-    private func showFailedSignUpIn(title: String, withLoader: Bool = true) {
+    private func showFailedSignUpIn(title: String, withLoader: Bool = true, isAlert: Bool = false) {
+        SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
         KeyManagerNexilis.deleteKey()
         KeyManagerNexilis.deleteMarker()
-        if withLoader {
+        if isAlert {
+            Nexilis.hideLoader(completion: {
+                let alert = UIAlertController(title: title,
+                                              message: "Do you want to create new user with this password?".localized(),
+                                              preferredStyle: .alert) // use .alert if you want centered popup
+                
+                alert.addAction(UIAlertAction(title: "Yes".localized(), style: .default, handler: { [self] _ in
+                    didTapSubmit(forceSU: true)
+                }))
+                
+                alert.addAction(UIAlertAction(title: "No".localized(), style: .cancel, handler: nil))
+
+                self.present(alert, animated: true)
+            })
+        } else if withLoader {
             Nexilis.hideLoader(completion: {
                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                 imageView.tintColor = .white
@@ -407,7 +438,7 @@ public class SignUpSignIn: UIViewController {
         }
     }
     
-    @objc func didTapSubmit(sender: Any) {
+    @objc func checkSubmit(sender: Any?) {
         guard let name = usernameField.text, !name.isEmpty else {
             var text = "Username"
             if isEmail {
@@ -447,15 +478,13 @@ public class SignUpSignIn: UIViewController {
             return
         }
         
-        let idMe = User.getMyPin()!
-
         if !name.matches("^[a-zA-Z0-9 ]*$") {
             self.showFailedSignUpIn(title: "Contains prohibited characters. Only alphabetic characters are allowed.".localized(), withLoader: false)
             return
         }
         let password = passwordField.text ?? ""
         if !passwordField.isHidden {
-            if password.isEmpty {
+            if password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 self.showFailedSignUpIn(title: "Password can't be empty".localized(), withLoader: false)
                 return
             }
@@ -464,28 +493,55 @@ public class SignUpSignIn: UIViewController {
                 return
             }
         }
-        if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
-            self.showFailedSignUpIn(title: "Check your connection".localized(), withLoader: false)
-            return
+        self.nameReg = name
+        self.passReg = password
+        if Utils.isMiddleMode() {
+            let alert = UIAlertController(title: "Touch/Face ID(Optional)".localized(),
+                                          message: "Do you want to use Touch/Face ID for next Sign-In?".localized(),
+                                          preferredStyle: .alert) // use .alert if you want centered popup
+            
+            alert.addAction(UIAlertAction(title: "Yes".localized(), style: .default, handler: { [self] _ in
+                self.isBioMetricOnReg = true
+                didTapSubmit()
+            }))
+            
+            alert.addAction(UIAlertAction(title: "No".localized(), style: .cancel, handler: { [self] _ in
+                didTapSubmit()
+            }))
+            
+            self.present(alert, animated: true)
+        } else {
+            if !CheckConnection.isConnectedToNetwork() || API.nGetCLXConnState() == 0 {
+                self.showFailedSignUpIn(title: "Check your connection".localized(), withLoader: false)
+                return
+            }
+            didTapSubmit()
         }
+    }
+    
+    private func didTapSubmit(forceSU: Bool = false) {
+        let name = self.nameReg
+        let password = self.passReg
+        let isBiometricOn = self.isBioMetricOnReg
+        let a = name.split(separator: " ", maxSplits: 1)
+        let first = String(a[0])
+        let last = a.count == 2 ? String(a[1]) : ""
         if KeyManagerNexilis.hasGeneratedKey() {
+            SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
             KeyManagerNexilis.deleteKey()
             KeyManagerNexilis.deleteMarker()
         }
         KeyManagerNexilis.generateKey()
         KeyManagerNexilis.saveMarker()
-        let policyLevel = Utils.getSignInLevel()
-        var isBiometricOn = false
-        if policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_PWD_BIOFACE || policyLevel == MFAViewController.STEP_FIDO_BIOFINGER || policyLevel == MFAViewController.STEP_FIDO_BIOFACE {
-            isBiometricOn = true
-        }
-        guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: isBiometricOn) else {
+        guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: isBiometricOn, isSaveState: isBiometricOn) else {
+            SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
             KeyManagerNexilis.deleteKey()
             KeyManagerNexilis.deleteMarker()
             UIApplication.shared.visibleViewController?.view.makeToast("Biometric or passcode authentication required".localized(), duration: 3, position: .center)
             return
         }
-        if Database.shared.openDatabase() == 0 {
+        if Database.shared.openDatabase() == 0 && !Utils.isMiddleMode() {
+            SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
             APIS.showRestartApp()
             KeyManagerNexilis.deleteKey()
             KeyManagerNexilis.deleteMarker()
@@ -494,7 +550,14 @@ public class SignUpSignIn: UIViewController {
         Nexilis.showLoader()
         DispatchQueue.global().async {
             do {
-                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger()) {
+                var id = ""
+                if Utils.isMiddleMode() {
+                    id = Nexilis.justInit()
+                } else {
+                    id = User.getMyPin() ?? ""
+                }
+//                print("MASUK IDNYALOH: \(id)")
+                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getChalanger(xPin: id)) {
                     if response.isOk() {
                         let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
                         if data.isEmpty {
@@ -507,19 +570,19 @@ public class SignUpSignIn: UIViewController {
                         var pk = ""
                         var sign = ""
                         let df = HMACDeviceFingerprintNexilis.generate()
-                        if let dataSign = "\(data)!\(df)".data(using: .utf8) {
-                            if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
-                                sign = signature.base64EncodedString()
-                            }
-                        }
+//                        if let dataSign = "\(data)!\(df)".data(using: .utf8) {
+//                            if let signature = KeyManagerNexilis.sign(data: dataSign, privateKey: privateKey) {
+//                                sign = signature.base64EncodedString()
+//                            }
+//                        }
                         if let publicKey = KeyManagerNexilis.getRSAX509PublicKeyBase64(privateKey: privateKey) {
                             pk = publicKey
                         }
                         let otp = try TOTPGenerator.generateTOTP(base32Secret: TOTPGenerator.getTOTP(), digits: 6, timeStepSeconds: 300)
-                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpSignInAPI(p_name: name, p_password: md5Hex, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp), timeout: 30 * 1000) {
+                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getSignUpSignInAPI(p_name: name, p_password: md5Hex, xPin: id, deviceFingerprint: df, publicKey: pk, signature: sign, totp: otp, forceSU: forceSU ? "1" : ""), timeout: 30 * 1000) {
                             if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "20" {
                                 DispatchQueue.main.async {
-                                    self.showFailedSignUpIn(title: "Invalid user / Username and password does not match".localized())
+                                    self.showFailedSignUpIn(title: "Invalid user / Username and password does not match".localized(), isAlert: true)
                                 }
                             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "11" {
                                 DispatchQueue.main.async {
@@ -562,13 +625,14 @@ public class SignUpSignIn: UIViewController {
     }
     
     private func successSubmit(response: TMessage, first: String, last: String, email: String = "", number: String = "") {
+//        print("response successSubmit: \(response.toLogString())")
         let sign = response.getBody(key: CoreMessage_TMessageKey.SIGN, default_value: "")
+        let id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
+        let f_pin = response.getBody(key: CoreMessage_TMessageKey.F_PIN_REAL, default_value: "")
+        let device_id = response.getBody(key: CoreMessage_TMessageKey.IMEI, default_value: id)
+        let last_sign = response.getBody(key: CoreMessage_TMessageKey.LAST_SIGN, default_value: "0")
         if sign == "1" || !email.isEmpty || !number.isEmpty {
-            let id = response.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
-            let f_pin = response.getBody(key: CoreMessage_TMessageKey.F_PIN_REAL, default_value: "")
-            let device_id = response.getBody(key: CoreMessage_TMessageKey.IMEI, default_value: id)
-            let last_sign = response.getBody(key: CoreMessage_TMessageKey.LAST_SIGN, default_value: "0")
-            //print("last sign: \(last_sign)")
+//            print("last sign: \(last_sign)")
             if last_sign != "0" {
                 Utils.setLoginMultipleFPin(value: f_pin)
                 DispatchQueue.main.async {
@@ -606,26 +670,101 @@ public class SignUpSignIn: UIViewController {
                 })
                 return
             }
-            self.deleteAllRecordDatabase()
             if(!id.isEmpty) {
-//                            Nexilis.changeUser(f_pin: device_id)
-                SecureUserDefaults.shared.set(device_id, forKey: "device_id")
+                SecureUserDefaults.shared.set(f_pin, forKey: "me")
                 Utils.setProfile(value: true)
                 // pos registration
-                _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                if !Utils.isMiddleMode() {
+                    self.deleteAllRecordDatabase()
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: id))
+                }
+                if Utils.isMiddleMode() {
+                    Nexilis.setInitCallback() { res in
+                        if res == 1 {
+                            Nexilis.successSui?()
+                            closePage()
+                        }
+                    }
+                    Nexilis.startConnect(withInit: false)
+                } else {
+                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
+                    closePage()
+                }
+                func closePage() {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader(completion: {
+                            let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Successfully Sign-In".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                            banner.show()
+                            if Nexilis.showFB {
+                                Nexilis.floatingButton.removeFromSuperview()
+                                FloatingButton.datePull = nil
+                                Nexilis.floatingButton = FloatingButton()
+                                Nexilis.addFB()
+                            }
+                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
+                            if self.forceLogin {
+                                self.navigationController?.dismiss(animated: true)
+                            } else {
+                                let controllers = self.navigationController?.viewControllers
+                                if controllers![controllers!.count - 2] is SignInOption {
+                                    self.navigationController?.popToViewController(controllers![controllers!.count - 3], animated: true)
+                                } else {
+                                    self.navigationController?.popViewController(animated: true)
+                                }
+                            }
+                            Nexilis.getFeatureAccess()
+                        })
+                    }
+                }
+            }
+        } else {
+            if !Utils.isMiddleMode() {
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    var firstN = first
+                    if firstN.isEmpty {
+                        if !email.isEmpty {
+                            firstN = email
+                        } else {
+                            firstN = number
+                        }
+                    }
+                    do {
+                        if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT * FROM BUDDY where f_pin = '\(f_pin)' ") {
+                            if !cursorData.next() {
+                                _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: f_pin))
+                            } else {
+                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "BUDDY", cvalues: ["first_name": first , "last_name": last], _where: "f_pin = '\(f_pin)'")
+                            }
+                            cursorData.close()
+                        }
+                    } catch {
+                        rollback.pointee = true
+                    }
+                })
+            }
+            SecureUserDefaults.shared.set(f_pin, forKey: "me")
+            Utils.setProfile(value: true)
+            if Utils.isMiddleMode() {
+                Nexilis.setInitCallback() { res in
+                    if res == 1 {
+                        Nexilis.successSui?()
+                        closePage()
+                    }
+                }
+                Nexilis.startConnect(withInit: false)
+            } else {
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
+                closePage()
+            }
+            func closePage() {
+                DispatchQueue.main.async {
                     Nexilis.hideLoader(completion: {
                         let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                         imageView.tintColor = .white
-                        let banner = FloatingNotificationBanner(title: "Successfully Sign-In".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
+                        let banner = FloatingNotificationBanner(title: "Successfully Sign-Up".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
                         banner.show()
-                        if Nexilis.showFB {
-                            Nexilis.floatingButton.removeFromSuperview()
-                            FloatingButton.datePull = nil
-                            Nexilis.floatingButton = FloatingButton()
-                            Nexilis.addFB()
-                        }
-                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
                         if self.forceLogin {
                             self.navigationController?.dismiss(animated: true)
                         } else {
@@ -636,54 +775,8 @@ public class SignUpSignIn: UIViewController {
                                 self.navigationController?.popViewController(animated: true)
                             }
                         }
-                        Nexilis.getFeatureAccess()
                     })
-                })
-            }
-        } else {
-            let idMe = User.getMyPin()!
-            Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                var firstN = first
-                if firstN.isEmpty {
-                    if !email.isEmpty {
-                        firstN = email
-                    } else {
-                        firstN = number
-                    }
                 }
-                do {
-                    if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT * FROM BUDDY where f_pin = '\(idMe)' ") {
-                        if !cursorData.next() {
-                            _ = Nexilis.write(message: CoreMessage_TMessageBank.getPostRegistration(p_pin: idMe))
-                        } else {
-                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "BUDDY", cvalues: ["first_name": first , "last_name": last], _where: "f_pin = '\(idMe)'")
-                        }
-                        cursorData.close()
-                    }
-                } catch {
-                    rollback.pointee = true
-                    print("Access database error: \(error.localizedDescription)")
-                }
-            })
-            Utils.setProfile(value: true)
-            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
-            DispatchQueue.main.async {
-                Nexilis.hideLoader(completion: {
-                    let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
-                    imageView.tintColor = .white
-                    let banner = FloatingNotificationBanner(title: "Successfully Sign-Up".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
-                    banner.show()
-                    if self.forceLogin {
-                        self.navigationController?.dismiss(animated: true)
-                    } else {
-                        let controllers = self.navigationController?.viewControllers
-                        if controllers![controllers!.count - 2] is SignInOption {
-                            self.navigationController?.popToViewController(controllers![controllers!.count - 3], animated: true)
-                        } else {
-                            self.navigationController?.popViewController(animated: true)
-                        }
-                    }
-                })
             }
         }
     }

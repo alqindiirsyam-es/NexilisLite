@@ -1612,12 +1612,12 @@ public class ImageCache {
         for (_, sanitizedKey) in cacheKeyMap {
             if isGif {
                 if let gifData = cacheGif.object(forKey: sanitizedKey as NSString) {
-                    try? FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).gif", data: gifData as Data)
+                    try? FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).gif", data: gifData as Data, withoutBiometric: true)
                 }
             } else {
                 if let image = cache.object(forKey: sanitizedKey as NSString),
                    let imageData = image.pngData() {
-                    try? FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).png", data: imageData)
+                    try? FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).png", data: imageData, withoutBiometric: true)
                 }
             }
         }
@@ -1641,7 +1641,7 @@ public class ImageCache {
             guard FileEncryption.shared.isSecureExists(filename: fileName) else { continue }
 
             do {
-                if var data = try FileEncryption.shared.readSecure(filename: fileName) {
+                if var data = try FileEncryption.shared.readSecure(filename: fileName, withoutBiometric: true) {
                     if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) {
                         data = decrypted
                     }

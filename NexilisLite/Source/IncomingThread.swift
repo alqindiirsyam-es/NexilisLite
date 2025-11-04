@@ -811,14 +811,27 @@ class IncomingThread {
         if message.mBodies["message_id"] != nil {
             messageId = message.getBody(key: "message_id")
         }
+        if !messageId.contains("'") {
+            messageId = "'\(messageId)'"
+        }
         let type = message.getBody(key: CoreMessage_TMessageKey.DELETE_MESSAGE_FLAG)
+        
+        var messageExist = false
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select last_edited from MESSAGE where message_id = \(messageId)"), cursor.next() {
+                messageExist = true
+                cursor.close()
+            }
+        })
+        if !messageExist {
+            let messageToSave = message
+            messageToSave.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = messageId.replacingOccurrences(of: "'", with: "")
+            Nexilis.saveMessage(message: message, withStatus: false)
+        }
         
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if type == "1" {
-                    if !messageId.contains("'") {
-                        messageId = "'\(messageId)'"
-                    }
                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
                         "message_text" : "🚫 _This message was deleted_",
                         "lock" : "1",
@@ -1335,12 +1348,7 @@ class IncomingThread {
     private func receiveMessage(message: TMessage) -> Void {
 //        print("receive message \(message.toLogString())")
         if Utils.getSecureFolderOffline() == "0" {
-            if API.nGetCLXConnState() == 0 {
-                do {
-                    let id = Utils.getConnectionID()
-                    try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-                } catch {}
-            }
+            _ = Nexilis.justInit(isChecking: true)
             if FileEncryption.shared.aesKey == nil {
                 IncomingThread.dispatch = DispatchGroup()
                 IncomingThread.dispatch?.enter()

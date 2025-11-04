@@ -654,6 +654,8 @@ public class CoreMessage_TMessageCode {
     public static let SEND_SIGNIN_OTP = "SSI01A";
     public static let SEND_SIGNUP_OTP = "SSU01O";
     public static let SEND_VERIFY_LOGIN = "SVL";
+    public static let SEND_VERIFY_LOGIN_V2 = "SVL2";
+    public static let SET_PASSWORD_SIGN_UP = "SHP";
     public static let SEND_OTP_LOGIN = "SOTL";
     
     //Whiteboard
@@ -752,6 +754,7 @@ public class CoreMessage_TMessageCode {
     public static let MOBILE_INQUIRY = "MINQ";
     
     public static let SIGN_UP_AND_SIGN_IN_API = "SUAI01";
+    public static let SIGN_UP_AND_SIGN_IN_API_V2 = "SUAI02";
     public static let BACKUP_AVAILABILITY = "BUA2";
     public static let BACKUP_UPLOADED = "BUU2";
     public static let BACKUP_RESTORED = "BUR2";

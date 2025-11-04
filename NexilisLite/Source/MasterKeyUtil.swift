@@ -88,12 +88,12 @@ public class MasterKeyUtil {
     
     private let masterKeyQueue = DispatchQueue(label: "io.nexilis.masterKeyQueue")
 
-    func getMasterKey() throws -> SymmetricKey {
+    func getMasterKey(withoutBiometric: Bool = false) throws -> SymmetricKey {
         var retrievedKey: SymmetricKey?
         var thrownError: Error?
 
         masterKeyQueue.sync {
-            if Nexilis.checkingAccess(key: "authentication") && isDeviceNotSecure() {
+            if Nexilis.checkingAccess(key: "authentication") && isDeviceNotSecure() && !withoutBiometric {
                 let semaphore = DispatchSemaphore(value: 0)
                 var result = false
 
@@ -379,12 +379,12 @@ class KeyManagerNexilis {
         return [0x80 | UInt8(bytes.count)] + bytes
     }
     
-    static func getPrivateKey(useBiometric: Bool = true) -> SecKey? {
+    static func getPrivateKey(useBiometric: Bool = true, isSaveState: Bool = false) -> SecKey? {
         if useBiometric {
             let semaphore = DispatchSemaphore(value: 0)
             var result = false
 
-            Utils.authenticateWithBiometrics { success, errorMessage in
+            Utils.authenticateWithBiometrics(isSaveState: isSaveState) { success, errorMessage in
                 if success {
                     print("Access granted!")
                     result = true
@@ -497,6 +497,7 @@ class BiometricStateManager {
                                    localizedReason: "Validasi biometric anda!") { success, _ in
                 if success, let currentState = context.evaluatedPolicyDomainState,
                    let savedState = Utils.getBiometricState() {
+                    SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
                     completion(savedState == currentState, 1)
                 } else {
                     completion(false, 0)

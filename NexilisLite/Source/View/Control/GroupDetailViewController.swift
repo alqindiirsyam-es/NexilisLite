@@ -196,6 +196,7 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                 }
             }
         })
+        submitAction.isEnabled = false
         self.alert2?.addAction(submitAction)
         self.alert2?.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
         
@@ -207,6 +208,13 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
             guard let currentText = textField.text,
                   let stringRange = Range(range, in: currentText) else {
                 return false
+            }
+            if textField == alertTextFieldSubGroup {
+                if currentText.trimmingCharacters(in: .whitespaces).isEmpty {
+                    self.alert2?.actions[0].isEnabled = false
+                } else {
+                    self.alert2?.actions[0].isEnabled = true
+                }
             }
 
             let updatedText = currentText.replacingCharacters(in: stringRange, with: string)

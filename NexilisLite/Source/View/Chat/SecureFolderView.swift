@@ -95,12 +95,14 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
         navigationController?.navigationBar.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
 //        tabBarController?.navigationItem.leftBarButtonItem = nil
         tabBarController?.navigationItem.searchController = nil
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            title: "Back",
-            style: .plain,
-                target: self,
-                action: #selector(dismissSelf)
-            )
+        if !isTab {
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                title: "Back",
+                style: .plain,
+                    target: self,
+                    action: #selector(dismissSelf)
+                )
+        }
     }
     
     @objc func dismissSelf() {
@@ -108,7 +110,8 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     }
     
     public override func viewDidAppear(_ animated: Bool) {
-        self.title = "Secure Folder".localized()
+//        self.title = "Secure Folder".localized()
+        self.navigationController?.navigationBar.topItem?.title = "Secure Folder".localized()
         self.navigationController?.navigationBar.setNeedsLayout()
     }
     

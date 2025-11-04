@@ -46,7 +46,7 @@ class ChangePasswordViewController: UIViewController {
     }
     
     @objc func didTapNext(sender: Any) {
-        guard let oldPassword = oldPassField.text, !oldPassword.isEmpty else {
+        guard let oldPassword = oldPassField.text, !oldPassword.trimmingCharacters(in: .whitespaces).isEmpty else {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "Old password can't be empty".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
@@ -66,7 +66,7 @@ class ChangePasswordViewController: UIViewController {
 //            banner.show()
 //            return
 //        }
-        guard let newPassword = newPassField.text, !newPassword.isEmpty else {
+        guard let newPassword = newPassField.text, !newPassword.trimmingCharacters(in: .whitespaces).isEmpty else {
             let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
             imageView.tintColor = .white
             let banner = FloatingNotificationBanner(title: "New password can't be empty".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)

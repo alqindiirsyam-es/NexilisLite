@@ -40,6 +40,7 @@ public class CoreMessage_TMessageKey {
     public static let N_MEMBERS      = "Bl"
     public static let PSWD            = "Bm"
     public static let PSWD_OLD      = "Bm0";
+    public static let SHOW_PSWD = "Bm1";
     public static let N_DOWNLOADS    = "Bn"
     public static let DEVICE_BRAND   = "Bo"
     public static let DEVICE_MODEL   = "Bp"
@@ -527,5 +528,7 @@ public class CoreMessage_TMessageKey {
     public static let ACT_TIME = "ACTMS";
     
     public static let TOTP = "TOTP";
+    public static let SUBMIT_DATE = "SD01";
+    public static let FORCE_LOGIN_AUTH = "FLA";
     public static let IS_BOT = "ibot";
 }
