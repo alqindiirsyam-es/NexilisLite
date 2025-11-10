@@ -1004,9 +1004,12 @@ extension String {
     }
     
     public func substring(with nsRange: NSRange) -> String? {
-        guard let range = Range(nsRange, in: self) else { return nil }
-        return String(self[range])
-    }
+            guard nsRange.location >= 0, nsRange.length >= 0 else { return nil }
+            guard let range = Range(nsRange, in: self),
+                  range.lowerBound <= endIndex,
+                  range.upperBound <= endIndex else { return nil }
+            return String(self[range])
+        }
     
     static public func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }

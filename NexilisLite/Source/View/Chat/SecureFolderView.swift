@@ -18,7 +18,7 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     var previewItem: NSURL?
 
     var isGridView: Bool = true
-    var isTab = true
+    var isTab = false
     
     public init(isTab: Bool = false) {
         self.isTab = isTab
@@ -31,6 +31,7 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
 
     let searchBar: UISearchBar = {
         let sb = UISearchBar()
+        sb.backgroundImage = UIImage()
         sb.placeholder = "Search files"
         return sb
     }()
@@ -59,8 +60,6 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
         tapGesture.cancelsTouchesInView = false
         view.addGestureRecognizer(tapGesture)
         setupSubviews()
-        loadFiles()
-        filteredFiles = files
     }
     
     @objc func dismissKeyboard() {
@@ -113,6 +112,10 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
 //        self.title = "Secure Folder".localized()
         self.navigationController?.navigationBar.topItem?.title = "Secure Folder".localized()
         self.navigationController?.navigationBar.setNeedsLayout()
+        loadFiles()
+        filteredFiles = files
+        collectionView.collectionViewLayout.invalidateLayout()
+        collectionView.reloadData()
     }
     
     @objc func cancel(sender: Any) {
@@ -164,8 +167,10 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     }
     
     func loadFiles() {
+        files.removeAll()
+        filteredFiles.removeAll()
         do {
-            var query = "SELECT audio_id, video_id, image_id, thumb_id, file_id, attachment_flag, status, server_date FROM MESSAGE where (video_id IS NOT NULL AND video_id != '') OR (image_id IS NOT NULL AND image_id != '') OR (file_id IS NOT NULL AND file_id != '') order by server_date asc"
+            let query = "SELECT audio_id, video_id, image_id, thumb_id, file_id, attachment_flag, status, server_date, message_text FROM MESSAGE where (video_id IS NOT NULL AND video_id != '') OR (image_id IS NOT NULL AND image_id != '') OR (file_id IS NOT NULL AND file_id != '') order by server_date asc"
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
@@ -179,19 +184,38 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
                             let attachmentFlag = cursorData.string(forColumn: "attachment_flag") ?? ""
                             let status = cursorData.string(forColumn: "status") ?? ""
                             let serverDate = cursorData.string(forColumn: "server_date") ?? ""
+                            let messageText = cursorData.string(forColumn: "message_text") ?? ""
+                            var dataFile = ""
                             if imageId != "" {
-                                fileName = imageId
+                                if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    fileName = "📷 " + "Photo".localized()
+                                } else {
+                                    fileName = imageId
+                                }
+                                dataFile = imageId
                             }
                             else if videoId != "" {
-                                fileName = videoId
+                                if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    fileName = "📹 " + "Video".localized()
+                                } else {
+                                    fileName = videoId
+                                }
+                                dataFile = videoId
                             }
                             else if fileId != "" {
-                                fileName = fileId
+                                let arrayMessage = messageText.components(separatedBy: "|")
+                                if arrayMessage.count > 1 {
+                                    fileName = messageText.components(separatedBy: "|")[0]
+                                } else {
+                                    fileName = fileId
+                                }
+                                dataFile = fileId
                             }
                             else if audioId != "" {
-                                fileName = audioId
+                                fileName = "♫ " + "Audio".localized()
+                                dataFile = audioId
                             }
-                            if FileEncryption.shared.isSecureExists(filename: fileName) {
+                            if FileEncryption.shared.isSecureExists(filename: dataFile) {
                                 let secureFolderItem = SecureFolderItem(audioId: audioId, videoId: videoId, imageId: imageId, fileId: fileId, thumbId: thumbId, attachmentFlag: attachmentFlag, serverDate: serverDate, status: status, filename: fileName)
                                 files.append(secureFolderItem)
                             }
@@ -273,10 +297,17 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
     public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FileCell", for: indexPath) as! FileCell
         let fileItem = filteredFiles[indexPath.item]
+        var thumbnailImage = UIImage(systemName: "doc.text")?.withTintColor(.black)
+        if fileItem.thumbId != "" {
+            thumbnailImage = getThumbnail(for: fileItem.thumbId)
+        } else if fileItem.audioId != "" {
+            thumbnailImage = UIImage(systemName: "speaker.wave.3")?.withTintColor(.black)
+        }
+        cell.imageView.image = thumbnailImage
         if fileItem.imageId != "" {
             print("this image")
             do {
-                if var data = try FileEncryption.shared.readSecure(filename: fileItem.filename) {
+                if var data = try FileEncryption.shared.readSecure(filename: fileItem.imageId) {
                     let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
                     if dataDecrypt != nil {
                         data = dataDecrypt!
@@ -291,7 +322,7 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
         else if fileItem.videoId != "" {
             print("this video")
             do {
-                if var secureData = try FileEncryption.shared.readSecure(filename: fileItem.filename) {
+                if var secureData = try FileEncryption.shared.readSecure(filename: fileItem.videoId) {
                     let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
                     if dataDecrypt != nil {
                         secureData = dataDecrypt!
@@ -299,11 +330,7 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
                     let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
                     let tempPath = cachesDirectory.appendingPathComponent(fileItem.filename)
                     try secureData.write(to: tempPath)
-                    let player = AVPlayer(url: tempPath as URL)
-                    let playerVC = AVPlayerViewController()
-                    playerVC.modalPresentationStyle = .custom
-                    playerVC.player = player
-                    self.present(playerVC, animated: true, completion: nil)
+                    APIS.openVideoNexilis(imageView: cell.imageView, videoURL: tempPath)
                 }
             } catch {
                 
@@ -312,7 +339,57 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
         else if fileItem.fileId != "" {
             print("this file")
             do {
-                if var docData = try FileEncryption.shared.readSecure(filename: fileItem.filename) {
+                func showFile(urlFile: URL, isFile: Bool = true) {
+                    let previewController = QLPreviewController()
+                    previewController.dataSource = self
+                    let vcHandleFile = UIViewController()
+                    let nc = UINavigationController(rootViewController: vcHandleFile)
+                    let attributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
+                    let navBarAppearance = UINavigationBarAppearance()
+                    nc.defaultStyle()
+                    navBarAppearance.configureWithOpaqueBackground()
+                    navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
+                    navBarAppearance.titleTextAttributes = attributes
+                    nc.navigationBar.standardAppearance = navBarAppearance
+                    nc.navigationBar.scrollEdgeAppearance = navBarAppearance
+                    let backAction = UIAction { _ in
+                        nc.dismiss(animated: true)
+                    }
+                    let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
+                    vcHandleFile.navigationItem.leftBarButtonItem = backButton
+                    if Nexilis.checkingAccess(key: "secure_folder_share") {
+                        let shareAction = UIAction { _ in
+                            let fileManager = FileManager.default
+                            let tempURL = fileManager.temporaryDirectory.appendingPathComponent(urlFile.lastPathComponent)
+                            do {
+                                if !fileManager.fileExists(atPath: tempURL.path) {
+                                    try fileManager.copyItem(at: urlFile, to: tempURL)
+                                }
+                                let activityViewController = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+                                activityViewController.popoverPresentationController?.sourceView = vcHandleFile.view
+                                vcHandleFile.present(activityViewController, animated: true, completion: nil)
+                            } catch {
+                                
+                            }
+                        }
+                        let shareButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "square.and.arrow.up"), primaryAction: shareAction, menu: nil)
+                        vcHandleFile.navigationItem.rightBarButtonItem = shareButton
+                    }
+                    if let viewVc = vcHandleFile.view {
+                        if isFile {
+                            vcHandleFile.title = fileItem.filename
+                        }
+                        vcHandleFile.addChild(previewController)
+                        previewController.dataSource = self
+                        previewController.view.frame = CGRect(x: 0, y: 0, width: viewVc.bounds.size.width, height: viewVc.bounds.size.height)
+                        previewController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                        viewVc.addSubview(previewController.view)
+                        previewController.didMove(toParent: vcHandleFile)
+                        
+                        self.present(nc, animated: true)
+                    }
+                }
+                if var docData = try FileEncryption.shared.readSecure(filename: fileItem.fileId) {
                     let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: docData)
                     if dataDecrypt != nil {
                         docData = dataDecrypt!
@@ -321,12 +398,7 @@ public class SecureFolderViewController: UIViewController, UISearchBarDelegate, 
                     let tempPath = cachesDirectory.appendingPathComponent(fileItem.filename)
                     try docData.write(to: tempPath)
                     self.previewItem = tempPath as NSURL
-                    let previewController = QLPreviewController()
-                    let rightBarButton = UIBarButtonItem()
-                    previewController.navigationItem.rightBarButtonItem = rightBarButton
-                    previewController.dataSource = self
-                    previewController.modalPresentationStyle = .custom
-                    self.present(previewController,animated: true)
+                    showFile(urlFile: tempPath)
                 }
             }
             catch {

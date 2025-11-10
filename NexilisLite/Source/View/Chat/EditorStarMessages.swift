@@ -347,6 +347,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             imageStared.tintColor = .systemYellow
         }
         
+        let thumbChat = (dataMessages[indexPath.row]["thumb_id"] as? String) ?? ""
+        let imageChat = (dataMessages[indexPath.row]["image_id"] as? String) ?? ""
+        let videoChat = (dataMessages[indexPath.row]["video_id"] as? String) ?? ""
+        let fileChat = (dataMessages[indexPath.row]["file_id"] as? String) ?? ""
+        let gifChat = (dataMessages[indexPath.row]["gif_id"] as? String) ?? ""
+        
         let imageAckView = UIImageView()
         if dataMessages[indexPath.row]["read_receipts"] as? String == "8" {
             var imageAck = UIImage(named: "ack_icon_gray", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
@@ -416,7 +422,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15).isActive = true
         messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
         
-        var textChat = (dataMessages[indexPath.row]["message_text"])! as? String
+        var textChat = (dataMessages[indexPath.row]["message_text"])! as? String ?? ""
         if (dataMessages[indexPath.row]["lock"] != nil && (dataMessages[indexPath.row]["lock"])! as? String == "1") {
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
                 textChat = "🚫 _"+"You were deleted this message".localized()+"_"
@@ -426,7 +432,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
         let imageSticker = UIImageView()
         if let attachmentFlag = dataMessages[indexPath.row]["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
-            if attachmentFlag == "27" || attachmentFlag == "26", let data = textChat { // live streaming
+            if attachmentFlag == "27" || attachmentFlag == "26" {
+                let data = textChat// live streaming
                 if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
                     Database.shared.database?.inTransaction({ fmdb, rollback in
                         let title = json["title"] as! String
@@ -456,44 +463,56 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageSticker.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 imageSticker.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor).isActive = true
                 imageSticker.widthAnchor.constraint(equalToConstant: 80).isActive = true
-                var imageStickerBundle = UIImage(named: (textChat!.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                var imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 if imageStickerBundle == nil {
-                    imageStickerBundle = UIImage(named: (textChat!.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+                    imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
                 }
                 imageSticker.image = imageStickerBundle //resourcesMediaBundle
                 imageSticker.contentMode = .scaleAspectFit
             }
             else {
-                modifyText()
+                modifyText(at: indexPath)
             }
         } else {
-            modifyText()
+            modifyText(at: indexPath)
         }
         messageText.font = UIFont.systemFont(ofSize: 12 + offset())
         
-        func modifyText() {
-            if !textChat!.isEmpty {
-                if textChat!.contains("■"){
-                    textChat = textChat!.components(separatedBy: "■")[0]
-                    textChat = textChat!.trimmingCharacters(in: .whitespacesAndNewlines)
+        func modifyText(at indexPath: IndexPath) {
+            guard !textChat.isEmpty else { return }
+            guard indexPath.row >= 0, indexPath.row < dataMessages.count else {
+                print("⚠️ modifyText: Invalid index \(indexPath.row), total: \(dataMessages.count)")
+                return
+            }
+            var text = textChat
+            let messageData = dataMessages[indexPath.row]
+            if let separatorRange = text.range(of: "■") {
+                text = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if !fileChat.isEmpty {
+                let lock = messageData["lock"] as? String ?? ""
+                if lock != "1", lock != "2" {
+                    let parts = text.components(separatedBy: "|")
+                    if parts.count > 1 { text = parts[1] }
                 }
-                let finalAtribute = textChat!.richText()
-                textChat = finalAtribute.string
-                let urlPattern = "(https?://|www\\.)\\S+"
-                if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
-                    let matches = regex.matches(in: textChat!, options: [], range: NSRange(textChat!.startIndex..., in: textChat!))
-                    
-                    for match in matches {
-                        if let range = Range(match.range, in: textChat!) {
-                            let linkText = String(textChat![range])
-                            let nsRange = NSRange(range, in: textChat!)
-                            finalAtribute.addAttribute(.link, value: linkText, range: nsRange)
-                            finalAtribute.addAttribute(.foregroundColor, value: UIColor.blue, range: nsRange)
-                            finalAtribute.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: nsRange)
-                        }
-                    }
+            }
+            let finalAttributed = text.richText()
+            let urlPattern = "(https?://|www\\.)\\S+"
+            if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
+                let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+                for match in matches {
+                    guard let range = Range(match.range, in: text) else { continue }
+                    let linkText = String(text[range])
+                    let nsRange = NSRange(range, in: text)
+                    finalAttributed.addAttributes([
+                        .link: linkText,
+                        .foregroundColor: UIColor.systemBlue,
+                        .underlineStyle: NSUnderlineStyle.single.rawValue
+                    ], range: nsRange)
                 }
-                messageText.attributedText = finalAtribute
+            }
+            DispatchQueue.main.async {
+                messageText.attributedText = finalAttributed
                 messageText.delegate = self
             }
         }
@@ -512,12 +531,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         timeMessage.text = formatter.string(from: date as Date)
         timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
         timeMessage.textColor = .lightGray
-        
-        let thumbChat = (dataMessages[indexPath.row]["thumb_id"] as? String) ?? ""
-        let imageChat = (dataMessages[indexPath.row]["image_id"] as? String) ?? ""
-        let videoChat = (dataMessages[indexPath.row]["video_id"] as? String) ?? ""
-        let fileChat = (dataMessages[indexPath.row]["file_id"] as? String) ?? ""
-        let gifChat = (dataMessages[indexPath.row]["gif_id"] as? String) ?? ""
         
         let imageThumb = UIImageView()
         let containerViewFile = UIView()
@@ -709,8 +722,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-            let arrExtFile = (textChat?.components(separatedBy: "|")[0])?.split(separator: ".")
-            let finalExtFile = arrExtFile![arrExtFile!.count - 1]
+            let arrExtFile = (textChat.components(separatedBy: "|")[0]).split(separator: ".")
+            let finalExtFile = arrExtFile[arrExtFile.count - 1]
             if let dirPath = paths.first {
                 let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(fileChat)
                 if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -790,7 +803,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
             nameFile.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
             nameFile.textColor = .white
-            nameFile.text = textChat?.components(separatedBy: "|")[0]
+            nameFile.text = textChat.components(separatedBy: "|")[0]
             
             if (dataMessages[indexPath.row]["progress"] as! Double != 100.0) {
                 let containerLoading = UIView()
@@ -835,9 +848,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
         
         let containerLinkMessage = UIView()
-        if thumbChat.isEmpty && fileChat.isEmpty && !textChat!.isEmpty {
+        if thumbChat.isEmpty && fileChat.isEmpty && !textChat.isEmpty {
             var text = ""
-            let listTextSplitBreak = textChat!.components(separatedBy: "\n")
+            let listTextSplitBreak = textChat.components(separatedBy: "\n")
             let indexFirstLinkSplitBreak = listTextSplitBreak.firstIndex(where: { $0.contains("www.") || $0.contains("http://") || $0.contains("https://") })
             if indexFirstLinkSplitBreak != nil {
                 let listTextSplitSpace = listTextSplitBreak[indexFirstLinkSplitBreak!].components(separatedBy: " ")

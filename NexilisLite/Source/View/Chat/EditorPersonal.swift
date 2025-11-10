@@ -4955,67 +4955,77 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
     
     private func handleIndent(_ textView: UITextView, _ range: NSRange, _ text: String) -> Bool {
         guard let nsText = textView.text as NSString? else { return true }
+
+        // Ensure valid range
+        guard range.location <= nsText.length else { return true }
+
         let newText = nsText.replacingCharacters(in: range, with: text)
         var lines = newText.components(separatedBy: "\n")
-        
-        // Ensure range location is valid, considering Unicode scalars
+
         guard let textRange = Range(range, in: textView.text) else { return true }
         let prefixText = textView.text[..<textRange.lowerBound]
-        let affectedLineIndex = prefixText.components(separatedBy: "\n").count - 1
-        guard affectedLineIndex >= 0, affectedLineIndex < lines.count else { return true }
-        
+        let affectedLineIndex = max(prefixText.components(separatedBy: "\n").count - 1, 0)
+        guard affectedLineIndex < lines.count else { return true }
+
         let affectedLine = lines[affectedLineIndex]
-        // Auto-indent new lines based on previous line
+
+        // ---- Auto-indent new lines ----
         if text == "\n" {
             let previousLine = lines[affectedLineIndex]
-            
+
+            // Handle bullet points
             if previousLine.hasPrefix("  •") {
                 let newBullet = "\n  • "
-                textView.text = nsText.replacingCharacters(in: range, with: newBullet)
-                DispatchQueue.main.async {
-                    textView.selectedRange = NSRange(location: range.location + newBullet.utf16.count, length: 0)
-                }
+                safeReplaceText(in: textView, range: range, with: newBullet)
                 return false
             }
-            
+
+            // Handle numbered list continuation
             if let match = previousLine.range(of: #"^\s{2}(\d+)\."#, options: .regularExpression),
                let numberMatch = previousLine[match].components(separatedBy: ".").first,
                let number = Int(numberMatch.trimmingCharacters(in: .whitespaces)) {
-                
                 let newNumber = "\n  \(number + 1). "
-                textView.text = nsText.replacingCharacters(in: range, with: newNumber)
-                DispatchQueue.main.async {
-                    textView.selectedRange = NSRange(location: range.location + newNumber.utf16.count, length: 0)
-                }
+                safeReplaceText(in: textView, range: range, with: newNumber)
                 return false
             }
         }
-        
-        // Handle Backspace on Empty Bullet (Convert "  • " → "- ")
-        if text.isEmpty && affectedLine.trimmingCharacters(in: .whitespaces) == "•" {
-            lines[affectedLineIndex] = "- "  // Replace "  • " with "- "
-            textView.text = lines.joined(separator: "\n")
-            DispatchQueue.main.async {
-                textView.selectedRange = NSRange(location: range.location - 1, length: 0)
+
+        // ---- Handle backspace cases ----
+        if text.isEmpty {
+            // Empty bullet → "- "
+            if affectedLine.trimmingCharacters(in: .whitespaces) == "•" {
+                lines[affectedLineIndex] = "- "
+                updateTextView(textView, with: lines.joined(separator: "\n"), cursorOffset: -1)
+                return false
             }
-            return false
-        }
-        
-        // Handle Backspace on bullet
-        if text.isEmpty, newText.hasPrefix(" •"), newText.substring(with: NSRange(location: range.location - 1, length: 2)) == " •" {
-            return false
-        }
-        
-        // Handle Backspace on Numbered List
-        if text.isEmpty, newText.hasPrefix("  "), newText.substring(with: NSRange(location: range.location - 2, length: 2)) == "  " {
-            lines[affectedLineIndex] = affectedLine.trimmingCharacters(in: .whitespaces)
-            textView.text = lines.joined(separator: "\n")
-            DispatchQueue.main.async {
-                textView.selectedRange = NSRange(location: range.location - 2, length: 0)
+
+            // Bullet or number deletion checks, safely bounded
+            if range.location >= 2,
+               let twoChars = textView.text.substring(with: NSRange(location: range.location - 2, length: 2)),
+               twoChars == "  " {
+                lines[affectedLineIndex] = affectedLine.trimmingCharacters(in: .whitespaces)
+                updateTextView(textView, with: lines.joined(separator: "\n"), cursorOffset: -2)
+                return false
             }
-            return false
         }
+
         return true
+    }
+    
+    private func safeReplaceText(in textView: UITextView, range: NSRange, with newText: String) {
+        let nsText = textView.text as NSString
+        textView.text = nsText.replacingCharacters(in: range, with: newText)
+        DispatchQueue.main.async {
+            textView.selectedRange = NSRange(location: range.location + newText.utf16.count, length: 0)
+        }
+    }
+
+    private func updateTextView(_ textView: UITextView, with newText: String, cursorOffset: Int) {
+        textView.text = newText
+        DispatchQueue.main.async {
+            let newLoc = max(textView.selectedRange.location + cursorOffset, 0)
+            textView.selectedRange = NSRange(location: newLoc, length: 0)
+        }
     }
     
     private func handleRichText(_ textView: UITextView) {
@@ -7665,39 +7675,48 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
             else {
                 messageText.attributedText = textChat.richText()
-                modifyText()
+                modifyText(at: indexPath)
             }
         } else {
             messageText.attributedText = textChat.richText()
-            modifyText()
+            modifyText(at: indexPath)
         }
         
-        func modifyText() {
-            if !textChat.isEmpty {
-                if textChat.contains("■"){
-                    textChat = textChat.components(separatedBy: "■")[0]
-                    textChat = textChat.trimmingCharacters(in: .whitespacesAndNewlines)
+        func modifyText(at indexPath: IndexPath) {
+            guard !textChat.isEmpty else { return }
+            guard indexPath.row >= 0, indexPath.row < dataMessages.count else {
+                print("⚠️ modifyText: Invalid index \(indexPath.row), total: \(dataMessages.count)")
+                return
+            }
+            var text = textChat
+            let messageData = dataMessages[indexPath.row]
+            if let separatorRange = text.range(of: "■") {
+                text = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if !fileChat.isEmpty {
+                let lock = messageData["lock"] as? String ?? ""
+                if lock != "1", lock != "2" {
+                    let parts = text.components(separatedBy: "|")
+                    if parts.count > 1 { text = parts[1] }
                 }
-                if !fileChat.isEmpty && dataMessages[indexPath.row]["lock"] as? String != "1" && dataMessages[indexPath.row]["lock"] as? String != "2" {
-                    textChat = textChat.components(separatedBy: "|")[1]
+            }
+            let finalAttributed = text.richText()
+            let urlPattern = "(https?://|www\\.)\\S+"
+            if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
+                let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+                for match in matches {
+                    guard let range = Range(match.range, in: text) else { continue }
+                    let linkText = String(text[range])
+                    let nsRange = NSRange(range, in: text)
+                    finalAttributed.addAttributes([
+                        .link: linkText,
+                        .foregroundColor: UIColor.systemBlue,
+                        .underlineStyle: NSUnderlineStyle.single.rawValue
+                    ], range: nsRange)
                 }
-                let finalAtribute = textChat.richText()
-                textChat = finalAtribute.string
-                let urlPattern = "(https?://|www\\.)\\S+"
-                if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
-                    let matches = regex.matches(in: textChat, options: [], range: NSRange(textChat.startIndex..., in: textChat))
-                    
-                    for match in matches {
-                        if let range = Range(match.range, in: textChat) {
-                            let linkText = String(textChat[range])
-                            let nsRange = NSRange(range, in: textChat)
-                            finalAtribute.addAttribute(.link, value: linkText, range: nsRange)
-                            finalAtribute.addAttribute(.foregroundColor, value: UIColor.blue, range: nsRange)
-                            finalAtribute.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: nsRange)
-                        }
-                    }
-                }
-                messageText.attributedText = finalAtribute
+            }
+            DispatchQueue.main.async {
+                messageText.attributedText = finalAttributed
                 messageText.delegate = self
             }
         }
@@ -9108,7 +9127,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-        let indexPath = sender.indexPath
+        var indexPath = sender.indexPath
+        if indexPath.count == 0 {
+            if let index = self.dataMessages.firstIndex(where: {$0["message_id"] as? String == sender.message_id}) {
+                let section = self.dataDates.firstIndex(of: self.dataMessages[index]["chat_date"]  as? String ?? "")
+                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[index]["message_id"]  as? String ?? ""})
+                if row != nil && section != nil {
+                    indexPath = IndexPath(row: row!, section: section!)
+                }
+            }
+        }
         let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         func showMedia(data: Data? = nil, url: URL? = nil, type: Int = 0) {
             let image = UIImage(data: data ?? Data())
@@ -9149,25 +9177,15 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageViewer.navigationItem.rightBarButtonItem = shareButton
             }
             
-            var name = ""
-            if !isContactCenter {
-                name = dataPerson["name"] as? String ?? ""
-            } else {
-                if users.count == 1 {
-                    name = users[0].fullName
-                } else {
-                    var stringName = ""
-                    for user in users {
-                        if stringName.isEmpty {
-                            stringName = user.fullName
-                        } else {
-                            stringName += ", \(user.fullName)"
-                        }
-                    }
-                    name = stringName
-                }
+            let user = User.getData(pin: dataMessages[indexPath.row]["f_pin"] as? String)
+            let name = user?.fullName
+            imageViewer.titleCustom = name ?? ""
+            if let timestamp = Double(dataMessages[indexPath.row][TypeDataMessage.server_date] as? String ?? "") {
+                let date = Date(timeIntervalSince1970: timestamp / 1000)
+                let formatter = DateFormatter()
+                formatter.dateFormat = "dd/MM/yy HH:mm"
+                imageViewer.subtitleCustom = formatter.string(from: date)
             }
-            imageViewer.title = name
             
             let transitionDelegate = ZoomTransitioningDelegate()
             transitionDelegate.originImageView = sender.imageView

@@ -119,15 +119,17 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     private func reloadAllData() {
 //        print("reloadAllData")
         DispatchQueue.main.async { [weak self] in
-            if self?.timerReloadData == nil && !self!.isGettingData {
-                self?.refresh()
+            guard let self = self else { return }
+            if self.timerReloadData == nil && !self.isGettingData {
+                self.refresh()
             } else {
-                self?.timerReloadData?.invalidate()
-                self?.timerReloadData = nil
-                self?.timerReloadData = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+                self.timerReloadData?.invalidate()
+                self.timerReloadData = nil
+                self.timerReloadData = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                     if self != nil && !self!.isGettingData {
-                        self?.refresh()
-                        self?.timerReloadData = nil
+                        guard let self = self else { return }
+                        self.refresh()
+                        self.timerReloadData = nil
                     }
                 }
             }

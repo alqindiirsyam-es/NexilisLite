@@ -3404,6 +3404,8 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     var media: MediaType!
 
     public let backgroundView = UIView()
+    public var titleCustom = ""
+    public var subtitleCustom = ""
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
     private var statusBarBackgroundView: UIView!
@@ -3428,6 +3430,10 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         edgesForExtendedLayout = .all
         extendedLayoutIncludesOpaqueBars = true
         navigationController?.navigationBar.isTranslucent = true
+        
+        if !titleCustom.isEmpty {
+            setNavigationTitle(title: titleCustom, subtitle: subtitleCustom)
+        }
 
         // Background view
         backgroundView.backgroundColor = .white
@@ -3482,6 +3488,27 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         UIView.animate(withDuration: 0.25) {
             self.backgroundView.alpha = 1
         }
+    }
+    
+    func setNavigationTitle(title: String, subtitle: String) {
+        let titleLabel = UILabel()
+        titleLabel.text = title
+        titleLabel.font = UIFont.systemFont(ofSize: 15)
+        titleLabel.textColor = .label
+        titleLabel.textAlignment = .center
+
+        let subtitleLabel = UILabel()
+        subtitleLabel.text = subtitle
+        subtitleLabel.font = UIFont.systemFont(ofSize: 12)
+        subtitleLabel.textColor = .secondaryLabel
+        subtitleLabel.textAlignment = .center
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 0
+
+        navigationItem.titleView = stack
     }
 
     private func configureMedia() {

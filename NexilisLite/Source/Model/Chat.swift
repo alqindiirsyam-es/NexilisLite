@@ -10,7 +10,7 @@ import Foundation
 public class Chat: Model {
     
     public let fpin: String
-    public let pin: String
+    public var pin: String
     public let messageId: String
     public var counter: String
     public var messageText: String
@@ -340,7 +340,7 @@ public class Chat: Model {
                             order by 6 desc
                             """
                 if !lastQuery.isEmpty {
-                    query = "select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.credential, m.lock, m.audio_id, m.gif_id from MESSAGE m JOIN BUDDY b ON m.f_pin = b.f_pin where \(lastQuery) order by 6 desc"
+                    query = "select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.credential, m.lock, m.audio_id, m.gif_id, m.l_pin, m.chat_id from MESSAGE m JOIN BUDDY b ON m.f_pin = b.f_pin where \(lastQuery) order by 6 desc"
                 }
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {
@@ -380,6 +380,13 @@ public class Chat: Model {
                                         groupName: cursorData.string(forColumnIndex: 20) ?? "",
                                         pinned: cursorData.longLongInt(forColumnIndex: 21),
                                         isBot: Int(cursorData.string(forColumnIndex: 22) ?? "0") ?? 0)
+                        if chat.pin.isEmpty && !lastQuery.isEmpty {
+                            chat.pin = cursorData.string(forColumnIndex: 18) ?? ""
+                            let chatId = cursorData.string(forColumnIndex: 19) ?? ""
+                            if !chatId.isEmpty {
+                                chat.pin = chatId
+                            }
+                        }
                         chats.append(chat)
                     }
                     cursorData.close()

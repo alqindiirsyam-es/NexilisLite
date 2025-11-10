@@ -2993,7 +2993,7 @@ public class APIS: NSObject {
         nameGroupShared = name
     }
     
-    public static func openImageNexilis(imageView: UIImageView, data: Data? = nil, isGIF: Bool = false) {
+    public static func openImageNexilis(imageView: UIImageView, data: Data? = nil, isGIF: Bool = false, nameSender: String = "", time: String = "") {
         let image = UIImage(data: data ?? Data())
         let imageViewer = MediaViewerViewController()
         if !isGIF {
@@ -3013,9 +3013,15 @@ public class APIS: NSObject {
         }
         let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
         imageViewer.navigationItem.leftBarButtonItem = backButton
-        
-        let name = ""
-        imageViewer.title = name
+        imageViewer.titleCustom = nameSender
+        if !time.isEmpty {
+            if let timestamp = Double(time) {
+                let date = Date(timeIntervalSince1970: timestamp / 1000)
+                let formatter = DateFormatter()
+                formatter.dateFormat = "dd/MM/yy HH:mm"
+                imageViewer.subtitleCustom = formatter.string(from: date)
+            }
+        }
         
         let transitionDelegate = ZoomTransitioningDelegate()
         transitionDelegate.originImageView = imageView
@@ -3033,15 +3039,43 @@ public class APIS: NSObject {
         }
     }
     
-    public static func openVideoNexilis(videoURL: URL) {
-        let player = AVPlayer(url: videoURL)
-        let playerVC = AVPlayerViewController()
-        playerVC.modalPresentationStyle = .custom
-        playerVC.player = player
+    public static func openVideoNexilis(imageView: UIImageView, videoURL: URL, nameSender: String = "", time: String = "") {
+        let imageViewer = MediaViewerViewController()
+        imageViewer.media = .video(videoURL)
+        let navigationController = UINavigationController(rootViewController: imageViewer)
+        navigationController.defaultStyle()
+        navigationController.view.backgroundColor = .clear
+        navigationController.modalPresentationCapturesStatusBarAppearance = true
+        navigationController.modalPresentationStyle = .overFullScreen
+        
+        let backAction = UIAction { _ in
+            navigationController.dismiss(animated: true)
+        }
+        let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
+        imageViewer.navigationItem.leftBarButtonItem = backButton
+        imageViewer.titleCustom = nameSender
+        if !time.isEmpty {
+            if let timestamp = Double(time) {
+                let date = Date(timeIntervalSince1970: timestamp / 1000)
+                let formatter = DateFormatter()
+                formatter.dateFormat = "dd/MM/yy HH:mm"
+                imageViewer.subtitleCustom = formatter.string(from: date)
+            }
+        }
+        
+        let transitionDelegate = ZoomTransitioningDelegate()
+        transitionDelegate.originImageView = imageView
+        navigationController.transitioningDelegate = transitionDelegate
+        self.transitioningDelegateRef = transitionDelegate
+        
         if UIApplication.shared.visibleViewController?.navigationController != nil {
-            UIApplication.shared.visibleViewController?.navigationController?.present(playerVC, animated: true, completion: nil)
+            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true) {
+                imageViewer.animateBackgroundIn()
+            }
         } else {
-            UIApplication.shared.visibleViewController?.present(playerVC, animated: true, completion: nil)
+            UIApplication.shared.visibleViewController?.present(navigationController, animated: true) {
+                imageViewer.animateBackgroundIn()
+            }
         }
     }
     
