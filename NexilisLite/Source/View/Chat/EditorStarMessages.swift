@@ -484,11 +484,16 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 print("⚠️ modifyText: Invalid index \(indexPath.row), total: \(dataMessages.count)")
                 return
             }
+
             var text = textChat
             let messageData = dataMessages[indexPath.row]
+
+            // Remove segment after separator
             if let separatorRange = text.range(of: "■") {
                 text = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             }
+
+            // Optional pipe-split logic
             if !fileChat.isEmpty {
                 let lock = messageData["lock"] as? String ?? ""
                 if lock != "1", lock != "2" {
@@ -496,21 +501,37 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     if parts.count > 1 { text = parts[1] }
                 }
             }
-            let finalAttributed = text.richText()
+
+            // Must be mutable!
+            let finalAttributed = NSMutableAttributedString(attributedString: text.richText())
+
             let urlPattern = "(https?://|www\\.)\\S+"
-            if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
-                let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-                for match in matches {
-                    guard let range = Range(match.range, in: text) else { continue }
-                    let linkText = String(text[range])
-                    let nsRange = NSRange(range, in: text)
-                    finalAttributed.addAttributes([
-                        .link: linkText,
-                        .foregroundColor: UIColor.systemBlue,
-                        .underlineStyle: NSUnderlineStyle.single.rawValue
-                    ], range: nsRange)
+            guard let regex = try? NSRegularExpression(pattern: urlPattern) else { return }
+
+            let fullString = finalAttributed.string
+            let fullLength = (fullString as NSString).length
+
+            let matches = regex.matches(in: fullString, range: NSRange(location: 0, length: fullLength))
+
+            for match in matches {
+                let range = match.range
+
+                // Skip invalid ranges safely
+                if range.location == NSNotFound ||
+                   range.location + range.length > fullLength ||
+                   range.length == 0 {
+                    continue
                 }
+
+                let linkText = (fullString as NSString).substring(with: range)
+
+                finalAttributed.addAttributes([
+                    .link: linkText,
+                    .foregroundColor: UIColor.systemBlue,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue
+                ], range: range)
             }
+
             DispatchQueue.main.async {
                 messageText.attributedText = finalAttributed
                 messageText.delegate = self
@@ -1868,6 +1889,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     }
     
     public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         let message = dataMessages[indexPath.row]
         if let attachmentFlag = message["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
             if attachmentFlag == "27" {

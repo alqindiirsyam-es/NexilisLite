@@ -999,9 +999,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     func updateProgress(_ data: [AnyHashable: Any]){
         var isImage = false
-        var idx = dataMessages.lastIndex(where: { $0["video_id"]  as? String ?? "" == data["name"]  as? String ?? "" || $0["video_id"] as? String == data["video_id"] as? String })
+        var idx = dataMessages.lastIndex(where: { $0["video_id"] as? String == data["name"] as? String || $0["video_id"] as? String == data["video_id"] as? String })
         if (idx == nil) {
-            idx = dataMessages.lastIndex(where: { $0["image_id"]  as? String ?? "" == data["name"]  as? String ?? "" || $0["image_id"] as? String == data["image_id"] as? String })
+            idx = dataMessages.lastIndex(where: { $0["image_id"] as? String == data["name"] as? String || $0["image_id"] as? String == data["image_id"] as? String })
             isImage = true
         }
         if (idx != nil) {
@@ -1009,7 +1009,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             if section == nil {
                 return
             }
-            let row = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[idx!]["message_id"]  as? String ?? ""})
+            let row = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[section!]}).firstIndex(where: { $0["message_id"] as? String == dataMessages[idx!]["message_id"] as? String})
             if row == nil {
                 return
             }
@@ -1033,9 +1033,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                     }
                                     var containerView : UIView?
                                     if (isImage) {
-                                        containerView = viewInContainer.subviews[0]
+                                        if viewInContainer.subviews[0] is UIVisualEffectView {
+                                            containerView = viewInContainer.subviews[1]
+                                        } else {
+                                            containerView = viewInContainer.subviews[0]
+                                        }
                                     } else if viewInContainer.subviews.count > 1 {
-                                        containerView = viewInContainer.subviews[1]
+                                        if viewInContainer.subviews[0] is UIVisualEffectView {
+                                            containerView = viewInContainer.subviews[2]
+                                        } else {
+                                            containerView = viewInContainer.subviews[1]
+                                        }
                                     }
                                     if let loading = containerView?.layer.sublayers?[1] as? CAShapeLayer {
                                         loading.strokeEnd = CGFloat(progress / 100)
@@ -1051,11 +1059,18 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 }
             }
         } else {
-            idx = dataMessages.lastIndex(where: { $0["file_id"]  as? String ?? "" == data["name"]  as? String ?? "" || $0["file_id"] as? String == data["file_id"] as? String })
+            idx = dataMessages.lastIndex(where: { $0["file_id"] as? String == data["name"] as? String || $0["file_id"] as? String == data["file_id"] as? String })
             if (idx != nil) {
+                let section = dataDates.firstIndex(of: dataMessages[idx!]["chat_date"]  as? String ?? "")
+                if section == nil {
+                    return
+                }
+                let row = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[section!]}).firstIndex(where: { $0["message_id"] as? String == dataMessages[idx!]["message_id"] as? String})
+                if row == nil {
+                    return
+                }
                 DispatchQueue.main.async {
-                    let section = 0
-                    let indexPath = IndexPath(row: idx!, section: section)
+                    let indexPath = IndexPath(row: row!, section: section!)
                     if(self.fakeProgMultip < self.maxFakeProgMultip){
                         self.fakeProgMultip = self.fakeProgMultip + 1
                     }
@@ -5977,11 +5992,16 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 print("⚠️ modifyText: Invalid index \(indexPath.row), total: \(dataMessages.count)")
                 return
             }
+
             var text = textChat
             let messageData = dataMessages[indexPath.row]
+
+            // Remove segment after separator
             if let separatorRange = text.range(of: "■") {
                 text = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             }
+
+            // Optional pipe-split logic
             if !fileChat.isEmpty {
                 let lock = messageData["lock"] as? String ?? ""
                 if lock != "1", lock != "2" {
@@ -5989,21 +6009,37 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     if parts.count > 1 { text = parts[1] }
                 }
             }
-            let finalAttributed = text.richText()
+
+            // Must be mutable!
+            let finalAttributed = NSMutableAttributedString(attributedString: text.richText(group_id: self.dataGroup["group_id"]  as? String ?? ""))
+
             let urlPattern = "(https?://|www\\.)\\S+"
-            if let regex = try? NSRegularExpression(pattern: urlPattern, options: []) {
-                let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-                for match in matches {
-                    guard let range = Range(match.range, in: text) else { continue }
-                    let linkText = String(text[range])
-                    let nsRange = NSRange(range, in: text)
-                    finalAttributed.addAttributes([
-                        .link: linkText,
-                        .foregroundColor: UIColor.systemBlue,
-                        .underlineStyle: NSUnderlineStyle.single.rawValue
-                    ], range: nsRange)
+            guard let regex = try? NSRegularExpression(pattern: urlPattern) else { return }
+
+            let fullString = finalAttributed.string
+            let fullLength = (fullString as NSString).length
+
+            let matches = regex.matches(in: fullString, range: NSRange(location: 0, length: fullLength))
+
+            for match in matches {
+                let range = match.range
+
+                // Skip invalid ranges safely
+                if range.location == NSNotFound ||
+                   range.location + range.length > fullLength ||
+                   range.length == 0 {
+                    continue
                 }
+
+                let linkText = (fullString as NSString).substring(with: range)
+
+                finalAttributed.addAttributes([
+                    .link: linkText,
+                    .foregroundColor: UIColor.systemBlue,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue
+                ], range: range)
             }
+
             DispatchQueue.main.async {
                 messageText.attributedText = finalAttributed
                 messageText.delegate = self
@@ -6052,17 +6088,27 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         
         if !audioChat.isEmpty {
             messageText.isHidden = true
+            var padTop: CGFloat = 32
+            if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int != 0 {
+                padTop = 52
+            }
+            
+            let contAudio = UIView()
+            contAudio.backgroundColor = .clear
+            containerMessage.addSubview(contAudio)
+            contAudio.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: padTop, paddingLeft: 15, paddingBottom: 15, paddingRight: 15)
+            
             let imageAudio = UIImageView()
             imageAudio.image = UIImage(systemName: "music.note", withConfiguration: UIImage.SymbolConfiguration(pointSize: 35))
-            containerMessage.addSubview(imageAudio)
-            imageAudio.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingTop: 15, paddingLeft: 15, paddingBottom: 15, centerY: containerMessage.centerYAnchor)
+            contAudio.addSubview(imageAudio)
+            imageAudio.anchor(top: contAudio.topAnchor, left: contAudio.leftAnchor, bottom: contAudio.bottomAnchor, centerY: contAudio.centerYAnchor)
             imageAudio.tintColor = .mainColor
             
             let playButtonAudio = UIButton(type: .system)
             playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
             playButtonAudio.tintColor = .gray
-            containerMessage.addSubview(playButtonAudio)
-            playButtonAudio.anchor(left: containerMessage.leftAnchor, paddingLeft: 60, centerY: containerMessage.centerYAnchor, width: 20, height: 20)
+            contAudio.addSubview(playButtonAudio)
+            playButtonAudio.anchor(left: contAudio.leftAnchor, paddingLeft: 45, centerY: contAudio.centerYAnchor, width: 20, height: 20)
             
             let progressSliderAudio = UISlider()
             progressSliderAudio.minimumValue = 0
@@ -6070,14 +6116,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let thumbImage = UIImage(systemName: "circle.fill")?.withTintColor(UIColor.mainColor)
                 .resize(target: CGSize(width: 15, height: 15))
             progressSliderAudio.setThumbImage(thumbImage, for: .normal)
-            containerMessage.addSubview(progressSliderAudio)
-            progressSliderAudio.anchor(left: playButtonAudio.rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 10, paddingRight: 15, centerY: containerMessage.centerYAnchor, height: 15)
+            contAudio.addSubview(progressSliderAudio)
+            progressSliderAudio.anchor(left: playButtonAudio.rightAnchor, right: contAudio.rightAnchor, paddingLeft: 10, centerY: contAudio.centerYAnchor, height: 15)
             
             let timeLabelAudio = UILabel()
             timeLabelAudio.text = "0:00"
             timeLabelAudio.font = .systemFont(ofSize: 10 + offset())
             timeLabelAudio.textColor = .gray
-            containerMessage.addSubview(timeLabelAudio)
+            contAudio.addSubview(timeLabelAudio)
             timeLabelAudio.anchor(top: playButtonAudio.bottomAnchor, left: playButtonAudio.rightAnchor, paddingLeft: 10, width: 100, height: 12)
             
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -6234,6 +6280,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
                             let blurEffectView = UIVisualEffectView(effect: blurEffect)
                             blurEffectView.frame = CGRect(x: 0, y: 0, width: listImageThumb[i].frame.size.width, height: listImageThumb[i].frame.size.height)
+                            blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                            listImageThumb[i].addSubview(blurEffectView)
+                        } else if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+                            let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.dark)
+                            let blurEffectView = UIVisualEffectView(effect: blurEffect)
+                            blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
                             blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
                             listImageThumb[i].addSubview(blurEffectView)
                         }
@@ -6399,6 +6451,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             imageDownload.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
                             imageDownload.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
                         }
+                    } else if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+                        let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.dark)
+                        let blurEffectView = UIVisualEffectView(effect: blurEffect)
+                        blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
+                        blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                        imageThumb.addSubview(blurEffectView)
                     }
                     
                 }
@@ -7360,6 +7418,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 formatter.dateFormat = "dd/MM/yy HH:mm"
                 imageViewer.subtitleCustom = formatter.string(from: date)
             }
+            imageViewer.isSecure = dataMessages[indexPath.row][TypeDataMessage.credential] as? String == "1"
             
             let transitionDelegate = ZoomTransitioningDelegate()
             transitionDelegate.originImageView = sender.imageView
@@ -7553,12 +7612,73 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     vcHandleFile.navigationItem.rightBarButtonItem = shareButton
                 }
                 if let viewVc = vcHandleFile.view {
+                    let isSecure = dataMessages[indexPath.row][TypeDataMessage.credential] as? String == "1"
                     vcHandleFile.title = sender.labelFile.text
+                    var secureView: UIView!
+                    if isSecure {
+                        secureView = SecureField().secureContainer
+                        
+                        let privacyOverlay: UIView = {
+                            let view = UIView()
+                            view.backgroundColor = .black
+                            return view
+                        }()
+                        
+                        viewVc.addSubview(privacyOverlay)
+                        privacyOverlay.translatesAutoresizingMaskIntoConstraints = false
+                        NSLayoutConstraint.activate([
+                            privacyOverlay.topAnchor.constraint(equalTo: view.topAnchor),
+                            privacyOverlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                            privacyOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                            privacyOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+                        ])
+
+                        // Add WhatsApp-style message
+                        let icon = UIImageView(image: UIImage(systemName: "camera.fill"))
+                        icon.tintColor = .mainColor
+                        icon.contentMode = .scaleAspectFit
+
+                        let label = UILabel()
+                        label.text = "Screen capture/recording blocked".localized()
+                        label.font = .systemFont(ofSize: 22, weight: .semibold)
+                        label.textColor = .white
+
+                        let desc = UILabel()
+                        desc.text = "You tried to take a screenshot.\nFor added privacy, credential messages don’t allow this.".localized()
+                        desc.font = .systemFont(ofSize: 16)
+                        desc.textColor = .lightGray
+                        desc.numberOfLines = 0
+                        desc.textAlignment = .center
+
+                        let stack = UIStackView(arrangedSubviews: [icon, label, desc])
+                        stack.axis = .vertical
+                        stack.alignment = .center
+                        stack.spacing = 18
+
+                        privacyOverlay.addSubview(stack)
+                        stack.translatesAutoresizingMaskIntoConstraints = false
+
+                        NSLayoutConstraint.activate([
+                            stack.centerXAnchor.constraint(equalTo: privacyOverlay.centerXAnchor),
+                            stack.centerYAnchor.constraint(equalTo: privacyOverlay.centerYAnchor),
+                            stack.leftAnchor.constraint(equalTo: view.leftAnchor),
+                            stack.rightAnchor.constraint(equalTo: view.rightAnchor),
+                            icon.widthAnchor.constraint(equalToConstant: 80),
+                            icon.heightAnchor.constraint(equalToConstant: 80)
+                        ])
+                        
+                        viewVc.addSubview(secureView)
+                        secureView.frame = CGRect(x: 0, y: 0, width: viewVc.bounds.size.width, height: viewVc.bounds.size.height)
+                    }
                     vcHandleFile.addChild(previewController)
                     previewController.dataSource = self
-                    previewController.view.frame = CGRect(x: 0, y: 0, width: viewVc.bounds.size.width, height: viewVc.bounds.size.height)
+                    previewController.view.frame = CGRect(x: 0, y: 0, width: isSecure ? secureView.bounds.size.width : viewVc.bounds.size.width, height: isSecure ? secureView.bounds.size.height : viewVc.bounds.size.height)
                     previewController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                    viewVc.addSubview(previewController.view)
+                    if isSecure {
+                        secureView.addSubview(previewController.view)
+                    } else {
+                        viewVc.addSubview(previewController.view)
+                    }
                     previewController.didMove(toParent: vcHandleFile)
                     
                     self.present(nc, animated: true)
@@ -8217,7 +8337,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
 //            }
 //        }
 //    }
-//    
+//
 //    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
 //        if !decelerate {
 //            let indexPath = tableChatView.indexPathsForVisibleRows?.first

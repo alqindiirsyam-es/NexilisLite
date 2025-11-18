@@ -445,7 +445,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         content.text = "Confirmed".localized() + " at (\(dataLocation[0]))"
                     }
                     if dataStatus.count != 0 {
-                        if (dataStatus[0]["time_ack"] as! String).isEmpty {
+                        if (dataStatus[0]["time_ack"] as? String ?? "").isEmpty {
                             cell.accessoryView = noStatus
                         } else {
                             let date = Date(milliseconds: Int64(dataStatus[0]["time_ack"] as! String) ?? 100)
@@ -465,12 +465,14 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             
                             cell.accessoryView = viewTimeStatus
                         }
+                    } else {
+                        cell.accessoryView = noStatus
                     }
                 } else {
                     content.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.systemBlue)
                     content.text = "Read".localized()
                     if dataStatus.count != 0 {
-                        if (dataStatus[0]["time_read"] as! String).isEmpty {
+                        if (dataStatus[0]["time_read"] as? String ?? "").isEmpty {
                             cell.accessoryView = noStatus
                         } else {
                             let date = Date(milliseconds: Int64(dataStatus[0]["time_read"] as! String) ?? 100)
@@ -490,13 +492,15 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             
                             cell.accessoryView = viewTimeStatus
                         }
+                    } else {
+                        cell.accessoryView = noStatus
                     }
                 }
             } else if indexPath.row == 2 && !data.isEmpty && data["read_receipts"] as? String == "8" {
                 content.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.systemBlue)
                 content.text = "Read".localized()
                 if dataStatus.count != 0 {
-                    if (dataStatus[0]["time_read"] as! String).isEmpty {
+                    if (dataStatus[0]["time_read"] as? String ?? "").isEmpty {
                         cell.accessoryView = noStatus
                     } else {
                         let date = Date(milliseconds: Int64(dataStatus[0]["time_read"] as! String) ?? 100)
@@ -516,11 +520,13 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         
                         cell.accessoryView = viewTimeStatus
                     }
+                } else {
+                    cell.accessoryView = noStatus
                 }
             } else {
                 content.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
                 content.text = "Delivered".localized()
-                if (dataStatus[0]["time_delivered"] as! String).isEmpty {
+                if dataStatus.count == 0 || (dataStatus[0]["time_delivered"] as? String ?? "").isEmpty {
                     cell.accessoryView = noStatus
                 } else {
                     let date = Date(milliseconds: Int64(dataStatus[0]["time_delivered"] as! String) ?? 100)

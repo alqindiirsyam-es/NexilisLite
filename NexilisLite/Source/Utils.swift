@@ -508,7 +508,7 @@ public final class Utils {
 
             let imageString = NSAttributedString(attachment: imageAttachment)
             let textString = NSAttributedString(string: " " + textPreview, attributes: [
-                .font: UIFont.systemFont(ofSize: 14),
+                .font: UIFont.systemFont(ofSize: 14 + String.offset()),
                 .foregroundColor: UIColor.gray
             ])
             
@@ -571,7 +571,7 @@ public final class Utils {
     }
     
     private static func showNSMutableAttributedString(_ text: String) -> NSMutableAttributedString {
-        let font = UIFont.systemFont(ofSize: 12)
+        let font = UIFont.systemFont(ofSize: 12 + String.offset())
         return NSMutableAttributedString(string: text, attributes: [NSAttributedString.Key.font: font])
     }
     
@@ -3393,6 +3393,31 @@ public class MessageScope {
     public static let CHANNEL = "33";
 }
 
+class SecureField : UITextField {
+
+    override init(frame: CGRect) {
+        super.init(frame: .zero)
+        self.isSecureTextEntry = true
+        self.translatesAutoresizingMaskIntoConstraints = false
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    weak var secureContainer: UIView? {
+        let secureView = self.subviews.filter({ subview in
+            type(of: subview).description().contains("CanvasView")
+        }).first
+        secureView?.translatesAutoresizingMaskIntoConstraints = false
+        secureView?.isUserInteractionEnabled = true //To enable child view's userInteraction in iOS 13
+        return secureView
+    }
+    
+    override var canBecomeFirstResponder: Bool {false}
+    override func becomeFirstResponder() -> Bool {false}
+}
+
 class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, UIScrollViewDelegate {
     
     enum MediaType {
@@ -3413,6 +3438,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     private var playerLayer: AVPlayerLayer?
     private let playPauseButton = UIButton(type: .custom)
     private var isVideoPlaying = false
+    public var isSecure = false
 
     var isNavigationBarHidden = false {
         didSet { setNeedsStatusBarAppearanceUpdate() }
@@ -3421,11 +3447,23 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     override var prefersStatusBarHidden: Bool {
         return isNavigationBarHidden
     }
+    
+    private var privacyOverlay: UIView = {
+        let view = UIView()
+        view.backgroundColor = .black
+        return view
+    }()
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
         view.backgroundColor = .clear
+        
+        guard let secureView = SecureField().secureContainer else {return}
+        if isSecure {
+            setupPrivacyOverlay()
+            self.view.addSubview(secureView)
+        }
 
         edgesForExtendedLayout = .all
         extendedLayoutIncludesOpaqueBars = true
@@ -3439,7 +3477,11 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         backgroundView.backgroundColor = .white
         backgroundView.alpha = 0
         backgroundView.frame = view.bounds
-        view.addSubview(backgroundView)
+        if isSecure {
+            secureView.addSubview(backgroundView)
+        } else {
+            view.addSubview(backgroundView)
+        }
 
         // ScrollView for zooming
         scrollView.frame = view.bounds
@@ -3449,7 +3491,11 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         scrollView.showsVerticalScrollIndicator = false
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.bouncesZoom = true
-        view.addSubview(scrollView)
+        if isSecure {
+            secureView.addSubview(scrollView)
+        } else {
+            view.addSubview(scrollView)
+        }
 
         // Add imageView to scrollView
         imageView.frame = scrollView.bounds
@@ -3476,6 +3522,51 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         statusBarBackgroundView.backgroundColor = .mainColor
         statusBarBackgroundView.autoresizingMask = [.flexibleWidth, .flexibleBottomMargin]
         view.addSubview(statusBarBackgroundView)
+    }
+    
+    private func setupPrivacyOverlay() {
+        view.addSubview(privacyOverlay)
+        privacyOverlay.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            privacyOverlay.topAnchor.constraint(equalTo: view.topAnchor),
+            privacyOverlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            privacyOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            privacyOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+
+        // Add WhatsApp-style message
+        let icon = UIImageView(image: UIImage(systemName: "camera.fill"))
+        icon.tintColor = .mainColor
+        icon.contentMode = .scaleAspectFit
+
+        let label = UILabel()
+        label.text = "Screen capture/recording blocked".localized()
+        label.font = .systemFont(ofSize: 22, weight: .semibold)
+        label.textColor = .white
+
+        let desc = UILabel()
+        desc.text = "You tried to take a screenshot.\nFor added privacy, credential messages don’t allow this.".localized()
+        desc.font = .systemFont(ofSize: 16)
+        desc.textColor = .lightGray
+        desc.numberOfLines = 0
+        desc.textAlignment = .center
+
+        let stack = UIStackView(arrangedSubviews: [icon, label, desc])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 18
+
+        privacyOverlay.addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: privacyOverlay.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: privacyOverlay.centerYAnchor),
+            stack.leftAnchor.constraint(equalTo: view.leftAnchor),
+            stack.rightAnchor.constraint(equalTo: view.rightAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 80),
+            icon.heightAnchor.constraint(equalToConstant: 80)
+        ])
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -3607,6 +3698,9 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             let maxDistance = view.bounds.height / 2.0
             let progress = min(distance / maxDistance, 1.0)
             self.backgroundView.alpha = 1.0 - progress
+            if isSecure {
+                self.privacyOverlay.isHidden = true
+            }
 
         case .ended, .cancelled:
             let distance = hypot(translation.x, translation.y)
@@ -3617,6 +3711,9 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
                 dismiss(animated: true, completion: nil)
             } else {
                 // Return to center if not far enough
+                if isSecure {
+                    self.privacyOverlay.isHidden = false
+                }
                 UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0.8, options: [], animations: {
                     self.scrollView.transform = .identity
                     self.backgroundView.alpha = 1.0
