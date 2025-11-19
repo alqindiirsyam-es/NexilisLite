@@ -3894,19 +3894,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func checkNewMessage(tableView: UITableView) {
-//        let indexPathFirst = tableView.indexPathsForVisibleRows?.first
-//        if indexPathFirst != nil {
-//            let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPathFirst!.section] })
-//            if self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPathFirst!.row]["message_id"] as? String }) == 0 && !gettingDataMessage {
-//                gettingDataMessage = true
-//                addDataMessage()
-//            }
-//        }
         currentIndexpath = tableView.indexPathsForVisibleRows?.last
         let indexFirst = tableView.indexPathsForVisibleRows?.first
         if indexFirst != nil {
-            let dataMessages = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[currentIndexpath!.section] })
-            if dataMessages.count == 0 || dataMessages.count - 1 < currentIndexpath!.row {
+            let dataMessages = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexFirst!.section] })
+            if dataMessages.count == 0 {
                 return
             }
             let contentHeight = tableView.contentSize.height
@@ -3935,6 +3927,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 //                    headerView.isHidden = false
 //                }
 //            }
+            if dataMessages.count - 1 < currentIndexpath!.row {
+                return
+            }
             var listData = dataMessages[0...currentIndexpath!.row]
             listData = listData.filter({$0["status"] as? String != "4" && $0["status"] as? String != "8"})
             if listData.count != 0 && !isContactCenter {
@@ -3946,18 +3941,15 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 }
             }
         }
-        if counter == 0 {
-            if indicatorCounterBSTB.isDescendant(of: self.view) {
-                indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
-                indicatorCounterBSTB.removeFromSuperview()
-            }
-            updateCounter(counter: 0)
+        if counter == 0 && indicatorCounterBSTB.isDescendant(of: self.view) {
+            indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
+            indicatorCounterBSTB.removeFromSuperview()
         } else if counter != 0 && currentIndexpath != nil {
             let dataFilter = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[currentIndexpath!.section] })
             if dataFilter.count == 0 {
                 return
             }
-            let idx = dataMessages.firstIndex(where: { $0["message_id"] as? String == dataFilter[currentIndexpath!.row]["message_id"] as? String})
+            let idx = dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataFilter[currentIndexpath!.row]["message_id"]  as? String ?? ""})
             if idx == nil {
                 return
             }
