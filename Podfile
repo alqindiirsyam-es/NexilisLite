@@ -7,7 +7,7 @@ target 'NexilisLite' do
 
   # Pods for NexilisLite
 
-  pod 'nuSDKService', '4.0.22'
+  pod 'nuSDKService', '5.0.0'
   pod 'FMDB/SQLCipher', '~> 2.7.12'
   pod 'NotificationBannerSwift', :git => 'https://github.com/Daltron/NotificationBanner.git', :tag => '4.0.0'
   pod 'Alamofire', '~> 5.10.2'

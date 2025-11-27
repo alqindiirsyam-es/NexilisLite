@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.76"
+    public static var cpaasVersion = "5.0.78"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1892,7 +1892,6 @@ public class Nexilis: NSObject {
     private static func makeNotifRequestFriend(message: TMessage) {
         let nameReq = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
         let profile = message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)
-        print("HEHE: \(message.toLogString())")
         DispatchQueue.main.async {
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             let inEditorPersonal: String? = SecureUserDefaults.shared.value(forKey: "inEditorPersonal") ?? nil
@@ -3673,51 +3672,92 @@ extension Nexilis: MessageDelegate {
         }
     }
     
-    public func onReceive(message: TMessage) {
-        var dataMessage: [AnyHashable : Any] = [:]
-        dataMessage["message"] = message
-        NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil, userInfo: dataMessage)
-        if message.getCode() == CoreMessage_TMessageCode.PUSH_CALL_CENTER {
-            if User.getDataCanNil(pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN)) == nil {
-                Nexilis.addFriendSilent(fpin: message.getBody(key: CoreMessage_TMessageKey.L_PIN))
-                sleep(1)
+    static func viewFormCS(pin: String, channel: String, displayName: String, thumb: String, id: String) {
+        if User.getDataCanNil(pin: pin) == nil {
+            Nexilis.addFriendSilent(fpin: pin)
+            sleep(1)
+        }
+        DispatchQueue.main.async {
+            if Nexilis.onGoingPushCC.isEmpty {
+                var data: [String: String] = [:]
+                data["channel"] = channel
+                data["l_pin"] = pin
+                data["f_display_name"] = displayName
+                Nexilis.onGoingPushCC = data
+            } else if Nexilis.onGoingPushCC["l_pin"] == pin {
+                return
             }
-            DispatchQueue.main.async {
-                if Nexilis.onGoingPushCC.isEmpty {
-                    var data: [String: String] = [:]
-                    data["channel"] = message.getBody(key: CoreMessage_TMessageKey.CHANNEL)
-                    data["l_pin"] = message.getBody(key: CoreMessage_TMessageKey.L_PIN)
-                    data["f_display_name"] = message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME)
-                    Nexilis.onGoingPushCC = data
-                } else if Nexilis.onGoingPushCC["l_pin"] == message.getBody(key: CoreMessage_TMessageKey.L_PIN) {
-                    return
+            let alert = LibAlertController(title: "", message: "\n\n\n\n\n\n\n\n\n\n".localized(), preferredStyle: .alert)
+            let newWidth = UIScreen.main.bounds.width * 0.90 - 270
+            // update width constraint value for main view
+            if let viewWidthConstraint = alert.view.constraints.filter({ return $0.firstAttribute == .width }).first{
+                viewWidthConstraint.constant = newWidth
+            }
+            // update width constraint value for container view
+            if let containerViewWidthConstraint = alert.view.subviews.first?.constraints.filter({ return $0.firstAttribute == .width }).first {
+                containerViewWidthConstraint.constant = newWidth
+            }
+            let titleFont = [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 18), NSAttributedString.Key.foregroundColor: UIColor.black]
+            let titleAttrString = NSMutableAttributedString(string: "Call Center".localized(), attributes: titleFont)
+            alert.setValue(titleAttrString, forKey: "attributedTitle")
+            alert.view.subviews.first?.subviews.first?.subviews.first?.backgroundColor = .lightGray
+            alert.view.tintColor = .black
+            let rejectAction = UIAlertAction(title: "Pass to other representative".localized(), style: .destructive, handler: {(_) in
+                APIS.isHasFormCS = false
+                DispatchQueue.global().async {
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: channel, l_pin: pin))
                 }
-                let alert = LibAlertController(title: "", message: "\n\n\n\n\n\n\n\n\n\n".localized(), preferredStyle: .alert)
-                let newWidth = UIScreen.main.bounds.width * 0.90 - 270
-                // update width constraint value for main view
-                if let viewWidthConstraint = alert.view.constraints.filter({ return $0.firstAttribute == .width }).first{
-                    viewWidthConstraint.constant = newWidth
-                }
-                // update width constraint value for container view
-                if let containerViewWidthConstraint = alert.view.subviews.first?.constraints.filter({ return $0.firstAttribute == .width }).first {
-                    containerViewWidthConstraint.constant = newWidth
-                }
-                let titleFont = [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 18), NSAttributedString.Key.foregroundColor: UIColor.black]
-                let titleAttrString = NSMutableAttributedString(string: "Call Center".localized(), attributes: titleFont)
-                alert.setValue(titleAttrString, forKey: "attributedTitle")
-                alert.view.subviews.first?.subviews.first?.subviews.first?.backgroundColor = .lightGray
-                alert.view.tintColor = .black
-                let rejectAction = UIAlertAction(title: "Pass to other representative".localized(), style: .destructive, handler: {(_) in
+                Nexilis.onGoingPushCC.removeAll()
+                alert.dismiss(animated: true, completion: nil)
+            })
+            let acceptAction = UIAlertAction(title: "I'll handle the customer".localized(), style: .default, handler: {(_) in
+                APIS.isHasFormCS = false
+                let goAudioCall = Nexilis.checkMicPermission()
+                if !goAudioCall && channel == "1" {
+                    let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow microphone permission in your settings".localized(), preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                        if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
+                            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                        }
+                    }))
+                    if UIApplication.shared.visibleViewController?.navigationController != nil {
+                        UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
+                    } else {
+                        UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
+                    }
                     DispatchQueue.global().async {
-                        _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), l_pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN)))
+                        DispatchQueue.global().async {
+                            _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: channel, l_pin: pin))
+                            
+                        }
                     }
                     Nexilis.onGoingPushCC.removeAll()
-                    alert.dismiss(animated: true, completion: nil)
-                })
-                let acceptAction = UIAlertAction(title: "I'll handle the customer".localized(), style: .default, handler: {(_) in
-                    let goAudioCall = Nexilis.checkMicPermission()
-                    if !goAudioCall && message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "1" {
-                        let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow microphone permission in your settings".localized(), preferredStyle: .alert)
+                    return
+                }
+                if channel == "2" {
+                    var permissionCheck = -1
+                    if AVCaptureDevice.authorizationStatus(for: .video) ==  .authorized {
+                        permissionCheck = 1
+                    } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
+                        permissionCheck = 0
+                    } else {
+                        Nexilis.dispatch = DispatchGroup()
+                        Nexilis.dispatch?.enter()
+                        AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
+                            if granted == true {
+                                permissionCheck = 1
+                            } else {
+                                permissionCheck = 0
+                            }
+                            if let dispatch = Nexilis.dispatch {
+                                dispatch.leave()
+                            }
+                        })
+                        Nexilis.dispatch?.wait()
+                        Nexilis.dispatch = nil
+                    }
+                    if permissionCheck == 0 {
+                        let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow camera permission in your settings".localized(), preferredStyle: .alert)
                         alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
                             if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
                                 UIApplication.shared.open(url, options: [:], completionHandler: nil)
@@ -3730,131 +3770,477 @@ extension Nexilis: MessageDelegate {
                         }
                         DispatchQueue.global().async {
                             DispatchQueue.global().async {
-                                _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), l_pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN)))
-                                
+                                _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: channel, l_pin: pin))
                             }
                         }
                         Nexilis.onGoingPushCC.removeAll()
                         return
                     }
-                    if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "2" {
-                        var permissionCheck = -1
-                        if AVCaptureDevice.authorizationStatus(for: .video) ==  .authorized {
-                            permissionCheck = 1
-                        } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
-                            permissionCheck = 0
-                        } else {
-                            Nexilis.dispatch = DispatchGroup()
-                            Nexilis.dispatch?.enter()
-                            AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
-                                if granted == true {
-                                    permissionCheck = 1
-                                } else {
-                                    permissionCheck = 0
-                                }
-                                if let dispatch = Nexilis.dispatch {
-                                    dispatch.leave()
-                                }
-                            })
-                            Nexilis.dispatch?.wait()
-                            Nexilis.dispatch = nil
+                }
+                if UIApplication.shared.visibleViewController is UINavigationController {
+                    let nc = UIApplication.shared.visibleViewController as! UINavigationController
+                    if nc.visibleViewController is QmeraStreamingViewController {
+                        let vc = nc.visibleViewController as! QmeraStreamingViewController
+                        var alert = LibAlertController(title: "", message: "Are you sure you want to end Live Streaming, and open notification?".localized(), preferredStyle: .alert)
+                        if !vc.isLive {
+                            alert = LibAlertController(title: "", message: "Are you sure you want to leave Live Streaming, and open notification?".localized(), preferredStyle: .alert)
                         }
-                        if permissionCheck == 0 {
-                            let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow camera permission in your settings".localized(), preferredStyle: .alert)
-                            alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                                }
-                            }))
-                            if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                            } else {
-                                UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                            }
+                        alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: { _ in
                             DispatchQueue.global().async {
-                                DispatchQueue.global().async {
-                                    _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), l_pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN)))
-                                }
+                                _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: channel, l_pin: pin))
                             }
                             Nexilis.onGoingPushCC.removeAll()
+                            alert.dismiss(animated: true, completion: nil)
+                        }))
+                        alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                            DispatchQueue.global().async {
+                                API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
+                                vc.sendLeft()
+                            }
+                            vc.dismiss(animated: true, completion: {
+                                acceptCC()
+                            })
+                        }))
+                        nc.present(alert, animated: true, completion: nil)
+                    } else if nc.visibleViewController is SeminarViewController {
+                        let vc = nc.visibleViewController as! SeminarViewController
+                        var alert = LibAlertController(title: "", message: "Are you sure you want to end Seminar, and open notification?".localized(), preferredStyle: .alert)
+                        if !vc.isLive {
+                            alert = LibAlertController(title: "", message: "Are you sure you want to leave Seminar, and open notification?".localized(), preferredStyle: .alert)
+                        }
+                        alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                            DispatchQueue.global().async {
+                                _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: channel, l_pin: pin))
+                            }
+                            Nexilis.onGoingPushCC.removeAll()
+                            alert.dismiss(animated: true, completion: nil)
+                        }))
+                        alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                            DispatchQueue.global().async {
+                                API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
+                                vc.sendLeft()
+                            }
+                            vc.dismiss(animated: true, completion: {
+                                acceptCC()
+                            })
+                        }))
+                        nc.present(alert, animated: true, completion: nil)
+                    }  else {
+                        acceptCC()
+                    }
+                } else {
+                    acceptCC()
+                }
+                func acceptCC() {
+                    if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptRequestCallCenter(channel: channel, l_pin: pin, complaint_id: id)) {
+                        if (response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "00") {
+                            Nexilis.onGoingPushCC.removeAll()
+                            let complaintId = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
+                            if !complaintId.isEmpty {
+                                alert.dismiss(animated: true, completion: nil)
+                                let idMe = User.getMyPin()!
+                                SecureUserDefaults.shared.set("\(pin),\(idMe),\(complaintId)", forKey: "onGoingCC")
+                                SecureUserDefaults.shared.set("\(pin)", forKey: "membersCC")
+                                SecureUserDefaults.shared.set("\(channel)", forKey: "channelCC")
+                                if channel == "0" {
+                                    let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+                                    editorPersonalVC.isContactCenter = true
+                                    editorPersonalVC.isRequestContactCenter = false
+                                    editorPersonalVC.unique_l_pin = pin
+                                    editorPersonalVC.complaintId = complaintId
+                                    editorPersonalVC.channelContactCenter = channel
+                                    editorPersonalVC.fPinContacCenter = pin
+                                    let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
+                                    navigationController.modalPresentationStyle = .fullScreen
+                                    navigationController.navigationBar.tintColor = .white
+                                    navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                                    navigationController.navigationBar.isTranslucent = false
+                                    navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+                                    navigationController.navigationBar.barStyle = .black
+                                    let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                                    UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+                                    let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+                                    navigationController.navigationBar.titleTextAttributes = textAttributes
+                                    if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                        UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                                    } else {
+                                        UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                                    }
+                                } else {
+                                    SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                                        if channel == "1" {
+                                            let controller = QmeraAudioViewController()
+                                            controller.user = User.getData(pin: pin)
+                                            controller.isOutgoing = true
+                                            controller.ticketId = complaintId
+                                            controller.modalPresentationStyle = .overCurrentContext
+                                            let navigationController = CustomNavigationController(rootViewController: controller)
+                                            navigationController.modalPresentationStyle = .fullScreen
+                                            if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                                UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                                            } else {
+                                                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                                            }
+                                        } else if channel == "2" {
+                                            let videoVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
+                                            videoVC.fPin = pin
+                                            videoVC.users.append(User.getData(pin: pin)!)
+                                            videoVC.ticketId = complaintId
+                                            let navigationController = CustomNavigationController(rootViewController: videoVC)
+                                            navigationController.modalPresentationStyle = .fullScreen
+                                            if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                                UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                                            } else {
+                                                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                                            }
+                                        }
+                                    })
+                                }
+                            }
+                        }
+                    } else {
+                        print("RESPONSE NIL")
+                    }
+                }
+            })
+            alert.addAction(acceptAction)
+            alert.addAction(rejectAction)
+            
+            let containerView = UIView(frame: CGRect(x: 20, y: 60, width: alert.view.bounds.size.width * 0.9 - 40, height: 150))
+            alert.view.addSubview(containerView)
+            containerView.layer.cornerRadius = 10.0
+            containerView.clipsToBounds = true
+            containerView.backgroundColor = .secondaryColor.withAlphaComponent(0.5)
+            
+            let imageProfile = UIImageView()
+            containerView.addSubview(imageProfile)
+            imageProfile.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                imageProfile.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10),
+                imageProfile.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
+                imageProfile.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 10),
+                imageProfile.widthAnchor.constraint(equalToConstant: 100)
+            ])
+            imageProfile.layer.cornerRadius = 10.0
+            imageProfile.clipsToBounds = true
+            imageProfile.backgroundColor = .lightGray.withAlphaComponent(0.3)
+            imageProfile.tintColor = .secondaryColor
+            imageProfile.image = UIImage(systemName: "person")
+            if thumb != "" {
+                imageProfile.setImage(name: thumb)
+                imageProfile.contentMode = .scaleAspectFill
+            }
+            
+            let labelName = UILabel()
+            containerView.addSubview(labelName)
+            labelName.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                labelName.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 15),
+                labelName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            labelName.font = UIFont.systemFont(ofSize: 12)
+            labelName.text = "Name".localized()
+            labelName.textColor = .mainColor
+            
+            let valueName = UILabel()
+            containerView.addSubview(valueName)
+            valueName.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                valueName.topAnchor.constraint(equalTo: labelName.bottomAnchor),
+                valueName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            valueName.font = UIFont.systemFont(ofSize: 12)
+            valueName.text = displayName
+            valueName.textColor = .mainColor
+            
+            let labelType = UILabel()
+            containerView.addSubview(labelType)
+            labelType.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                labelType.topAnchor.constraint(equalTo: valueName.bottomAnchor, constant: 5),
+                labelType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            labelType.font = UIFont.systemFont(ofSize: 12)
+            labelType.text = "Request Type".localized()
+            labelType.textColor = .mainColor
+            
+            let valueType = UILabel()
+            containerView.addSubview(valueType)
+            valueType.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                valueType.topAnchor.constraint(equalTo: labelType.bottomAnchor),
+                valueType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            valueType.font = UIFont.systemFont(ofSize: 12)
+            if channel == "0" {
+                valueType.text = "Chat".localized()
+            } else if channel == "1" {
+                valueType.text = "Audio Call".localized()
+            } else if channel == "2" {
+                valueType.text = "Video Call".localized()
+            } else {
+                valueType.text = "Email".localized()
+            }
+            valueType.textColor = .mainColor
+            
+            let labelIdentity = UILabel()
+            containerView.addSubview(labelIdentity)
+            labelIdentity.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                labelIdentity.topAnchor.constraint(equalTo: valueType.bottomAnchor, constant: 5),
+                labelIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            labelIdentity.font = UIFont.systemFont(ofSize: 12)
+            labelIdentity.text = "Complaint ID".localized()
+            labelIdentity.textColor = .mainColor
+            
+            let valueIdentity = UILabel()
+            containerView.addSubview(valueIdentity)
+            valueIdentity.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                valueIdentity.topAnchor.constraint(equalTo: labelIdentity.bottomAnchor),
+                valueIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5),
+                valueIdentity.trailingAnchor.constraint(equalTo: containerView.trailingAnchor)
+            ])
+            valueIdentity.font = UIFont.systemFont(ofSize: 12)
+            valueIdentity.text = id
+            valueIdentity.numberOfLines = 0
+            valueIdentity.textColor = .mainColor
+            
+            var isShowAlert: Int?
+            let canShow = UIApplication.shared.visibleViewController
+            if canShow != nil && !(canShow is UINavigationController) {
+                if !(canShow is EditorPersonal) && !(canShow is QmeraAudioViewController) && !(canShow is QmeraVideoViewController) {
+                    isShowAlert = 0
+                } else {
+                    isShowAlert = 3
+                }
+            } else if canShow != nil {
+                if canShow is UINavigationController {
+                    let canShowNC = canShow as! UINavigationController
+                    if !(canShowNC.visibleViewController is EditorPersonal) && !(canShowNC.visibleViewController is QmeraAudioViewController) && !(canShowNC.visibleViewController is QmeraVideoViewController) {
+                        isShowAlert = 0
+                    } else {
+                        isShowAlert = 3
+                    }
+                } else {
+                    isShowAlert = 0
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(isShowAlert!), execute: {
+                if UIApplication.shared.visibleViewController?.navigationController != nil {
+                    UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
+                } else {
+                    UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
+                }
+            })
+        }
+    }
+    
+    static func viewFormCSInvited(pin: String, channel: String, id: String) {
+        DispatchQueue.main.async {
+            let alert = LibAlertController(title: "", message: "\n\n\n\n\n\n\n\n\n\n".localized(), preferredStyle: .alert)
+            let newWidth = UIScreen.main.bounds.width * 0.90 - 270
+            // update width constraint value for main view
+            if let viewWidthConstraint = alert.view.constraints.filter({ return $0.firstAttribute == .width }).first{
+                viewWidthConstraint.constant = newWidth
+            }
+            // update width constraint value for container view
+            if let containerViewWidthConstraint = alert.view.subviews.first?.constraints.filter({ return $0.firstAttribute == .width }).first {
+                containerViewWidthConstraint.constant = newWidth
+            }
+            let titleFont = [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 18), NSAttributedString.Key.foregroundColor: UIColor.black]
+            let titleAttrString = NSMutableAttributedString(string: "You're invited to\nCall Center".localized(), attributes: titleFont)
+            alert.setValue(titleAttrString, forKey: "attributedTitle")
+            alert.view.subviews.first?.subviews.first?.subviews.first?.backgroundColor = .lightGray
+            alert.view.tintColor = .black
+            let rejectAction = UIAlertAction(title: "Reject".localized(), style: .destructive, handler: {(_) in
+                listCCIdInv.removeAll(where: {$0 == id})
+                DispatchQueue.global().async {
+                    if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 0, ticket_id: id)) {
+                        if result.isOk() {
                             return
                         }
                     }
-                    if UIApplication.shared.visibleViewController is UINavigationController {
-                        let nc = UIApplication.shared.visibleViewController as! UINavigationController
-                        if nc.visibleViewController is QmeraStreamingViewController {
-                            let vc = nc.visibleViewController as! QmeraStreamingViewController
-                            var alert = LibAlertController(title: "", message: "Are you sure you want to end Live Streaming, and open notification?".localized(), preferredStyle: .alert)
-                            if !vc.isLive {
-                                alert = LibAlertController(title: "", message: "Are you sure you want to leave Live Streaming, and open notification?".localized(), preferredStyle: .alert)
-                            }
-                            alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                DispatchQueue.global().async {
-                                    _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), l_pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN)))
-                                }
-                                Nexilis.onGoingPushCC.removeAll()
-                                alert.dismiss(animated: true, completion: nil)
-                            }))
-                            alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                DispatchQueue.global().async {
-                                    API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
-                                    vc.sendLeft()
-                                }
-                                vc.dismiss(animated: true, completion: {
-                                    acceptCC()
-                                })
-                            }))
-                            nc.present(alert, animated: true, completion: nil)
-//                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "isRunningStreaming"), object: nil, userInfo: dataMessage)
-                        } else if nc.visibleViewController is SeminarViewController {
-                            let vc = nc.visibleViewController as! SeminarViewController
-                            var alert = LibAlertController(title: "", message: "Are you sure you want to end Seminar, and open notification?".localized(), preferredStyle: .alert)
-                            if !vc.isLive {
-                                alert = LibAlertController(title: "", message: "Are you sure you want to leave Seminar, and open notification?".localized(), preferredStyle: .alert)
-                            }
-                            alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                DispatchQueue.global().async {
-                                    _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), l_pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN)))
-                                }
-                                Nexilis.onGoingPushCC.removeAll()
-                                alert.dismiss(animated: true, completion: nil)
-                            }))
-                            alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                DispatchQueue.global().async {
-                                    API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
-                                    vc.sendLeft()
-                                }
-                                vc.dismiss(animated: true, completion: {
-                                    acceptCC()
-                                })
-                            }))
-                            nc.present(alert, animated: true, completion: nil)
-//                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "isRunningStreaming"), object: nil, userInfo: dataMessage)
-                        }  else {
-                            acceptCC()
+                }
+                alert.dismiss(animated: true, completion: nil)
+            })
+            let acceptAction = UIAlertAction(title: "Accept".localized(), style: .default, handler: {(_) in
+                listCCIdInv.removeAll(where: {$0 == id})
+                let goAudioCall = Nexilis.checkMicPermission()
+                if !goAudioCall && channel == "1" {
+                    let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow microphone permission in your settings".localized(), preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                        if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
+                            UIApplication.shared.open(url, options: [:], completionHandler: nil)
                         }
+                    }))
+                    if UIApplication.shared.visibleViewController?.navigationController != nil {
+                        UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
+                    } else {
+                        UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
+                    }
+                    DispatchQueue.global().async {
+                        if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 0, ticket_id: id)) {
+                            if result.isOk() {
+                                return
+                            }
+                        }
+                    }
+                    return
+                }
+                if channel == "2" {
+                    var permissionCheck = -1
+                    if AVCaptureDevice.authorizationStatus(for: .video) ==  .authorized {
+                        permissionCheck = 1
+                    } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
+                        permissionCheck = 0
+                    } else {
+                        Nexilis.dispatch = DispatchGroup()
+                        Nexilis.dispatch?.enter()
+                        AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
+                            if granted == true {
+                                permissionCheck = 1
+                            } else {
+                                permissionCheck = 0
+                            }
+                            if let dispatch = Nexilis.dispatch {
+                                dispatch.leave()
+                            }
+                        })
+                        Nexilis.dispatch?.wait()
+                        Nexilis.dispatch = nil
+                    }
+                    
+                    if permissionCheck == 0 {
+                        let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow camera permission in your settings".localized(), preferredStyle: .alert)
+                        alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                            if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
+                                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                            }
+                        }))
+                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                            UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
+                        } else {
+                            UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
+                        }
+                        DispatchQueue.global().async {
+                            if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 0, ticket_id: id)) {
+                                if result.isOk() {
+                                    return
+                                }
+                            }
+                        }
+                        return
+                    }
+                }
+                if UIApplication.shared.visibleViewController is UINavigationController {
+                    let nc = UIApplication.shared.visibleViewController as! UINavigationController
+                    if nc.visibleViewController is QmeraStreamingViewController {
+                        let vc = nc.visibleViewController as! QmeraStreamingViewController
+                        var alert = LibAlertController(title: "", message: "Are you sure you want to end Live Streaming, and open notification?".localized(), preferredStyle: .alert)
+                        if !vc.isLive {
+                            alert = LibAlertController(title: "", message: "Are you sure you want to leave Live Streaming, and open notification?".localized(), preferredStyle: .alert)
+                        }
+                        alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                            DispatchQueue.global().async {
+                                if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 0, ticket_id: id)) {
+                                    if result.isOk() {
+                                        return
+                                    }
+                                }
+                            }
+                            alert.dismiss(animated: true, completion: nil)
+                        }))
+                        alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                            DispatchQueue.global().async {
+                                API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
+                                vc.sendLeft()
+                            }
+                            vc.dismiss(animated: true, completion: {
+                                acceptCC()
+                            })
+                        }))
+                        nc.present(alert, animated: true, completion: nil)
+                    } else if nc.visibleViewController is SeminarViewController {
+                        let vc = nc.visibleViewController as! SeminarViewController
+                        var alert = LibAlertController(title: "", message: "Are you sure you want to end Seminar, and open notification?".localized(), preferredStyle: .alert)
+                        if !vc.isLive {
+                            alert = LibAlertController(title: "", message: "Are you sure you want to leave Seminar, and open notification?".localized(), preferredStyle: .alert)
+                        }
+                        alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                            DispatchQueue.global().async {
+                                if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 0, ticket_id: id)) {
+                                    if result.isOk() {
+                                        return
+                                    }
+                                }
+                            }
+                            alert.dismiss(animated: true, completion: nil)
+                        }))
+                        alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
+                            DispatchQueue.global().async {
+                                API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
+                                vc.sendLeft()
+                            }
+                            vc.dismiss(animated: true, completion: {
+                                acceptCC()
+                            })
+                        }))
+                        nc.present(alert, animated: true, completion: nil)
                     } else {
                         acceptCC()
                     }
-                    func acceptCC() {
-                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptRequestCallCenter(channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), l_pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN), complaint_id: message.getBody(key: CoreMessage_TMessageKey.DATA))) {
-                            if (response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "00") {
-                                Nexilis.onGoingPushCC.removeAll()
-                                let complaintId = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "")
-                                if !complaintId.isEmpty {
-                                    alert.dismiss(animated: true, completion: nil)
+                } else {
+                    acceptCC()
+                }
+                func acceptCC() {
+                    if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 1, ticket_id: id)) {
+                        if result.isOk() {
+                            let requester = result.getBody(key: CoreMessage_TMessageKey.UPLINE_PIN)
+                            let officer = result.getBody(key: CoreMessage_TMessageKey.FRIEND_FPIN)
+                            let data = result.getBody(key: CoreMessage_TMessageKey.DATA)
+                            let complaintId = id
+                            SecureUserDefaults.shared.set("\(requester),\(officer),\(complaintId)", forKey: "onGoingCC")
+                            SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
+                            if !data.isEmpty {
+                                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                                    var members = ""
+                                    var user : [User] = []
                                     let idMe = User.getMyPin()!
-                                    SecureUserDefaults.shared.set("\(message.getBody(key: CoreMessage_TMessageKey.L_PIN)),\(idMe),\(complaintId)", forKey: "onGoingCC")
-                                    SecureUserDefaults.shared.set("\(message.getBody(key: CoreMessage_TMessageKey.L_PIN))", forKey: "membersCC")
-                                    SecureUserDefaults.shared.set("\(message.getBody(key: CoreMessage_TMessageKey.CHANNEL))", forKey: "channelCC")
-                                    if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "0" {
+                                    
+                                    for json in jsonArray {
+                                        if "\(json)" != idMe {
+                                            if let userData = User.getData(pin: "\(json)") {
+                                                user.append(userData)
+                                            } else {
+                                                Nexilis.addFriendSilent(fpin: "\(json)")
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                                                    if let userData = User.getData(pin: "\(json)") {
+                                                        user.append(userData)
+                                                    }
+                                                })
+                                            }
+                                            if members.isEmpty {
+                                                members = "\(json)"
+                                            } else {
+                                                members += ",\(json)"
+                                            }
+                                        }
+                                    }
+                                    SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
+                                    if channel == "0" {
                                         let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+                                        editorPersonalVC.hidesBottomBarWhenPushed = true
+                                        editorPersonalVC.unique_l_pin = officer
+                                        editorPersonalVC.fromNotification = true
                                         editorPersonalVC.isContactCenter = true
-                                        editorPersonalVC.isRequestContactCenter = false
-                                        editorPersonalVC.unique_l_pin = message.getBody(key: CoreMessage_TMessageKey.L_PIN)
+                                        editorPersonalVC.fPinContacCenter = members
                                         editorPersonalVC.complaintId = complaintId
-                                        editorPersonalVC.channelContactCenter = message.getBody(key: CoreMessage_TMessageKey.CHANNEL)
-                                        editorPersonalVC.fPinContacCenter = message.getBody(key: CoreMessage_TMessageKey.L_PIN)
+                                        editorPersonalVC.onGoingCC = true
+                                        editorPersonalVC.isRequestContactCenter = false
+                                        editorPersonalVC.users = user
                                         let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
                                         navigationController.modalPresentationStyle = .fullScreen
                                         navigationController.navigationBar.tintColor = .white
@@ -3874,11 +4260,11 @@ extension Nexilis: MessageDelegate {
                                     } else {
                                         SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                                            if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "1" {
-                                                let pin = message.getBody(key: CoreMessage_TMessageKey.L_PIN)
+                                            if channel == "1" {
+                                                let pin = officer
                                                 let controller = QmeraAudioViewController()
                                                 controller.user = User.getData(pin: pin)
-                                                controller.isOutgoing = true
+                                                controller.isOutgoing = false
                                                 controller.ticketId = complaintId
                                                 controller.modalPresentationStyle = .overCurrentContext
                                                 let navigationController = CustomNavigationController(rootViewController: controller)
@@ -3888,11 +4274,13 @@ extension Nexilis: MessageDelegate {
                                                 } else {
                                                     UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
                                                 }
-                                            } else if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "2" {
+                                            } else if channel == "2" {
                                                 let videoVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
-                                                videoVC.fPin = message.getBody(key: CoreMessage_TMessageKey.L_PIN)
-                                                videoVC.users.append(User.getData(pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN))!)
+                                                videoVC.fPin = officer
+                                                videoVC.users.append(User.getData(pin: officer)!)
                                                 videoVC.ticketId = complaintId
+                                                videoVC.isInisiator = false
+                                                videoVC.isAutoAccept = true
                                                 let navigationController = CustomNavigationController(rootViewController: videoVC)
                                                 navigationController.modalPresentationStyle = .fullScreen
                                                 if UIApplication.shared.visibleViewController?.navigationController != nil {
@@ -3905,141 +4293,135 @@ extension Nexilis: MessageDelegate {
                                     }
                                 }
                             }
-                        }
-                    }
-                })
-                alert.addAction(acceptAction)
-                alert.addAction(rejectAction)
-                
-                let containerView = UIView(frame: CGRect(x: 20, y: 60, width: alert.view.bounds.size.width * 0.9 - 40, height: 150))
-                alert.view.addSubview(containerView)
-                containerView.layer.cornerRadius = 10.0
-                containerView.clipsToBounds = true
-                containerView.backgroundColor = .secondaryColor.withAlphaComponent(0.5)
-                
-                let imageProfile = UIImageView()
-                containerView.addSubview(imageProfile)
-                imageProfile.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    imageProfile.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10),
-                    imageProfile.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
-                    imageProfile.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 10),
-                    imageProfile.widthAnchor.constraint(equalToConstant: 100)
-                ])
-                imageProfile.layer.cornerRadius = 10.0
-                imageProfile.clipsToBounds = true
-                imageProfile.backgroundColor = .lightGray.withAlphaComponent(0.3)
-                imageProfile.tintColor = .secondaryColor
-                imageProfile.image = UIImage(systemName: "person")
-                if message.getBody(key: CoreMessage_TMessageKey.THUMB_ID) != "" {
-                    imageProfile.setImage(name: message.getBody(key: CoreMessage_TMessageKey.THUMB_ID))
-                    imageProfile.contentMode = .scaleAspectFill
-                }
-                
-                let labelName = UILabel()
-                containerView.addSubview(labelName)
-                labelName.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    labelName.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 15),
-                    labelName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                labelName.font = UIFont.systemFont(ofSize: 12)
-                labelName.text = "Name".localized()
-                labelName.textColor = .mainColor
-                
-                let valueName = UILabel()
-                containerView.addSubview(valueName)
-                valueName.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    valueName.topAnchor.constraint(equalTo: labelName.bottomAnchor),
-                    valueName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                valueName.font = UIFont.systemFont(ofSize: 12)
-                valueName.text = message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME)
-                valueName.textColor = .mainColor
-                
-                let labelType = UILabel()
-                containerView.addSubview(labelType)
-                labelType.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    labelType.topAnchor.constraint(equalTo: valueName.bottomAnchor, constant: 5),
-                    labelType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                labelType.font = UIFont.systemFont(ofSize: 12)
-                labelType.text = "Request Type".localized()
-                labelType.textColor = .mainColor
-                
-                let valueType = UILabel()
-                containerView.addSubview(valueType)
-                valueType.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    valueType.topAnchor.constraint(equalTo: labelType.bottomAnchor),
-                    valueType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                valueType.font = UIFont.systemFont(ofSize: 12)
-                if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "0" {
-                    valueType.text = "Chat".localized()
-                } else if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "1" {
-                    valueType.text = "Audio Call".localized()
-                } else if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "2" {
-                    valueType.text = "Video Call".localized()
-                } else {
-                    valueType.text = "Email".localized()
-                }
-                valueType.textColor = .mainColor
-                
-                let labelIdentity = UILabel()
-                containerView.addSubview(labelIdentity)
-                labelIdentity.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    labelIdentity.topAnchor.constraint(equalTo: valueType.bottomAnchor, constant: 5),
-                    labelIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                labelIdentity.font = UIFont.systemFont(ofSize: 12)
-                labelIdentity.text = "Complaint ID".localized()
-                labelIdentity.textColor = .mainColor
-                
-                let valueIdentity = UILabel()
-                containerView.addSubview(valueIdentity)
-                valueIdentity.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    valueIdentity.topAnchor.constraint(equalTo: labelIdentity.bottomAnchor),
-                    valueIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5),
-                    valueIdentity.trailingAnchor.constraint(equalTo: containerView.trailingAnchor)
-                ])
-                valueIdentity.font = UIFont.systemFont(ofSize: 12)
-                valueIdentity.text = message.getBody(key: CoreMessage_TMessageKey.DATA)
-                valueIdentity.numberOfLines = 0
-                valueIdentity.textColor = .mainColor
-                
-                var isShowAlert: Int?
-                let canShow = UIApplication.shared.visibleViewController
-                if canShow != nil && !(canShow is UINavigationController) {
-                    if !(canShow is EditorPersonal) && !(canShow is QmeraAudioViewController) && !(canShow is QmeraVideoViewController) {
-                        isShowAlert = 0
-                    } else {
-                        isShowAlert = 3
-                    }
-                } else if canShow != nil {
-                    if canShow is UINavigationController {
-                        let canShowNC = canShow as! UINavigationController
-                        if !(canShowNC.visibleViewController is EditorPersonal) && !(canShowNC.visibleViewController is QmeraAudioViewController) && !(canShowNC.visibleViewController is QmeraVideoViewController) {
-                            isShowAlert = 0
                         } else {
-                            isShowAlert = 3
+                            let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
+                            imageView.tintColor = .white
+                            let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
+                            banner.show()
                         }
-                    } else {
-                        isShowAlert = 0
                     }
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(isShowAlert!), execute: {
-                    if UIApplication.shared.visibleViewController?.navigationController != nil {
-                        UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                    } else {
-                        UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                    }
-                })
+            })
+            alert.addAction(rejectAction)
+            alert.addAction(acceptAction)
+            
+            let containerView = UIView(frame: CGRect(x: 50, y: 80, width: alert.view.bounds.size.width * 0.9 - 100, height: 150))
+            alert.view.addSubview(containerView)
+            containerView.layer.cornerRadius = 10.0
+            containerView.clipsToBounds = true
+            containerView.backgroundColor = .secondaryColor.withAlphaComponent(0.5)
+            
+            let userData = User.getData(pin: pin)
+            
+            let imageProfile = UIImageView()
+            containerView.addSubview(imageProfile)
+            imageProfile.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                imageProfile.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10),
+                imageProfile.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
+                imageProfile.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 10),
+                imageProfile.widthAnchor.constraint(equalToConstant: 100)
+            ])
+            imageProfile.layer.cornerRadius = 10.0
+            imageProfile.clipsToBounds = true
+            imageProfile.backgroundColor = .lightGray.withAlphaComponent(0.3)
+            imageProfile.tintColor = .secondaryColor
+            imageProfile.image = UIImage(systemName: "person")
+            if userData!.thumb != "" {
+                imageProfile.setImage(name: userData!.thumb)
+                imageProfile.contentMode = .scaleAspectFill
             }
+            
+            let labelName = UILabel()
+            containerView.addSubview(labelName)
+            labelName.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                labelName.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 15),
+                labelName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            labelName.font = UIFont.systemFont(ofSize: 12)
+            labelName.text = "Name".localized()
+            labelName.textColor = .mainColor
+            
+            let valueName = UILabel()
+            containerView.addSubview(valueName)
+            valueName.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                valueName.topAnchor.constraint(equalTo: labelName.bottomAnchor),
+                valueName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            valueName.font = UIFont.systemFont(ofSize: 12)
+            valueName.text = userData!.fullName
+            valueName.textColor = .mainColor
+            
+            let labelType = UILabel()
+            containerView.addSubview(labelType)
+            labelType.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                labelType.topAnchor.constraint(equalTo: valueName.bottomAnchor, constant: 5),
+                labelType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            labelType.font = UIFont.systemFont(ofSize: 12)
+            labelType.text = "Request Type".localized()
+            labelType.textColor = .mainColor
+            
+            let valueType = UILabel()
+            containerView.addSubview(valueType)
+            valueType.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                valueType.topAnchor.constraint(equalTo: labelType.bottomAnchor),
+                valueType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            valueType.font = UIFont.systemFont(ofSize: 12)
+            if channel == "0" {
+                valueType.text = "Chat".localized()
+            } else if channel == "1" {
+                valueType.text = "Audio Call".localized()
+            } else if channel == "2" {
+                valueType.text = "Video Call".localized()
+            } else {
+                valueType.text = "Email".localized()
+            }
+            valueType.textColor = .mainColor
+            
+            let labelIdentity = UILabel()
+            containerView.addSubview(labelIdentity)
+            labelIdentity.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                labelIdentity.topAnchor.constraint(equalTo: valueType.bottomAnchor, constant: 5),
+                labelIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
+            ])
+            labelIdentity.font = UIFont.systemFont(ofSize: 12)
+            labelIdentity.text = "Complaint ID".localized()
+            labelIdentity.textColor = .mainColor
+            
+            let valueIdentity = UILabel()
+            containerView.addSubview(valueIdentity)
+            valueIdentity.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                valueIdentity.topAnchor.constraint(equalTo: labelIdentity.bottomAnchor),
+                valueIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5),
+                valueIdentity.trailingAnchor.constraint(equalTo: containerView.trailingAnchor)
+            ])
+            valueIdentity.font = UIFont.systemFont(ofSize: 12)
+            valueIdentity.text = id
+            valueIdentity.numberOfLines = 0
+            valueIdentity.textColor = .mainColor
+            
+            if UIApplication.shared.visibleViewController?.navigationController != nil {
+                UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
+            } else {
+                UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
+            }
+        }
+    }
+    
+    public func onReceive(message: TMessage) {
+        var dataMessage: [AnyHashable : Any] = [:]
+        dataMessage["message"] = message
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil, userInfo: dataMessage)
+        if message.getCode() == CoreMessage_TMessageCode.PUSH_CALL_CENTER {
+            Nexilis.viewFormCS(pin: message.getBody(key: CoreMessage_TMessageKey.L_PIN), channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), displayName: message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME), thumb: message.getBody(key: CoreMessage_TMessageKey.THUMB_ID), id: message.getBody(key: CoreMessage_TMessageKey.DATA))
         } else if message.getCode() == CoreMessage_TMessageCode.ACCEPT_CALL_CENTER {
             let fPinContacCenter = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
             let requester = message.getBody(key: CoreMessage_TMessageKey.UPLINE_PIN)
@@ -4054,381 +4436,7 @@ extension Nexilis: MessageDelegate {
                 return
             }
             listCCIdInv.append(message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))
-            DispatchQueue.main.async {
-                let alert = LibAlertController(title: "", message: "\n\n\n\n\n\n\n\n\n\n".localized(), preferredStyle: .alert)
-                let newWidth = UIScreen.main.bounds.width * 0.90 - 270
-                // update width constraint value for main view
-                if let viewWidthConstraint = alert.view.constraints.filter({ return $0.firstAttribute == .width }).first{
-                    viewWidthConstraint.constant = newWidth
-                }
-                // update width constraint value for container view
-                if let containerViewWidthConstraint = alert.view.subviews.first?.constraints.filter({ return $0.firstAttribute == .width }).first {
-                    containerViewWidthConstraint.constant = newWidth
-                }
-                let titleFont = [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 18), NSAttributedString.Key.foregroundColor: UIColor.black]
-                let titleAttrString = NSMutableAttributedString(string: "You're invited to\nCall Center".localized(), attributes: titleFont)
-                alert.setValue(titleAttrString, forKey: "attributedTitle")
-                alert.view.subviews.first?.subviews.first?.subviews.first?.backgroundColor = .lightGray
-                alert.view.tintColor = .black
-                let rejectAction = UIAlertAction(title: "Reject".localized(), style: .destructive, handler: {(_) in
-                    listCCIdInv.removeAll(where: {$0 == message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID)})
-                    DispatchQueue.global().async {
-                        if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: message.getPIN(), type: 0, ticket_id: message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))) {
-                            if result.isOk() {
-                                return
-                            }
-                        }
-                    }
-                    alert.dismiss(animated: true, completion: nil)
-                })
-                let acceptAction = UIAlertAction(title: "Accept".localized(), style: .default, handler: {(_) in
-                    listCCIdInv.removeAll(where: {$0 == message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID)})
-                    let goAudioCall = Nexilis.checkMicPermission()
-                    if !goAudioCall && message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "1" {
-                        let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow microphone permission in your settings".localized(), preferredStyle: .alert)
-                        alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                            if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                                UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                            }
-                        }))
-                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                            UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                        } else {
-                            UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                        }
-                        DispatchQueue.global().async {
-                            if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: message.getPIN(), type: 0, ticket_id: message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))) {
-                                if result.isOk() {
-                                    return
-                                }
-                            }
-                        }
-                        return
-                    }
-                    if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "2" {
-                        var permissionCheck = -1
-                        if AVCaptureDevice.authorizationStatus(for: .video) ==  .authorized {
-                            permissionCheck = 1
-                        } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
-                            permissionCheck = 0
-                        } else {
-                            Nexilis.dispatch = DispatchGroup()
-                            Nexilis.dispatch?.enter()
-                            AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
-                                if granted == true {
-                                    permissionCheck = 1
-                                } else {
-                                    permissionCheck = 0
-                                }
-                                if let dispatch = Nexilis.dispatch {
-                                    dispatch.leave()
-                                }
-                            })
-                            Nexilis.dispatch?.wait()
-                            Nexilis.dispatch = nil
-                        }
-                        
-                        if permissionCheck == 0 {
-                            let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow camera permission in your settings".localized(), preferredStyle: .alert)
-                            alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                                }
-                            }))
-                            if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                            } else {
-                                UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                            }
-                            DispatchQueue.global().async {
-                                if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: message.getPIN(), type: 0, ticket_id: message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))) {
-                                    if result.isOk() {
-                                        return
-                                    }
-                                }
-                            }
-                            return
-                        }
-                    }
-                    if UIApplication.shared.visibleViewController is UINavigationController {
-                        let nc = UIApplication.shared.visibleViewController as! UINavigationController
-                        if nc.visibleViewController is QmeraStreamingViewController {
-                            let vc = nc.visibleViewController as! QmeraStreamingViewController
-                            var alert = LibAlertController(title: "", message: "Are you sure you want to end Live Streaming, and open notification?".localized(), preferredStyle: .alert)
-                            if !vc.isLive {
-                                alert = LibAlertController(title: "", message: "Are you sure you want to leave Live Streaming, and open notification?".localized(), preferredStyle: .alert)
-                            }
-                            alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                DispatchQueue.global().async {
-                                    if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: message.getPIN(), type: 0, ticket_id: message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))) {
-                                        if result.isOk() {
-                                            return
-                                        }
-                                    }
-                                }
-                                alert.dismiss(animated: true, completion: nil)
-                            }))
-                            alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                DispatchQueue.global().async {
-                                    API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
-                                    vc.sendLeft()
-                                }
-                                vc.dismiss(animated: true, completion: {
-                                    acceptCC()
-                                })
-                            }))
-                            nc.present(alert, animated: true, completion: nil)
-                        } else if nc.visibleViewController is SeminarViewController {
-                            let vc = nc.visibleViewController as! SeminarViewController
-                            var alert = LibAlertController(title: "", message: "Are you sure you want to end Seminar, and open notification?".localized(), preferredStyle: .alert)
-                            if !vc.isLive {
-                                alert = LibAlertController(title: "", message: "Are you sure you want to leave Seminar, and open notification?".localized(), preferredStyle: .alert)
-                            }
-                            alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                DispatchQueue.global().async {
-                                    if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: message.getPIN(), type: 0, ticket_id: message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))) {
-                                        if result.isOk() {
-                                            return
-                                        }
-                                    }
-                                }
-                                alert.dismiss(animated: true, completion: nil)
-                            }))
-                            alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                                DispatchQueue.global().async {
-                                    API.terminateBC(sBroadcasterID: vc.isLive ? nil : vc.data)
-                                    vc.sendLeft()
-                                }
-                                vc.dismiss(animated: true, completion: {
-                                    acceptCC()
-                                })
-                            }))
-                            nc.present(alert, animated: true, completion: nil)
-                        } else {
-                            acceptCC()
-                        }
-                    } else {
-                        acceptCC()
-                    }
-                    func acceptCC() {
-                        if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: message.getPIN(), type: 1, ticket_id: message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))) {
-                            if result.isOk() {
-                                let requester = result.getBody(key: CoreMessage_TMessageKey.UPLINE_PIN)
-                                let officer = result.getBody(key: CoreMessage_TMessageKey.FRIEND_FPIN)
-                                let data = result.getBody(key: CoreMessage_TMessageKey.DATA)
-                                let complaintId = message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID)
-                                SecureUserDefaults.shared.set("\(requester),\(officer),\(complaintId)", forKey: "onGoingCC")
-                                SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
-                                if !data.isEmpty {
-                                    if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-                                        var members = ""
-                                        var user : [User] = []
-                                        let idMe = User.getMyPin()!
-                                        
-                                        for json in jsonArray {
-                                            if "\(json)" != idMe {
-                                                if let userData = User.getData(pin: "\(json)") {
-                                                    user.append(userData)
-                                                } else {
-                                                    Nexilis.addFriendSilent(fpin: "\(json)")
-                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                                                        if let userData = User.getData(pin: "\(json)") {
-                                                            user.append(userData)
-                                                        }
-                                                    })
-                                                }
-                                                if members.isEmpty {
-                                                    members = "\(json)"
-                                                } else {
-                                                    members += ",\(json)"
-                                                }
-                                            }
-                                        }
-                                        SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
-                                        if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "0" {
-                                            let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
-                                            editorPersonalVC.hidesBottomBarWhenPushed = true
-                                            editorPersonalVC.unique_l_pin = officer
-                                            editorPersonalVC.fromNotification = true
-                                            editorPersonalVC.isContactCenter = true
-                                            editorPersonalVC.fPinContacCenter = members
-                                            editorPersonalVC.complaintId = complaintId
-                                            editorPersonalVC.onGoingCC = true
-                                            editorPersonalVC.isRequestContactCenter = false
-                                            editorPersonalVC.users = user
-                                            let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
-                                            navigationController.modalPresentationStyle = .fullScreen
-                                            navigationController.navigationBar.tintColor = .white
-                                            navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-                                            navigationController.navigationBar.isTranslucent = false
-                                            navigationController.navigationBar.overrideUserInterfaceStyle = .dark
-                                            navigationController.navigationBar.barStyle = .black
-                                            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                                            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-                                            let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-                                            navigationController.navigationBar.titleTextAttributes = textAttributes
-                                            if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                                UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                                            } else {
-                                                UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                                            }
-                                        } else {
-                                            SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                                                if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "1" {
-                                                    let pin = officer
-                                                    let controller = QmeraAudioViewController()
-                                                    controller.user = User.getData(pin: pin)
-                                                    controller.isOutgoing = false
-                                                    controller.ticketId = complaintId
-                                                    controller.modalPresentationStyle = .overCurrentContext
-                                                    let navigationController = CustomNavigationController(rootViewController: controller)
-                                                    navigationController.modalPresentationStyle = .fullScreen
-                                                    if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                                        UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                                                    } else {
-                                                        UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                                                    }
-                                                } else if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "2" {
-                                                    let videoVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
-                                                    videoVC.fPin = officer
-                                                    videoVC.users.append(User.getData(pin: officer)!)
-                                                    videoVC.ticketId = complaintId
-                                                    videoVC.isInisiator = false
-                                                    videoVC.isAutoAccept = true
-                                                    let navigationController = CustomNavigationController(rootViewController: videoVC)
-                                                    navigationController.modalPresentationStyle = .fullScreen
-                                                    if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                                        UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                                                    } else {
-                                                        UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                                                    }
-                                                }
-                                            })
-                                        }
-                                    }
-                                }
-                            } else {
-                                let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
-                                imageView.tintColor = .white
-                                let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                                banner.show()
-                            }
-                        }
-                    }
-                })
-                alert.addAction(rejectAction)
-                alert.addAction(acceptAction)
-                
-                let containerView = UIView(frame: CGRect(x: 50, y: 80, width: alert.view.bounds.size.width * 0.9 - 100, height: 150))
-                alert.view.addSubview(containerView)
-                containerView.layer.cornerRadius = 10.0
-                containerView.clipsToBounds = true
-                containerView.backgroundColor = .secondaryColor.withAlphaComponent(0.5)
-                
-                let userData = User.getData(pin: message.getPIN())
-                
-                let imageProfile = UIImageView()
-                containerView.addSubview(imageProfile)
-                imageProfile.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    imageProfile.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10),
-                    imageProfile.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
-                    imageProfile.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 10),
-                    imageProfile.widthAnchor.constraint(equalToConstant: 100)
-                ])
-                imageProfile.layer.cornerRadius = 10.0
-                imageProfile.clipsToBounds = true
-                imageProfile.backgroundColor = .lightGray.withAlphaComponent(0.3)
-                imageProfile.tintColor = .secondaryColor
-                imageProfile.image = UIImage(systemName: "person")
-                if userData!.thumb != "" {
-                    imageProfile.setImage(name: userData!.thumb)
-                    imageProfile.contentMode = .scaleAspectFill
-                }
-                
-                let labelName = UILabel()
-                containerView.addSubview(labelName)
-                labelName.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    labelName.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 15),
-                    labelName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                labelName.font = UIFont.systemFont(ofSize: 12)
-                labelName.text = "Name".localized()
-                labelName.textColor = .mainColor
-                
-                let valueName = UILabel()
-                containerView.addSubview(valueName)
-                valueName.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    valueName.topAnchor.constraint(equalTo: labelName.bottomAnchor),
-                    valueName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                valueName.font = UIFont.systemFont(ofSize: 12)
-                valueName.text = userData!.fullName
-                valueName.textColor = .mainColor
-                
-                let labelType = UILabel()
-                containerView.addSubview(labelType)
-                labelType.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    labelType.topAnchor.constraint(equalTo: valueName.bottomAnchor, constant: 5),
-                    labelType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                labelType.font = UIFont.systemFont(ofSize: 12)
-                labelType.text = "Request Type".localized()
-                labelType.textColor = .mainColor
-                
-                let valueType = UILabel()
-                containerView.addSubview(valueType)
-                valueType.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    valueType.topAnchor.constraint(equalTo: labelType.bottomAnchor),
-                    valueType.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                valueType.font = UIFont.systemFont(ofSize: 12)
-                if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "0" {
-                    valueType.text = "Chat".localized()
-                } else if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "1" {
-                    valueType.text = "Audio Call".localized()
-                } else if message.getBody(key: CoreMessage_TMessageKey.CHANNEL) == "2" {
-                    valueType.text = "Video Call".localized()
-                } else {
-                    valueType.text = "Email".localized()
-                }
-                valueType.textColor = .mainColor
-                
-                let labelIdentity = UILabel()
-                containerView.addSubview(labelIdentity)
-                labelIdentity.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    labelIdentity.topAnchor.constraint(equalTo: valueType.bottomAnchor, constant: 5),
-                    labelIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
-                ])
-                labelIdentity.font = UIFont.systemFont(ofSize: 12)
-                labelIdentity.text = "Complaint ID".localized()
-                labelIdentity.textColor = .mainColor
-                
-                let valueIdentity = UILabel()
-                containerView.addSubview(valueIdentity)
-                valueIdentity.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    valueIdentity.topAnchor.constraint(equalTo: labelIdentity.bottomAnchor),
-                    valueIdentity.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5),
-                    valueIdentity.trailingAnchor.constraint(equalTo: containerView.trailingAnchor)
-                ])
-                valueIdentity.font = UIFont.systemFont(ofSize: 12)
-                valueIdentity.text = message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID)
-                valueIdentity.numberOfLines = 0
-                valueIdentity.textColor = .mainColor
-                
-                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                    UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                } else {
-                    UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                }
-            }
+            Nexilis.viewFormCSInvited(pin: message.getPIN(), channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), id: message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))
         } else if message.getCode() != CoreMessage_TMessageCode.PUSH_CALL_CENTER && message.getCode() != CoreMessage_TMessageCode.ACCEPT_CALL_CENTER && message.getCode() != CoreMessage_TMessageCode.END_CALL_CENTER && message.getCode() != CoreMessage_TMessageCode.TIMEOUT_CONTACT_CENTER && message.getCode() != CoreMessage_TMessageCode.ACCEPT_CONTACT_CENTER && message.getCode() != CoreMessage_TMessageCode.PUSH_MEMBER_ROOM_CONTACT_CENTER && message.getCode() != CoreMessage_TMessageCode.INVITE_END_CONTACT_CENTER && message.getCode() != CoreMessage_TMessageCode.INVITE_EXIT_CONTACT_CENTER || !message.getBody(key: CoreMessage_TMessageKey.MERCHANT_NAME).isEmpty {
             let m = message.mBodies
             if !message.getBody(key: CoreMessage_TMessageKey.MERCHANT_NAME).isEmpty {

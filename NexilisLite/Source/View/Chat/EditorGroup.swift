@@ -67,6 +67,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     var copySession = false
     var forwardSession = false
     var deleteSession = false
+    var summarizeSession = false
     var isSearching = false
     let containerMultpileSelectSession = UIView()
     let viewSticker = UIView()
@@ -986,7 +987,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             self.definesPresentationContext = true
         }
         
-        if copySession || forwardSession || deleteSession || isSearching {
+        if copySession || forwardSession || deleteSession || summarizeSession || isSearching {
             navigationItem.hidesBackButton = true
             navigationController?.interactivePopGestureRecognizer?.isEnabled = false
         } else {
@@ -1761,7 +1762,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     @objc func seeProfileTapped() {
-        if isHistoryCC || removed || copySession || forwardSession || deleteSession || (dataGroup["official"] as? String == "1" && (dataGroup["parent"] as? String)!.isEmpty) {
+        if isHistoryCC || removed || copySession || forwardSession || deleteSession || summarizeSession || (dataGroup["official"] as? String == "1" && (dataGroup["parent"] as? String)!.isEmpty) {
             return
         }
         dismissKeyboard()
@@ -3984,7 +3985,37 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 })
             }
         })
-        let more = UIMenu(title: "More...".localized(), children: [translate, gcs])
+        let summarize = UIAction(title: "Summarize Chat".localized(), image: UIImage(systemName: "doc.text.magnifyingglass"), handler: {(_) in
+            if self.removed {
+                return
+            }
+            if self.isSearching {
+                self.cancelAction()
+            }
+            if self.reffId != nil {
+                self.deleteReplyView()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                self.summarizeSession = true
+                let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
+                cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
+                if self.dataPerson["f_pin"] != "-999" && !self.isContactCenter {
+                    self.navigationItem.rightBarButtonItems = nil
+                }
+                self.navigationItem.rightBarButtonItem = cancelButton
+                if self.isContactCenter || self.fromNotification {
+                    self.navigationItem.leftBarButtonItem = nil
+                }
+                self.changeAppBar()
+                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String})
+                if idx != nil{
+                    self.dataMessages[idx!]["isSelected"] = true
+                }
+                self.addMultipleSelectSession()
+                self.tableChatView.reloadData()
+            }
+        })
+        let more = UIMenu(title: "More...".localized(), children: [translate, gcs, summarize])
         let info = UIAction(title: "Info".localized(), image: UIImage(systemName: "info.circle"), handler: {(_) in
             if self.removed {
                 return
@@ -4553,6 +4584,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.forwardSession = false
             } else if self.deleteSession {
                 self.deleteSession = false
+            } else if self.summarizeSession {
+                self.summarizeSession = false
             } else if self.isSearching {
                 self.countMatchesSearch = 0
                 self.isSearching = false
@@ -4671,6 +4704,13 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     button.tintColor = .gray
                 } else {
                     button.tintColor = .red
+                }
+            } else if summarizeSession {
+                button.image = UIImage(systemName: "doc.text.magnifyingglass")
+                if countSelected == 0 {
+                    button.tintColor = .gray
+                } else {
+                    button.tintColor = .mainColor
                 }
             }
             let buttonGesture = UITapGestureRecognizer(target: self, action: #selector(sessionAction))
@@ -4832,6 +4872,69 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
             alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
             self.present(alertController, animated: true)
+        } else if summarizeSession {
+            let dataMessages = self.dataMessages.filter({ $0["isSelected"] as! Bool == true })
+            var countSelected = dataMessages.count
+            if countSelected == 0 {
+                return
+            }
+            for i in 0..<countSelected {
+                if let isGroupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
+                    countSelected += (isGroupingImages.count - 1)
+                }
+            }
+            var contentText = ""
+            for message in dataMessages {
+                if !(message[TypeDataMessage.message_text] as? String ?? "").isEmpty {
+                    let dataUser = User.getData(pin: message[TypeDataMessage.f_pin] as? String ?? "", lPin: self.dataPerson["f_pin"] as? String ?? "")
+                    contentText.append(dataUser?.fullName ?? "")
+                    contentText.append(": ")
+                    contentText.append(message[TypeDataMessage.message_text] as? String ?? "")
+                    contentText.append("\n\n")
+                } else {
+                    self.view.makeToast("Cannot get messages to summarize".localized(), duration: 3)
+                    return
+                }
+            }
+            self.view.makeToast("Summarizing chat...".localized(), duration: 3)
+            let payload: [String : Any] = [
+                "role": "user",
+                "content": contentText
+            ]
+            let parameter: [String : Any] = [
+                "use_video": "0",
+                "summarize": "1",
+                "payload": [payload]
+            ]
+            DispatchQueue.global().async {
+                Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getGPTBotUrl())!, parameter: parameter, completion: { data, response, error in
+                    let response = response as? HTTPURLResponse
+                    if response?.statusCode != 200 || error != nil {
+                        DispatchQueue.main.async {
+                            self.view.makeToast("There is an error occurred while getting chat suggestion for you. Please try again or check your network connection.".localized(), duration: 3)
+                        }
+                        return
+                    }
+                    if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                        if let json = try? JSONSerialization.jsonObject(with: responseString.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [String: Any] {
+                            if let content = json["content"] as? String {
+                                DispatchQueue.main.async {
+                                    let alertController = LibAlertController(title: nil, message: content, preferredStyle: .alert)
+                                    alertController.addAction(UIAlertAction(title: "Copy".localized(), style: .default, handler: { _ in
+                                        DispatchQueue.main.async {
+                                            UIPasteboard.general.string = content
+                                            self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
+                                        }
+                                    }))
+                                    alertController.addAction(UIAlertAction(title: "Close".localized(), style: .cancel, handler: nil))
+                                    self.present(alertController, animated: true)
+                                }
+                            }
+                        }
+                    }
+                })
+            }
+            
         }
     }
     
@@ -5291,14 +5394,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
-        if copySession || forwardSession || deleteSession {
+        if copySession || forwardSession || deleteSession || summarizeSession {
             guard indexPath.row < dataMessages.count else {
                 return
             }
 //            if copySession && dataMessages[indexPath.row]["f_pin"]  as? String ?? "" != "-999" {
 //                return
 //            }
-            if (dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" != "0" || dataMessages[indexPath.row]["lock"] as? String == "1") && !forwardSession && !deleteSession {
+            if (dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" != "0" || dataMessages[indexPath.row]["lock"] as? String == "1") && !forwardSession && !deleteSession && !summarizeSession {
                 return
             }
             let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[indexPath.row]["message_id"]  as? String ?? ""})
@@ -5338,6 +5441,18 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         let message = dataMessages[indexPath.row]
         if let attachmentFlag = message["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
             if attachmentFlag == "27" || attachmentFlag == "26" {
+                if attachmentFlag == "27" {
+                    if !Nexilis.checkingAccess(key: "live_streaming") {
+                        if Nexilis.checkingAccessAlert(key: "live_streaming") != "|" && !Nexilis.checkingAccessAlert(key: "live_streaming").isEmpty {
+                            let title = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[0]
+                            let message = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[1]
+                            APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+                        } else {
+                            UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                        }
+                        return
+                    }
+                }
                 let streamingController = (attachmentFlag == "27") ? QmeraCreateStreamingViewController() : CreateSeminarViewController()
                 switch(attachmentFlag){
                 case "27":
@@ -5504,7 +5619,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         
         let statusMessage = UIImageView()
         
-        if (dataMessages[indexPath.row]["attachment_flag"] as? String == "0" && dataMessages[indexPath.row]["lock"] as? String != "1") || forwardSession || deleteSession {
+        if (dataMessages[indexPath.row]["attachment_flag"] as? String == "0" && dataMessages[indexPath.row]["lock"] as? String != "1") || forwardSession || deleteSession || summarizeSession {
             var showSelectedImage = true
             if (!imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty) && forwardSession {
                 if !Nexilis.checkingAccess(key: "secure_folder_forward") && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
@@ -5531,7 +5646,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     }
                 }
             }
-            if dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" && !deleteSession {
+            if dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" && !deleteSession && !summarizeSession {
                 showSelectedImage = false
             }
             if showSelectedImage {
@@ -5541,7 +5656,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 selectedImage.frame.size = CGSize(width: 20, height: 20)
                 var leading = selectedImage.leadingAnchor.constraint(equalTo: cellMessage.contentView.leadingAnchor, constant: -20)
                 selectedImage.isHidden = true
-                if copySession || forwardSession || deleteSession {
+                if copySession || forwardSession || deleteSession || summarizeSession {
                     leading = selectedImage.leadingAnchor.constraint(equalTo: cellMessage.contentView.leadingAnchor, constant: 15)
                     selectedImage.isHidden = false
                 }
@@ -5633,7 +5748,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
             
         } else {
-            if copySession || forwardSession || deleteSession {
+            if copySession || forwardSession || deleteSession || summarizeSession {
                 profileMessage.leadingAnchor.constraint(equalTo: cellMessage.contentView.leadingAnchor, constant: 50).isActive = true
             } else {
                 profileMessage.leadingAnchor.constraint(equalTo: cellMessage.contentView.leadingAnchor, constant: 15).isActive = true
@@ -6046,7 +6161,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
-        if !copySession && !forwardSession && !deleteSession && !isHistoryCC && !removed {
+        if !copySession && !forwardSession && !deleteSession && !summarizeSession && !isHistoryCC && !removed {
             let interaction = UIContextMenuInteraction(delegate: self)
             containerMessage.addInteraction(interaction)
             containerMessage.isUserInteractionEnabled = true
@@ -6340,7 +6455,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         iconStar.tintColor = .white
                     }
                     
-                    if !copySession && !forwardSession && !deleteSession {
+                    if !copySession && !forwardSession && !deleteSession && !summarizeSession {
                         let objectTap = ObjectGesture(target: self, action: #selector(imageGroupingTapped(_:)))
                         listImageThumb[i].isUserInteractionEnabled = true
                         listImageThumb[i].addGestureRecognizer(objectTap)
@@ -6546,7 +6661,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     imageupload.heightAnchor.constraint(equalToConstant: 20).isActive = true
                 }
                 
-                if !copySession && !forwardSession && !deleteSession {
+                if !copySession && !forwardSession && !deleteSession && !summarizeSession {
                     let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
                     let sfs = (dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String) ?? ""
                     imageThumb.isUserInteractionEnabled = true
@@ -6692,7 +6807,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 nameFile.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5).isActive = true
             }
             
-            if !copySession && !forwardSession && !deleteSession {
+            if !copySession && !forwardSession && !deleteSession && !summarizeSession {
                 let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
                 let sfs = (dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String) ?? ""
                 containerViewFile.addGestureRecognizer(objectTap)
@@ -6802,7 +6917,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             showForwardedSign()
                         }
                         
-                        if !copySession && !forwardSession && !deleteSession {
+                        if !copySession && !forwardSession && !deleteSession && !summarizeSession {
                             let objectTap = ObjectGesture(target: self, action: #selector(tapMessageText(_:)))
                             objectTap.message_id = text
                             containerLinkMessage.addGestureRecognizer(objectTap)
@@ -7074,7 +7189,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     contentReply.trailingAnchor.constraint(equalTo: imageSticker.leadingAnchor, constant: -20).isActive = true
                 }
                 
-                if !copySession && !forwardSession && !deleteSession {
+                if !copySession && !forwardSession && !deleteSession && !summarizeSession {
                     let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
                     containerReply.addGestureRecognizer(objectTap)
                     objectTap.indexPath = indexPath
@@ -7860,7 +7975,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     }
     
     //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-    //        if copySession || forwardSession || deleteSession {
+    //        if copySession || forwardSession || deleteSession || summarizeSession {
     //            return nil
     //        }
     //        let idMe = User.getMyPin() as String?
@@ -7873,7 +7988,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     //    }
     //
     //    public func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-    //        if copySession || forwardSession || deleteSession {
+    //        if copySession || forwardSession || deleteSession || summarizeSession {
     //            return nil
     //        }
     //        let action = UIContextualAction(style: .normal,

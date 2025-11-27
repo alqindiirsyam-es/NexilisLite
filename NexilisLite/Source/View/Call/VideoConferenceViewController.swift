@@ -14,16 +14,31 @@ import UIKit
 import nuSDKService
 import AVFoundation
 import NotificationBannerSwift
+import MediaPlayer
 
 class VideoConferenceViewController: UIViewController {
+    static private var nMaxSPOn: Float! = 20.0
+    static private var nMaxSPOff: Float! = 20.0
+    static private var volumeView: MPVolumeView!
+    static private var lastVolume: Float! = AVAudioSession.sharedInstance().outputVolume
+    static private var bSpeakerPhone: Bool! = false
+    private var tempSpeaker = false
+    private var timerSpeaker: Timer?
+    static private var isLoop = false
+    
+    
     var dataPerson: [[String: String?]] = []
     var fPin = ""
     var wbRoomId = ""
     var isInisiator = true
-    var isSpeaker = true
+    var isSpeaker = false
+    var isMuted = false
     var isPresent = false
-    var callFCM = false
+    var isNavigationHidden = false
+    var rotateMyView = false
     var listRemoteViewFix: [UIImageView] = [
+        UIImageView(),
+        UIImageView(),
         UIImageView(),
         UIImageView(),
         UIImageView(),
@@ -41,12 +56,30 @@ class VideoConferenceViewController: UIViewController {
         UIView(),
         UIView(),
         UIView(),
+        UIView(),
+        UIView(),
         UIView()
     ]
-    let myImage = UIImageView()
-    let name = UILabel()
-    let profileImage = UIImageView()
-    let labelIncomingOutgoing = UILabel()
+    var imageMuted: [UIImageView] = [
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView()
+    ]
+    var mutedZoom: UIImageView = {
+        let image = UIImageView(frame: CGRect(x: 0, y: 0, width: 30, height: 40))
+        image.contentMode = .scaleAspectFit
+        image.image = UIImage(systemName: "mic.slash")
+        image.tintColor = .red
+        image.isHidden = true
+        return image
+    }()
     let buttonDecline = UIButton()
     let buttonAccept = UIButton()
     let zoomView = UIImageView()
@@ -57,13 +90,14 @@ class VideoConferenceViewController: UIViewController {
     var constraintLeftStackViewToolbar2 = NSLayoutConstraint()
     let stackViewToolbar = UIStackView()
     let stackViewToolbar2 = UIStackView()
+    let stackViewToolbar3 = UIStackView()
     var onScreenConstraintWB = [NSLayoutConstraint]()
     let buttonWB = UIButton()
     let buttonChat = UIButton()
     var wbVC : WhiteboardViewController?
-    let buttonAddParticipant = UIButton()
     let buttonSpeaker = UIButton()
     let buttonRotate = UIButton()
+    let buttonMuted = UIButton()
     let buttonZoom = UIButton()
     var showStackViewToolbar = true
     let scrollRemoteView = UIScrollView()
@@ -78,7 +112,6 @@ class VideoConferenceViewController: UIViewController {
     var isCalled = false
     var isZoomIn = true
     private var frontCamera = true
-    var timerCR : Timer?
     var users: [User] = []
     let poweredByView: UIStackView = {
         let stackView = UIStackView()
@@ -89,6 +122,62 @@ class VideoConferenceViewController: UIViewController {
     private var vcTimer = Timer()
     private var containerTimerVC = UIView()
     private var labelTimerVC = UILabel()
+    
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Waiting for others\nto join"
+        label.font = .systemFont(ofSize: 28, weight: .semibold)
+        label.numberOfLines = 2
+        label.textAlignment = .center
+        return label
+    }()
+
+    private let iconView: UIImageView = {
+        let imageView = UIImageView(image: UIImage(systemName: "video.fill"))
+        imageView.tintColor = .darkGray
+        imageView.contentMode = .scaleAspectFit
+        return imageView
+    }()
+
+    private let roomLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Video Conference Room"
+        label.font = .systemFont(ofSize: 22, weight: .semibold)
+        label.textAlignment = .center
+        return label
+    }()
+
+    private let subtitleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "The meeting will start once others join"
+        label.font = .systemFont(ofSize: 16)
+        label.textColor = .gray
+        label.textAlignment = .center
+        return label
+    }()
+    
+    private lazy var contentStack: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [
+            titleLabel,
+            iconView,
+            roomLabel,
+            subtitleLabel
+        ])
+        stack.axis = .vertical
+        stack.spacing = 16
+        stack.alignment = .center
+        return stack
+    }()
+
+    private let cancelButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Cancel", for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 18, weight: .medium)
+        button.backgroundColor = UIColor.systemGray5
+        button.layer.cornerRadius = 12
+        button.addTarget(self, action: #selector(cancelPressed), for: .touchUpInside)
+        return button
+    }()
     
     let poweredByLabel: UILabel = {
         let label = UILabel()
@@ -109,29 +198,106 @@ class VideoConferenceViewController: UIViewController {
         return button
     }()
     
+    private let animatedLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Joining room"
+        label.font = .systemFont(ofSize: 28, weight: .semibold)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        return label
+    }()
+
+    private let activityIndicator: UIActivityIndicatorView = {
+        let indicator = UIActivityIndicatorView(style: .large)
+        indicator.color = .white
+        indicator.startAnimating()
+        return indicator
+    }()
+
+    private lazy var joiningStack: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [
+            animatedLabel,
+            activityIndicator
+        ])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 20
+        return stack
+    }()
+    
+    private var joiningTimer: Timer?
+    private var dotCount = 0
+    private var blurView: UIVisualEffectView!
+    
+    static func turnSpeakerOn() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.overrideOutputAudioPort(bSpeakerPhone ? .speaker : .none)
+        } catch {
+            
+        }
+//        var bAudioEngineIsAvtive: Bool! = false
+//        API.turnSpeakerPhone(bSPon: bSpeakerPhone)
+//        repeat {
+//            Thread.sleep(forTimeInterval : 0.3)
+//            bAudioEngineIsAvtive = API.bAudioEngineIsRunning()
+//            print("Audio Session State: \(bAudioEngineIsAvtive ? "Active" : "Inactive" )")
+//            if (bAudioEngineIsAvtive) {
+//                break
+//            }
+//            API.restartAudioEngine()
+//        } while (!bAudioEngineIsAvtive)
+//        var volume:Float! = 0
+//        if (bSpeakerPhone) {
+//            volume = lastVolume * nMaxSPOn
+//        } else {
+//            volume = lastVolume * nMaxSPOff
+//        }
+//        API.adjustVolume(fValue: volume)
+    }
+
+//    static func toggleSpeakerPhone() {
+//        bSpeakerPhone = !bSpeakerPhone
+//        var volume:Float! = 0
+//        if (bSpeakerPhone) {
+//            volume = lastVolume * nMaxSPOn
+//        } else {
+//            volume = lastVolume * nMaxSPOff
+//        }
+//        API.adjustVolume(fValue: volume)
+//    }
+    
     deinit {
-        navigationController?.navigationBar.setBackgroundImage(nil, for: .default)
-        navigationController?.navigationBar.shadowImage = nil
-        navigationController?.navigationBar.isTranslucent = false
-        navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        navigationController?.changeAppearance(clear: false)
         let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
         navigationController?.navigationBar.titleTextAttributes = textAttributes
         navigationController?.navigationBar.topItem?.backBarButtonItem = nil
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
+        Nexilis.floatingButton.isHidden = false
     }
     
     override func viewWillDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
-            navigationController?.navigationBar.setBackgroundImage(nil, for: .default)
-            navigationController?.navigationBar.shadowImage = nil
-            navigationController?.navigationBar.isTranslucent = false
-            navigationController?.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+            navigationController?.changeAppearance(clear: false)
             let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
             navigationController?.navigationBar.titleTextAttributes = textAttributes
             navigationController?.navigationBar.topItem?.backBarButtonItem = nil
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             NotificationCenter.default.removeObserver(self)
+        }
+        Nexilis.floatingButton.isHidden = false
+    }
+    
+    private func backToDefaultAudioSession() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .mixWithOthers])
+            try audioSession.overrideOutputAudioPort(.speaker)
+            try audioSession.setPreferredSampleRate(48000)
+            try audioSession.setActive(true)
+        } catch {
         }
     }
 
@@ -146,8 +312,6 @@ class VideoConferenceViewController: UIViewController {
         navigationController?.changeAppearance(clear: true)
         
         NotificationCenter.default.addObserver(self, selector: #selector(self.onStatusCall(_:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusCall), object: nil)
-//        NotificationCenter.default.addObserver(self, selector: #selector(onReceiveMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil)
-//        NotificationCenter.default.addObserver(self, selector: #selector(onCallFCM(notification:)), name: NSNotification.Name(rawValue: Nexilis.callFCM), object: nil)
         
         view.backgroundColor = .clear
         navigationController?.navigationBar.topItem?.backBarButtonItem = UIBarButtonItem(title: "", style: .plain, target: nil, action: nil)
@@ -156,43 +320,30 @@ class VideoConferenceViewController: UIViewController {
         if fPin != ""{
             getDataProfile(fPin: fPin)
         }
+        backToDefaultAudioSession()
         addZoomView()
         addCameraView()
         addListRemoteView()
+        addToolbar()
         addTimerVC()
-        didTapAcceptCallButton()
-        do {
-            if isInisiator && !isCalled {
-                
-                _ = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(initiateConfRoom), userInfo: nil, repeats: false)
-            }
-            else if !isCalled {
-                _ = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(joinConfRoom), userInfo: nil, repeats: false)
-            }
-            isCalled = true
-        } catch {
-            print(error)
+        if isInisiator && !isCalled {
+            addWaitingForOthersView()
+            initiateConfRoom()
+        } else if !isCalled {
+            addJoiningView()
+            joinConfRoom()
         }
-//        API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-//        addBackgroundIncoming()
-//        addProfileNameCalling()
-//        Calling()
-//        addToolbar()
-//        addTimerVC()
-//        if isAutoAccept {
-//            didTapAcceptCallButton()
-//        }
-        
+        isCalled = true
     }
     
-    @objc func initiateConfRoom(){
+    private func initiateConfRoom() {
         API.initiateCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-        Nexilis.write(message: CoreMessage_TMessageBank.startVCallConference(blog_id: roomId, time: "\(Date().currentTimeMillis())"))
+        _ = Nexilis.write(message: CoreMessage_TMessageBank.startVCallConference(blog_id: roomId, time: "\(Date().currentTimeMillis())"))
     }
     
-    @objc func joinConfRoom(){
+    private func joinConfRoom() {
         API.joinCR(sConfRoom: roomId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-        Nexilis.write(message: CoreMessage_TMessageBank.joinVCallConference(blog_id: roomId))
+        _ = Nexilis.write(message: CoreMessage_TMessageBank.joinVCallConference(blog_id: roomId))
     }
     
     func getDataProfile(fPin: String) {
@@ -241,19 +392,6 @@ class VideoConferenceViewController: UIViewController {
                     row["isOffline"] = ""
                     row["user_type"] = ""
                     dataPerson.append(row)
-    //                if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendQRCode(fpin: fPin)), response.isOk() {
-    //                    self.getDataProfile(fPin: fPin)
-    //                }
-    //                Nexilis.addFriend (fpin: "\(fPin)") { result in
-    //                    if result {
-    //                        self.getDataProfile(fPin: fPin)
-    //                    } else {
-    //                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-    //                        imageView.tintColor = .white
-    //                        let banner = FloatingNotificationBanner(title: "Server busy, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-    //                        banner.show()
-    //                    }
-    //                }
                 }
             } catch {
                 rollback.pointee = true
@@ -264,7 +402,7 @@ class VideoConferenceViewController: UIViewController {
     
     func addTimerVC() {
         view.addSubview(containerTimerVC)
-        containerTimerVC.anchor(top: view.topAnchor, paddingTop: 20, centerX: view.centerXAnchor, minWidth: 40)
+        containerTimerVC.anchor(top: view.safeAreaLayoutGuide.topAnchor, centerX: view.centerXAnchor, minHeight: 40, minWidth: 40)
         containerTimerVC.makeRoundedView(radius: 8)
         containerTimerVC.backgroundColor = .black.withAlphaComponent(0.3)
         containerTimerVC.addSubview(labelTimerVC)
@@ -284,10 +422,7 @@ class VideoConferenceViewController: UIViewController {
         ])
         zoomView.backgroundColor = .secondaryColor
         zoomView.isUserInteractionEnabled = true
-//        zoomView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(hideToolbar)))
-        let scaleX = self.view.bounds.height / self.view.bounds.width
-        let scaleY = self.view.bounds.width / self.view.bounds.height
-        self.zoomView.transform   = CGAffineTransform.init(scaleX: -scaleY, y: scaleX).rotated(by: -(CGFloat.pi * 3)/2)
+        zoomView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(hideToolbar)))
     }
     
     func addCameraView() {
@@ -295,7 +430,7 @@ class VideoConferenceViewController: UIViewController {
 //        cameraView.frame = CGRect(x: view.frame.width - 130, y: 20, width: 120, height: 160)
         cameraView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            cameraView.topAnchor.constraint(equalTo: view.topAnchor, constant: 20.0),
+            cameraView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             cameraView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10.0),
             cameraView.widthAnchor.constraint(equalToConstant: 120.0),
             cameraView.heightAnchor.constraint(equalToConstant: 160.0)
@@ -311,159 +446,65 @@ class VideoConferenceViewController: UIViewController {
             scrollRemoteView.topAnchor.constraint(equalTo: cameraView.bottomAnchor, constant: 10),
             scrollRemoteView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
             scrollRemoteView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
-            scrollRemoteView.widthAnchor.constraint(equalToConstant: 130.0)
+            scrollRemoteView.widthAnchor.constraint(equalToConstant: 120.0)
         ])
         
         scrollRemoteView.showsHorizontalScrollIndicator = false
         scrollRemoteView.showsVerticalScrollIndicator = false
         scrollRemoteView.contentSize.width = 120.0
         scrollRemoteView.backgroundColor = .clear
-        for i in 0...7 {
-            self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
-            self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
-            self.listRemoteViewFix[i].backgroundColor = .clear
-            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
-        }
     }
     
-    func addBackgroundIncoming() {
-        view.addSubview(myImage)
-        myImage.translatesAutoresizingMaskIntoConstraints = false
+    func addWaitingForOthersView() {
+        view.addSubview(contentStack)
+        view.addSubview(cancelButton)
+
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
+
         NSLayoutConstraint.activate([
-            myImage.topAnchor.constraint(equalTo: view.topAnchor),
-            myImage.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            myImage.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            myImage.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 80),
+            iconView.heightAnchor.constraint(equalToConstant: 80),
+
+            contentStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            contentStack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+
+            cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            cancelButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            cancelButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -40),
+            cancelButton.heightAnchor.constraint(equalToConstant: 52)
         ])
-        myImage.backgroundColor = .lightGray
-        myImage.tintColor = .secondaryColor
-        let image = dataPerson[0]["picture"]!!
-        if image.isEmpty {
-            myImage.image = UIImage(systemName: "person")
-            myImage.contentMode = .scaleAspectFit
-        } else {
-            myImage.setImage(name: image)
-            myImage.contentMode = .scaleAspectFill
-        }
-//        let idMe = User.getMyPin() as String?
-//        Database.shared.database?.inTransaction({ fmdb, rollback in
-//            if let c = Database().getRecords(fmdb: fmdb, query: "select image_id from BUDDY where f_pin = '\(idMe!)'"), c.next() {
-//                let image = c.string(forColumnIndex: 0)!
-//                if image.isEmpty {
-//                    myImage.image = UIImage(systemName: "person")
-//                    myImage.contentMode = .scaleAspectFit
-//                } else {
-//                    myImage.setImage(name: image)
-//                    myImage.contentMode = .scaleAspectFill
-//                }
-//                c.close()
-//            }
-//        })
     }
     
-    func addProfileNameCalling() {
-        view.addSubview(profileImage)
-        profileImage.translatesAutoresizingMaskIntoConstraints = false
-        profileImage.frame.size = CGSize(width: 60.0, height: 60.0)
-        NSLayoutConstraint.activate([
-            profileImage.topAnchor.constraint(equalTo: view.topAnchor, constant: 40.0),
-            profileImage.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            profileImage.widthAnchor.constraint(equalToConstant: 60.0),
-            profileImage.heightAnchor.constraint(equalToConstant: 63.0)
-        ])
-        profileImage.backgroundColor = .lightGray
-        profileImage.tintColor = .secondaryColor
-        profileImage.circle()
-        let image = dataPerson[0]["picture"]!!
-        if image.isEmpty {
-            profileImage.image = UIImage(systemName: "person")
-            profileImage.contentMode = .scaleAspectFit
-            profileImage.layer.borderWidth = 1
-            profileImage.layer.borderColor = UIColor.secondaryColor.cgColor
-        } else {
-            profileImage.setImage(name: image)
-            profileImage.contentMode = .scaleAspectFill
-        }
+    func addJoiningView() {
+        let blurEffect = UIBlurEffect(style: .systemThinMaterialDark)
+        blurView = UIVisualEffectView(effect: blurEffect)
+        blurView.frame = view.bounds
+        blurView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(blurView)
         
-        view.addSubview(name)
-        name.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(joiningStack)
+        joiningStack.translatesAutoresizingMaskIntoConstraints = false
+
         NSLayoutConstraint.activate([
-            name.topAnchor.constraint(equalTo: profileImage.bottomAnchor, constant: 5.0),
-            name.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+            joiningStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            joiningStack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            joiningStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            joiningStack.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
-        name.font = UIFont.systemFont(ofSize: 12)
-        name.backgroundColor = .black.withAlphaComponent(0.05)
-        name.layer.cornerRadius = 5.0
-        name.clipsToBounds = true
-        name.textColor = .mainColor
-        name.text = dataPerson[0]["name"]!?.trimmingCharacters(in: .whitespaces)
-    }
-    
-    func Calling() {
-        view.addSubview(labelIncomingOutgoing)
-        labelIncomingOutgoing.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            labelIncomingOutgoing.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 40.0),
-            labelIncomingOutgoing.centerXAnchor.constraint(equalTo: view.centerXAnchor)
-        ])
-        if isInisiator {
-            labelIncomingOutgoing.text = "Outgoing video call".localized() + "..."
-//            Nexilis.startAudio()
-            if ticketId.isEmpty {
-                if callFCM {
-                    DispatchQueue.global().async {
-                        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCalling(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
-                            if response.isOk() {
-                                
-                            } else {
-                                DispatchQueue.main.async {
-                                    if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                                        self.labelIncomingOutgoing.text = "Busy".localized()
-                                    }
-                                    if self.buttonDecline.isDescendant(of: self.view) {
-                                        self.buttonDecline.removeFromSuperview()
-                                    }
-                                    if self.buttonAccept.isDescendant(of: self.view) {
-                                        self.buttonAccept.removeFromSuperview()
-                                    }
-                                }
-                            }
-                        } else {
-                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                            imageView.tintColor = .white
-                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                            banner.show()
-                        }
-                    }
-                } else {
-                    Nexilis.playRingbacktoneCall()
-                    API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-                }
-            } else {
-                API.ccs(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: true)
-                if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getIncomingCallCS(f_pin_opposite: users[0].pin), timeout: 30 * 1000){
-                    if response.mBodies[CoreMessage_TMessageKey.ERRCOD] != "01" {
-                        endAllCall()
-                    }
-                }
-            }
-        } else {
-            let systemSoundID: SystemSoundID = 1254
-            AudioServicesPlaySystemSound(systemSoundID)
-            labelIncomingOutgoing.text = "Incoming video call".localized() + "..."
+        
+        joiningTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            self.dotCount = (self.dotCount + 1) % 4
+            let dots = String(repeating: ".", count: self.dotCount)
+            self.animatedLabel.text = "Joining room\(dots)"
         }
-        labelIncomingOutgoing.font = UIFont.systemFont(ofSize: 12)
-        labelIncomingOutgoing.backgroundColor = .black.withAlphaComponent(0.05)
-        labelIncomingOutgoing.layer.cornerRadius = 5.0
-        labelIncomingOutgoing.clipsToBounds = true
-        labelIncomingOutgoing.textColor = .mainColor
     }
     
-    func addToolbar() {
+    func addToolbar(resetToolbar: Bool = false) {
         view.addSubview(buttonDecline)
         buttonDecline.translatesAutoresizingMaskIntoConstraints = false
         buttonDecline.frame.size = CGSize(width: 70.0, height: 70.0)
-        if isInisiator {
+        if isInisiator || resetToolbar {
             constraintLeadingButtonDecline = buttonDecline.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         } else {
             constraintLeadingButtonDecline = buttonDecline.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: view.frame.width * 0.2)
@@ -480,32 +521,15 @@ class VideoConferenceViewController: UIViewController {
         buttonDecline.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
         buttonDecline.tintColor = .white
         buttonDecline.addTarget(self, action: #selector(didTapDeclineCallButton(sender:)), for: .touchUpInside)
-        
-        if !isInisiator{
-            view.addSubview(buttonAccept)
-            buttonAccept.translatesAutoresizingMaskIntoConstraints = false
-            buttonAccept.frame.size = CGSize(width: 70.0, height: 70.0)
-            NSLayoutConstraint.activate([
-                buttonAccept.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -60.0),
-                buttonAccept.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -(view.frame.width * 0.2)),
-                buttonAccept.widthAnchor.constraint(equalToConstant: 70.0),
-                buttonAccept.heightAnchor.constraint(equalToConstant: 70.0)
-            ])
-            buttonAccept.backgroundColor = .greenColor
-            buttonAccept.circle()
-            buttonAccept.setImage(UIImage(systemName: "checkmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
-            buttonAccept.tintColor = .white
-            buttonAccept.addTarget(self, action: #selector(didTapAcceptCallButton), for: .touchUpInside)
-        }
+        buttonDecline.isHidden = true
     }
     
-    @objc func onCallFCM(notification: NSNotification) {
-        DispatchQueue.main.async { [self] in
-            let data:[AnyHashable : Any] = notification.userInfo!
-            if let l_pin = data["l_pin"] as? String {
-                Nexilis.playRingtoneCall()
-                API.initiateCCall(sParty: l_pin, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-            }
+    @objc private func cancelPressed() {
+        endAllCall()
+        if self.isInisiator && !self.isPresent {
+            self.navigationController?.popViewController(animated: true)
+        } else {
+            self.dismiss(animated: true, completion: nil)
         }
     }
     
@@ -537,13 +561,9 @@ class VideoConferenceViewController: UIViewController {
     }
     
     @objc func didTapDeclineCallButton(sender: AnyObject){
-        
-        let alert = LibAlertController(title: "End Video Call".localized(), message: "Are you sure you want to end video call?".localized(), preferredStyle: .alert)
+        let alert = LibAlertController(title: "End Conference Room".localized(), message: "Are you sure you want to end conference video call?".localized(), preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "No".localized(), style: UIAlertAction.Style.default, handler: nil))
         alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {(_) in
-            if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                self.labelIncomingOutgoing.text = "Video call is over".localized()
-            }
             if self.stackViewToolbar.isDescendant(of: self.view){
                 self.stackViewToolbar.removeFromSuperview()
             }
@@ -565,12 +585,14 @@ class VideoConferenceViewController: UIViewController {
             if self.buttonRotate.isDescendant(of: self.view) {
                 self.buttonRotate.removeFromSuperview()
             }
+            if self.buttonMuted.isDescendant(of: self.view) {
+                self.buttonMuted.removeFromSuperview()
+            }
             if self.wbVC != nil{
                 self.wbVC!.close?()
             }
             self.wbTimer.invalidate()
             self.vcTimer.invalidate()
-            self.labelTimerVC.text = "Video call is over".localized()
             self.endAllCall()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 if self.isInisiator && !self.isPresent {
@@ -600,186 +622,39 @@ class VideoConferenceViewController: UIViewController {
             } else if goVideoCall == -1 {
                 return
             }
-        }
-        
-        let spacing = 20.0
-        let size = 50.0
-        
-        self.view.addSubview(self.stackViewToolbar)
-        self.stackViewToolbar.axis = .horizontal
-        self.stackViewToolbar.distribution = .fillEqually // Distribute buttons equally
-        self.stackViewToolbar.spacing = 10 // Add spacing between buttons
-        self.stackViewToolbar.translatesAutoresizingMaskIntoConstraints = false
-        
-        self.buttonRotate.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            self.buttonRotate.widthAnchor.constraint(equalToConstant: size),
-            self.buttonRotate.heightAnchor.constraint(equalToConstant: size)
-        ])
-        self.buttonRotate.backgroundColor = .secondaryColor
-        self.buttonRotate.tintColor = .mainColor
-        self.buttonRotate.circle()
-        self.buttonRotate.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-        self.buttonRotate.addTarget(self, action: #selector(camera(sender:)), for: .touchUpInside)
-        
-        self.buttonAddParticipant.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            self.buttonAddParticipant.widthAnchor.constraint(equalToConstant: size),
-            self.buttonAddParticipant.heightAnchor.constraint(equalToConstant: size)
-        ])
-        self.buttonAddParticipant.backgroundColor = .secondaryColor
-        self.buttonAddParticipant.tintColor = .mainColor
-        self.buttonAddParticipant.circle()
-        self.buttonAddParticipant.setImage(UIImage(systemName: "person.badge.plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-        self.buttonAddParticipant.addTarget(self, action: #selector(didTapAddParticipantButton(sender:)), for: .touchUpInside)
-        
-        self.buttonSpeaker.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            self.buttonSpeaker.widthAnchor.constraint(equalToConstant: size),
-            self.buttonSpeaker.heightAnchor.constraint(equalToConstant: size)
-        ])
-        self.buttonSpeaker.backgroundColor = .lightGray
-        self.buttonSpeaker.tintColor = .mainColor
-        self.buttonSpeaker.circle()
-        self.buttonSpeaker.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-        self.buttonSpeaker.addTarget(self, action: #selector(didTapSpeakerButton(sender:)), for: .touchUpInside)
-        
-        self.buttonZoom.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            self.buttonZoom.widthAnchor.constraint(equalToConstant: size),
-            self.buttonZoom.heightAnchor.constraint(equalToConstant: size)
-        ])
-        self.buttonZoom.backgroundColor = .secondaryColor
-        self.buttonZoom.tintColor = .mainColor
-        self.buttonZoom.circle()
-        self.buttonZoom.setImage(UIImage(systemName: "minus.magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-        self.buttonZoom.addTarget(self, action: #selector(didTapZoomButton(sender:)), for: .touchUpInside)
-        
-        self.buttonDecline.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            self.buttonDecline.widthAnchor.constraint(equalToConstant: size),
-            self.buttonDecline.heightAnchor.constraint(equalToConstant: size)
-        ])
-        self.buttonDecline.backgroundColor = .red
-        self.buttonDecline.tintColor = .white
-        self.buttonDecline.circle()
-        self.buttonDecline.setImage(UIImage(systemName: "phone.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-        self.buttonDecline.addTarget(self, action: #selector(didTapDeclineCallButton(sender:)), for: .touchUpInside)
-        
-        if isInisiator{
-            self.stackViewToolbar.addArrangedSubview(buttonAddParticipant)
-        }
-        self.stackViewToolbar.addArrangedSubview(buttonRotate)
-        self.stackViewToolbar.addArrangedSubview(buttonSpeaker)
-        self.stackViewToolbar.addArrangedSubview(buttonZoom)
-        self.stackViewToolbar.addArrangedSubview(buttonDecline)
-        
-        NSLayoutConstraint.activate([
-            self.stackViewToolbar.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            self.stackViewToolbar.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -60),
-            self.stackViewToolbar.heightAnchor.constraint(equalToConstant: 50),
-            self.stackViewToolbar.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.7)
-        ])
-        
-        self.view.addSubview(poweredByView)
-        self.poweredByView.translatesAutoresizingMaskIntoConstraints = false
-        let constraintRightPowered =  self.poweredByView.rightAnchor.constraint(equalTo: self.view.rightAnchor, constant: -10.0)
-        let constraintBottomPowered = self.poweredByView.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: -10.0)
-        NSLayoutConstraint.activate([
-            constraintRightPowered,
-            constraintBottomPowered,
-            nexilisLogo.widthAnchor.constraint(equalToConstant: 30.0),
-            nexilisLogo.heightAnchor.constraint(equalToConstant: 30.0)
-        ])
-        
-        poweredByView.addArrangedSubview(poweredByLabel)
-        poweredByView.addArrangedSubview(nexilisLogo)
-    }
-    
-    @objc func didTapAcceptCallButton2() {
-        if !isInisiator{
-            let goAudioCall = Nexilis.checkMicPermission()
-            let goVideoCall = Nexilis.checkCameraPermission()
-            if goVideoCall == 0 {
-                let alert = LibAlertController(title: "Attention!".localized(), message: !goAudioCall && goVideoCall == 0 ? "Please allow microphone & camera permission in your settings".localized() : !goAudioCall ? "Please allow microphone permission in your settings".localized() : "Please allow camera permission in your settings", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {_ in
-                    if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                    }
-                }))
-                self.navigationController?.present(alert, animated: true, completion: nil)
-                return
-            } else if goVideoCall == -1 {
-                return
-            }
-//            Nexilis.startAudio()
-//            if ticketId.isEmpty {
-//                API.receiveCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView,ivRemoteZ: zoomView)
-//            } else {
-//                API.csa(sTicketID: ticketId, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView, bCameraOn: true)
-//            }
-//            Nexilis.ringtonePlayer?.stop()
+            joiningTimer?.invalidate()
+            blurView.removeFromSuperview()
+            joiningStack.removeFromSuperview()
+        } else {
+            contentStack.removeFromSuperview()
+            cancelButton.removeFromSuperview()
         }
         DispatchQueue.main.async {
-//            self.myImage.removeFromSuperview()
-//            self.name.removeFromSuperview()
-//            self.profileImage.removeFromSuperview()
-//            self.labelIncomingOutgoing.removeFromSuperview()
-//            self.buttonAccept.removeFromSuperview()
-//            NSLayoutConstraint.deactivate([
-//                self.constraintLeadingButtonDecline,
-//                self.constraintBottomButtonDecline
-//            ])
-            let spacing = 20.0
-            let size = 40.0
-            self.view.addSubview(self.buttonDecline)
-            self.buttonDecline.translatesAutoresizingMaskIntoConstraints = false
-            self.buttonDecline.frame.size = CGSize(width: size, height: size)
-            if self.isInisiator {
-                self.constraintLeadingButtonDecline = self.buttonDecline.centerXAnchor.constraint(equalTo: self.view.centerXAnchor)
-            } else {
-                self.constraintLeadingButtonDecline = self.buttonDecline.leadingAnchor.constraint(equalTo: self.view.leadingAnchor, constant: self.view.frame.width * 0.2)
-            }
-            self.constraintBottomButtonDecline = self.buttonDecline.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: -60.0)
-            NSLayoutConstraint.activate([
-                self.constraintBottomButtonDecline,
+            NSLayoutConstraint.deactivate([
                 self.constraintLeadingButtonDecline,
-                self.buttonDecline.widthAnchor.constraint(equalToConstant: size),
-                self.buttonDecline.heightAnchor.constraint(equalToConstant: size)
+                self.constraintBottomButtonDecline
             ])
-            self.buttonDecline.backgroundColor = .red
-            self.buttonDecline.circle()
-            self.buttonDecline.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-            self.buttonDecline.tintColor = .white
-            self.buttonDecline.addTarget(self, action: #selector(self.didTapDeclineCallButton(sender:)), for: .touchUpInside)
+            self.buttonDecline.isHidden = false
             self.addToolbarAfterAccept()
-            self.buttonDecline.setImage(UIImage(systemName: "phone.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-//            UIView.animate(withDuration: 1.0, animations: {
-//                self.view.layoutIfNeeded()
-//            })
+            self.buttonDecline.setImage(UIImage(systemName: "phone.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            UIView.animate(withDuration: 1.0, animations: {
+                self.view.layoutIfNeeded()
+            })
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 self.containerTimerVC.isHidden = false
                 self.buttonRotate.isHidden = false
-                if self.isInisiator {
-                    self.buttonAddParticipant.isHidden = false
-                }
-                else {
-                    self.buttonAddParticipant.isHidden = true
-                }
                 self.buttonSpeaker.isHidden = false
-                self.buttonWB.isHidden = false
-                self.buttonChat.isHidden = false
-                self.buttonZoom.isHidden = false
                 self.poweredByView.isHidden = false
+                self.buttonMuted.isHidden = false
                 let connectDate = Date()
                 self.vcTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                     let format = Utils.callDurationFormatter.string(from: Date().timeIntervalSince(connectDate))
                     self.labelTimerVC.text = format
                 }
                 self.vcTimer.fire()
-                API.adjustVolume(fValue: 10.0)
             }
         }
+        
     }
     
     @objc func didTapChatButton(){
@@ -851,7 +726,6 @@ class VideoConferenceViewController: UIViewController {
                 }
                 self.buttonDecline.isHidden = false
                 self.buttonSpeaker.isHidden = false
-                self.buttonAddParticipant.isHidden = false
                 self.buttonRotate.isHidden = false
                 self.buttonZoom.isHidden = false
 //                if(!self.wbRoomId.isEmpty){
@@ -863,7 +737,6 @@ class VideoConferenceViewController: UIViewController {
         }
         self.buttonDecline.isHidden = true
         self.buttonSpeaker.isHidden = true
-        self.buttonAddParticipant.isHidden = true
         self.buttonRotate.isHidden = true
         self.buttonZoom.isHidden = true
         addChild(wbVC!)
@@ -885,81 +758,68 @@ class VideoConferenceViewController: UIViewController {
     }
     
     func addToolbarAfterAccept() {
-        self.view.addSubview(self.stackViewToolbar)
+        view.addSubview(self.stackViewToolbar)
         self.stackViewToolbar.translatesAutoresizingMaskIntoConstraints = false
         constraintBottomStackViewToolbar = self.stackViewToolbar.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: -60.0)
         NSLayoutConstraint.activate([
             self.stackViewToolbar.centerXAnchor.constraint(equalTo: self.view.centerXAnchor),
             constraintBottomStackViewToolbar
         ])
-        let spacing = 20.0
-        let size = 40.0
         self.stackViewToolbar.axis = .horizontal
         self.stackViewToolbar.distribution = .equalSpacing
         self.stackViewToolbar.alignment = .center
-        self.stackViewToolbar.spacing = spacing
+        self.stackViewToolbar.spacing = 30
         
-        self.view.addSubview(buttonRotate)
+        view.addSubview(self.stackViewToolbar3)
+        self.stackViewToolbar3.anchor(bottom: self.stackViewToolbar.topAnchor, paddingBottom: 10, centerX: self.view.centerXAnchor)
+        self.stackViewToolbar3.axis = .horizontal
+        self.stackViewToolbar3.distribution = .equalSpacing
+        self.stackViewToolbar3.alignment = .center
+        self.stackViewToolbar3.spacing = 30
+        
+        view.addSubview(buttonRotate)
         buttonRotate.translatesAutoresizingMaskIntoConstraints = false
-        buttonRotate.frame.size = CGSize(width: size, height: size)
+        buttonRotate.frame.size = CGSize(width: 70.0, height: 70.0)
         NSLayoutConstraint.activate([
-            buttonRotate.widthAnchor.constraint(equalToConstant: size),
-            buttonRotate.heightAnchor.constraint(equalToConstant: size),
-            buttonRotate.centerXAnchor.constraint(equalTo: self.view.centerXAnchor),
-            buttonRotate.bottomAnchor.constraint(equalTo: self.stackViewToolbar.topAnchor, constant: -10.0)
+            buttonRotate.widthAnchor.constraint(equalToConstant: 70.0),
+            buttonRotate.heightAnchor.constraint(equalToConstant: 70.0),
         ])
         buttonRotate.backgroundColor = .secondaryColor
-        buttonRotate.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
+        buttonRotate.setImage(UIImage(systemName: "arrow.triangle.2.circlepath.camera", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
         buttonRotate.tintColor = .mainColor
         buttonRotate.circle()
         buttonRotate.isHidden = true
         buttonRotate.addTarget(self, action: #selector(camera(sender:)), for: .touchUpInside)
         
-        if isInisiator {
-            view.addSubview(buttonAddParticipant)
-            buttonAddParticipant.translatesAutoresizingMaskIntoConstraints = false
-            buttonAddParticipant.frame.size = CGSize(width: size, height: size)
-            NSLayoutConstraint.activate([
-                buttonAddParticipant.widthAnchor.constraint(equalToConstant: size),
-                buttonAddParticipant.heightAnchor.constraint(equalToConstant: size)
-            ])
-            buttonAddParticipant.backgroundColor = .secondaryColor
-            buttonAddParticipant.setImage(UIImage(systemName: "person.badge.plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-            buttonAddParticipant.tintColor = .mainColor
-            buttonAddParticipant.circle()
-            buttonAddParticipant.isHidden = true
-            buttonAddParticipant.addTarget(self, action: #selector(didTapAddParticipantButton(sender:)), for: .touchUpInside)
-        }
+        view.addSubview(buttonMuted)
+        buttonMuted.translatesAutoresizingMaskIntoConstraints = false
+        buttonMuted.frame.size = CGSize(width: 70.0, height: 70.0)
+        NSLayoutConstraint.activate([
+            buttonMuted.widthAnchor.constraint(equalToConstant: 70.0),
+            buttonMuted.heightAnchor.constraint(equalToConstant: 70.0),
+        ])
+        buttonMuted.backgroundColor = .secondaryColor
+        buttonMuted.setImage(UIImage(systemName: "mic", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+        buttonMuted.tintColor = .mainColor
+        buttonMuted.circle()
+        buttonMuted.isHidden = true
+        buttonMuted.addTarget(self, action: #selector(muted(sender:)), for: .touchUpInside)
         
         view.addSubview(buttonSpeaker)
         buttonSpeaker.translatesAutoresizingMaskIntoConstraints = false
-        buttonSpeaker.frame.size = CGSize(width: size, height: size)
+        buttonSpeaker.frame.size = CGSize(width: 70.0, height: 70.0)
         NSLayoutConstraint.activate([
-            buttonSpeaker.widthAnchor.constraint(equalToConstant: size),
-            buttonSpeaker.heightAnchor.constraint(equalToConstant: size)
+            buttonSpeaker.widthAnchor.constraint(equalToConstant: 70.0),
+            buttonSpeaker.heightAnchor.constraint(equalToConstant: 70.0)
         ])
-        buttonSpeaker.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-        self.buttonSpeaker.backgroundColor = .lightGray
-        self.buttonSpeaker.tintColor = .mainColor
+        buttonSpeaker.backgroundColor = .secondaryColor
+        buttonSpeaker.tintColor = .mainColor
+        buttonSpeaker.setImage(UIImage(systemName: "speaker.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
         buttonSpeaker.circle()
         buttonSpeaker.isHidden = true
         buttonSpeaker.addTarget(self, action: #selector(didTapSpeakerButton(sender:)), for: .touchUpInside)
         
-        view.addSubview(buttonZoom)
-        buttonZoom.translatesAutoresizingMaskIntoConstraints = false
-        buttonZoom.frame.size = CGSize(width: size, height: size)
-        NSLayoutConstraint.activate([
-            buttonZoom.widthAnchor.constraint(equalToConstant: size),
-            buttonZoom.heightAnchor.constraint(equalToConstant: size)
-        ])
-        buttonZoom.setImage(UIImage(systemName: "minus.magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: spacing, weight: .medium, scale: .default)), for: .normal)
-        self.buttonZoom.backgroundColor = .lightGray
-        self.buttonZoom.tintColor = .mainColor
-        buttonZoom.circle()
-        buttonZoom.isHidden = true
-        buttonZoom.addTarget(self, action: #selector(didTapZoomButton(sender:)), for: .touchUpInside)
-        
-        self.view.addSubview(self.stackViewToolbar2)
+        view.addSubview(self.stackViewToolbar2)
         self.stackViewToolbar2.translatesAutoresizingMaskIntoConstraints = false
         constraintLeftStackViewToolbar2 = self.stackViewToolbar2.leftAnchor.constraint(equalTo: self.view.leftAnchor, constant: 10.0)
         NSLayoutConstraint.activate([
@@ -985,7 +845,7 @@ class VideoConferenceViewController: UIViewController {
         buttonWB.isHidden = true
         buttonWB.addTarget(self, action: #selector(didTapWBButton), for: .touchUpInside)
         
-        self.view.addSubview(poweredByView)
+        view.addSubview(poweredByView)
         self.poweredByView.translatesAutoresizingMaskIntoConstraints = false
         let constraintRightPowered =  self.poweredByView.rightAnchor.constraint(equalTo: self.view.rightAnchor, constant: -10.0)
         let constraintBottomPowered = self.poweredByView.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: -10.0)
@@ -998,64 +858,31 @@ class VideoConferenceViewController: UIViewController {
         
         poweredByView.addArrangedSubview(poweredByLabel)
         poweredByView.addArrangedSubview(nexilisLogo)
+        poweredByView.isHidden = true
         
-        stackViewToolbar.addArrangedSubview(buttonAddParticipant)
         stackViewToolbar.addArrangedSubview(buttonDecline)
         stackViewToolbar.addArrangedSubview(buttonSpeaker)
-        stackViewToolbar.addArrangedSubview(buttonZoom)
-        stackViewToolbar2.addArrangedSubview(buttonWB)
-        stackViewToolbar2.addArrangedSubview(buttonChat)
-//        startFaceTimer()
+        stackViewToolbar3.addArrangedSubview(buttonRotate)
+        stackViewToolbar3.addArrangedSubview(buttonMuted)
+    }
+    
+    @objc func muted(sender: Any?) {
+        isMuted = !isMuted
+        API.mmc(int: 1, boolean: isMuted)
+        DispatchQueue.main.async {
+            if (self.isMuted) {
+                self.buttonMuted.backgroundColor = .lightGray
+                self.buttonMuted.tintColor = .mainColor
+                self.buttonMuted.setImage(UIImage(systemName: "mic.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            } else {
+                self.buttonMuted.backgroundColor = .secondaryColor
+                self.buttonMuted.tintColor = .mainColor
+                self.buttonMuted.setImage(UIImage(systemName: "mic", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            }
+        }
     }
     
     func endAllCall() {
-        if isInisiator {
-            Nexilis.stopRingbacktoneCall()
-        } else {
-            Nexilis.stopRingtoneCall()
-        }
-//        let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-//        if !onGoingCC.isEmpty {
-//            let requester = onGoingCC.components(separatedBy: ",")[0]
-//            let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-//            let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
-//            let idMe = User.getMyPin()!
-//            let startTimeCC: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
-//            DispatchQueue.global().async {
-//                let date = "\(Date().currentTimeMillis())"
-//                Database.shared.database?.inTransaction({ (fmdb, rollback) in
-//                    do {
-//                        _ = try Database.shared.insertRecord(fmdb: fmdb, table: "CALL_CENTER_HISTORY", cvalues: [
-//                            "type" : "2",
-//                            "title" : "Contact Center".localized(),
-//                            "time" : startTimeCC,
-//                            "f_pin" : officer,
-//                            "data" : complaintId,
-//                            "time_end" : date,
-//                            "complaint_id" : complaintId,
-//                            "members" : "",
-//                            "requester": requester
-//                        ], replace: true)
-//                    } catch {
-//                        rollback.pointee = true
-//                        print("Access database error: \(error.localizedDescription)")
-//                    }
-//                })
-//                if officer == idMe {
-//                    _ = Nexilis.write(message: CoreMessage_TMessageBank.endCallCenter(complaint_id: complaintId, l_pin: requester))
-//                } else {
-//                    if requester == idMe {
-//                        _ = Nexilis.write(message: CoreMessage_TMessageBank.endCallCenter(complaint_id: complaintId, l_pin: officer))
-//                    } else {
-//                        _ = Nexilis.write(message: CoreMessage_TMessageBank.leaveCCRoomInvite(ticket_id: complaintId))
-//                    }
-//                }
-//                SecureUserDefaults.shared.removeValue(forKey: "onGoingCC")
-//                SecureUserDefaults.shared.removeValue(forKey: "membersCC")
-//                SecureUserDefaults.shared.removeValue(forKey: "startTimeCC")
-//                SecureUserDefaults.shared.removeValue(forKey: "waitingRequestCC")
-//            }
-//        }
         _ = Nexilis.write(message: CoreMessage_TMessageBank.endVCallConference(blog_id: roomId))
         API.terminateCall(sParty: nil)
         cameraView.image = nil
@@ -1064,9 +891,11 @@ class VideoConferenceViewController: UIViewController {
         dataPerson.removeAll()
     }
     
-    func setSpeaker(isSpeaker: Bool) {
+    func setSpeaker() {
         DispatchQueue.main.async {
-            if (isSpeaker) {
+            self.timerSpeaker?.invalidate()
+            self.tempSpeaker = !self.tempSpeaker
+            if (self.tempSpeaker) {
                 self.buttonSpeaker.backgroundColor = .lightGray
                 self.buttonSpeaker.tintColor = .mainColor
                 self.buttonSpeaker.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
@@ -1075,13 +904,20 @@ class VideoConferenceViewController: UIViewController {
                 self.buttonSpeaker.tintColor = .mainColor
                 self.buttonSpeaker.setImage(UIImage(systemName: "speaker.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
             }
-            self.isSpeaker = isSpeaker
+            self.timerSpeaker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {_ in
+                if VideoConferenceViewController.bSpeakerPhone != self.tempSpeaker {
+                    VideoConferenceViewController.bSpeakerPhone = !VideoConferenceViewController.bSpeakerPhone
+                    self.tempSpeaker = VideoConferenceViewController.bSpeakerPhone
+                    DispatchQueue.global().async {
+                        VideoConferenceViewController.turnSpeakerOn()
+                    }
+                }
+            })
         }
-        Nexilis.setSpeaker(isSpeaker, isVideo: true)
     }
     
     @objc func didTapSpeakerButton(sender: AnyObject){
-        setSpeaker(isSpeaker: !(self.isSpeaker))
+        setSpeaker()
     }
     
     @objc func didTapZoomButton(sender: AnyObject){
@@ -1166,53 +1002,86 @@ class VideoConferenceViewController: UIViewController {
         let message = (data?["message"] ?? "") as! String
         var remoteChannel = [String:String]()
         let arrayMessage = message.split(separator: ",")
-        print(state)
-        if (state == Nexilis.VIDEO_CALL_END) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.endAllCall()
-                if self.isInisiator && !self.isPresent {
-                    self.navigationController?.popViewController(animated: true)
-                } else {
-                    self.dismiss(animated: true, completion: nil)
-                }
-            }
-        }
-    }
-    
-    @objc func onStatusCall2(_ notification: NSNotification) {
-        let data = notification.userInfo
-        let state = (data?["state"] ?? 0) as! Int
-        let message = (data?["message"] ?? "") as! String
-        var remoteChannel = [String:String]()
-        let arrayMessage = message.split(separator: ",")
-        if(state == Nexilis.VIDEO_CALL_ZOOM){
-            DispatchQueue.main.async {
-                if self.dataPerson.count > 1 {
-                    if !self.transformZoomAfterNewUserMore2 {
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi * 3)/2)
-                        self.transformZoomAfterNewUserMore2 = true
+        if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
+            DispatchQueue.main.async { [self] in
+                if self.dataPerson.count == 1 {
+                    var param = arrayMessage[1]
+                    if arrayMessage[2] != "." {
+                        param = arrayMessage[2]
+                    }
+                    if param == "1" {
+                        mutedZoom.isHidden = false
+                    } else {
+                        mutedZoom.isHidden = true
                     }
                 }
             }
-        }
-        else if (state == Nexilis.VIDEO_CAMERA_PARAMS_CHANED){
+        } else if (state == Nexilis.VIDEO_CALL_ZOOM) && self.dataPerson.count > 1 {
+            DispatchQueue.main.async {
+                if arrayMessage[0] != arrayMessage[3] && !self.rotateMyView {
+                    self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
+                    self.zoomView.contentMode = .scaleAspectFit
+                } else {
+                    self.rotateMyView = true
+                    self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
+                    self.zoomView.contentMode = .scaleAspectFit
+                }
+            }
+        } else if (state == Nexilis.VIDEO_CAMERA_PARAMS_CHANED){
             if(arrayMessage[3] == "0"){
                 DispatchQueue.main.async {
                     if self.dataPerson.count == 1 && arrayMessage[2] == "1" && arrayMessage[4] == "1" {
-                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi * 3)/2)
+                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
                     } else {
-                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi)/2)
+                        self.zoomView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
                     }
                 }
             }
         }
-        else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
-            if isInisiator {
-                Nexilis.stopRingbacktoneCall()
+        else if state == Nexilis.STREAMING_SEMINAR_ENDED { // always call turnspeaker
+            DispatchQueue.main.async {
+                self.buttonSpeaker.isEnabled = false
             }
+            VideoConferenceViewController.isLoop = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                var countLoop = 0
+                repeat {
+                    Thread.sleep(forTimeInterval : 0.5)
+                    if (VideoConferenceViewController.isLoop && !API.bAudioEngineIsRunning()) {
+                        API.restartAudioEngine()
+                        DispatchQueue.main.async {
+                            if !self.buttonSpeaker.isEnabled{
+                                self.setSpeaker()
+                                self.buttonSpeaker.isEnabled = true
+                            } else if VideoConferenceViewController.bSpeakerPhone {
+                                do {
+                                    let audioSession = AVAudioSession.sharedInstance()
+                                    try audioSession.overrideOutputAudioPort(.speaker)
+                                } catch {
+                                    
+                                }
+                            }
+                        }
+                    }
+                    countLoop = countLoop + 1
+                    if countLoop == 3 {
+                        DispatchQueue.main.async {
+                            if !self.buttonSpeaker.isEnabled{
+                                self.setSpeaker()
+                                self.buttonSpeaker.isEnabled = true
+                            }
+                        }
+                    }
+                } while (VideoConferenceViewController.isLoop)
+            }
+        }
+        else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
             let channel = arrayMessage[3]
             remoteChannel[String(channel)] = String(arrayMessage[5])
             DispatchQueue.main.async {
+                if self.dataPerson.count == 0 {
+                    self.getDataProfile(fPin: String(arrayMessage[1]))
+                }
                 if (self.dataPerson.count == 1 && String(arrayMessage[1]) != self.dataPerson[0]["f_pin"]!!) {
                     self.getDataProfile(fPin: String(arrayMessage[1]))
                     for i in 0...1 {
@@ -1228,13 +1097,13 @@ class VideoConferenceViewController: UIViewController {
                             if self.dataPerson[0]["user_type"] == "2" {
                                 self.listRemoteViewFix[0].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
                             } else {
-                                self.listRemoteViewFix[0].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi * 3 )/2)
+                                self.listRemoteViewFix[0].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
                             }
                         } else {
                             if arrayMessage[5] == "2" {
                                 self.listRemoteViewFix[1].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
                             } else {
-                                self.listRemoteViewFix[1].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi * 3 )/2)
+                                self.listRemoteViewFix[1].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
                             }
                         }
                         let pictureImage = self.dataPerson[i]["picture"] ?? ""
@@ -1255,139 +1124,108 @@ class VideoConferenceViewController: UIViewController {
                         labelName.textColor = .white
                     }
                     self.scrollRemoteView.contentSize.height = CGFloat(170 * 2)
+                    if self.buttonWB.isEnabled {
+                        self.buttonWB.isEnabled = false
+                    }
+                    if self.buttonRotate.isEnabled {
+                        self.buttonRotate.isEnabled = false
+                        if self.wbVC != nil && self.wbVC!.view.isDescendant(of: self.view){
+                            self.wbVC!.view.removeFromSuperview()
+                            self.buttonDecline.isHidden = false
+                            self.buttonSpeaker.isHidden = false
+                            self.buttonRotate.isHidden = false
+                            self.buttonMuted.isHidden = false
+                        }
+                    }
                 } else if self.dataPerson.count > 1 {
-                    if self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[1]}) != nil {
-                        return
-                    }
-                    self.getDataProfile(fPin: String(arrayMessage[1]))
-                    let i = self.dataPerson.count - 1
-                    self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
-                    self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
-                    self.listRemoteViewFix[i].backgroundColor = .clear
-                    self.listRemoteViewFix[i].makeRoundedView(radius: 8.0)
-                    self.scrollRemoteView.addSubview(self.containerLabelName[i])
-                    self.containerLabelName[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 30)
-                    self.containerLabelName[i].backgroundColor = .orangeBNI.withAlphaComponent(0.5)
-                    self.containerLabelName[i].makeRoundedView(radius: 8.0)
-                    if arrayMessage[5] == "2" {
-                        self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
-                    } else {
-                        self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi * 3 )/2)
-                    }
-                    let pictureImage = self.dataPerson[self.dataPerson.count - 1]["picture"] ?? ""
-                    let namePerson = self.dataPerson[self.dataPerson.count - 1]["name"] ?? ""
-                    if (!pictureImage!.isEmpty) {
-                        self.listRemoteViewFix[i].setImage(name: pictureImage!)
-                        self.listRemoteViewFix[i].contentMode = .scaleAspectFill
-                    } else {
-                        self.listRemoteViewFix[i].image = UIImage(systemName: "person")
-                        self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
-                        self.listRemoteViewFix[i].contentMode = .scaleAspectFit
-                    }
-                    self.scrollRemoteView.contentSize.height = CGFloat(170 * (i + 1))
-                    let labelName = UILabel()
-                    self.containerLabelName[i].addSubview(labelName)
-                    labelName.anchor(left: self.containerLabelName[i].leftAnchor, right: self.containerLabelName[i].rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: self.containerLabelName[i].centerXAnchor, centerY: self.containerLabelName[i].centerYAnchor)
-                    labelName.text = namePerson
-                    labelName.textAlignment = .center
-                    labelName.textColor = .white
-                }
-            }
-            if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
-                DispatchQueue.main.async {
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 1.9).rotated(by: (CGFloat.pi)/2)
-                    self.zoomView.contentMode = .scaleAspectFit
-                }
-            }
-            else if self.dataPerson.count == 1 {
-                DispatchQueue.main.async {
-                    self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi * 3)/2)
-                    self.zoomView.contentMode = .scaleAspectFit
-                }
-            } else if self.dataPerson.count > 1 {
-                DispatchQueue.main.async {
-                    for i in 0..<self.dataPerson.count {
-//                        self.listRemoteViewFix[i].image = self.listRemoteViewFix[i].image?.rotate(radians: (CGFloat.pi * 3 )/2)
-                        self.listRemoteViewFix[i].image = nil
-                        if self.dataPerson[i]["user_type"] == "2" || arrayMessage[5] == "2" {
+                    if self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[1]}) == nil {
+                        self.getDataProfile(fPin: String(arrayMessage[1]))
+                        let i = self.dataPerson.count - 1
+                        self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
+                        self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
+                        self.listRemoteViewFix[i].backgroundColor = .clear
+                        self.listRemoteViewFix[i].makeRoundedView(radius: 8.0)
+                        self.scrollRemoteView.addSubview(self.containerLabelName[i])
+                        self.containerLabelName[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 30)
+                        self.containerLabelName[i].backgroundColor = .orangeBNI.withAlphaComponent(0.5)
+                        self.containerLabelName[i].makeRoundedView(radius: 8.0)
+                        if arrayMessage[5] == "2" {
                             self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
                         } else {
-                            self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi * 3 )/2)
+                            self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
+                        }
+                        let pictureImage = self.dataPerson[self.dataPerson.count - 1]["picture"] ?? ""
+                        let namePerson = self.dataPerson[self.dataPerson.count - 1]["name"] ?? ""
+                        if (!pictureImage!.isEmpty) {
+                            self.listRemoteViewFix[i].setImage(name: pictureImage!)
+                            self.listRemoteViewFix[i].contentMode = .scaleAspectFill
+                        } else {
+                            self.listRemoteViewFix[i].image = UIImage(systemName: "person")
+                            self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
+                            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
+                        }
+                        self.scrollRemoteView.contentSize.height = CGFloat(170 * (i + 1))
+                        let labelName = UILabel()
+                        self.containerLabelName[i].addSubview(labelName)
+                        labelName.anchor(left: self.containerLabelName[i].leftAnchor, right: self.containerLabelName[i].rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: self.containerLabelName[i].centerXAnchor, centerY: self.containerLabelName[i].centerYAnchor)
+                        labelName.text = namePerson
+                        labelName.textAlignment = .center
+                        labelName.textColor = .white
+                    }
+                }
+                
+                if let user = User.getData(pin: String(arrayMessage[1])) {
+                    if !self.users.contains(user) {
+                        user.isConnected = true
+                        self.users.append(user)
+                    } else if let userEx = self.users.firstIndex(where: { $0.pin == String(arrayMessage[1]) }) {
+                        self.users[userEx].isConnected = true
+                    }
+                }
+                if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
+                    DispatchQueue.main.async {
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: -1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
+                        self.zoomView.contentMode = .scaleAspectFit
+                    }
+                }
+                else if self.dataPerson.count == 1 {
+                    DispatchQueue.main.async {
+                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (-CGFloat.pi)/2)
+                        self.zoomView.contentMode = .scaleAspectFit
+                    }
+                } else if self.dataPerson.count > 1 {
+                    DispatchQueue.main.async {
+                        for i in 0..<self.dataPerson.count {
+                            self.listRemoteViewFix[i].image = nil
+                            if self.dataPerson[i]["user_type"] == "2" || arrayMessage[5] == "2" {
+                                self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (CGFloat.pi)/2)
+                            } else {
+                                self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
+                            }
                         }
                     }
                 }
             }
             DispatchQueue.main.async {
-                if self.isInisiator && self.name.isDescendant(of: self.view) {
+                if self.contentStack.isDescendant(of: self.view) || self.joiningStack.isDescendant(of: self.view) {
                     self.didTapAcceptCallButton()
+                    if VideoConferenceViewController.bSpeakerPhone {
+                        DispatchQueue.main.async {
+                            VideoConferenceViewController.bSpeakerPhone = false
+                            self.setSpeaker()
+                        }
+                    }
                 }
                 let indexPerson = self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[1]})
                 if indexPerson != nil {
                     self.dataPerson[indexPerson!]["user_type"] = String(arrayMessage[5])
                 }
             }
-        } else if (state == Nexilis.VIDEO_CALL_END || state == Nexilis.AUDIO_CALL_END) {
-            if isInisiator {
-                Nexilis.stopRingbacktoneCall()
-            } else {
-                Nexilis.stopRingtoneCall()
-            }
-            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-            if !onGoingCC.isEmpty {
-                let requester = onGoingCC.components(separatedBy: ",")[0]
-                let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-                if arrayMessage[0] == requester || arrayMessage[0] == officer {
-                    DispatchQueue.main.async {
-                        let controller = self.presentedViewController
-                        if controller != nil {
-                            controller!.dismiss(animated: true)
-                        }
-                        if !self.showNotifCCEnd{
-                            let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
-                            imageView.tintColor = .white
-                            let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                            banner.show()
-                            self.showNotifCCEnd = true
-                        }
-                        if self.stackViewToolbar.isDescendant(of: self.view){
-                            self.stackViewToolbar.removeFromSuperview()
-                        }
-                        if self.stackViewToolbar2.isDescendant(of: self.view){
-                            self.stackViewToolbar2.removeFromSuperview()
-                        }
-                        if self.buttonWB.isDescendant(of: self.view){
-                            self.buttonWB.removeFromSuperview()
-                        }
-                        if self.buttonChat.isDescendant(of: self.view){
-                            self.buttonChat.removeFromSuperview()
-                        }
-                        if self.buttonDecline.isDescendant(of: self.view) {
-                            self.buttonDecline.removeFromSuperview()
-                        }
-                        if self.buttonAccept.isDescendant(of: self.view) {
-                            self.buttonAccept.removeFromSuperview()
-                        }
-                        if self.buttonRotate.isDescendant(of: self.view) {
-                            self.buttonRotate.removeFromSuperview()
-                        }
-                        if self.wbVC != nil{
-                            self.wbVC!.close?()
-                        }
-                        self.wbTimer.invalidate()
-                        _ = Nexilis.getWhiteboardDelegate()?.terminate()
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        self.endAllCall()
-                        self.dismiss(animated: true, completion: nil)
-                    }
-                    return
-                }
-            }
+        }
+        else if (state == Nexilis.VIDEO_CALL_END || state == Nexilis.AUDIO_CALL_END) {
             DispatchQueue.main.async {
-                if (self.dataPerson.count == 1) {
-                    if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                        self.labelIncomingOutgoing.text = "Video call is over".localized()
-                    }
+                let pin = "\(arrayMessage[0])"
+                if (self.dataPerson.count == 1 || (!self.fPin.isEmpty && pin == self.fPin)) {
                     if self.stackViewToolbar.isDescendant(of: self.view){
                         self.stackViewToolbar.removeFromSuperview()
                     }
@@ -1409,17 +1247,23 @@ class VideoConferenceViewController: UIViewController {
                     if self.buttonRotate.isDescendant(of: self.view) {
                         self.buttonRotate.removeFromSuperview()
                     }
+                    if self.buttonMuted.isDescendant(of: self.view) {
+                        self.buttonMuted.removeFromSuperview()
+                    }
                     if self.wbVC != nil{
                         self.wbVC!.close?()
                     }
                     self.wbTimer.invalidate()
                     self.vcTimer.invalidate()
-                    self.labelTimerVC.text = "Video call is over".localized()
                     _ = Nexilis.getWhiteboardDelegate()?.terminate()
                     let controller = self.presentedViewController
                     if controller != nil {
                         controller!.dismiss(animated: true)
                     }
+                    VideoConferenceViewController.isLoop = false
+                    VideoConferenceViewController.bSpeakerPhone = false
+                    do { try AVAudioSession.sharedInstance().setActive(false) } catch {}
+                    Nexilis.callAPNActivated = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self.endAllCall()
                         if self.isInisiator && !self.isPresent {
@@ -1456,218 +1300,23 @@ class VideoConferenceViewController: UIViewController {
                         }
                         self.dataPerson.remove(at: indexPerson!)
                     }
-                    if !onGoingCC.isEmpty {
-                        if let pin = arrayMessage.first, let index = self.users.firstIndex(of: User(pin: String(pin))) {
-                            self.users.remove(at: index)
-                        }
-                    }
-                    
-                    if self.dataPerson.count == 1 {
-                        self.transformZoomAfterNewUserMore2 = false
-                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 1.9).rotated(by: (CGFloat.pi)/2)
+                    if let index = self.users.firstIndex(where: { $0.pin == pin }) {
+                        self.users.remove(at: index)
                     }
                 }
             }
-        } else if (state == Nexilis.OFFLINE) {
-            if isInisiator {
-                Nexilis.stopRingbacktoneCall()
-            } else {
-                Nexilis.stopRingtoneCall()
-            }
-            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        }
+        else if state == Nexilis.OFFLINE {
             DispatchQueue.main.async {
-                if (self.dataPerson.count == 1) {
-                    if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                        self.labelIncomingOutgoing.text = "Offline".localized()
-                    }
-                    if self.buttonDecline.isDescendant(of: self.view) {
-                        self.buttonDecline.removeFromSuperview()
-                    }
-                    if self.buttonAccept.isDescendant(of: self.view) {
-                        self.buttonAccept.removeFromSuperview()
-                    }
-                } else {
-                    let indexPerson = self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[0]})
-                    if indexPerson != nil {
-                        if (self.dataPerson.count == 2) {
-                            self.containerLabelName.forEach({ $0.subviews.forEach({ $0.removeFromSuperview() }) })
-                            self.scrollRemoteView.subviews.forEach({ $0.removeFromSuperview() })
-                        } else {
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
-                                let viewAfterRemote = self.listRemoteViewFix[indexPerson! + 1]
-                                let viewAfterName = self.containerLabelName[indexPerson! + 1]
-                                viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
-                                viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
-                                UIView.animate(withDuration: 0.35, animations: {
-                                    self.scrollRemoteView.layoutIfNeeded()
-                                })
-                            }
-                        }
-                    }
-                    if !onGoingCC.isEmpty {
-                        if let pin = arrayMessage.first, let index = self.users.firstIndex(of: User(pin: String(pin))) {
-                            self.users.remove(at: index)
-                            if !onGoingCC.isEmpty && self.users.count != 0 {
-                                DispatchQueue.main.async {
-                                    var members = ""
-                                    for user in self.users {
-                                        if members.isEmpty {
-                                            members = "\(user.pin)"
-                                        } else {
-                                            members = ",\(user.pin)"
-                                        }
-                                    }
-                                    SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
-                                }
-                            }
-                        }
-                    }
-                    self.dataPerson.remove(at: indexPerson!)
-                }
-            }
-            if (self.dataPerson.count == 1) {
+                self.joiningTimer?.invalidate()
+                self.activityIndicator.isHidden = true
+                self.animatedLabel.text = "The room has not been started by the initiator".localized()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self.endAllCall()
-                    if self.isInisiator && onGoingCC.isEmpty && !self.isPresent {
+                    if self.isInisiator && !self.isPresent {
                         self.navigationController?.popViewController(animated: true)
                     } else {
                         self.dismiss(animated: true, completion: nil)
-                    }
-                }
-            }
-        } else if (state == Nexilis.BUSY) {
-            if isInisiator {
-                Nexilis.stopRingbacktoneCall()
-            } else {
-                Nexilis.stopRingtoneCall()
-            }
-            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-            DispatchQueue.main.async { [self] in
-                if (self.dataPerson.count == 1) {
-                    if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                        self.labelIncomingOutgoing.text = "Busy".localized()
-                    }
-                    if self.buttonDecline.isDescendant(of: self.view) {
-                        self.buttonDecline.removeFromSuperview()
-                    }
-                    if self.buttonAccept.isDescendant(of: self.view) {
-                        self.buttonAccept.removeFromSuperview()
-                    }
-                } else {
-                    let indexPerson = self.dataPerson.firstIndex(where: {$0["f_pin"]!! == arrayMessage[0]})
-                    if indexPerson != nil {
-                        if (self.dataPerson.count == 2) {
-                            self.containerLabelName.forEach({ $0.subviews.forEach({ $0.removeFromSuperview() }) })
-                            self.scrollRemoteView.subviews.forEach({ $0.removeFromSuperview() })
-                        } else {
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
-                                let viewAfterRemote = self.listRemoteViewFix[indexPerson! + 1]
-                                let viewAfterName = self.containerLabelName[indexPerson! + 1]
-                                viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
-                                viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
-                                UIView.animate(withDuration: 0.35, animations: {
-                                    self.scrollRemoteView.layoutIfNeeded()
-                                })
-                            }
-                        }
-                    }
-                    if !onGoingCC.isEmpty {
-                        if let pin = arrayMessage.first, let index = self.users.firstIndex(of: User(pin: String(pin))) {
-                            self.users.remove(at: index)
-                            if !onGoingCC.isEmpty && users.count != 0 {
-                                DispatchQueue.main.async {
-                                    var members = ""
-                                    for user in self.users {
-                                        if members.isEmpty {
-                                            members = "\(user.pin)"
-                                        } else {
-                                            members = ",\(user.pin)"
-                                        }
-                                    }
-                                    SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
-                                }
-                            }
-                        }
-                    }
-                    self.dataPerson.remove(at: indexPerson!)
-                }
-            }
-            if (self.dataPerson.count == 1) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.endAllCall()
-                    if self.isInisiator && onGoingCC.isEmpty && !self.isPresent {
-                        self.navigationController?.popViewController(animated: true)
-                    } else {
-                        self.dismiss(animated: true, completion: nil)
-                    }
-                }
-            }
-        } else if (state == Nexilis.VIDEO_CALL_RINGING) {
-            DispatchQueue.main.async {
-                if (self.dataPerson.count > 1) {
-                    if (self.dataPerson.count == 2) {
-                        for i in 0...1{
-                            self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
-                            self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
-                            self.listRemoteViewFix[i].backgroundColor = .clear
-                            self.listRemoteViewFix[i].makeRoundedView(radius: 8.0)
-                            self.scrollRemoteView.addSubview(self.containerLabelName[i])
-                            self.containerLabelName[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 30)
-                            self.containerLabelName[i].backgroundColor = .orangeBNI.withAlphaComponent(0.5)
-                            self.containerLabelName[i].makeRoundedView(radius: 8.0)
-                            let pictureImage = self.dataPerson[i]["picture"] ?? ""
-                            let namePerson = self.dataPerson[i]["name"] ?? ""
-                            if (!pictureImage!.isEmpty) {
-                                self.listRemoteViewFix[i].setImage(name: pictureImage!)
-                                self.listRemoteViewFix[i].contentMode = .scaleAspectFill
-                            } else {
-                                self.listRemoteViewFix[i].image = UIImage(systemName: "person")
-                                self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
-                                self.listRemoteViewFix[i].contentMode = .scaleAspectFit
-                            }
-                            let labelName = UILabel()
-                            self.containerLabelName[i].addSubview(labelName)
-                            labelName.anchor(left: self.containerLabelName[i].leftAnchor, right: self.containerLabelName[i].rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: self.containerLabelName[i].centerXAnchor, centerY: self.containerLabelName[i].centerYAnchor)
-                            labelName.text = namePerson
-                            labelName.textAlignment = .center
-                            labelName.textColor = .white
-                        }
-                        self.scrollRemoteView.contentSize.height = CGFloat(170 * 2)
-                    } else {
-                        let i = self.dataPerson.count - 1
-                        self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
-                        self.listRemoteViewFix[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 160)
-                        self.listRemoteViewFix[i].backgroundColor = .clear
-                        self.listRemoteViewFix[i].makeRoundedView(radius: 8.0)
-                        self.scrollRemoteView.addSubview(self.containerLabelName[i])
-                        self.containerLabelName[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 30)
-                        self.containerLabelName[i].backgroundColor = .orangeBNI.withAlphaComponent(0.5)
-                        self.containerLabelName[i].makeRoundedView(radius: 8.0)
-                        let pictureImage = self.dataPerson[self.dataPerson.count - 1]["picture"] ?? ""
-                        let namePerson = self.dataPerson[self.dataPerson.count - 1]["name"] ?? ""
-                        if (!pictureImage!.isEmpty) {
-                            self.listRemoteViewFix[i].setImage(name: pictureImage!)
-                            self.listRemoteViewFix[i].contentMode = .scaleAspectFill
-                        } else {
-                            self.listRemoteViewFix[i].image = UIImage(systemName: "person")
-                            self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
-                            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
-                        }
-                        self.scrollRemoteView.contentSize.height = CGFloat(170 * (i + 1))
-                        let labelName = UILabel()
-                        self.containerLabelName[i].addSubview(labelName)
-                        labelName.anchor(left: self.containerLabelName[i].leftAnchor, right: self.containerLabelName[i].rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: self.containerLabelName[i].centerXAnchor, centerY: self.containerLabelName[i].centerYAnchor)
-                        labelName.text = namePerson
-                        labelName.textAlignment = .center
-                        labelName.textColor = .white
                     }
                 }
             }

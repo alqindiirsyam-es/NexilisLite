@@ -334,7 +334,7 @@ class QmeraAudioViewController: UIViewController {
     private func backToDefaultAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .mixWithOthers])
+            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .mixWithOthers])
             try audioSession.overrideOutputAudioPort(.speaker)
             try audioSession.setPreferredSampleRate(44100)
             try audioSession.setActive(true)
