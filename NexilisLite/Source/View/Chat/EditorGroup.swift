@@ -398,7 +398,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
-            cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white], for: .normal)
+            cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
             if !self.isHistoryCC {
                 self.navigationItem.rightBarButtonItems = nil
             }
@@ -3866,6 +3866,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 self.forwardSession = true
                 let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
+                cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
                 if !self.isHistoryCC {
                     self.navigationItem.rightBarButtonItems = nil
                 }
@@ -3892,6 +3893,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 self.copySession = true
                 let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
+                cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
                 if !self.isHistoryCC {
                     self.navigationItem.rightBarButtonItems = nil
                 }
@@ -3999,13 +4001,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.summarizeSession = true
                 let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
                 cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
-                if self.dataPerson["f_pin"] != "-999" && !self.isContactCenter {
+                if !self.isHistoryCC {
                     self.navigationItem.rightBarButtonItems = nil
                 }
                 self.navigationItem.rightBarButtonItem = cancelButton
-                if self.isContactCenter || self.fromNotification {
-                    self.navigationItem.leftBarButtonItem = nil
-                }
                 self.changeAppBar()
                 let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String})
                 if idx != nil{
@@ -4039,6 +4038,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 self.deleteSession = true
                 let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
+                cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
                 if !self.isHistoryCC {
                     self.navigationItem.rightBarButtonItems = nil
                 }
@@ -4886,7 +4886,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             var contentText = ""
             for message in dataMessages {
                 if !(message[TypeDataMessage.message_text] as? String ?? "").isEmpty {
-                    let dataUser = User.getData(pin: message[TypeDataMessage.f_pin] as? String ?? "", lPin: self.dataPerson["f_pin"] as? String ?? "")
+                    let dataUser = User.getData(pin: message[TypeDataMessage.f_pin] as? String ?? "", lPin: self.unique_l_pin)
                     contentText.append(dataUser?.fullName ?? "")
                     contentText.append(": ")
                     contentText.append(message[TypeDataMessage.message_text] as? String ?? "")
@@ -5557,8 +5557,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         profileMessage.isUserInteractionEnabled = true
         profileMessage.addGestureRecognizer(tapGestureRecognizer)
         
-        let containerMessage = UIView()
-        
+        var containerMessage = UIView()
+        if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+            containerMessage = SecureField().secureContainer!
+        }
         let messageIdChat = (dataMessages[indexPath.row]["message_id"] as? String) ?? ""
         let thumbChat = dataMessages[indexPath.row]["thumb_id"]  as? String ?? ""
         let imageChat = dataMessages[indexPath.row]["image_id"]  as? String ?? ""

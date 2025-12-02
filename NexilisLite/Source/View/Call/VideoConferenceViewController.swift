@@ -33,6 +33,7 @@ class VideoConferenceViewController: UIViewController {
     var isInisiator = true
     var isSpeaker = false
     var isMuted = false
+    var isCameraOff = false
     var isPresent = false
     var isNavigationHidden = false
     var rotateMyView = false
@@ -98,6 +99,7 @@ class VideoConferenceViewController: UIViewController {
     let buttonSpeaker = UIButton()
     let buttonRotate = UIButton()
     let buttonMuted = UIButton()
+    let buttonCameraOff = UIButton()
     let buttonZoom = UIButton()
     var showStackViewToolbar = true
     let scrollRemoteView = UIScrollView()
@@ -588,6 +590,9 @@ class VideoConferenceViewController: UIViewController {
             if self.buttonMuted.isDescendant(of: self.view) {
                 self.buttonMuted.removeFromSuperview()
             }
+            if self.buttonCameraOff.isDescendant(of: self.view) {
+                self.buttonCameraOff.removeFromSuperview()
+            }
             if self.wbVC != nil{
                 self.wbVC!.close?()
             }
@@ -607,7 +612,10 @@ class VideoConferenceViewController: UIViewController {
     }
     
     @objc func didTapAcceptCallButton() {
-        if !isInisiator{
+        if !isInisiator {
+            joiningTimer?.invalidate()
+            blurView.removeFromSuperview()
+            joiningStack.removeFromSuperview()
             let goAudioCall = Nexilis.checkMicPermission()
             let goVideoCall = Nexilis.checkCameraPermission()
             if goVideoCall == 0 {
@@ -622,9 +630,6 @@ class VideoConferenceViewController: UIViewController {
             } else if goVideoCall == -1 {
                 return
             }
-            joiningTimer?.invalidate()
-            blurView.removeFromSuperview()
-            joiningStack.removeFromSuperview()
         } else {
             contentStack.removeFromSuperview()
             cancelButton.removeFromSuperview()
@@ -646,6 +651,7 @@ class VideoConferenceViewController: UIViewController {
                 self.buttonSpeaker.isHidden = false
                 self.poweredByView.isHidden = false
                 self.buttonMuted.isHidden = false
+                self.buttonCameraOff.isHidden = false
                 let connectDate = Date()
                 self.vcTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                     let format = Utils.callDurationFormatter.string(from: Date().timeIntervalSince(connectDate))
@@ -805,6 +811,20 @@ class VideoConferenceViewController: UIViewController {
         buttonMuted.isHidden = true
         buttonMuted.addTarget(self, action: #selector(muted(sender:)), for: .touchUpInside)
         
+//        view.addSubview(buttonCameraOff)
+//        buttonCameraOff.translatesAutoresizingMaskIntoConstraints = false
+//        buttonCameraOff.frame.size = CGSize(width: 70.0, height: 70.0)
+//        NSLayoutConstraint.activate([
+//            buttonCameraOff.widthAnchor.constraint(equalToConstant: 70.0),
+//            buttonCameraOff.heightAnchor.constraint(equalToConstant: 70.0),
+//        ])
+//        buttonCameraOff.backgroundColor = .secondaryColor
+//        buttonCameraOff.setImage(UIImage(systemName: "video", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+//        buttonCameraOff.tintColor = .mainColor
+//        buttonCameraOff.circle()
+//        buttonCameraOff.isHidden = true
+//        buttonCameraOff.addTarget(self, action: #selector(cameraOff(sender:)), for: .touchUpInside)
+        
         view.addSubview(buttonSpeaker)
         buttonSpeaker.translatesAutoresizingMaskIntoConstraints = false
         buttonSpeaker.frame.size = CGSize(width: 70.0, height: 70.0)
@@ -864,6 +884,7 @@ class VideoConferenceViewController: UIViewController {
         stackViewToolbar.addArrangedSubview(buttonSpeaker)
         stackViewToolbar3.addArrangedSubview(buttonRotate)
         stackViewToolbar3.addArrangedSubview(buttonMuted)
+//        stackViewToolbar3.addArrangedSubview(buttonCameraOff)
     }
     
     @objc func muted(sender: Any?) {
@@ -878,6 +899,22 @@ class VideoConferenceViewController: UIViewController {
                 self.buttonMuted.backgroundColor = .secondaryColor
                 self.buttonMuted.tintColor = .mainColor
                 self.buttonMuted.setImage(UIImage(systemName: "mic", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            }
+        }
+    }
+    
+    @objc func cameraOff(sender: Any?) {
+        isCameraOff = !isCameraOff
+        API.mmc(int: 2, boolean: isCameraOff)
+        DispatchQueue.main.async {
+            if (self.isCameraOff) {
+                self.buttonCameraOff.backgroundColor = .lightGray
+                self.buttonCameraOff.tintColor = .mainColor
+                self.buttonCameraOff.setImage(UIImage(systemName: "video.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            } else {
+                self.buttonCameraOff.backgroundColor = .secondaryColor
+                self.buttonCameraOff.tintColor = .mainColor
+                self.buttonCameraOff.setImage(UIImage(systemName: "video", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
             }
         }
     }
@@ -1106,16 +1143,16 @@ class VideoConferenceViewController: UIViewController {
                                 self.listRemoteViewFix[1].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
                             }
                         }
-                        let pictureImage = self.dataPerson[i]["picture"] ?? ""
+//                        let pictureImage = self.dataPerson[i]["picture"] ?? ""
                         let namePerson = self.dataPerson[i]["name"] ?? ""
-                        if (!pictureImage!.isEmpty) {
-                            self.listRemoteViewFix[i].setImage(name: pictureImage!)
-                            self.listRemoteViewFix[i].contentMode = .scaleAspectFill
-                        } else {
-                            self.listRemoteViewFix[i].image = UIImage(systemName: "person")
-                            self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
-                            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
-                        }
+//                        if (!pictureImage!.isEmpty) {
+//                            self.listRemoteViewFix[i].setImage(name: pictureImage!)
+//                            self.listRemoteViewFix[i].contentMode = .scaleAspectFill
+//                        } else {
+//                            self.listRemoteViewFix[i].image = UIImage(systemName: "person")
+//                            self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
+//                            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
+//                        }
                         let labelName = UILabel()
                         self.containerLabelName[i].addSubview(labelName)
                         labelName.anchor(left: self.containerLabelName[i].leftAnchor, right: self.containerLabelName[i].rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: self.containerLabelName[i].centerXAnchor, centerY: self.containerLabelName[i].centerYAnchor)
@@ -1135,6 +1172,7 @@ class VideoConferenceViewController: UIViewController {
                             self.buttonSpeaker.isHidden = false
                             self.buttonRotate.isHidden = false
                             self.buttonMuted.isHidden = false
+                            self.buttonCameraOff.isHidden = false
                         }
                     }
                 } else if self.dataPerson.count > 1 {
@@ -1154,16 +1192,16 @@ class VideoConferenceViewController: UIViewController {
                         } else {
                             self.listRemoteViewFix[i].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
                         }
-                        let pictureImage = self.dataPerson[self.dataPerson.count - 1]["picture"] ?? ""
+//                        let pictureImage = self.dataPerson[self.dataPerson.count - 1]["picture"] ?? ""
                         let namePerson = self.dataPerson[self.dataPerson.count - 1]["name"] ?? ""
-                        if (!pictureImage!.isEmpty) {
-                            self.listRemoteViewFix[i].setImage(name: pictureImage!)
-                            self.listRemoteViewFix[i].contentMode = .scaleAspectFill
-                        } else {
-                            self.listRemoteViewFix[i].image = UIImage(systemName: "person")
-                            self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
-                            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
-                        }
+//                        if (!pictureImage!.isEmpty) {
+//                            self.listRemoteViewFix[i].setImage(name: pictureImage!)
+//                            self.listRemoteViewFix[i].contentMode = .scaleAspectFill
+//                        } else {
+//                            self.listRemoteViewFix[i].image = UIImage(systemName: "person")
+//                            self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
+//                            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
+//                        }
                         self.scrollRemoteView.contentSize.height = CGFloat(170 * (i + 1))
                         let labelName = UILabel()
                         self.containerLabelName[i].addSubview(labelName)
@@ -1250,6 +1288,9 @@ class VideoConferenceViewController: UIViewController {
                     if self.buttonMuted.isDescendant(of: self.view) {
                         self.buttonMuted.removeFromSuperview()
                     }
+                    if self.buttonCameraOff.isDescendant(of: self.view) {
+                        self.buttonCameraOff.removeFromSuperview()
+                    }
                     if self.wbVC != nil{
                         self.wbVC!.close?()
                     }
@@ -1279,24 +1320,12 @@ class VideoConferenceViewController: UIViewController {
                             self.containerLabelName.forEach({ $0.subviews.forEach({ $0.removeFromSuperview() }) })
                             self.scrollRemoteView.subviews.forEach({ $0.removeFromSuperview() })
                         } else {
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
-                                let iLoop = (self.listRemoteViewFix.count - 1) - (indexPerson! + 1)
-                                if iLoop >= 0 {
-                                    for i in 0...iLoop {
-                                        let viewAfterRemote = self.listRemoteViewFix[(indexPerson! + i) + 1]
-                                        let viewAfterName = self.containerLabelName[(indexPerson! + i) + 1]
-                                        viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
-                                        viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
-                                        UIView.animate(withDuration: 0.35, animations: {
-                                            self.scrollRemoteView.layoutIfNeeded()
-                                        })
-                                    }
-                                }
-                            }
+                            self.containerLabelName[indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
+                            self.containerLabelName[indexPerson!].removeFromSuperview()
+                            self.listRemoteViewFix[indexPerson!].removeFromSuperview()
+                            UIView.animate(withDuration: 0.35, animations: {
+                                self.scrollRemoteView.layoutIfNeeded()
+                            })
                         }
                         self.dataPerson.remove(at: indexPerson!)
                     }

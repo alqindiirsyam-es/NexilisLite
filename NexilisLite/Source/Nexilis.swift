@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.78"
+    public static var cpaasVersion = "5.0.79"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -4196,108 +4196,115 @@ extension Nexilis: MessageDelegate {
                     acceptCC()
                 }
                 func acceptCC() {
-                    if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 1, ticket_id: id)) {
-                        if result.isOk() {
-                            let requester = result.getBody(key: CoreMessage_TMessageKey.UPLINE_PIN)
-                            let officer = result.getBody(key: CoreMessage_TMessageKey.FRIEND_FPIN)
-                            let data = result.getBody(key: CoreMessage_TMessageKey.DATA)
-                            let complaintId = id
-                            SecureUserDefaults.shared.set("\(requester),\(officer),\(complaintId)", forKey: "onGoingCC")
-                            SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
-                            if !data.isEmpty {
-                                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-                                    var members = ""
-                                    var user : [User] = []
-                                    let idMe = User.getMyPin()!
-                                    
-                                    for json in jsonArray {
-                                        if "\(json)" != idMe {
-                                            if let userData = User.getData(pin: "\(json)") {
-                                                user.append(userData)
-                                            } else {
-                                                Nexilis.addFriendSilent(fpin: "\(json)")
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                    DispatchQueue.global().async {
+                        if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 1, ticket_id: id)) {
+                            if result.isOk() {
+                                let requester = result.getBody(key: CoreMessage_TMessageKey.UPLINE_PIN)
+                                let officer = result.getBody(key: CoreMessage_TMessageKey.FRIEND_FPIN)
+                                let data = result.getBody(key: CoreMessage_TMessageKey.DATA)
+                                let complaintId = id
+                                SecureUserDefaults.shared.set("\(requester),\(officer),\(complaintId)", forKey: "onGoingCC")
+                                SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
+                                if !data.isEmpty {
+                                    if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                                        var members = ""
+                                        var user : [User] = []
+                                        let idMe = User.getMyPin()!
+                                        
+                                        for json in jsonArray {
+                                            if "\(json)" != idMe {
+                                                if let userData = User.getDataCanNil(pin: "\(json)") {
+                                                    user.append(userData)
+                                                } else {
+                                                    Nexilis.addFriendSilent(fpin: "\(json)")
+                                                    while User.getDataCanNil(pin: "\(json)") == nil {
+                                                        Thread.sleep(forTimeInterval: 0.5)
+                                                    }
                                                     if let userData = User.getData(pin: "\(json)") {
                                                         user.append(userData)
                                                     }
+                                                }
+                                                if members.isEmpty {
+                                                    members = "\(json)"
+                                                } else {
+                                                    members += ",\(json)"
+                                                }
+                                            }
+                                        }
+                                        SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
+                                        DispatchQueue.main.async {
+                                            if channel == "0" {
+                                                let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+                                                editorPersonalVC.hidesBottomBarWhenPushed = true
+                                                editorPersonalVC.unique_l_pin = officer
+                                                editorPersonalVC.fromNotification = true
+                                                editorPersonalVC.isContactCenter = true
+                                                editorPersonalVC.fPinContacCenter = members
+                                                editorPersonalVC.complaintId = complaintId
+                                                editorPersonalVC.onGoingCC = true
+                                                editorPersonalVC.isRequestContactCenter = false
+                                                editorPersonalVC.users = user
+                                                let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
+                                                navigationController.modalPresentationStyle = .fullScreen
+                                                navigationController.navigationBar.tintColor = .white
+                                                navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                                                navigationController.navigationBar.isTranslucent = false
+                                                navigationController.navigationBar.overrideUserInterfaceStyle = .dark
+                                                navigationController.navigationBar.barStyle = .black
+                                                let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                                                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+                                                let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+                                                navigationController.navigationBar.titleTextAttributes = textAttributes
+                                                if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                                                } else {
+                                                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                                                }
+                                            } else {
+                                                SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                                                    if channel == "1" {
+                                                        let pin = officer
+                                                        let controller = QmeraAudioViewController()
+                                                        controller.user = User.getData(pin: pin)
+                                                        controller.isOutgoing = false
+                                                        controller.ticketId = complaintId
+                                                        controller.modalPresentationStyle = .overCurrentContext
+                                                        let navigationController = CustomNavigationController(rootViewController: controller)
+                                                        navigationController.modalPresentationStyle = .fullScreen
+                                                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                                                        } else {
+                                                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                                                        }
+                                                    } else if channel == "2" {
+                                                        let videoVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
+                                                        videoVC.fPin = officer
+                                                        videoVC.users.append(User.getData(pin: officer)!)
+                                                        videoVC.ticketId = complaintId
+                                                        videoVC.isInisiator = false
+                                                        videoVC.isAutoAccept = true
+                                                        let navigationController = CustomNavigationController(rootViewController: videoVC)
+                                                        navigationController.modalPresentationStyle = .fullScreen
+                                                        if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
+                                                        } else {
+                                                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
+                                                        }
+                                                    }
                                                 })
                                             }
-                                            if members.isEmpty {
-                                                members = "\(json)"
-                                            } else {
-                                                members += ",\(json)"
-                                            }
                                         }
-                                    }
-                                    SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
-                                    if channel == "0" {
-                                        let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
-                                        editorPersonalVC.hidesBottomBarWhenPushed = true
-                                        editorPersonalVC.unique_l_pin = officer
-                                        editorPersonalVC.fromNotification = true
-                                        editorPersonalVC.isContactCenter = true
-                                        editorPersonalVC.fPinContacCenter = members
-                                        editorPersonalVC.complaintId = complaintId
-                                        editorPersonalVC.onGoingCC = true
-                                        editorPersonalVC.isRequestContactCenter = false
-                                        editorPersonalVC.users = user
-                                        let navigationController = CustomNavigationController(rootViewController: editorPersonalVC)
-                                        navigationController.modalPresentationStyle = .fullScreen
-                                        navigationController.navigationBar.tintColor = .white
-                                        navigationController.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-                                        navigationController.navigationBar.isTranslucent = false
-                                        navigationController.navigationBar.overrideUserInterfaceStyle = .dark
-                                        navigationController.navigationBar.barStyle = .black
-                                        let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                                        UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-                                        let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-                                        navigationController.navigationBar.titleTextAttributes = textAttributes
-                                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                            UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                                        } else {
-                                            UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                                        }
-                                    } else {
-                                        SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "startTimeCC")
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                                            if channel == "1" {
-                                                let pin = officer
-                                                let controller = QmeraAudioViewController()
-                                                controller.user = User.getData(pin: pin)
-                                                controller.isOutgoing = false
-                                                controller.ticketId = complaintId
-                                                controller.modalPresentationStyle = .overCurrentContext
-                                                let navigationController = CustomNavigationController(rootViewController: controller)
-                                                navigationController.modalPresentationStyle = .fullScreen
-                                                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                                                } else {
-                                                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                                                }
-                                            } else if channel == "2" {
-                                                let videoVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "videoVCQmera") as! QmeraVideoViewController
-                                                videoVC.fPin = officer
-                                                videoVC.users.append(User.getData(pin: officer)!)
-                                                videoVC.ticketId = complaintId
-                                                videoVC.isInisiator = false
-                                                videoVC.isAutoAccept = true
-                                                let navigationController = CustomNavigationController(rootViewController: videoVC)
-                                                navigationController.modalPresentationStyle = .fullScreen
-                                                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                                    UIApplication.shared.visibleViewController?.navigationController?.present(navigationController, animated: true, completion: nil)
-                                                } else {
-                                                    UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
-                                                }
-                                            }
-                                        })
                                     }
                                 }
+                            } else {
+                                DispatchQueue.main.async {
+                                    let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
+                                    imageView.tintColor = .white
+                                    let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
+                                    banner.show()
+                                }
                             }
-                        } else {
-                            let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
-                            imageView.tintColor = .white
-                            let banner = FloatingNotificationBanner(title: "Call Center Session has ended".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
-                            banner.show()
                         }
                     }
                 }

@@ -34,6 +34,7 @@ class QmeraVideoViewController: UIViewController {
     var isInisiator = true
 //    var isSpeaker = false
     var isMuted = false
+    var isCameraOff = false
     var isPresent = false
     var callFCM = true
     var isNavigationHidden = false
@@ -90,6 +91,7 @@ class QmeraVideoViewController: UIViewController {
     let buttonSpeaker = UIButton()
     let buttonRotate = UIButton()
     let buttonMuted = UIButton()
+    let buttonCameraOff = UIButton()
     var showStackViewToolbar = true
     let scrollRemoteView = UIScrollView()
     var isAutoAccept = false
@@ -698,6 +700,9 @@ class QmeraVideoViewController: UIViewController {
                 if self.buttonMuted.isDescendant(of: self.view) {
                     self.buttonMuted.removeFromSuperview()
                 }
+                if self.buttonCameraOff.isDescendant(of: self.view) {
+                    self.buttonCameraOff.removeFromSuperview()
+                }
                 if self.wbVC != nil{
                     self.wbVC!.close?()
                 }
@@ -769,6 +774,7 @@ class QmeraVideoViewController: UIViewController {
                 self.buttonChat.isHidden = false
                 self.poweredByView.isHidden = false
                 self.buttonMuted.isHidden = false
+                self.buttonCameraOff.isHidden = false
                 let connectDate = Date()
                 self.vcTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                     let format = Utils.callDurationFormatter.string(from: Date().timeIntervalSince(connectDate))
@@ -806,6 +812,9 @@ class QmeraVideoViewController: UIViewController {
         }
         if self.buttonMuted.isDescendant(of: self.view) {
             self.buttonMuted.removeFromSuperview()
+        }
+        if self.buttonCameraOff.isDescendant(of: self.view) {
+            self.buttonCameraOff.removeFromSuperview()
         }
         addBackgroundIncoming()
         addProfileNameCalling()
@@ -885,6 +894,7 @@ class QmeraVideoViewController: UIViewController {
                 self.buttonAddParticipant.isHidden = false
                 self.buttonRotate.isHidden = false
                 self.buttonMuted.isHidden = false
+                self.buttonCameraOff.isHidden = false
 //                if(!self.wbRoomId.isEmpty){
 //                    DispatchQueue.main.async {
 //                        self.wbTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(self.runTimer), userInfo: nil, repeats: true)
@@ -895,6 +905,7 @@ class QmeraVideoViewController: UIViewController {
         self.buttonDecline.isHidden = true
         self.buttonSpeaker.isHidden = true
         self.buttonMuted.isHidden = true
+        self.buttonCameraOff.isHidden = true
         self.buttonAddParticipant.isHidden = true
         self.buttonRotate.isHidden = true
         addChild(wbVC!)
@@ -963,6 +974,21 @@ class QmeraVideoViewController: UIViewController {
         buttonMuted.circle()
         buttonMuted.isHidden = true
         buttonMuted.addTarget(self, action: #selector(muted(sender:)), for: .touchUpInside)
+        
+//        view.addSubview(buttonCameraOff)
+//        buttonCameraOff.translatesAutoresizingMaskIntoConstraints = false
+//        buttonCameraOff.frame.size = CGSize(width: 70.0, height: 70.0)
+//        NSLayoutConstraint.activate([
+//            buttonCameraOff.widthAnchor.constraint(equalToConstant: 70.0),
+//            buttonCameraOff.heightAnchor.constraint(equalToConstant: 70.0),
+//        ])
+//        buttonCameraOff.backgroundColor = .secondaryColor
+//        buttonCameraOff.setImage(UIImage(systemName: "video", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+//        buttonCameraOff.tintColor = .mainColor
+//        buttonCameraOff.circle()
+//        buttonCameraOff.isHidden = true
+//        buttonCameraOff.addTarget(self, action: #selector(cameraOff(sender:)), for: .touchUpInside)
+        
         
         view.addSubview(buttonAddParticipant)
         buttonAddParticipant.translatesAutoresizingMaskIntoConstraints = false
@@ -1056,6 +1082,7 @@ class QmeraVideoViewController: UIViewController {
         stackViewToolbar2.addArrangedSubview(buttonChat)
         stackViewToolbar3.addArrangedSubview(buttonRotate)
         stackViewToolbar3.addArrangedSubview(buttonMuted)
+//        stackViewToolbar3.addArrangedSubview(buttonCameraOff)
 //        startFaceTimer()
     }
     
@@ -1232,6 +1259,22 @@ class QmeraVideoViewController: UIViewController {
         }
     }
     
+    @objc func cameraOff(sender: Any?) {
+        isCameraOff = !isCameraOff
+        API.mmc(int: 2, boolean: isCameraOff)
+        DispatchQueue.main.async {
+            if (self.isCameraOff) {
+                self.buttonCameraOff.backgroundColor = .lightGray
+                self.buttonCameraOff.tintColor = .mainColor
+                self.buttonCameraOff.setImage(UIImage(systemName: "video.slash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            } else {
+                self.buttonCameraOff.backgroundColor = .secondaryColor
+                self.buttonCameraOff.tintColor = .mainColor
+                self.buttonCameraOff.setImage(UIImage(systemName: "video", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            }
+        }
+    }
+    
     @objc func hideToolbar() {
         DispatchQueue.main.async {
             if self.showStackViewToolbar {
@@ -1367,16 +1410,16 @@ class QmeraVideoViewController: UIViewController {
                                 self.listRemoteViewFix[1].transform = CGAffineTransform.init(scaleX: 1.4, y: 1.3).rotated(by: (-CGFloat.pi)/2)
                             }
                         }
-                        let pictureImage = self.dataPerson[i]["picture"] ?? ""
+//                        let pictureImage = self.dataPerson[i]["picture"] ?? ""
                         let namePerson = self.dataPerson[i]["name"] ?? ""
-                        if (!pictureImage!.isEmpty) {
-                            self.listRemoteViewFix[i].setImage(name: pictureImage!)
-                            self.listRemoteViewFix[i].contentMode = .scaleAspectFill
-                        } else {
-                            self.listRemoteViewFix[i].image = UIImage(systemName: "person")
-                            self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
-                            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
-                        }
+//                        if (!pictureImage!.isEmpty) {
+//                            self.listRemoteViewFix[i].setImage(name: pictureImage!)
+//                            self.listRemoteViewFix[i].contentMode = .scaleAspectFill
+//                        } else {
+//                            self.listRemoteViewFix[i].image = UIImage(systemName: "person")
+//                            self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
+//                            self.listRemoteViewFix[i].contentMode = .scaleAspectFit
+//                        }
                         let labelName = UILabel()
                         self.containerLabelName[i].addSubview(labelName)
                         labelName.anchor(left: self.containerLabelName[i].leftAnchor, right: self.containerLabelName[i].rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: self.containerLabelName[i].centerXAnchor, centerY: self.containerLabelName[i].centerYAnchor)
@@ -1397,6 +1440,7 @@ class QmeraVideoViewController: UIViewController {
                             self.buttonAddParticipant.isHidden = false
                             self.buttonRotate.isHidden = false
                             self.buttonMuted.isHidden = false
+                            self.buttonCameraOff.isHidden = false
                         }
                     }
                 } else if self.dataPerson.count > 1 {
@@ -1529,6 +1573,9 @@ class QmeraVideoViewController: UIViewController {
                         if self.buttonMuted.isDescendant(of: self.view) {
                             self.buttonMuted.removeFromSuperview()
                         }
+                        if self.buttonCameraOff.isDescendant(of: self.view) {
+                            self.buttonCameraOff.removeFromSuperview()
+                        }
                         if self.wbVC != nil{
                             self.wbVC!.close?()
                         }
@@ -1576,6 +1623,9 @@ class QmeraVideoViewController: UIViewController {
                     if self.buttonMuted.isDescendant(of: self.view) {
                         self.buttonMuted.removeFromSuperview()
                     }
+                    if self.buttonCameraOff.isDescendant(of: self.view) {
+                        self.buttonCameraOff.removeFromSuperview()
+                    }
                     if self.wbVC != nil{
                         self.wbVC!.close?()
                     }
@@ -1612,24 +1662,12 @@ class QmeraVideoViewController: UIViewController {
                                 self.buttonRotate.isEnabled = true
                             }
                         } else {
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
-                                let iLoop = (self.listRemoteViewFix.count - 1) - (indexPerson! + 1)
-                                if iLoop >= 0 {
-                                    for i in 0...iLoop {
-                                        let viewAfterRemote = self.listRemoteViewFix[(indexPerson! + i) + 1]
-                                        let viewAfterName = self.containerLabelName[(indexPerson! + i) + 1]
-                                        viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
-                                        viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
-                                        UIView.animate(withDuration: 0.35, animations: {
-                                            self.scrollRemoteView.layoutIfNeeded()
-                                        })
-                                    }
-                                }
-                            }
+                            self.containerLabelName[indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
+                            self.containerLabelName[indexPerson!].removeFromSuperview()
+                            self.listRemoteViewFix[indexPerson!].removeFromSuperview()
+                            UIView.animate(withDuration: 0.35, animations: {
+                                self.scrollRemoteView.layoutIfNeeded()
+                            })
                         }
                         self.dataPerson.remove(at: indexPerson!)
                     }
@@ -1641,8 +1679,6 @@ class QmeraVideoViewController: UIViewController {
                     if self.dataPerson.count == 1 {
                         self.transformZoomAfterNewUserMore2 = false
                         self.rotateMyView = false
-//                        self.zoomView.transform   = CGAffineTransform.init(scaleX: 1.9, y: 2.0).rotated(by: (CGFloat.pi)/2)
-                        
                         if !self.users[0].isConnected {
                             self.resetViewToOutgoing()
                         }
@@ -1679,19 +1715,12 @@ class QmeraVideoViewController: UIViewController {
                                 self.buttonRotate.isEnabled = true
                             }
                         } else {
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
-                                let viewAfterRemote = self.listRemoteViewFix[indexPerson! + 1]
-                                let viewAfterName = self.containerLabelName[indexPerson! + 1]
-                                viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
-                                viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
-                                UIView.animate(withDuration: 0.35, animations: {
-                                    self.scrollRemoteView.layoutIfNeeded()
-                                })
-                            }
+                            self.containerLabelName[indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
+                            self.containerLabelName[indexPerson!].removeFromSuperview()
+                            self.listRemoteViewFix[indexPerson!].removeFromSuperview()
+                            UIView.animate(withDuration: 0.35, animations: {
+                                self.scrollRemoteView.layoutIfNeeded()
+                            })
                         }
                     }
                     if !onGoingCC.isEmpty {
@@ -1756,19 +1785,12 @@ class QmeraVideoViewController: UIViewController {
                                 self.buttonRotate.isEnabled = true
                             }
                         } else {
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            self.containerLabelName[indexPerson! + indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
-                            self.scrollRemoteView.subviews[indexPerson! + indexPerson!].removeFromSuperview()
-                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
-                                let viewAfterRemote = self.listRemoteViewFix[indexPerson! + 1]
-                                let viewAfterName = self.containerLabelName[indexPerson! + 1]
-                                viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
-                                viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
-                                UIView.animate(withDuration: 0.35, animations: {
-                                    self.scrollRemoteView.layoutIfNeeded()
-                                })
-                            }
+                            self.containerLabelName[indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
+                            self.containerLabelName[indexPerson!].removeFromSuperview()
+                            self.listRemoteViewFix[indexPerson!].removeFromSuperview()
+                            UIView.animate(withDuration: 0.35, animations: {
+                                self.scrollRemoteView.layoutIfNeeded()
+                            })
                         }
                     }
                     if !onGoingCC.isEmpty {
@@ -1821,16 +1843,16 @@ class QmeraVideoViewController: UIViewController {
                             self.containerLabelName[i].frame = CGRect(x: 0, y: 170 * i, width: 120, height: 30)
                             self.containerLabelName[i].backgroundColor = .orangeBNI.withAlphaComponent(0.5)
                             self.containerLabelName[i].makeRoundedView(radius: 8.0)
-                            let pictureImage = self.dataPerson[i]["picture"] ?? ""
+//                            let pictureImage = self.dataPerson[i]["picture"] ?? ""
                             let namePerson = self.dataPerson[i]["name"] ?? ""
-                            if (!pictureImage!.isEmpty) {
-                                self.listRemoteViewFix[i].setImage(name: pictureImage!)
-                                self.listRemoteViewFix[i].contentMode = .scaleAspectFill
-                            } else {
-                                self.listRemoteViewFix[i].image = UIImage(systemName: "person")
-                                self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
-                                self.listRemoteViewFix[i].contentMode = .scaleAspectFit
-                            }
+//                            if (!pictureImage!.isEmpty) {
+//                                self.listRemoteViewFix[i].setImage(name: pictureImage!)
+//                                self.listRemoteViewFix[i].contentMode = .scaleAspectFill
+//                            } else {
+//                                self.listRemoteViewFix[i].image = UIImage(systemName: "person")
+//                                self.listRemoteViewFix[i].backgroundColor = UIColor.systemGray6
+//                                self.listRemoteViewFix[i].contentMode = .scaleAspectFit
+//                            }
                             let labelName = UILabel()
                             self.containerLabelName[i].addSubview(labelName)
                             labelName.anchor(left: self.containerLabelName[i].leftAnchor, right: self.containerLabelName[i].rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: self.containerLabelName[i].centerXAnchor, centerY: self.containerLabelName[i].centerYAnchor)

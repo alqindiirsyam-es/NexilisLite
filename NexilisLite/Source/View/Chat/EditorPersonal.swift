@@ -1699,7 +1699,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         viewButton.isHidden = false
                         viewTextfield.isHidden = false
                     }
-                } else if (dataMessage.getCode() == CoreMessage_TMessageCode.INVITE_END_CONTACT_CENTER || dataMessage.getCode() == CoreMessage_TMessageCode.END_CALL_CENTER || dataMessage.getCode() == CoreMessage_TMessageCode.INVITE_EXIT_CONTACT_CENTER) && !fromVCAC {
+                } else if (dataMessage.getCode() == CoreMessage_TMessageCode.INVITE_END_CONTACT_CENTER || dataMessage.getCode() == CoreMessage_TMessageCode.END_CALL_CENTER || dataMessage.getCode() == CoreMessage_TMessageCode.INVITE_EXIT_CONTACT_CENTER  || dataMessage.getCode() == CoreMessage_TMessageCode.TIMEOUT_CONTACT_CENTER) && !fromVCAC {
                     let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
                     if onGoingCC.isEmpty || !isContactCenter {
                         return
@@ -1902,7 +1902,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             self.timeoutCC.invalidate()
                         } else if !fromVCAC {
                             if !self.showToast30s {
-                                self.view.makeToast("Please reply within 30 seconds so the call center session doesn't end.".localized(), duration: 3)
+                                self.view.makeToast("Please reply within 60 seconds so the call center session doesn't end.".localized(), duration: 3)
                                 sendTyping(l_pin: fPinContacCenter, isTyping: true)
                                 self.showToast30s = true
                             }
@@ -2876,10 +2876,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             message_scope_id = MessageScope.CHATROOM
             chat_id = complaintId
             if isAutoSendCC {
-                timeoutCC = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                timeoutCC = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: false, block: {_ in
                     let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
                     imageView.tintColor = .white
-                    let banner = FloatingNotificationBanner(title: "Customer doesn't respond in 30 second, so call center session will be ended automatically.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
+                    let banner = FloatingNotificationBanner(title: "Customer doesn't respond in 60 second, so call center session will be ended automatically.".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
                     banner.show()
                     self.endCallCenter()
                 })
@@ -6822,6 +6822,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 streamingNav.navigationBar.isTranslucent = false
                 navigationController?.present(streamingNav, animated: true, completion: nil)
             } else if attachmentFlag == "25" {
+                if !Nexilis.checkingAccess(key: "vconf_room") {
+                    if Nexilis.checkingAccessAlert(key: "vconf_room") != "|" && !Nexilis.checkingAccessAlert(key: "vconf_room").isEmpty {
+                        let title = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[0]
+                        let message = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[1]
+                        APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+                    } else {
+                        UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                    }
+                    return
+                }
                 let conferenceController = CreateSeminarViewController()
                 if let messageText = message["message_text"],
                    let messageText = messageText as? String,
@@ -7271,7 +7281,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
         }
         
-        let containerMessage = UIView()
+        var containerMessage = UIView()
+        if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+            containerMessage = SecureField().secureContainer!
+        }
         cell.contentView.addSubview(containerMessage)
         containerMessage.translatesAutoresizingMaskIntoConstraints = false
         

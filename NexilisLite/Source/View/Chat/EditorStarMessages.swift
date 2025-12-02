@@ -1921,6 +1921,48 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 streamingNav.navigationBar.titleTextAttributes = textAttributes
                 streamingNav.navigationBar.isTranslucent = false
                 navigationController?.present(streamingNav, animated: true, completion: nil)
+            } else if attachmentFlag == "25" {
+                if !Nexilis.checkingAccess(key: "vconf_room") {
+                    if Nexilis.checkingAccessAlert(key: "vconf_room") != "|" && !Nexilis.checkingAccessAlert(key: "vconf_room").isEmpty {
+                        let title = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[0]
+                        let message = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[1]
+                        APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
+                    } else {
+                        UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
+                    }
+                    return
+                }
+                let conferenceController = CreateSeminarViewController()
+                if let messageText = message["message_text"],
+                   let messageText = messageText as? String,
+                   var json = try! JSONSerialization.jsonObject(with: messageText.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                    if json["blog"] == nil {
+                        json["blog"] = message["blog"] ?? nil
+                    }
+                    if json["members"] == nil {
+                        json["members"] = message["members"] ?? nil
+                    }
+                    if json["by"] as? String != User.getMyPin() as String? {
+                        conferenceController.isJoin = true
+                    }
+                    let start = json["time"] as? Int64 ?? 0
+                    json["start"] = String(Date(milliseconds: start).format(dateFormat: "dd/MM/yyyy HH:mm"))
+                    conferenceController.data = json
+                }
+                let conferenceNav = CustomNavigationController(rootViewController: conferenceController)
+                conferenceNav.modalPresentationStyle = .custom
+                conferenceNav.navigationBar.tintColor = .white
+                conferenceNav.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                conferenceNav.navigationBar.isTranslucent = false
+                conferenceNav.navigationBar.overrideUserInterfaceStyle = .dark
+                conferenceNav.navigationBar.barStyle = .black
+                let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+                UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+                let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+                conferenceNav.navigationBar.titleTextAttributes = textAttributes
+                conferenceNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                conferenceNav.navigationBar.isTranslucent = false
+                navigationController?.present(conferenceNav, animated: true, completion: nil)
             }
         }
         if message[TypeDataMessage.message_scope_id] as? String == "3" {

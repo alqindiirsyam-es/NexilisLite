@@ -412,7 +412,7 @@ class IncomingThread {
             _ = Nexilis.responseString(packetId: packetId, message: "01")
         }
         ack(message: message)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: {
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             let channelCC: String = SecureUserDefaults.shared.value(forKey: "channelCC") ?? ""
             if onGoingCC.isEmpty || channelCC.isEmpty || (!onGoingCC.isEmpty && onGoingCC.components(separatedBy: ",").count < 3) {

@@ -1700,6 +1700,7 @@ public class APIS: NSObject {
     }
     
     private static func ccActionFromAPN(data: [String: Any], fromTapNotif: Bool = false) {
+        print("DATA CC: \(data)")
         let nxCode = data["nx_code"] as? String ?? ""
         let packetId = data[CoreMessage_TMessageKey.PACKET_ID] as? String ?? ""
         if nxCode == CoreMessage_TMessageCode.PUSH_CALL_CENTER {
@@ -1742,6 +1743,26 @@ public class APIS: NSObject {
                 let complainId = data[CoreMessage_TMessageKey.CALL_CENTER_ID] as? String ?? ""
                 Nexilis.viewFormCSInvited(pin: pin, channel: channel, id: complainId)
             }
+        } else if nxCode == CoreMessage_TMessageCode.PUSH_MEMBER_ROOM_CONTACT_CENTER && !fromTapNotif {
+            let dataM = data[CoreMessage_TMessageKey.DATA] as? String ?? ""
+            let message = TMessage()
+            message.mBodies[CoreMessage_TMessageKey.DATA] = dataM
+            message.mCode = nxCode
+            var dataMessage: [AnyHashable : Any] = [:]
+            dataMessage["message"] = message
+            NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil, userInfo: dataMessage)
+        } else if (nxCode == CoreMessage_TMessageCode.INVITE_END_CONTACT_CENTER || nxCode == CoreMessage_TMessageCode.END_CALL_CENTER || nxCode == CoreMessage_TMessageCode.INVITE_EXIT_CONTACT_CENTER) && !fromTapNotif {
+            let dataM = data[CoreMessage_TMessageKey.DATA] as? String ?? ""
+            let f_pin = data[CoreMessage_TMessageKey.F_PIN] as? String ?? ""
+            let l_pin = data[CoreMessage_TMessageKey.L_PIN] as? String ?? ""
+            let message = TMessage()
+            message.mBodies[CoreMessage_TMessageKey.DATA] = dataM
+            message.mBodies[CoreMessage_TMessageKey.F_PIN] = f_pin
+            message.mPIN = l_pin
+            message.mCode = nxCode
+            var dataMessage: [AnyHashable : Any] = [:]
+            dataMessage["message"] = message
+            NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil, userInfo: dataMessage)
         }
         if nxCode == CoreMessage_TMessageCode.PUSH_CALL_CENTER || nxCode == CoreMessage_TMessageCode.PUSH_SECOND_CONTACT_CENTER {
             DispatchQueue.global().async {

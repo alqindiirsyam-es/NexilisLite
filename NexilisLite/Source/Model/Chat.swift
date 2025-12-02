@@ -309,11 +309,15 @@ public class Chat: Model {
 //        })
 //    }
     
-    public static func getData(isImage: Bool = false, isDoc: Bool = false, isVideo: Bool = false, isGIF: Bool = false, isLink: Bool = false, isAudio: Bool = false, isArchived: Bool = false) -> [Chat] {
+    public static func getData(isImage: Bool = false, isDoc: Bool = false, isVideo: Bool = false, isGIF: Bool = false, isLink: Bool = false, isAudio: Bool = false, isArchived: Bool = false, withText: String = "") -> [Chat] {
         var chats: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 var lastQuery = ""
+                var text = withText
+                if text.contains("~"){
+                    text = withText.components(separatedBy: "~")[1].trimmingCharacters(in: .whitespaces)
+                }
                 if isImage {
                     lastQuery = "m.image_id IS NOT NULL AND m.image_id != ''"
                 } else if isDoc {
@@ -326,6 +330,9 @@ public class Chat: Model {
                     lastQuery = "m.message_text IS NOT NULL AND m.message_text != '' AND (m.message_text LIKE '%https://%' OR m.message_text LIKE '%www.%')"
                 } else if isAudio {
                     lastQuery = "m.audio_id IS NOT NULL AND m.audio_id != ''"
+                }
+                if !lastQuery.isEmpty && !text.isEmpty {
+                    lastQuery += "AND (m.message_text LIKE '%\(text)%' OR name LIKE '%\(text)%')"
                 }
                 var query = """
                             select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
@@ -345,16 +352,16 @@ public class Chat: Model {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {
 //                        if !lastQuery.isEmpty {
-//                            for columnIndex in 0..<cursorData.columnCount {
-//                                if let columnName = cursorData.columnName(for: columnIndex) {
-//                                    if let value = cursorData.object(forColumn: columnName) {
-//                                        print("\(columnName): \(value)")
-//                                    } else {
-//                                        print("\(columnName): nil")
-//                                    }
-//                                }
-//                            }
-//                            print("---------------------")
+                            for columnIndex in 0..<cursorData.columnCount {
+                                if let columnName = cursorData.columnName(for: columnIndex) {
+                                    if let value = cursorData.object(forColumn: columnName) {
+                                        print("\(columnName): \(value)")
+                                    } else {
+                                        print("\(columnName): nil")
+                                    }
+                                }
+                            }
+                            print("---------------------")
 //                        }
                         let chat = Chat(fpin: cursorData.string(forColumnIndex: 0) ?? "",
                                         pin: cursorData.string(forColumnIndex: 1) ?? "",
