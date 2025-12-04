@@ -51,53 +51,48 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     var listMentionWithText:[User] = []
     var listMentionInTextField:[User] = []
     
+    private let playPauseButton = UIButton(type: .system)
+    private var player: AVPlayer?
+    private var playerLayer: AVPlayerLayer?
+    private var isPlaying = false
+    private var thumbImageForVideo: UIImage!
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        if self.isMovingFromParent {
+            self.stopVideo()
+            NotificationCenter.default.removeObserver(self)
+        }
+    }
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         
         if (imageVideoData != nil) {
             if (imageVideoData![.mediaType] as! String == "public.movie") {
-                do {
-                    let asset = AVURLAsset(url: imageVideoData![.mediaURL] as! URL, options: nil)
+                if let url = imageVideoData![.mediaURL] as? URL {
+                    let asset = AVURLAsset(url: url, options: nil)
                     let imgGenerator = AVAssetImageGenerator(asset: asset)
                     imgGenerator.appliesPreferredTrackTransform = true
-                    let cgImage = try imgGenerator.copyCGImage(at: CMTimeMake(value: 0, timescale: 1), actualTime: nil)
-                    let thumbnail = UIImage(cgImage: cgImage)
-                    imagePreview.image = thumbnail
-                    let symbolPlay = UIImageView(image: UIImage(systemName: "play.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .bold, scale: .default)))
-                    imagePreview.addSubview(symbolPlay)
-                    symbolPlay.tintColor = .black.withAlphaComponent(0.5)
-                    symbolPlay.translatesAutoresizingMaskIntoConstraints = false
-                    symbolPlay.centerXAnchor.constraint(equalTo: imagePreview.centerXAnchor).isActive = true
-                    symbolPlay.centerYAnchor.constraint(equalTo: imagePreview.centerYAnchor).isActive = true
-                    let objectTap = ObjectGesture(target: self, action: #selector(previewImageVideoTapped(_:)))
-                    scrollViewImage.addGestureRecognizer(objectTap)
-                    objectTap.videoURL = imageVideoData![.mediaURL] as? NSURL
-                } catch let error {
-                    //print("*** Error generating thumbnail: \(error.localizedDescription)")
+                    if let cgImage = try? imgGenerator.copyCGImage(at: CMTimeMake(value: 0, timescale: 1), actualTime: nil) {
+                        let thumbnail = UIImage(cgImage: cgImage)
+                        thumbImageForVideo = thumbnail
+                    }
+                    configureVideo(url: url)
                 }
             } else {
                 imagePreview.image = imageVideoData![.originalImage] as? UIImage
             }
         } else {
             if urlVideoPhpPicker != nil {
-                do {
-                    let asset = AVURLAsset(url: urlVideoPhpPicker!, options: nil)
+                if let url = urlVideoPhpPicker {
+                    let asset = AVURLAsset(url: url, options: nil)
                     let imgGenerator = AVAssetImageGenerator(asset: asset)
                     imgGenerator.appliesPreferredTrackTransform = true
-                    let cgImage = try imgGenerator.copyCGImage(at: CMTimeMake(value: 0, timescale: 1), actualTime: nil)
-                    let thumbnail = UIImage(cgImage: cgImage)
-                    imagePreview.image = thumbnail
-                    let symbolPlay = UIImageView(image: UIImage(systemName: "play.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .bold, scale: .default)))
-                    imagePreview.addSubview(symbolPlay)
-                    symbolPlay.tintColor = .black.withAlphaComponent(0.5)
-                    symbolPlay.translatesAutoresizingMaskIntoConstraints = false
-                    symbolPlay.centerXAnchor.constraint(equalTo: imagePreview.centerXAnchor).isActive = true
-                    symbolPlay.centerYAnchor.constraint(equalTo: imagePreview.centerYAnchor).isActive = true
-                    let objectTap = ObjectGesture(target: self, action: #selector(previewImageVideoTapped(_:)))
-                    scrollViewImage.addGestureRecognizer(objectTap)
-                    objectTap.videoURL = urlVideoPhpPicker as? NSURL
-                } catch let error {
-                    print("*** Error generating thumbnail: \(error.localizedDescription)")
+                    if let cgImage = try? imgGenerator.copyCGImage(at: CMTimeMake(value: 0, timescale: 1), actualTime: nil) {
+                        let thumbnail = UIImage(cgImage: cgImage)
+                        thumbImageForVideo = thumbnail
+                    }
+                    configureVideo(url: url)
                 }
             } else if isGIF {
                 animatedImageView = SDAnimatedImageView()
@@ -110,12 +105,6 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             } else {
                 imagePreview.image = image
             }
-        }
-        
-        if ((imageVideoData != nil && imageVideoData![.mediaType] as! String == "public.image") || isHiddenTextField) {
-            scrollViewImage.maximumZoomScale = 4
-            scrollViewImage.minimumZoomScale = 1
-            scrollViewImage.delegate = self
         }
         
         if (isHiddenTextField) {
@@ -193,6 +182,60 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             self.heightTableMention.isActive = true
         }
         lastTextLength = textFieldSend.text.count
+    }
+    
+    private func configureVideo(url: URL) {
+        playPauseButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30)), for: .normal)
+        playPauseButton.tintColor = .gray
+        playPauseButton.backgroundColor = UIColor.white
+        playPauseButton.layer.cornerRadius = 35
+        playPauseButton.clipsToBounds = true
+        self.view.addSubview(playPauseButton)
+        playPauseButton.anchor(centerX: self.view.centerXAnchor, centerY: self.view.centerYAnchor, width: 70, height: 70)
+        playPauseButton.addTarget(self, action: #selector(playPauseTapped), for: .touchUpInside)
+        playPauseButton.isUserInteractionEnabled = true
+        
+        player = AVPlayer(url: url)
+        playerLayer = AVPlayerLayer(player: player)
+        playerLayer?.frame = imagePreview.bounds
+        playerLayer?.videoGravity = .resizeAspect
+        if let playerLayer = playerLayer {
+            imagePreview.layer.addSublayer(playerLayer)
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(videoDidEnd), name: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem)
+    }
+    
+    @objc private func playPauseTapped() {
+        guard let player = player else { return }
+        if !isPlaying {
+            player.play()
+            playPauseButton.isHidden = true
+            isPlaying.toggle()
+        }
+    }
+    
+    @objc private func videoDidEnd() {
+        guard let player = player else { return }
+        player.seek(to: .zero)
+        player.play()
+        isPlaying = true
+    }
+    
+    private func stopVideo() {
+        player?.pause()
+        player?.seek(to: .zero)
+        isPlaying = false
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        
+        scrollViewImage.minimumZoomScale = 1.0
+        scrollViewImage.maximumZoomScale = 4.0
+        scrollViewImage.zoomScale = 1.0
+        scrollViewImage.delegate = self
+
+        scrollViewDidZoom(scrollViewImage)
     }
     
     @objc func showChooserACKConfidential() {
@@ -572,45 +615,35 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         }
     }
     
-    @objc func previewImageVideoTapped(_ sender: ObjectGesture) {
-        let player = AVPlayer(url: sender.videoURL! as URL)
-        let playerVC = AVPlayerViewController()
-        playerVC.player = player
-        playerVC.modalPresentationStyle = .custom
-        self.present(playerVC, animated: true, completion: nil)
-    }
-    
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {
         return imagePreview
     }
     
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
-        if scrollViewImage.zoomScale > 1 {
-            if let image = imagePreview.image {
-                let ratioW = imagePreview.frame.width / image.size.width
-                let ratioH = imagePreview.frame.height / image.size.height
-                
-                let ratio = ratioW < ratioH ? ratioW : ratioH
-                let newWidth = image.size.width * ratio
-                let newHeight = image.size.height * ratio
-                
-                let conditionLeft = newWidth*scrollViewImage.zoomScale > imagePreview.frame.width
-                
-                let left = 0.5 * (conditionLeft ? newWidth - imagePreview.frame.width : (scrollViewImage.frame.width - scrollViewImage.contentSize.width))
-                
-                let conditionTop = newHeight*scrollViewImage.zoomScale > imagePreview.frame.height
-                
-                let top = 0.01 * (conditionTop ? newHeight - imagePreview.frame.width : (scrollViewImage.frame.height - scrollViewImage.contentSize.height))
-                
-                scrollViewImage.contentInset = UIEdgeInsets(top: top, left: left, bottom: top, right: left)
-            }
-        } else {
-            scrollViewImage.contentInset = .zero
-        }
+        let scrollViewSize = scrollView.bounds.size
+
+        let contentWidth  = scrollView.contentSize.width
+        let contentHeight = scrollView.contentSize.height
+
+        let verticalInset = max(0, (scrollViewSize.height - contentHeight) / 2)
+        let horizontalInset = max(0, (scrollViewSize.width - contentWidth) / 2)
+
+        scrollView.contentInset = UIEdgeInsets(
+            top: verticalInset,
+            left: horizontalInset,
+            bottom: verticalInset,
+            right: horizontalInset
+        )
     }
     
     @objc func dismissKeyboard() {
         textFieldSend.resignFirstResponder() // dismiss keyoard
+        guard let player = player else { return }
+        if isPlaying {
+            player.pause()
+            playPauseButton.isHidden = false
+            isPlaying.toggle()
+        }
     }
     
     @objc func keyboardWillShow(notification: NSNotification) {
@@ -780,7 +813,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                         }
                         var dataThumbVideo: Data?
                         if !fromCopy {
-                            dataThumbVideo = imagePreview.image!.jpegData(compressionQuality:  0.5)
+                            dataThumbVideo = thumbImageForVideo.jpegData(compressionQuality:  0.5)
                         }
                         let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
                         if !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {

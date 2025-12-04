@@ -115,6 +115,7 @@ class QmeraVideoViewController: UIViewController {
     private var vcTimer = Timer()
     private var containerTimerVC = UIView()
     private var labelTimerVC = UILabel()
+    private var timerTimeout = Timer()
     
     let poweredByLabel: UILabel = {
         let label = UILabel()
@@ -181,6 +182,7 @@ class QmeraVideoViewController: UIViewController {
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
+        self.timerTimeout.invalidate()
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -193,6 +195,7 @@ class QmeraVideoViewController: UIViewController {
             NotificationCenter.default.removeObserver(self)
         }
         Nexilis.floatingButton.isHidden = false
+        self.timerTimeout.invalidate()
     }
     
     private func backToDefaultAudioSession() {
@@ -483,9 +486,57 @@ class QmeraVideoViewController: UIViewController {
                             if response.isOk() {
                                 DispatchQueue.main.async {
                                     self.labelIncomingOutgoing.text = "Ringing".localized()
+                                    self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                        DispatchQueue.main.async {
+                                            if self.labelIncomingOutgoing.isDescendant(of: self.view) {
+                                                self.labelIncomingOutgoing.text = "The call was not answered".localized()
+                                            }
+                                            if self.buttonDecline.isDescendant(of: self.view) {
+                                                self.buttonDecline.removeFromSuperview()
+                                            }
+                                            if self.buttonAccept.isDescendant(of: self.view) {
+                                                self.buttonAccept.removeFromSuperview()
+                                            }
+                                            self.makeStateCall()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                                Nexilis.stopBusyCall()
+                                                self.endAllCall()
+                                                if self.isInisiator && !self.isPresent {
+                                                    self.navigationController?.popViewController(animated: true)
+                                                } else {
+                                                    self.dismiss(animated: true, completion: nil)
+                                                }
+                                            }
+                                        }
+                                    })
                                 }
                             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" && self.dataPerson.count > 0 {
                                 API.initiateCCall(sParty: self.dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
+                                DispatchQueue.main.async {
+                                    self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                        DispatchQueue.main.async {
+                                            if self.labelIncomingOutgoing.isDescendant(of: self.view) {
+                                                self.labelIncomingOutgoing.text = "The call was not answered".localized()
+                                            }
+                                            if self.buttonDecline.isDescendant(of: self.view) {
+                                                self.buttonDecline.removeFromSuperview()
+                                            }
+                                            if self.buttonAccept.isDescendant(of: self.view) {
+                                                self.buttonAccept.removeFromSuperview()
+                                            }
+                                            self.makeStateCall()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                                Nexilis.stopBusyCall()
+                                                self.endAllCall()
+                                                if self.isInisiator && !self.isPresent {
+                                                    self.navigationController?.popViewController(animated: true)
+                                                } else {
+                                                    self.dismiss(animated: true, completion: nil)
+                                                }
+                                            }
+                                        }
+                                    })
+                                }
                             } else {
                                 DispatchQueue.main.async {
                                     if self.labelIncomingOutgoing.isDescendant(of: self.view) {
@@ -508,6 +559,31 @@ class QmeraVideoViewController: UIViewController {
                     }
                 } else {
                     API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+                    DispatchQueue.main.async {
+                        self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                            DispatchQueue.main.async {
+                                if self.labelIncomingOutgoing.isDescendant(of: self.view) {
+                                    self.labelIncomingOutgoing.text = "The call was not answered".localized()
+                                }
+                                if self.buttonDecline.isDescendant(of: self.view) {
+                                    self.buttonDecline.removeFromSuperview()
+                                }
+                                if self.buttonAccept.isDescendant(of: self.view) {
+                                    self.buttonAccept.removeFromSuperview()
+                                }
+                                self.makeStateCall()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                    Nexilis.stopBusyCall()
+                                    self.endAllCall()
+                                    if self.isInisiator && !self.isPresent {
+                                        self.navigationController?.popViewController(animated: true)
+                                    } else {
+                                        self.dismiss(animated: true, completion: nil)
+                                    }
+                                }
+                            }
+                        })
+                    }
                 }
             } else {
                 backToDefaultAudioSession()
@@ -582,6 +658,33 @@ class QmeraVideoViewController: UIViewController {
                             labelIncomingOutgoing.text = "Ringing".localized()
                         }
                         API.initiateCCall(sParty: l_pin, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
+                        if !self.vcTimer.isValid {
+                            DispatchQueue.main.async {
+                                self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                    DispatchQueue.main.async {
+                                        if self.labelIncomingOutgoing.isDescendant(of: self.view) {
+                                            self.labelIncomingOutgoing.text = "The call was not answered".localized()
+                                        }
+                                        if self.buttonDecline.isDescendant(of: self.view) {
+                                            self.buttonDecline.removeFromSuperview()
+                                        }
+                                        if self.buttonAccept.isDescendant(of: self.view) {
+                                            self.buttonAccept.removeFromSuperview()
+                                        }
+                                        self.makeStateCall()
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                            Nexilis.stopBusyCall()
+                                            self.endAllCall()
+                                            if self.isInisiator && !self.isPresent {
+                                                self.navigationController?.popViewController(animated: true)
+                                            } else {
+                                                self.dismiss(animated: true, completion: nil)
+                                            }
+                                        }
+                                    }
+                                })
+                            }
+                        }
                     }
                 }
             }
@@ -727,6 +830,7 @@ class QmeraVideoViewController: UIViewController {
     }
     
     @objc func didTapAcceptCallButton() {
+        self.timerTimeout.invalidate()
         if !isInisiator{
             let goAudioCall = Nexilis.checkMicPermission()
             let goVideoCall = Nexilis.checkCameraPermission()
@@ -1381,6 +1485,7 @@ class QmeraVideoViewController: UIViewController {
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
             DispatchQueue.main.async {
+                self.timerTimeout.invalidate()
                 Nexilis.stopRingbacktoneCall()
             }
             let channel = arrayMessage[3]
@@ -1665,9 +1770,20 @@ class QmeraVideoViewController: UIViewController {
                             self.containerLabelName[indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
                             self.containerLabelName[indexPerson!].removeFromSuperview()
                             self.listRemoteViewFix[indexPerson!].removeFromSuperview()
-                            UIView.animate(withDuration: 0.35, animations: {
-                                self.scrollRemoteView.layoutIfNeeded()
-                            })
+                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
+                                let iLoop = (self.listRemoteViewFix.count - 1) - (indexPerson! + 1)
+                                if iLoop >= 0 {
+                                    for i in 0...iLoop {
+                                        let viewAfterRemote = self.listRemoteViewFix[(indexPerson! + i) + 1]
+                                        let viewAfterName = self.containerLabelName[(indexPerson! + i) + 1]
+                                        viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
+                                        viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
+                                        UIView.animate(withDuration: 0.35, animations: {
+                                            self.scrollRemoteView.layoutIfNeeded()
+                                        })
+                                    }
+                                }
+                            }
                         }
                         self.dataPerson.remove(at: indexPerson!)
                     }
@@ -1718,9 +1834,20 @@ class QmeraVideoViewController: UIViewController {
                             self.containerLabelName[indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
                             self.containerLabelName[indexPerson!].removeFromSuperview()
                             self.listRemoteViewFix[indexPerson!].removeFromSuperview()
-                            UIView.animate(withDuration: 0.35, animations: {
-                                self.scrollRemoteView.layoutIfNeeded()
-                            })
+                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
+                                let iLoop = (self.listRemoteViewFix.count - 1) - (indexPerson! + 1)
+                                if iLoop >= 0 {
+                                    for i in 0...iLoop {
+                                        let viewAfterRemote = self.listRemoteViewFix[(indexPerson! + i) + 1]
+                                        let viewAfterName = self.containerLabelName[(indexPerson! + i) + 1]
+                                        viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
+                                        viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
+                                        UIView.animate(withDuration: 0.35, animations: {
+                                            self.scrollRemoteView.layoutIfNeeded()
+                                        })
+                                    }
+                                }
+                            }
                         }
                     }
                     if !onGoingCC.isEmpty {
@@ -1788,9 +1915,20 @@ class QmeraVideoViewController: UIViewController {
                             self.containerLabelName[indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
                             self.containerLabelName[indexPerson!].removeFromSuperview()
                             self.listRemoteViewFix[indexPerson!].removeFromSuperview()
-                            UIView.animate(withDuration: 0.35, animations: {
-                                self.scrollRemoteView.layoutIfNeeded()
-                            })
+                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
+                                let iLoop = (self.listRemoteViewFix.count - 1) - (indexPerson! + 1)
+                                if iLoop >= 0 {
+                                    for i in 0...iLoop {
+                                        let viewAfterRemote = self.listRemoteViewFix[(indexPerson! + i) + 1]
+                                        let viewAfterName = self.containerLabelName[(indexPerson! + i) + 1]
+                                        viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
+                                        viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
+                                        UIView.animate(withDuration: 0.35, animations: {
+                                            self.scrollRemoteView.layoutIfNeeded()
+                                        })
+                                    }
+                                }
+                            }
                         }
                     }
                     if !onGoingCC.isEmpty {

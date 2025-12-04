@@ -3669,6 +3669,11 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         }
         isVideoPlaying.toggle()
     }
+    
+    func stopVideo() {
+        player?.pause()
+        player?.seek(to: .zero)
+    }
 
     @objc private func toggleNavigationBar() {
         guard let navController = navigationController else { return }
@@ -3701,6 +3706,10 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             if isSecure {
                 self.privacyOverlay.isHidden = true
             }
+            if isVideoPlaying {
+                player?.pause()
+                playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+            }
 
         case .ended, .cancelled:
             let distance = hypot(translation.x, translation.y)
@@ -3708,11 +3717,17 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
 
             if distance > threshold || abs(velocity.y) > 500 || abs(velocity.x) > 500 {
                 // Dismiss if far enough or fast swipe
+                self.stopVideo()
+                NotificationCenter.default.removeObserver(self)
                 dismiss(animated: true, completion: nil)
             } else {
                 // Return to center if not far enough
                 if isSecure {
                     self.privacyOverlay.isHidden = false
+                }
+                if isVideoPlaying {
+                    isVideoPlaying = false
+                    togglePlayPause()
                 }
                 UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0.8, options: [], animations: {
                     self.scrollView.transform = .identity

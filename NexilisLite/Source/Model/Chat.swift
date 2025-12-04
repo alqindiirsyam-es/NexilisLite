@@ -139,11 +139,15 @@ public class Chat: Model {
         return ""
     }
     
-    public static func getCountSearchMessage(key: String, pin: String, chatId:String = "", isPersonal: Bool) -> Int {
+    public static func getCountSearchMessage(key: String, pin: String, chatId:String = "", isPersonal: Bool, isCC: Int = 0) -> Int {
         var query = ""
         var count = 0
         if isPersonal {
-            query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and (l_pin = '\(pin)' or f_pin = '\(pin)')"
+            if isCC == 1 {
+                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and call_center_id = '\(pin)'"
+            } else {
+                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and (l_pin = '\(pin)' or f_pin = '\(pin)')"
+            }
         } else {
             query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and l_pin = '\(pin)' and chat_id = '\(chatId)'"
         }
@@ -211,9 +215,8 @@ public class Chat: Model {
                                    m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
-                            join BUDDY b on m.l_pin = b.f_pin
-                            where m.is_call_center = 0
-                              and m.message_id = '\(message_id)'
+                            join BUDDY b on (m.l_pin = b.f_pin OR m.f_pin = b.f_pin)
+                            where m.message_id = '\(message_id)'
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
@@ -222,7 +225,6 @@ public class Chat: Model {
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             where m.l_pin = '-999'
-                              and m.is_call_center = 0
                               and m.message_id = '\(message_id)'
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
@@ -232,7 +234,6 @@ public class Chat: Model {
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             where m.l_pin = '-997'
-                              and m.is_call_center = 0
                               and m.message_id = '\(message_id)'
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
@@ -243,8 +244,7 @@ public class Chat: Model {
                                    g.group_id, g.f_name as group_name, m.is_bot
                             from MESSAGE m
                             join GROUPZ g on m.l_pin = g.group_id
-                            where m.is_call_center = 0
-                              and m.message_id = '\(message_id)'
+                            where m.message_id = '\(message_id)'
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
@@ -254,8 +254,7 @@ public class Chat: Model {
                             from MESSAGE m
                             join DISCUSSION_FORUM d on m.l_pin = d.chat_id
                             join GROUPZ g on d.group_id = g.group_id
-                            where m.is_call_center = 0
-                              and m.message_id = '\(message_id)'
+                            where m.message_id = '\(message_id)'
 
                             order by 6 desc
                             """
@@ -352,16 +351,16 @@ public class Chat: Model {
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {
 //                        if !lastQuery.isEmpty {
-                            for columnIndex in 0..<cursorData.columnCount {
-                                if let columnName = cursorData.columnName(for: columnIndex) {
-                                    if let value = cursorData.object(forColumn: columnName) {
-                                        print("\(columnName): \(value)")
-                                    } else {
-                                        print("\(columnName): nil")
-                                    }
-                                }
-                            }
-                            print("---------------------")
+//                            for columnIndex in 0..<cursorData.columnCount {
+//                                if let columnName = cursorData.columnName(for: columnIndex) {
+//                                    if let value = cursorData.object(forColumn: columnName) {
+//                                        print("\(columnName): \(value)")
+//                                    } else {
+//                                        print("\(columnName): nil")
+//                                    }
+//                                }
+//                            }
+//                            print("---------------------")
 //                        }
                         let chat = Chat(fpin: cursorData.string(forColumnIndex: 0) ?? "",
                                         pin: cursorData.string(forColumnIndex: 1) ?? "",

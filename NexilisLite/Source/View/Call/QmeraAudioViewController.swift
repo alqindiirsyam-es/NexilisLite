@@ -88,6 +88,8 @@ class QmeraAudioViewController: UIViewController {
     
     private var firstCall: Bool = true
     
+    private var timerTimeout = Timer()
+    
 //    private var isSpeaker: Bool = false
     
     private var isMuted: Bool = false
@@ -311,6 +313,7 @@ class QmeraAudioViewController: UIViewController {
         NotificationCenter.default.removeObserver(self)
         UIDevice.current.isProximityMonitoringEnabled = false
         Nexilis.floatingButton.isHidden = false
+        self.timerTimeout.invalidate()
     }
     
     deinit {
@@ -318,6 +321,7 @@ class QmeraAudioViewController: UIViewController {
         Nexilis.floatingButton.isHidden = false
         NotificationCenter.default.removeObserver(self)
         AVAudioSession.sharedInstance().removeObserver(self, forKeyPath: "outputVolume")
+        self.timerTimeout.invalidate()
     }
     
     func showCallBanner() {
@@ -401,12 +405,39 @@ class QmeraAudioViewController: UIViewController {
                             if response.isOk() {
                                 DispatchQueue.main.async {
                                     self.status.text = "Ringing".localized() + "..."
+                                    self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                        DispatchQueue.main.async {
+                                            let longCall =  "0"
+                                            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                                            self.status.text = "The call was not answered"
+                                            self.end.isEnabled = false
+                                            Nexilis.stopRingbacktoneCall()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                                self.didEnd(sender: false)
+                                            }
+                                        }
+                                    })
                                 }
                             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
                                 API.initiateCCall(sParty: u.pin)
+                                DispatchQueue.main.async {
+                                    self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                        DispatchQueue.main.async {
+                                            let longCall =  "0"
+                                            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                                            self.status.text = "The call was not answered"
+                                            self.end.isEnabled = false
+                                            Nexilis.stopRingbacktoneCall()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                                self.didEnd(sender: false)
+                                            }
+                                        }
+                                    })
+                                }
                             } else {
                                 DispatchQueue.main.async {
                                     Nexilis.stopRingbacktoneCall()
+                                    self.timerTimeout.invalidate()
                                 }
                                 DispatchQueue.main.async {
                                     let longCall =  "0"
@@ -433,6 +464,20 @@ class QmeraAudioViewController: UIViewController {
                     }
                 } else {
                     API.initiateCCall(sParty: u.pin)
+                    DispatchQueue.main.async {
+                        self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                            DispatchQueue.main.async {
+                                let longCall =  "0"
+                                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                                self.status.text = "The call was not answered"
+                                self.end.isEnabled = false
+                                Nexilis.stopRingbacktoneCall()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                    self.didEnd(sender: false)
+                                }
+                            }
+                        })
+                    }
                 }
             } else if !ticketId.isEmpty {
                 if isOutgoing {
@@ -481,11 +526,31 @@ class QmeraAudioViewController: UIViewController {
                 if let f_pin = data["f_pin"] as? String {
                     if f_pin == User.getMyPin()!  {
                         API.initiateCCall(sParty: l_pin)
+                        if self.timer == nil {
+                            DispatchQueue.main.async {
+                                self.status.text = "Ringing".localized() + "..."
+                            }
+                            DispatchQueue.main.async {
+                                self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                    DispatchQueue.main.async {
+                                        let longCall =  "0"
+                                        Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                                        self.status.text = "The call was not answered"
+                                        self.end.isEnabled = false
+                                        Nexilis.stopRingbacktoneCall()
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                            self.didEnd(sender: false)
+                                        }
+                                    }
+                                })
+                            }
+                        }
                     }
                 }
             } else if data["call_cancel"] != nil {
                 DispatchQueue.main.async {
                     Nexilis.stopRingbacktoneCall()
+                    self.timerTimeout.invalidate()
                 }
                 DispatchQueue.main.async {
                     let longCall =  "0"
@@ -1140,6 +1205,7 @@ class QmeraAudioViewController: UIViewController {
             } else if state == Nexilis.AUDIO_CALL_OFFHOOK || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_OFFHOOK) {
                 DispatchQueue.main.async {
                     Nexilis.stopRingbacktoneCall()
+                    self.timerTimeout.invalidate()
                 }
                 if users.count == 1 && firstCall {
                     DispatchQueue.main.async {

@@ -1323,9 +1323,20 @@ class VideoConferenceViewController: UIViewController {
                             self.containerLabelName[indexPerson!].subviews.forEach({ $0.removeFromSuperview() })
                             self.containerLabelName[indexPerson!].removeFromSuperview()
                             self.listRemoteViewFix[indexPerson!].removeFromSuperview()
-                            UIView.animate(withDuration: 0.35, animations: {
-                                self.scrollRemoteView.layoutIfNeeded()
-                            })
+                            if indexPerson! + 1 <= self.listRemoteViewFix.count {
+                                let iLoop = (self.listRemoteViewFix.count - 1) - (indexPerson! + 1)
+                                if iLoop >= 0 {
+                                    for i in 0...iLoop {
+                                        let viewAfterRemote = self.listRemoteViewFix[(indexPerson! + i) + 1]
+                                        let viewAfterName = self.containerLabelName[(indexPerson! + i) + 1]
+                                        viewAfterRemote.frame.origin.y = viewAfterRemote.frame.origin.y - 170
+                                        viewAfterName.frame.origin.y = viewAfterName.frame.origin.y - 170
+                                        UIView.animate(withDuration: 0.35, animations: {
+                                            self.scrollRemoteView.layoutIfNeeded()
+                                        })
+                                    }
+                                }
+                            }
                         }
                         self.dataPerson.remove(at: indexPerson!)
                     }

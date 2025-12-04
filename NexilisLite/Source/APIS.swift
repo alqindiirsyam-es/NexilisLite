@@ -1700,7 +1700,6 @@ public class APIS: NSObject {
     }
     
     private static func ccActionFromAPN(data: [String: Any], fromTapNotif: Bool = false) {
-        print("DATA CC: \(data)")
         let nxCode = data["nx_code"] as? String ?? ""
         let packetId = data[CoreMessage_TMessageKey.PACKET_ID] as? String ?? ""
         if nxCode == CoreMessage_TMessageCode.PUSH_CALL_CENTER {

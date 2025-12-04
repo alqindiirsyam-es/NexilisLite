@@ -1172,9 +1172,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned, is_bot FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0 order by server_date asc LIMIT -1 OFFSET \(offset)"
         if isContactCenter {
             if complaintId.isEmpty {
-                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc LIMIT -1 OFFSET \(offset)"
+                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned, is_bot FROM MESSAGE where (f_pin='\(dataPerson["f_pin"]!!)' or l_pin='\(dataPerson["f_pin"]!!)') AND message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 order by server_date asc LIMIT -1 OFFSET \(offset)"
             } else {
-                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 AND call_center_id = '\(complaintId)' order by server_date asc LIMIT -1 OFFSET \(offset)"
+                query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned, is_bot FROM MESSAGE where message_scope_id = '\(MessageScope.CHATROOM)' AND broadcast_flag = 0 AND is_call_center = 1 AND call_center_id = '\(complaintId)' order by server_date asc LIMIT -1 OFFSET \(offset)"
             }
             if isRequestContactCenter && !isDirectCC {
                 viewButton.isHidden = true
@@ -7870,10 +7870,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 ], range: range)
             }
 
-            DispatchQueue.main.async {
-                messageText.attributedText = finalAttributed
-                messageText.delegate = self
-            }
+            messageText.attributedText = finalAttributed
+            messageText.delegate = self
         }
         
         if dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String == MessageScope.CALL || dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String == MessageScope.MISSED_CALL{
@@ -7960,7 +7958,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             containerMessage.isUserInteractionEnabled = true
         }
         
-        if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.CALL && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.MISSED_CALL {
+        if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.CALL && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.MISSED_CALL && dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String != "11" {
             messageText.attributedText = messageRequestFriend != nil ? messageRequestFriend.richText(isSearching: true, textSearch: textSearch) : stringLS.isEmpty ? textChat.richText(isSearching: true, textSearch: textSearch) : stringLS.richText(isSearching: true, textSearch: textSearch)
         }
         
@@ -8845,7 +8843,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     }
                 } else {
                     if isContactCenter {
-                        let user: [User] = users.filter({$0.pin == chatGroup[0].fpin})
+                        let user: [User] = users.filter({$0.pin == f_pin})
                         titleReply.text = user.first!.fullName
                     } else {
                         if chatGroup[0].messageScope != MessageScope.GROUP {
@@ -10387,7 +10385,7 @@ extension EditorPersonal: UISearchBarDelegate {
             timerSearch = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {[self] _ in
                 textSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
                 titleSearchMatches.isHidden = true
-                countMatchesSearch = Chat.getCountSearchMessage(key: textSearch, pin: unique_l_pin, isPersonal: true)
+                countMatchesSearch = Chat.getCountSearchMessage(key: textSearch, pin: isContactCenter ? complaintId : unique_l_pin , isPersonal: true, isCC: isContactCenter ? 1 : 0)
                 tableChatView.reloadData()
                 scrollToFirstSearchMessage()
             })

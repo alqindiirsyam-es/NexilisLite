@@ -6157,10 +6157,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 ], range: range)
             }
 
-            DispatchQueue.main.async {
-                messageText.attributedText = finalAttributed
-                messageText.delegate = self
-            }
+            messageText.attributedText = finalAttributed
+            messageText.delegate = self
         }
         
         if !copySession && !forwardSession && !deleteSession && !summarizeSession && !isHistoryCC && !removed {
@@ -6169,7 +6167,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerMessage.isUserInteractionEnabled = true
         }
         
-        if isSearching && textSearch.count > 1 {
+        if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String != "11" {
             messageText.attributedText = textChat.richText(isSearching: true, textSearch: textSearch, group_id: self.dataGroup["group_id"]  as? String ?? "")
         }
         
