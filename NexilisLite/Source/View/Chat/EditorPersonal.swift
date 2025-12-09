@@ -162,6 +162,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     var tableMentionEdit = UITableView()
     var heightTableEditMention: NSLayoutConstraint!
+    private weak var lastContextMenuView: UIView?
+    private var lastContextMenuInteraction: UIContextMenuInteraction?
     
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
@@ -2055,6 +2057,22 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
     }
     
+    func closeContextMenuIfNeeded() {
+        DispatchQueue.main.async {
+            guard let view = self.lastContextMenuView else { return }
+
+            // If we have the original interaction instance, remove it.
+            if let interaction = self.lastContextMenuInteraction {
+                view.removeInteraction(interaction)
+            } else {
+                // Fallback: remove all UIContextMenuInteraction instances from view
+                view.interactions
+                    .compactMap({ $0 as? UIContextMenuInteraction })
+                    .forEach({ view.removeInteraction($0) })
+            }
+        }
+    }
+    
     @objc func onFailedSendMessage(notification: NSNotification) {
         DispatchQueue.main.async {
             let data:[AnyHashable : Any] = notification.userInfo!
@@ -2147,6 +2165,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func updateStatusDelete(idx: Int?, chatData: [String: String]) {
+        self.closeContextMenuIfNeeded()
         do {
             if self.dataMessages[idx!]["lock"] != nil && self.dataMessages[idx!]["lock"]  as? String ?? "" == "1" {
                 return
@@ -4162,9 +4181,9 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
         }
     }
     
-    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, viewController: UIViewController, specFile: String) {
+    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, file_id: String, viewController: UIViewController, specFile: String) {
         specFileString = specFile
-        sendChat(message_text: message_text, attachment_flag: attachment_flag, image_id: image_id, video_id: video_id, thumb_id: thumb_id, viewController: viewController, gif_id : gif_id)
+        sendChat(message_text: message_text, attachment_flag: attachment_flag, image_id: image_id, video_id: video_id, file_id: file_id, thumb_id: thumb_id, viewController: viewController, gif_id : gif_id)
     }
 }
 
@@ -4172,42 +4191,80 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
 extension EditorPersonal: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPreviewControllerDataSource {
     public func didSelectDocument(document: Any?) {
         if (document != nil) {
-            self.previewItem = (document as! [URL])[0] as NSURL
-            specFileString = ""
-            let previewController = QLPreviewController()
-            previewController.dataSource = self
-            let vcHandleFile = UIViewController()
-            let nc = UINavigationController(rootViewController: vcHandleFile)
-            let attributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
-            let navBarAppearance = UINavigationBarAppearance()
-            nc.defaultStyle()
-            nc.modalPresentationStyle = .pageSheet
-            navBarAppearance.configureWithOpaqueBackground()
-            navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
-            navBarAppearance.titleTextAttributes = attributes
-            nc.navigationBar.standardAppearance = navBarAppearance
-            nc.navigationBar.scrollEdgeAppearance = navBarAppearance
-            let backButton = navigationQLPreviewDocument(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancelDocumentPreview))
-            vcHandleFile.navigationItem.leftBarButtonItem = backButton
-            let sendButton = navigationQLPreviewDocument(title: "Send".localized(), style: .done, target: self, action: #selector(sendDocument))
-            buttonSpec.setImage(UIImage(named: "pb_ic_attach_spc_off", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal).resize(target: CGSize(width: 30, height: 30)), for: .normal)
-            buttonSpec.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
-            buttonSpec.addTarget(self, action: #selector(showConfigurationFile), for: .touchUpInside)
-            let barButtonItemSpec = UIBarButtonItem(customView: buttonSpec)
-            vcHandleFile.navigationItem.rightBarButtonItems = [sendButton, barButtonItemSpec]
-            backButton.navigation = nc
-            sendButton.navigation = nc
-            if let viewVc = vcHandleFile.view {
-                vcHandleFile.title = self.previewItem?.lastPathComponent
-                vcHandleFile.addChild(previewController)
-                previewController.dataSource = self
-                previewController.view.frame = CGRect(x: 0, y: 0, width: viewVc.bounds.size.width, height: viewVc.bounds.size.height)
-                previewController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                viewVc.addSubview(previewController.view)
-                previewController.didMove(toParent: vcHandleFile)
+            let urlFile = (document as! [URL])[0] as URL
+            DispatchQueue.global().async {
+                if Nexilis.checkingAccess(key: "content_inspection") {
+                    print("Scan Doc")
+                    DispatchQueue.main.async {
+                        Nexilis.showLoader(text: "Scanning File...".localized())
+                    }
+                    let result = urlFile.validateFile()
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader {
+                            if result == 1 {
+                                sendIt()
+                            } else {
+                                APIS.showWarningFile(type: result)
+                            }
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        sendIt()
+                    }
+                }
                 
-                self.present(nc, animated: true)
+                func sendIt() {
+                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                    if (self.textFieldSend.textColor != .lightGray) {
+                        previewImageVC.currentTextTextField = self.textFieldSend.text
+                    }
+                    previewImageVC.modalPresentationStyle = .custom
+                    previewImageVC.isDoc = true
+                    previewImageVC.urlDoc = urlFile
+                    previewImageVC.delegate = self
+                    previewImageVC.isAck = self.isAck
+                    previewImageVC.isConfidential = self.isConfidential
+                    previewImageVC.isCC = self.isContactCenter
+                    self.present(previewImageVC, animated: true, completion: nil)
+                }
             }
+//            self.previewItem = (document as! [URL])[0] as NSURL
+//            specFileString = ""
+//            let previewController = QLPreviewController()
+//            previewController.dataSource = self
+//            let vcHandleFile = UIViewController()
+//            let nc = UINavigationController(rootViewController: vcHandleFile)
+//            let attributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
+//            let navBarAppearance = UINavigationBarAppearance()
+//            nc.defaultStyle()
+//            nc.modalPresentationStyle = .pageSheet
+//            navBarAppearance.configureWithOpaqueBackground()
+//            navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : UIColor.mainColor
+//            navBarAppearance.titleTextAttributes = attributes
+//            nc.navigationBar.standardAppearance = navBarAppearance
+//            nc.navigationBar.scrollEdgeAppearance = navBarAppearance
+//            let backButton = navigationQLPreviewDocument(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancelDocumentPreview))
+//            vcHandleFile.navigationItem.leftBarButtonItem = backButton
+//            let sendButton = navigationQLPreviewDocument(title: "Send".localized(), style: .done, target: self, action: #selector(sendDocument))
+//            buttonSpec.setImage(UIImage(named: "pb_ic_attach_spc_off", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal).resize(target: CGSize(width: 30, height: 30)), for: .normal)
+//            buttonSpec.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
+//            buttonSpec.addTarget(self, action: #selector(showConfigurationFile), for: .touchUpInside)
+//            let barButtonItemSpec = UIBarButtonItem(customView: buttonSpec)
+//            vcHandleFile.navigationItem.rightBarButtonItems = [sendButton, barButtonItemSpec]
+//            backButton.navigation = nc
+//            sendButton.navigation = nc
+//            if let viewVc = vcHandleFile.view {
+//                vcHandleFile.title = self.previewItem?.lastPathComponent
+//                vcHandleFile.addChild(previewController)
+//                previewController.dataSource = self
+//                previewController.view.frame = CGRect(x: 0, y: 0, width: viewVc.bounds.size.width, height: viewVc.bounds.size.height)
+//                previewController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+//                viewVc.addSubview(previewController.view)
+//                previewController.didMove(toParent: vcHandleFile)
+//                
+//                self.present(nc, animated: true)
+//            }
         }
     }
     
@@ -5081,10 +5138,17 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
 //EUC
 extension EditorPersonal: UIContextMenuInteractionDelegate {
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willEndFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
+        lastContextMenuView = nil
+        lastContextMenuInteraction = nil
         if showMenuContext {
             showMenuContext = false
             interaction.view!.removeInteraction(interaction)
         }
+    }
+    
+    public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willDisplayMenuFor configuration: UIContextMenuConfiguration, animator: (any UIContextMenuInteractionAnimating)?) {
+        lastContextMenuView = interaction.view
+        lastContextMenuInteraction = interaction
     }
     
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {

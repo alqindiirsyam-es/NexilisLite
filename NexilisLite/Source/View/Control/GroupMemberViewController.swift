@@ -140,9 +140,9 @@ class GroupMemberViewController: UITableViewController {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     var r: [User] = []
-                    var query =  "SELECT f_pin, first_name, last_name, image_id, user_type FROM BUDDY where f_pin not in (select m.f_pin from GROUPZ_MEMBER m where m.group_id = '\(self.group.id)') and official_account = '0' order by 2 collate nocase asc"
+                    var query =  "SELECT f_pin, first_name, last_name, image_id, user_type, official_account FROM BUDDY where f_pin not in (select m.f_pin from GROUPZ_MEMBER m where m.group_id = '\(self.group.id)') and official_account <> '1' order by 2 collate nocase asc"
                     if self.isContactCenterInvite {
-                        query =  "SELECT f_pin, first_name, last_name, image_id, user_type FROM BUDDY where f_pin not in (select m.f_pin from GROUPZ_MEMBER m where m.group_id = '\(self.group.id)') and user_type = '23' and official_account = '0' order by 2 collate nocase asc"
+                        query =  "SELECT f_pin, first_name, last_name, image_id, user_type, official_account FROM BUDDY where f_pin not in (select m.f_pin from GROUPZ_MEMBER m where m.group_id = '\(self.group.id)') and user_type = '23' and official_account = '0' order by 2 collate nocase asc"
                     }
                     if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                         while cursorData.next() {
@@ -151,6 +151,7 @@ class GroupMemberViewController: UITableViewController {
                                                 lastName: cursorData.string(forColumnIndex: 2) ?? "",
                                                 thumb: cursorData.string(forColumnIndex: 3) ?? "")
                             user.userType = cursorData.string(forColumnIndex: 4)
+                            user.official = cursorData.string(forColumnIndex: 5)
                             if (user.firstName + " " + user.lastName).trimmingCharacters(in: .whitespaces) == "USR\(user.pin)" {
                                 continue
                             }
@@ -223,7 +224,9 @@ class GroupMemberViewController: UITableViewController {
                 content.imageProperties.tintColor = .mainColor
             }
         }
-        if user.userType == "23" {
+        if User.isVerified(official_account: user.official ?? "") {
+            content.attributedText = self.set(image: UIImage(named: "ic_verified", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(user.fullName)", size: 15, y: -4, colorText: UIColor.verifiedColor)
+        } else if user.userType == "23" {
             content.attributedText = self.set(image: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: " " + (user.firstName + " " + user.lastName).trimmingCharacters(in: .whitespaces), size: 15, y: -4)
         } else if user.userType == "24" {
             content.attributedText = self.set(image: UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: " " + (user.firstName + " " + user.lastName).trimmingCharacters(in: .whitespaces), size: 15, y: -4)

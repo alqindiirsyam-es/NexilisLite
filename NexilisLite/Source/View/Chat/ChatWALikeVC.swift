@@ -467,8 +467,14 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     public func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let data: Chat
         if isFiltering {
+            if fillteredData.count == 0 {
+                return nil
+            }
             data = fillteredData[indexPath.row] as! Chat
         } else {
+            if chats.count == 0 {
+                return nil
+            }
             data = chats[indexPath.row]
         }
         if !data.isParent {

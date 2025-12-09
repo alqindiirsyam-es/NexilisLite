@@ -477,7 +477,7 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                     let notif = LibAlertController(title: nil, message: message, preferredStyle: .actionSheet)
                     notif.addAction(UIAlertAction(title: "Remove".localized(), style: .destructive, handler: { notifAction in
                         self.removeTopic(chatId: topic.chatId) { result in
-                            if result, let index = g.topics.firstIndex(of: topic) {
+                            if result, let index = self.group?.topics.firstIndex(of: topic) {
                                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                                     do {
                                         _ = Database.shared.deleteRecord(fmdb: fmdb, table: "DISCUSSION_FORUM", _where: "chat_id = '\(topic.chatId)'")
@@ -618,7 +618,7 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                         let notif = LibAlertController(title: nil, message: message, preferredStyle: .actionSheet)
                         notif.addAction(UIAlertAction(title: "Remove".localized(), style: .destructive, handler: { notifAction in
                             self.exitGroup(pin: member.pin) { result in
-                                if result, let index = g.members.firstIndex(of: member) {
+                                if result, let index = self.group?.members.firstIndex(of: member) {
                                     DispatchQueue.main.async {
                                         g.members.remove(at: index)
                                         tableView.deleteRows(at: [indexPath], with: .right)
@@ -667,14 +667,17 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
         case .exit:
             if let g = group {
                 let idMe = User.getMyPin() as String?
-                let admins = g.members.filter { member in
-                    return member.position == "1"
-                }
+//                let admins = g.members.filter { member in
+//                    return member.position == "1"
+//                }
                 var isDeleted = false
-                if admins.count == 1 {
-                    if admins.first?.pin == idMe {
-                        isDeleted = true
-                    }
+//                if admins.count == 1 {
+//                    if admins.first?.pin == idMe {
+//                        isDeleted = true
+//                    }
+//                }
+                if g.by == idMe {
+                    isDeleted = true
                 }
                 let message: String
                 if isDeleted {
@@ -1014,14 +1017,17 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
             let cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifier", for: indexPath)
             if let g = group {
                 let idMe = User.getMyPin() as String?
-                let admins = g.members.filter { member in
-                    return member.position == "1"
-                }
+//                let admins = g.members.filter { member in
+//                    return member.position == "1"
+//                }
                 var isDeleted = false
-                if admins.count == 1 {
-                    if admins.first?.pin == idMe {
-                        isDeleted = true
-                    }
+//                if admins.count == 1 {
+//                    if admins.first?.pin == idMe {
+//                        isDeleted = true
+//                    }
+//                }
+                if g.by == idMe {
+                    isDeleted = true
                 }
                 cell.accessoryView = nil
                 cell.accessoryType = .none

@@ -18,7 +18,7 @@ class QmeraStreamingViewController: UIViewController {
     
     var isLive: Bool = false
     
-    static private var isSpeakerPhone: Bool = false
+    static private var isSpeakerPhone: Bool = true
     
     static private var lastVolume: Float = AVAudioSession.sharedInstance().outputVolume
     
@@ -175,7 +175,7 @@ class QmeraStreamingViewController: UIViewController {
         let button = UIButton()
         button.translatesAutoresizingMaskIntoConstraints = false
         button.backgroundColor = .white.withAlphaComponent(0.2)
-        button.setImage(UIImage(systemName: "speaker.slash"), for: .normal)
+        button.setImage(UIImage(systemName: "speaker.wave.2.fill"), for: .normal)
         button.tintColor = .white
         button.layer.cornerRadius = 20
         button.clipsToBounds = true

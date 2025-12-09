@@ -9,12 +9,21 @@ import UIKit
 import AVKit
 import AVFoundation
 import SDWebImage
+import QuickLook
 
 protocol PreviewAttachmentImageVideoDelegate : NSObjectProtocol {
-    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, viewController: UIViewController, specFile: String)
+    func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, file_id: String, viewController: UIViewController, specFile: String)
 }
 
-class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITextViewDelegate {
+class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITextViewDelegate, QLPreviewControllerDataSource {
+    func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+        return 1
+    }
+    
+    func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem {
+        return urlDoc! as QLPreviewItem
+    }
+    
     @IBOutlet var imagePreview: UIImageView!
     @IBOutlet var buttonSend: UIButton!
     @IBOutlet var textFieldSend: UITextView!
@@ -43,6 +52,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     var isGIF = false
     var tableViewConfigFile: UITableView!
     var specFileString = ""
+    var isDoc = false
+    var urlDoc: URL?
+    let previewController = QLPreviewController()
     
     var lastPositionCursorMention = 0
     var lastTextLength = 0
@@ -67,7 +79,14 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        if (imageVideoData != nil) {
+        if isDoc {
+            self.addChild(previewController)
+            previewController.dataSource = self
+            previewController.view.frame = CGRect(x: 0, y: 55, width: imagePreview.bounds.width, height: imagePreview.bounds.height - 125)
+            previewController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            scrollViewImage.addSubview(previewController.view)
+            previewController.didMove(toParent: self)
+        } else if (imageVideoData != nil) {
             if (imageVideoData![.mediaType] as! String == "public.movie") {
                 if let url = imageVideoData![.mediaURL] as? URL {
                     let asset = AVURLAsset(url: url, options: nil)
@@ -230,29 +249,39 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         
-        scrollViewImage.minimumZoomScale = 1.0
-        scrollViewImage.maximumZoomScale = 4.0
-        scrollViewImage.zoomScale = 1.0
-        scrollViewImage.delegate = self
+        if !isDoc {
+            scrollViewImage.minimumZoomScale = 1.0
+            scrollViewImage.maximumZoomScale = 4.0
+            scrollViewImage.zoomScale = 1.0
+            scrollViewImage.delegate = self
 
-        scrollViewDidZoom(scrollViewImage)
+            scrollViewDidZoom(scrollViewImage)
+        }
     }
     
     @objc func showChooserACKConfidential() {
+        var isCC = false
         let alertController = LibAlertController(title: "Message Mode".localized(), message: "Select".localized() + " " + "Message Mode".localized(), preferredStyle: .actionSheet)
-        let imageConfidential = resizeImage(image: UIImage(named: "confidential_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
-        let confidentialAction = UIAlertAction(title: "Confidential Message".localized(), style: .default, handler: { (UIAlertAction) in
-            if !self.isConfidential {
-                self.isConfidential = true
-                self.buttonAckConfidential.setImage(imageConfidential, for: .normal)
-            }
-            if self.isAck {
-                self.isAck = false
-            }
-            self.setPreviousVariableMessageMode()
-        })
-        confidentialAction.setValue(imageConfidential, forKey: "image")
-        alertController.addAction(confidentialAction)
+        let vc = delegate
+        if vc is EditorPersonal {
+            let editorVc = vc as! EditorPersonal
+            isCC = editorVc.isContactCenter
+        }
+        if !isCC {
+            let imageConfidential = resizeImage(image: UIImage(named: "confidential_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
+            let confidentialAction = UIAlertAction(title: "Confidential Message".localized(), style: .default, handler: { (UIAlertAction) in
+                if !self.isConfidential {
+                    self.isConfidential = true
+                    self.buttonAckConfidential.setImage(imageConfidential, for: .normal)
+                }
+                if self.isAck {
+                    self.isAck = false
+                }
+                self.setPreviousVariableMessageMode()
+            })
+            confidentialAction.setValue(imageConfidential, forKey: "image")
+            alertController.addAction(confidentialAction)
+        }
         let imageAck = resizeImage(image: UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
         let ackAction = UIAlertAction(title: "Confirmation Message".localized(), style: .default, handler: { (UIAlertAction) in
             if !self.isAck {
@@ -671,7 +700,72 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     }
     
     @objc func sendTapped() {
-        if (image != nil) || (imageVideoData != nil && imageVideoData![.mediaType] as! String == "public.image") {
+        if isDoc {
+            DispatchQueue.global().async { [self] in
+                guard let previewItem = self.urlDoc else { return }
+                guard var dataFile = try? Data(contentsOf: previewItem as URL) else { return }
+                func sanitizeFile(mimeType: String, sanitizeAction: (Data) -> MessageGuardLite.Result) -> Data? {
+                    DispatchQueue.main.async {
+                        Nexilis.showLoader(text: "Sanitizing your \(mimeType.contains("pdf") ? "pdf file" : "image") (Message Guard)".localized())
+                    }
+                    let res = sanitizeAction(dataFile)
+                    defer {
+                        DispatchQueue.main.async { Nexilis.hideLoader {} }
+                    }
+
+                    if res.verdict == .block {
+                        DispatchQueue.main.async {
+                            Nexilis.hideLoader {
+                                APIS.showMessageGuardFile(mime: res.mime)
+                            }
+                        }
+                        return nil
+                    }
+                    return res.data ?? Data()
+                }
+                func processIt(with data: Data) {
+                    guard let urlFile = self.urlDoc?.absoluteString else { return }
+                    let originalFileName = (urlFile as NSString).lastPathComponent.removingPercentEncoding ?? "file"
+                    let renamedNameFile = "Nexilis_\(Date().currentTimeMillis())_\(originalFileName)"
+
+                    let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                    let fileURL = documentsDirectory.appendingPathComponent(renamedNameFile)
+
+                    if !FileManager.default.fileExists(atPath: fileURL.path) {
+                        try? data.write(to: fileURL)
+                    }
+
+                    DispatchQueue.main.async {
+                        self.dismiss(animated: true, completion: nil)
+                        if (self.textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && self.textFieldSend.textColor == UIColor.lightGray) {
+                            self.delegate!.sendChatFromPreviewImage(message_text: "\(originalFileName)|", attachment_flag: "6", image_id: "", video_id: "", thumb_id: "", gif_id: "", file_id: renamedNameFile, viewController: self, specFile: self.specFileString)
+                        } else {
+                            self.delegate!.sendChatFromPreviewImage(message_text: "\(originalFileName)|\(self.textFieldSend.text!)", attachment_flag: "6", image_id: "", video_id: "", thumb_id: "", gif_id: "",  file_id: renamedNameFile, viewController: self, specFile: self.specFileString)
+                        }
+                    }
+                }
+                if Nexilis.checkingAccess(key: "message_guard") {
+                    DispatchQueue.global().async {
+                        let guardLite = MessageGuardLite(limits: .defaults())
+                        let mimeType = MessageGuardLite.sniffMime(dataFile)
+
+                        if mimeType == "image/png" || mimeType == "image/jpeg" {
+                            if let sanitized = sanitizeFile(mimeType: mimeType, sanitizeAction: guardLite.sanitizeImage) {
+                                dataFile = sanitized
+                            } else { return }
+                        } else if mimeType == "application/pdf" {
+                            if let sanitized = sanitizeFile(mimeType: mimeType, sanitizeAction: guardLite.sanitizePdf) {
+                                dataFile = sanitized
+                            } else { return }
+                        }
+
+                        processIt(with: dataFile)
+                    }
+                } else {
+                    processIt(with: dataFile)
+                }
+            }
+        } else if (image != nil) || (imageVideoData != nil && imageVideoData![.mediaType] as! String == "public.image") {
             Nexilis.showLoader()
             DispatchQueue.global().async { [self] in
                 var originalImageName = ""
@@ -733,9 +827,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                     Nexilis.hideLoader { [self] in
                         self.dismiss(animated: true, completion: nil)
                         if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
-                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self, specFile: specFileString)
+                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", file_id: "", viewController: self, specFile: specFileString)
                         } else {
-                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", viewController: self, specFile: specFileString)
+                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", file_id: "", viewController: self, specFile: specFileString)
                         }
                     }
                 }
@@ -836,9 +930,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                         }
                         self.dismiss(animated: true, completion: nil)
                         if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray) {
-                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self, specFile: specFileString)
+                            delegate!.sendChatFromPreviewImage(message_text: "", attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", file_id: "", viewController: self, specFile: specFileString)
                         } else {
-                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", viewController: self, specFile: specFileString)
+                            delegate!.sendChatFromPreviewImage(message_text: textFieldSend.text!, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: dataGIF != nil ? renamedVideoName : "", file_id: "", viewController: self, specFile: specFileString)
                         }
                     }
                 }

@@ -438,6 +438,9 @@ public class ArchivedChatView: UIViewController, UITableViewDataSource, UITableV
     }
     
     public func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        if archivedChats.count == 0 {
+            return nil
+        }
         let data = archivedChats[indexPath.row]
         if !data.isParent {
             let archiveAction = UIContextualAction(style: .normal, title: "Unarchive".localized()) { (_, _, completionHandler) in

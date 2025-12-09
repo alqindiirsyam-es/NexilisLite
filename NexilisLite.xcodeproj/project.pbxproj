@@ -218,6 +218,7 @@
 		CD46A0BA2A0CE320009E4C87 /* sticker_20000000_0.png in Resources */ = {isa = PBXBuildFile; fileRef = CD46A0152A0CE2DE009E4C87 /* sticker_20000000_0.png */; };
 		CD46A0BB2A0CE320009E4C87 /* sticker_10000000_8.png in Resources */ = {isa = PBXBuildFile; fileRef = CD46A0162A0CE2DE009E4C87 /* sticker_10000000_8.png */; };
 		CD46A0C52A0D0D5D009E4C87 /* MyArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD46A0C42A0D0D5D009E4C87 /* MyArchive.swift */; };
+		CD56DF582EE291EF00F35DC1 /* TFAPasswordVC.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD56DF572EE291EF00F35DC1 /* TFAPasswordVC.swift */; };
 		CD5A73AE2A77642D000541A5 /* MessageInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD5A73AC2A77642D000541A5 /* MessageInfo.swift */; };
 		CD5A73AF2A77642D000541A5 /* ListGroupImages.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD5A73AD2A77642D000541A5 /* ListGroupImages.swift */; };
 		CD6312592DA925260088964E /* CallLogVC.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD6312582DA925260088964E /* CallLogVC.swift */; };
@@ -513,6 +514,7 @@
 		CD46A01A2A0CE2DE009E4C87 /* Palio.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; path = Palio.storyboard; sourceTree = "<group>"; };
 		CD46A0BE2A0CE4FD009E4C87 /* NexilisLite.podspec */ = {isa = PBXFileReference; lastKnownFileType = text; path = NexilisLite.podspec; sourceTree = SOURCE_ROOT; xcLanguageSpecificationIdentifier = xcode.lang.ruby; };
 		CD46A0C42A0D0D5D009E4C87 /* MyArchive.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MyArchive.swift; sourceTree = "<group>"; };
+		CD56DF572EE291EF00F35DC1 /* TFAPasswordVC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TFAPasswordVC.swift; sourceTree = "<group>"; };
 		CD5A73AC2A77642D000541A5 /* MessageInfo.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MessageInfo.swift; sourceTree = "<group>"; };
 		CD5A73AD2A77642D000541A5 /* ListGroupImages.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ListGroupImages.swift; sourceTree = "<group>"; };
 		CD6312582DA925260088964E /* CallLogVC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLogVC.swift; sourceTree = "<group>"; };
@@ -843,6 +845,7 @@
 				CD1E71992A0BA86100BF871F /* SettingTableViewController.swift */,
 				CD21CA582E0AA0A200DA6B77 /* SignInOption.swift */,
 				CD1E71902A0BA86100BF871F /* SignUpSignIn.swift */,
+				CD56DF572EE291EF00F35DC1 /* TFAPasswordVC.swift */,
 				CD962CFC2E420B5300A7BDA5 /* TOTPGenerator.swift */,
 				CD1E719F2A0BA86100BF871F /* TypeViewController.swift */,
 				CD1E71A02A0BA86100BF871F /* VerifyEmail.swift */,
@@ -1419,6 +1422,7 @@
 				CD1E724D2A0BA86100BF871F /* TypeViewController.swift in Sources */,
 				CD1E720E2A0BA86100BF871F /* Network.swift in Sources */,
 				CD1E723C2A0BA86100BF871F /* HistoryBroadcastViewController.swift in Sources */,
+				CD56DF582EE291EF00F35DC1 /* TFAPasswordVC.swift in Sources */,
 				CD1E72112A0BA86100BF871F /* WhiteboardReceiver.swift in Sources */,
 				CD1E725F2A0BA86100BF871F /* CoreMessage_TMessageBank.swift in Sources */,
 				CD1E72222A0BA86100BF871F /* FormEditor.swift in Sources */,

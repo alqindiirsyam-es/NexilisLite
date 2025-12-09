@@ -81,6 +81,14 @@ class VideoConferenceViewController: UIViewController {
         image.isHidden = true
         return image
     }()
+    var mutedCamera: UIImageView = {
+        let image = UIImageView(frame: CGRect(x: 0, y: 0, width: 30, height: 40))
+        image.contentMode = .scaleAspectFit
+        image.image = UIImage(systemName: "mic.slash")
+        image.tintColor = .red
+        image.isHidden = true
+        return image
+    }()
     let buttonDecline = UIButton()
     let buttonAccept = UIButton()
     let zoomView = UIImageView()
@@ -96,6 +104,7 @@ class VideoConferenceViewController: UIViewController {
     let buttonWB = UIButton()
     let buttonChat = UIButton()
     var wbVC : WhiteboardViewController?
+    let buttonAddParticipant = UIButton()
     let buttonSpeaker = UIButton()
     let buttonRotate = UIButton()
     let buttonMuted = UIButton()
@@ -325,9 +334,11 @@ class VideoConferenceViewController: UIViewController {
         backToDefaultAudioSession()
         addZoomView()
         addCameraView()
+        addImageMuteOnCamera()
         addListRemoteView()
         addToolbar()
         addTimerVC()
+        addImageMutedOnZoom()
         if isInisiator && !isCalled {
             addWaitingForOthersView()
             initiateConfRoom()
@@ -413,6 +424,11 @@ class VideoConferenceViewController: UIViewController {
         containerTimerVC.isHidden = true
     }
     
+    func addImageMutedOnZoom() {
+        view.addSubview(mutedZoom)
+        mutedZoom.anchor(top: containerTimerVC.bottomAnchor, paddingTop: 10, centerX: view.centerXAnchor, width: 30, height: 40)
+    }
+    
     func addZoomView() {
         view.addSubview(zoomView)
         zoomView.translatesAutoresizingMaskIntoConstraints = false
@@ -439,6 +455,11 @@ class VideoConferenceViewController: UIViewController {
         ])
         cameraView.backgroundColor = .secondaryColor
         cameraView.makeRoundedView(radius: 8)
+    }
+    
+    func addImageMuteOnCamera() {
+        view.addSubview(mutedCamera)
+        mutedCamera.anchor(centerX: cameraView.centerXAnchor, centerY: cameraView.centerYAnchor, width: 30, height: 40)
     }
     
     func addListRemoteView() {
@@ -587,6 +608,9 @@ class VideoConferenceViewController: UIViewController {
             if self.buttonRotate.isDescendant(of: self.view) {
                 self.buttonRotate.removeFromSuperview()
             }
+            if self.buttonAddParticipant.isDescendant(of: self.view) {
+                self.buttonAddParticipant.removeFromSuperview()
+            }
             if self.buttonMuted.isDescendant(of: self.view) {
                 self.buttonMuted.removeFromSuperview()
             }
@@ -648,6 +672,9 @@ class VideoConferenceViewController: UIViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 self.containerTimerVC.isHidden = false
                 self.buttonRotate.isHidden = false
+                if self.isInisiator {
+                    self.buttonAddParticipant.isHidden = false
+                }
                 self.buttonSpeaker.isHidden = false
                 self.poweredByView.isHidden = false
                 self.buttonMuted.isHidden = false
@@ -733,6 +760,7 @@ class VideoConferenceViewController: UIViewController {
                 self.buttonDecline.isHidden = false
                 self.buttonSpeaker.isHidden = false
                 self.buttonRotate.isHidden = false
+                self.buttonAddParticipant.isHidden = false
                 self.buttonZoom.isHidden = false
 //                if(!self.wbRoomId.isEmpty){
 //                    DispatchQueue.main.async {
@@ -744,6 +772,7 @@ class VideoConferenceViewController: UIViewController {
         self.buttonDecline.isHidden = true
         self.buttonSpeaker.isHidden = true
         self.buttonRotate.isHidden = true
+        self.buttonAddParticipant.isHidden = true
         self.buttonZoom.isHidden = true
         addChild(wbVC!)
         wbVC!.view.translatesAutoresizingMaskIntoConstraints = false
@@ -810,6 +839,22 @@ class VideoConferenceViewController: UIViewController {
         buttonMuted.circle()
         buttonMuted.isHidden = true
         buttonMuted.addTarget(self, action: #selector(muted(sender:)), for: .touchUpInside)
+        
+        if self.isInisiator {
+            view.addSubview(buttonAddParticipant)
+            buttonAddParticipant.translatesAutoresizingMaskIntoConstraints = false
+            buttonAddParticipant.frame.size = CGSize(width: 70.0, height: 70.0)
+            NSLayoutConstraint.activate([
+                buttonAddParticipant.widthAnchor.constraint(equalToConstant: 70.0),
+                buttonAddParticipant.heightAnchor.constraint(equalToConstant: 70.0)
+            ])
+            buttonAddParticipant.backgroundColor = .secondaryColor
+            buttonAddParticipant.setImage(UIImage(systemName: "person.badge.plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+            buttonAddParticipant.tintColor = .mainColor
+            buttonAddParticipant.circle()
+            buttonAddParticipant.isHidden = true
+            buttonAddParticipant.addTarget(self, action: #selector(didTapAddParticipantButton(sender:)), for: .touchUpInside)
+        }
         
 //        view.addSubview(buttonCameraOff)
 //        buttonCameraOff.translatesAutoresizingMaskIntoConstraints = false
@@ -880,6 +925,9 @@ class VideoConferenceViewController: UIViewController {
         poweredByView.addArrangedSubview(nexilisLogo)
         poweredByView.isHidden = true
         
+        if self.isInisiator {
+            stackViewToolbar.addArrangedSubview(buttonAddParticipant)
+        }
         stackViewToolbar.addArrangedSubview(buttonDecline)
         stackViewToolbar.addArrangedSubview(buttonSpeaker)
         stackViewToolbar3.addArrangedSubview(buttonRotate)
@@ -891,6 +939,7 @@ class VideoConferenceViewController: UIViewController {
         isMuted = !isMuted
         API.mmc(int: 1, boolean: isMuted)
         DispatchQueue.main.async {
+            self.mutedCamera.isHidden = !self.mutedCamera.isHidden
             if (self.isMuted) {
                 self.buttonMuted.backgroundColor = .lightGray
                 self.buttonMuted.tintColor = .mainColor
@@ -984,19 +1033,11 @@ class VideoConferenceViewController: UIViewController {
             contactViewController.isAddParticipantVideo = true
             contactViewController.connectedCall = dataPerson
             contactViewController.isDismiss = { data in
-                let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-                if !onGoingCC.isEmpty {
-                    DispatchQueue.global().async {
-                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: data["f_pin"]!!, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "2"))
-                    }
-                    DispatchQueue.main.async {
-                        self.isAddCall = data["f_pin"]!!
-                    }
-                } else {
-                    DispatchQueue.main.async {
-                        self.dataPerson.append(data)
-                        _ = Nexilis.write(message: CoreMessage_TMessageBank.inviteVCallConference(f_pin: data["f_pin"]!!, blog_id: self.roomId))
-                    }
+                DispatchQueue.global().async {
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.inviteVCallConference(f_pin: data["f_pin"]!!, blog_id: self.roomId))
+                }
+                DispatchQueue.main.async {
+                    self.view.makeToast("Invitation has been sent to \(data["name"]!!)".localized(), duration: 3)
                 }
             }
             present(CustomNavigationController(rootViewController: contactViewController), animated: true, completion: nil)
@@ -1171,6 +1212,7 @@ class VideoConferenceViewController: UIViewController {
                             self.buttonDecline.isHidden = false
                             self.buttonSpeaker.isHidden = false
                             self.buttonRotate.isHidden = false
+                            self.buttonAddParticipant.isHidden = false
                             self.buttonMuted.isHidden = false
                             self.buttonCameraOff.isHidden = false
                         }
@@ -1284,6 +1326,9 @@ class VideoConferenceViewController: UIViewController {
                     }
                     if self.buttonRotate.isDescendant(of: self.view) {
                         self.buttonRotate.removeFromSuperview()
+                    }
+                    if self.buttonAddParticipant.isDescendant(of: self.view) {
+                        self.buttonAddParticipant.removeFromSuperview()
                     }
                     if self.buttonMuted.isDescendant(of: self.view) {
                         self.buttonMuted.removeFromSuperview()

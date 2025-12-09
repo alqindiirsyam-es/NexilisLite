@@ -68,6 +68,14 @@ class QmeraVideoViewController: UIViewController {
         image.isHidden = true
         return image
     }()
+    var mutedCamera: UIImageView = {
+        let image = UIImageView(frame: CGRect(x: 0, y: 0, width: 30, height: 40))
+        image.contentMode = .scaleAspectFit
+        image.image = UIImage(systemName: "mic.slash")
+        image.tintColor = .red
+        image.isHidden = true
+        return image
+    }()
     let myImage = UIImageView()
     let name = UILabel()
     let profileImage = UIImageView()
@@ -232,6 +240,7 @@ class QmeraVideoViewController: UIViewController {
         
         addZoomView()
         addCameraView()
+        addImageMuteOnCamera()
         addListRemoteView()
         addBackgroundIncoming()
         addProfileNameCalling()
@@ -377,6 +386,11 @@ class QmeraVideoViewController: UIViewController {
         ])
         cameraView.backgroundColor = .secondaryColor
         cameraView.makeRoundedView(radius: 8)
+    }
+    
+    func addImageMuteOnCamera() {
+        view.addSubview(mutedCamera)
+        mutedCamera.anchor(centerX: cameraView.centerXAnchor, centerY: cameraView.centerYAnchor, width: 30, height: 40)
     }
     
     func addListRemoteView() {
@@ -1351,6 +1365,7 @@ class QmeraVideoViewController: UIViewController {
         isMuted = !isMuted
         API.mmc(int: 1, boolean: isMuted)
         DispatchQueue.main.async {
+            self.mutedCamera.isHidden = !self.mutedCamera.isHidden
             if (self.isMuted) {
                 self.buttonMuted.backgroundColor = .lightGray
                 self.buttonMuted.tintColor = .mainColor

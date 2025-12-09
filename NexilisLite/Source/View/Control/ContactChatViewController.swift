@@ -44,7 +44,7 @@ class ContactChatViewController: UITableViewController {
         return searchController.searchBar.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     
-    var isFilltering: Bool {
+    var isFiltering: Bool {
         return !isSearchBarEmpty
     }
     
@@ -731,7 +731,7 @@ extension ContactChatViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         func selectOnContact() {
             let data: User
-            if isFilltering {
+            if isFiltering {
                 data = fillteredData[indexPath.row] as! User
             } else {
                 data = contacts[indexPath.row]
@@ -767,7 +767,7 @@ extension ContactChatViewController {
             switch segment.selectedSegmentIndex {
             case 0:
                 let data: Chat
-                if isFilltering {
+                if isFiltering {
                     data = fillteredData[indexPath.row] as! Chat
                 } else {
                     data = chats[indexPath.row]
@@ -847,7 +847,7 @@ extension ContactChatViewController {
     
     func expandCollapseChats(tableView: UITableView, indexPath: IndexPath) {
         let data: Chat
-        if isFilltering {
+        if isFiltering {
             data = fillteredData[indexPath.row] as! Chat
         } else {
             data = chats[indexPath.row]
@@ -857,7 +857,7 @@ extension ContactChatViewController {
             if let dataSubChats = self.chatGroupMaps[data.groupId] {
                 for dataSubChat in dataSubChats {
                     if var indexParent = chats.firstIndex(where: { $0.isParent && $0.groupId == data.groupId }) {
-                        if isFilltering {
+                        if isFiltering {
                             fillteredData.insert(dataSubChat, at: indexParent + 1)
                             indexParent+=1
                         } else {
@@ -870,7 +870,7 @@ extension ContactChatViewController {
                 }
             }
         } else {
-            if isFilltering {
+            if isFiltering {
                 if var changedFillteredData = fillteredData as? [Chat] {
                     changedFillteredData.removeAll(where: { $0.isParent == false && $0.groupId == data.groupId })
                     self.fillteredData = changedFillteredData
@@ -884,7 +884,7 @@ extension ContactChatViewController {
     
     func expandCollapseGroup(tableView: UITableView, indexPath: IndexPath) {
         let group: Group
-        if isFilltering {
+        if isFiltering {
             if indexPath.row == 0 {
                 group = fillteredData[indexPath.section] as! Group
             } else {
@@ -909,7 +909,7 @@ extension ContactChatViewController {
                 var loooop = true
                 repeat {
                     let c = sect + 1
-                    if isFilltering {
+                    if isFiltering {
                         if let o = self.fillteredData[c] as? Group {
                             if o.parent == id {
                                 sects = sects + 1
@@ -938,7 +938,7 @@ extension ContactChatViewController {
                 } while(loooop)
             }
             for i in stride(from: sects, to: 0, by: -1){
-                if isFilltering {
+                if isFiltering {
                     self.fillteredData.remove(at: indexPath.section + i)
                 }
                 else {
@@ -997,7 +997,7 @@ extension ContactChatViewController {
             } else {
                 getGroups(id: group.id) { g in
                     DispatchQueue.main.async {
-                        if self.isFilltering {
+                        if self.isFiltering {
                             if self.fillteredData[indexPath.section] is Group {
                                 self.groupMap[(self.fillteredData[indexPath.section] as! Group).id] = 1
                                 self.fillteredData.insert(contentsOf: g, at: indexPath.section + 1)
@@ -1074,7 +1074,7 @@ extension ContactChatViewController {
 extension ContactChatViewController {
     
     override func numberOfSections(in tableView: UITableView) -> Int {
-        if isFilltering {
+        if isFiltering {
             if ((segment.numberOfSegments == 3 && segment.selectedSegmentIndex == 2) || (segment.numberOfSegments < 3 && segment.selectedSegmentIndex == 1)) {
                 return fillteredData.count
             }
@@ -1089,7 +1089,7 @@ extension ContactChatViewController {
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         var value = 0
-        if isFilltering {
+        if isFiltering {
             func filterGroup(groups: [Group]) {
                 let group = groups[section]
                 if group.isSelected {
@@ -1167,9 +1167,15 @@ extension ContactChatViewController {
             return nil
         }
         let data: Chat
-        if isFilltering {
+        if isFiltering {
+            if fillteredData.count == 0 {
+                return nil
+            }
             data = fillteredData[indexPath.row] as! Chat
         } else {
+            if chats.count == 0 {
+                return nil
+            }
             data = chats[indexPath.row]
         }
         if !data.isParent && segment.selectedSegmentIndex == 0 {
@@ -1272,7 +1278,7 @@ extension ContactChatViewController {
                     content.subviews.forEach { $0.removeFromSuperview() }
                 }
                 let data: User
-                if isFilltering {
+                if isFiltering {
                     data = fillteredData[indexPath.row] as! User
                 } else {
                     if  indexPath.row > contacts.count - 1 {
@@ -1355,7 +1361,7 @@ extension ContactChatViewController {
                     return cell
                 }
                 var data: Chat
-                if isFilltering {
+                if isFiltering {
                     data = fillteredData[indexPath.row] as! Chat
                 } else {
                     if chats.count == 0 || (indexPath.row > (chats.count - 1)) {
@@ -1699,7 +1705,7 @@ extension ContactChatViewController {
                 var content = cell.defaultContentConfiguration()
                 content.textProperties.font = UIFont.systemFont(ofSize: 14 + String.offset())
                 let group: Group
-                if isFilltering {
+                if isFiltering {
                     if indexPath.row == 0 {
                         group = fillteredData[indexPath.section] as! Group
                     } else {
@@ -1766,7 +1772,7 @@ extension ContactChatViewController {
                     content.subviews.forEach { $0.removeFromSuperview() }
                 }
                 let data: User
-                if isFilltering {
+                if isFiltering {
                     data = fillteredData[indexPath.row] as! User
                 } else {
                     if  indexPath.row > contacts.count - 1 {
@@ -1837,7 +1843,7 @@ extension ContactChatViewController {
             var content = cell.defaultContentConfiguration()
             content.textProperties.font = UIFont.systemFont(ofSize: 14 + String.offset())
             let group: Group
-            if isFilltering {
+            if isFiltering {
                 if indexPath.row == 0 {
                     group = fillteredData[indexPath.section] as! Group
                 } else {

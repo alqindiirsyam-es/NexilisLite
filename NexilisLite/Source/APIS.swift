@@ -2583,337 +2583,266 @@ public class APIS: NSObject {
     }
     
     private static var isCheckingDataForShare = false
+
     public static func checkDataForShareExtension() {
         DispatchQueue.global().async {
-            if let userDefaults = UserDefaults(suiteName: nameGroupShared) {
-                if let value = userDefaults.string(forKey: "sharedItem") {
-                    if !value.isEmpty {
-                        if isCheckingDataForShare {
-                            return
-                        }
-                        isCheckingDataForShare = true
-                        if let jsonData = value.data(using: .utf8) {
-                            do {
-                                if let json = try JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: Any] {
-                                    let typeImage = 2
-                                    let typeVideo = 3
-                                    let typeFile = 4
-                                    let typeAudio = 5
-                                    let typeContact = json["typeContact"] as? String ?? "0"
-                                    var data = json["data"] as? String ?? ""
-                                    let idContact = json["idContact"] as? String ?? ""
-                                    let typeShare = json["typeShare"] as? Int ?? 1
-                                    var message = TMessage()
-                                    var groupId = ""
-                                    var chatId = ""
-                                    let scopeId = typeContact == "1" ? "4" : "3"
-                                    let thumb = json["thumb"] as? String ?? ""
-                                    let imageId = json["image"] as? String ?? ""
-                                    let videoId = json["video"] as? String ?? ""
-                                    let fileId = json["file"] as? String ?? ""
-                                    let audioId = json["audio"] as? String ?? ""
-                                    var renamedFileId = ""
-                                    var renamedAudioId = ""
-                                    var attachmentFlag = ""
-                                    if scopeId == "4" {
-                                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT group_id id FROM DISCUSSION_FORUM WHERE chat_id = '\(idContact)'"), cursor.next() {
-                                                groupId = cursor.string(forColumnIndex: 0) ?? ""
-                                                chatId = idContact
-                                                cursor.close()
-                                            } else {
-                                                groupId = idContact
-                                            }
-                                        })
-                                    }
-                                    if typeShare == typeImage {
-                                        attachmentFlag = "1"
-                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
-                                            let sharedImageURL = appGroupURL.appendingPathComponent(imageId)
-                                            let sharedThumbURL = appGroupURL.appendingPathComponent(thumb)
-                                            if Nexilis.checkingAccess(key: "content_inspection") {
-                                                DispatchQueue.main.async {
-                                                    Nexilis.showLoader(text: "Scanning File...".localized())
-                                                }
-                                                let result = sharedImageURL.validateFile()
-                                                DispatchQueue.main.async {
-                                                    Nexilis.hideLoader {
-                                                        if result == 1 {
-                                                            if copyData() {
-                                                                sendIt()
-                                                            }
-                                                        } else {
-                                                            APIS.showWarningFile(type: result)
-                                                            resetPrefs()
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                if copyData() {
-                                                    sendIt()
-                                                }
-                                            }
-                                            func copyData() -> Bool {
-                                                var dataSanitized: Data!
-                                                func sanitizeFile(sanitizeAction: (Data) -> MessageGuardLite.Result) -> Data? {
-                                                    DispatchQueue.main.async {
-                                                        Nexilis.showLoader(text: "Sanitizing your image (Message Guard)".localized())
-                                                    }
-                                                    let res = sanitizeAction(try! Data(contentsOf: sharedImageURL))
-                                                    defer {
-                                                        DispatchQueue.main.async { Nexilis.hideLoader {} }
-                                                    }
 
-                                                    if res.verdict == .block {
-                                                        DispatchQueue.main.async {
-                                                            Nexilis.hideLoader {
-                                                                APIS.showMessageGuardFile(mime: res.mime)
-                                                            }
-                                                        }
-                                                        return nil
-                                                    }
-                                                    return res.data ?? Data()
-                                                }
-                                                func processIt() {
-                                                    do {
-                                                        let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                                        if FileManager.default.fileExists(atPath: sharedImageURL.path) {
-                                                            let file = documentDir.appendingPathComponent(imageId)
-                                                            if !FileManager().fileExists(atPath: file.path) {
-                                                                if dataSanitized != nil {
-                                                                    let file = documentDir.appendingPathComponent(imageId)
-                                                                    try? dataSanitized.write(to: file)
-                                                                } else {
-                                                                    try? FileManager.default.copyItem(at: sharedImageURL, to: file)
-                                                                }
-                                                            }
-                                                        }
-                                                        if FileManager.default.fileExists(atPath: sharedThumbURL.path) {
-                                                            let file = documentDir.appendingPathComponent(thumb)
-                                                            if !FileManager().fileExists(atPath: file.path) {
-                                                                try? FileManager.default.copyItem(at: sharedThumbURL, to: file)
-                                                            }
-                                                        }
-                                                    } catch {
-                                                        
-                                                    }
-                                                }
-                                                if Nexilis.checkingAccess(key: "message_guard") {
-                                                    DispatchQueue.global().async {
-                                                        let guardLite = MessageGuardLite(limits: .defaults())
+            guard let userDefaults = UserDefaults(suiteName: nameGroupShared),
+                  let value = userDefaults.string(forKey: "sharedItem"),
+                  !value.isEmpty,
+                  !isCheckingDataForShare else {
 
-                                                        if let sanitized = sanitizeFile(sanitizeAction: guardLite.sanitizeImage) {
-                                                            dataSanitized = sanitized
-                                                        } else { return }
+                NotificationCenter.default.post(name: NSNotification.Name("reloadTabChats"), object: nil)
+                return
+            }
 
-                                                        processIt()
-                                                        sendIt()
-                                                    }
-                                                    return false
-                                                } else {
-                                                    processIt()
-                                                    return true
-                                                }
-                                            }
-                                        }
-                                    } else if typeShare == typeVideo {
-                                        attachmentFlag = "2"
-                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
-                                            let sharedVideoURL = appGroupURL.appendingPathComponent(videoId)
-                                            let sharedThumbURL = appGroupURL.appendingPathComponent(thumb)
-                                            if Nexilis.checkingAccess(key: "content_inspection") {
-                                                DispatchQueue.main.async {
-                                                    Nexilis.showLoader(text: "Scanning File...".localized())
-                                                }
-                                                let result = sharedVideoURL.validateFile()
-                                                DispatchQueue.main.async {
-                                                    Nexilis.hideLoader {
-                                                        if result == 1 {
-                                                            copyData()
-                                                            sendIt()
-                                                        } else {
-                                                            APIS.showWarningFile(type: result)
-                                                            resetPrefs()
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                copyData()
-                                                sendIt()
-                                            }
-                                            func copyData() {
-                                                do {
-                                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                                    if FileManager.default.fileExists(atPath: sharedVideoURL.path) {
-                                                        let file = documentDir.appendingPathComponent(videoId)
-                                                        if !FileManager().fileExists(atPath: file.path) {
-                                                            try? FileManager.default.copyItem(at: sharedVideoURL, to: file)
-                                                        }
-                                                    }
-                                                    if FileManager.default.fileExists(atPath: sharedThumbURL.path) {
-                                                        let file = documentDir.appendingPathComponent(thumb)
-                                                        if !FileManager().fileExists(atPath: file.path) {
-                                                            try? FileManager.default.copyItem(at: sharedThumbURL, to: file)
-                                                        }
-                                                    }
-                                                } catch {
-                                                    
-                                                }
-                                            }
-                                        }
-                                    } else if typeShare == typeFile {
-                                        attachmentFlag = "6"
-                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
-                                            renamedFileId = "Nexilis_\(Date().currentTimeMillis())_" + fileId
-                                            let sharedFileURL = appGroupURL.appendingPathComponent(fileId)
-                                            if Nexilis.checkingAccess(key: "content_inspection") {
-                                                DispatchQueue.main.async {
-                                                    Nexilis.showLoader(text: "Scanning File...".localized())
-                                                }
-                                                let result = sharedFileURL.validateFile()
-                                                DispatchQueue.main.async {
-                                                    Nexilis.hideLoader {
-                                                        if result == 1 {
-                                                            if copyData() {
-                                                                sendIt()
-                                                            }
-                                                        } else {
-                                                            APIS.showWarningFile(type: result)
-                                                            resetPrefs()
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                if copyData() {
-                                                    sendIt()
-                                                }
-                                            }
-                                            func copyData() -> Bool {
-                                                var dataSanitized: Data!
-                                                func sanitizeFile(sanitizeAction: (Data) -> MessageGuardLite.Result) -> Data? {
-                                                    DispatchQueue.main.async {
-                                                        Nexilis.showLoader(text: "Sanitizing your pdf file (Message Guard)".localized())
-                                                    }
-                                                    let res = sanitizeAction(try! Data(contentsOf: sharedFileURL))
-                                                    defer {
-                                                        DispatchQueue.main.async { Nexilis.hideLoader {} }
-                                                    }
+            isCheckingDataForShare = true
 
-                                                    if res.verdict == .block {
-                                                        DispatchQueue.main.async {
-                                                            Nexilis.hideLoader {
-                                                                APIS.showMessageGuardFile(mime: res.mime)
-                                                            }
-                                                        }
-                                                        return nil
-                                                    }
-                                                    return res.data ?? Data()
-                                                }
-                                                
-                                                func processIt() {
-                                                    do {
-                                                        let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                                        if FileManager.default.fileExists(atPath: sharedFileURL.path) {
-                                                            let file = documentDir.appendingPathComponent(renamedFileId)
-                                                            if !FileManager().fileExists(atPath: file.path) {
-                                                                if dataSanitized != nil {
-                                                                    let file = documentDir.appendingPathComponent(renamedFileId)
-                                                                    try? dataSanitized.write(to: file)
-                                                                } else {
-                                                                    try? FileManager.default.copyItem(at: sharedFileURL, to: file)
-                                                                }
-                                                            }
-                                                        }
-                                                        data = "\(fileId)|\(data)"
-                                                    } catch {
-                                                        
-                                                    }
-                                                }
-                                                
-                                                if Nexilis.checkingAccess(key: "message_guard") {
-                                                    DispatchQueue.global().async {
-                                                        let guardLite = MessageGuardLite(limits: .defaults())
-                                                        let mimeType = MessageGuardLite.sniffMime(try! Data(contentsOf: sharedFileURL))
+            guard let jsonData = value.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
+                print("Error parsing JSON")
+                isCheckingDataForShare = false
+                return
+            }
 
-                                                        if mimeType == "application/pdf" {
-                                                            if let sanitized = sanitizeFile(sanitizeAction: guardLite.sanitizePdf) {
-                                                                dataSanitized = sanitized
-                                                            } else { return }
-                                                        }
+            // MARK: - Extract JSON values
+            let typeShare = json["typeShare"] as? Int ?? 1
+            let idContact = json["idContact"] as? String ?? ""
+            let typeContact = json["typeContact"] as? String ?? "0"
+            var data = json["data"] as? String ?? ""
 
-                                                        processIt()
-                                                        sendIt()
-                                                    }
-                                                    return false
-                                                } else {
-                                                    processIt()
-                                                    return true
-                                                }
-                                            }
-                                        }
-                                    } else if typeShare == typeAudio {
-                                        attachmentFlag = "5"
-                                        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared) {
-                                            renamedAudioId = "Nexilis_\(Date().currentTimeMillis())_" + audioId
-                                            let sharedFileURL = appGroupURL.appendingPathComponent(audioId)
-                                            if Nexilis.checkingAccess(key: "content_inspection") {
-                                                DispatchQueue.main.async {
-                                                    Nexilis.showLoader(text: "Scanning File...".localized())
-                                                }
-                                                let result = sharedFileURL.validateFile()
-                                                DispatchQueue.main.async {
-                                                    Nexilis.hideLoader {
-                                                        if result == 1 {
-                                                            copyData()
-                                                            sendIt()
-                                                        } else {
-                                                            APIS.showWarningFile(type: result)
-                                                            resetPrefs()
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                copyData()
-                                                sendIt()
-                                            }
-                                            func copyData() {
-                                                do {
-                                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                                    if FileManager.default.fileExists(atPath: sharedFileURL.path) {
-                                                        let file = documentDir.appendingPathComponent(renamedAudioId)
-                                                        if !FileManager().fileExists(atPath: file.path) {
-                                                            try? FileManager.default.copyItem(at: sharedFileURL, to: file)
-                                                        }
-                                                    }
-                                                    data = "\(audioId)|\(data)"
-                                                } catch {
-                                                    
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        sendIt()
-                                    }
-                                    func sendIt() {
-                                        message = CoreMessage_TMessageBank.sendMessage(l_pin: groupId.isEmpty ? idContact : groupId, message_scope_id: scopeId, status: scopeId == "3" ? "1" : "2", message_text: data, credential: "0", attachment_flag: attachmentFlag, ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageId, audio_id: renamedAudioId, video_id: videoId, file_id: renamedFileId, thumb_id: thumb, reff_id: "", read_receipts: "4", chat_id: chatId, is_call_center: "0", call_center_id: "", opposite_pin: scopeId == "3" ? (User.getMyPin() ?? "") : idContact, gif_id: "", isForwarded: "0", isSecret: "0", specFile: "")
-                                        Nexilis.addQueueMessage(message: message)
-                                        resetPrefs()
-                                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-                                    }
-                                    func resetPrefs() {
-                                        userDefaults.set("", forKey: "sharedItem")
-                                        userDefaults.synchronize()
-                                        isCheckingDataForShare = false
-                                    }
-                                }
-                            } catch {
-                                print("Error parsing JSON: \(error)")
-                            }
+            let imageId = json["image"] as? String ?? ""
+            let videoId = json["video"] as? String ?? ""
+            let fileId = json["file"] as? String ?? ""
+            let audioId = json["audio"] as? String ?? ""
+            let thumb = json["thumb"] as? String ?? ""
+
+            let SCOPE = (typeContact == "1") ? "4" : "3"
+
+            // MARK: - Determine groupId & chatId
+            var groupId = ""
+            var chatId = ""
+
+            if SCOPE == "4" {
+                Database.shared.database?.inTransaction { fmdb, _ in
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT group_id id FROM DISCUSSION_FORUM WHERE chat_id = '\(idContact)'"),
+                       cursor.next() {
+                        groupId = cursor.string(forColumnIndex: 0) ?? ""
+                        chatId = idContact
+                        cursor.close()
+                    } else {
+                        groupId = idContact
+                    }
+                }
+            }
+
+            // paths
+            let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: nameGroupShared)
+            let documentDir = try? FileManager.default.url(for: .documentDirectory,
+                                                           in: .userDomainMask,
+                                                           appropriateFor: nil,
+                                                           create: true)
+
+            // MARK: - Unified validate logic
+            func validateIfNeeded(url: URL, completion: @escaping (_ passed: Bool) -> Void) {
+                guard Nexilis.checkingAccess(key: "content_inspection") else {
+                    completion(true)
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    Nexilis.showLoader(text: "Scanning File...".localized())
+                }
+
+                let result = url.validateFile()
+
+                DispatchQueue.main.async {
+                    Nexilis.hideLoader {
+                        if result == 1 { completion(true) }
+                        else {
+                            APIS.showWarningFile(type: result)
+                            resetPrefs()
+                            completion(false)
                         }
                     }
                 }
             }
-            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+
+            // MARK: - Unified copy function
+            func safeCopy(from: URL?, to: URL?) {
+                guard let from = from, let to = to else { return }
+                guard FileManager.default.fileExists(atPath: from.path),
+                      !FileManager.default.fileExists(atPath: to.path) else { return }
+                try? FileManager.default.copyItem(at: from, to: to)
+            }
+
+            // MARK: - Message Sender
+            func sendIt(attachmentFlag: String,
+                        renamedFileId: String = "",
+                        renamedAudioId: String = "") {
+
+                let message = CoreMessage_TMessageBank.sendMessage(
+                    l_pin: groupId.isEmpty ? idContact : groupId,
+                    message_scope_id: SCOPE,
+                    status: SCOPE == "3" ? "1" : "2",
+                    message_text: data,
+                    credential: "0",
+                    attachment_flag: attachmentFlag,
+                    ex_blog_id: "",
+                    message_large_text: "",
+                    ex_format: "",
+                    image_id: imageId,
+                    audio_id: renamedAudioId,
+                    video_id: videoId,
+                    file_id: renamedFileId,
+                    thumb_id: thumb,
+                    reff_id: "",
+                    read_receipts: "4",
+                    chat_id: chatId,
+                    is_call_center: "0",
+                    call_center_id: "",
+                    opposite_pin: SCOPE == "3" ? (User.getMyPin() ?? "") : idContact,
+                    gif_id: "",
+                    isForwarded: "0",
+                    isSecret: "0",
+                    specFile: ""
+                )
+
+                Nexilis.addQueueMessage(message: message)
+                resetPrefs()
+
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: NSNotification.Name("reloadTabChats"), object: nil)
+                }
+                DispatchQueue.main.asyncAfter(wallDeadline: .now() + 0.5, execute: {
+                    handleOpenEditor()
+                })
+            }
+
+            // MARK: - Reset
+            func resetPrefs() {
+                userDefaults.set("", forKey: "sharedItem")
+                userDefaults.synchronize()
+                isCheckingDataForShare = false
+            }
+
+            // MARK: - Open editor if needed
+            func handleOpenEditor() {
+                DispatchQueue.main.async {
+                    let isPersonal = (SCOPE == MessageScope.WHISPER || SCOPE == MessageScope.FORM || SCOPE == MessageScope.CHATROOM)
+                    let inEditorPersonal: String? = SecureUserDefaults.shared.value(forKey: "inEditorPersonal") ?? nil
+                    let inEditorGroup: [String]? = SecureUserDefaults.shared.value(forKey: "inEditorGroup") ?? nil
+                    if isPersonal && inEditorPersonal != nil {
+                        return
+                    } else if inEditorGroup != nil{
+                        return
+                    }
+
+                    let targetVC: UIViewController = {
+                        if isPersonal {
+                            let vc = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+                            vc.unique_l_pin = idContact
+                            vc.fromNotification = true
+                            return vc
+                        } else {
+                            let vc = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "editorGroupVC") as! EditorGroup
+                            vc.unique_l_pin = chatId.isEmpty ? groupId : chatId
+                            vc.fromNotification = true
+                            return vc
+                        }
+                    }()
+
+                    let nav = CustomNavigationController(rootViewController: targetVC)
+                    nav.modalPresentationStyle = .fullScreen
+                    nav.navigationBar.tintColor = .white
+                    nav.navigationBar.barTintColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+                    nav.navigationBar.isTranslucent = false
+                    nav.navigationBar.overrideUserInterfaceStyle = .dark
+                    nav.navigationBar.barStyle = .black
+
+                    if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
+                        (targetVC as? EditorPersonal)?.fromNotification = false
+                        UIApplication.shared.visibleViewController?.show(targetVC, sender: nil)
+                    } else {
+                        UIApplication.shared.visibleViewController?.present(nav, animated: true, completion: nil)
+                    }
+                }
+            }
+
+            // MARK: - Switch by typeShare
+            guard let appURL = appGroupURL else { return }
+            guard let doc = documentDir else { return }
+
+            switch typeShare {
+
+            // -------------------- IMAGE --------------------
+            case 2:
+                let sharedURL = appURL.appendingPathComponent(imageId)
+                let thumbURL = appURL.appendingPathComponent(thumb)
+
+                validateIfNeeded(url: sharedURL) { ok in
+                    guard ok else { return }
+
+                    let toImage = doc.appendingPathComponent(imageId)
+                    let toThumb = doc.appendingPathComponent(thumb)
+
+                    safeCopy(from: sharedURL, to: toImage)
+                    safeCopy(from: thumbURL, to: toThumb)
+
+                    sendIt(attachmentFlag: "1")
+                }
+
+            // -------------------- VIDEO --------------------
+            case 3:
+                let sharedURL = appURL.appendingPathComponent(videoId)
+                let thumbURL = appURL.appendingPathComponent(thumb)
+
+                validateIfNeeded(url: sharedURL) { ok in
+                    guard ok else { return }
+
+                    safeCopy(from: sharedURL,
+                             to: doc.appendingPathComponent(videoId))
+                    safeCopy(from: thumbURL,
+                             to: doc.appendingPathComponent(thumb))
+
+                    sendIt(attachmentFlag: "2")
+                }
+
+            // -------------------- FILE --------------------
+            case 4:
+                let renamed = "Nexilis_\(Date().currentTimeMillis())_\(fileId)"
+                let sharedURL = appURL.appendingPathComponent(fileId)
+
+                validateIfNeeded(url: sharedURL) { ok in
+                    guard ok else { return }
+
+                    let dest = doc.appendingPathComponent(renamed)
+                    safeCopy(from: sharedURL, to: dest)
+
+                    data = "\(fileId)|\(data)"
+
+                    sendIt(attachmentFlag: "6", renamedFileId: renamed)
+                }
+
+            // -------------------- AUDIO --------------------
+            case 5:
+                let renamed = "Nexilis_\(Date().currentTimeMillis())_\(audioId)"
+                let sharedURL = appURL.appendingPathComponent(audioId)
+
+                validateIfNeeded(url: sharedURL) { ok in
+                    guard ok else { return }
+
+                    let dest = doc.appendingPathComponent(renamed)
+                    safeCopy(from: sharedURL, to: dest)
+                    data = "\(audioId)|\(data)"
+
+                    sendIt(attachmentFlag: "5", renamedAudioId: renamed)
+                }
+
+            // -------------------- TEXT ONLY --------------------
+            default:
+                sendIt(attachmentFlag: "0")
+            }
         }
     }
     
