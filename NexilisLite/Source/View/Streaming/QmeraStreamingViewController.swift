@@ -18,9 +18,7 @@ class QmeraStreamingViewController: UIViewController {
     
     var isLive: Bool = false
     
-    static private var isSpeakerPhone: Bool = true
-    
-    static private var lastVolume: Float = AVAudioSession.sharedInstance().outputVolume
+    static private var isSpeakerPhone: Bool = false
     
     static private var nMaxSPOn: Float = 20.0
     
@@ -190,22 +188,8 @@ class QmeraStreamingViewController: UIViewController {
         } catch {
             print("Failed to set speaker mode: \(error)")
         }
-
-        let volume = lastVolume * (isSpeakerPhone ? nMaxSPOn : nMaxSPOff)
-        API.adjustVolume(fValue: volume)
-    }
-    
-    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-        if keyPath == "outputVolume" {
-            if let newVolume = change?[.newKey] as? Float {
-                QmeraStreamingViewController.lastVolume = newVolume
-                let adjustedVolume = newVolume * (QmeraStreamingViewController.isSpeakerPhone ? QmeraStreamingViewController.nMaxSPOn : QmeraStreamingViewController.nMaxSPOff)
-                API.adjustVolume(fValue: adjustedVolume)
-            }
-        }
     }
 
-    
     @objc func didTapSpeakerButton(_ sender: UIButton) {
         QmeraStreamingViewController.isSpeakerPhone.toggle()
         QmeraStreamingViewController.turnSpeakerOn()
@@ -216,6 +200,19 @@ class QmeraStreamingViewController: UIViewController {
     var alert: UIAlertController?
     var textFields = [UITextField]()
     let statusView = UIView()
+    
+    static private var isLoop = false
+    
+    private func backToDefaultAudioSession() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .mixWithOthers])
+            try audioSession.overrideOutputAudioPort(.speaker)
+            try audioSession.setPreferredSampleRate(48000)
+            try audioSession.setActive(true)
+        } catch {
+        }
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -264,7 +261,6 @@ class QmeraStreamingViewController: UIViewController {
         }
         else {
             addSpeakerView()
-            AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: [.new], context: nil)
         }
         
         keyboardTopAnchorConstraint = view.layoutMarginsGuide.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor, constant: 0)
@@ -306,6 +302,8 @@ class QmeraStreamingViewController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(onUpdateTitleOrTagline(notification:)), name: NSNotification.Name(rawValue: "liveStreamingUpdate"), object: nil)
         
         Nexilis.shared.streamingDelagate = self
+        self.backToDefaultAudioSession()
+        UIApplication.shared.isIdleTimerDisabled = true
         if isLive {
             let buttonRotate = UIButton()
             buttonRotate.frame = CGRect(x:0, y:0, width:30, height:30)
@@ -370,6 +368,7 @@ class QmeraStreamingViewController: UIViewController {
     
     override func viewWillDisappear(_ animated: Bool) {
         navigationController?.changeAppearance(clear: false)
+        UIApplication.shared.isIdleTimerDisabled = false
     }
     
     @objc func close(sender: Any?) {
@@ -498,7 +497,6 @@ class QmeraStreamingViewController: UIViewController {
     deinit {
         if !isLive {
             NotificationCenter.default.removeObserver(self)
-            AVAudioSession.sharedInstance().removeObserver(self, forKeyPath: "outputVolume")
         }
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
@@ -714,15 +712,43 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
                     self.imageView.transform = CGAffineTransform.init(scaleX: 1.9, y: 2.2).rotated(by: camera == 1 ? (CGFloat.pi * 5)/2 : (CGFloat.pi)/2)
                 }
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5, execute: {
-                do {
-                    let audioSession = AVAudioSession.sharedInstance()
-                    try audioSession.overrideOutputAudioPort(.speaker)
-                } catch {
-                    
-                }
-            })
             sendJoin()
+        } else if state == Nexilis.STREAMING_AFTER_OFFHOOK {
+            DispatchQueue.main.async {
+                self.buttonSpeaker.isEnabled = false
+            }
+            QmeraStreamingViewController.isLoop = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                var countLoop = 0
+                repeat {
+                    Thread.sleep(forTimeInterval : 0.5)
+                    if (QmeraStreamingViewController.isLoop && !API.bAudioEngineIsRunning()) {
+                        API.restartAudioEngine()
+                        DispatchQueue.main.async {
+                            if !self.buttonSpeaker.isEnabled {
+                                self.didTapSpeakerButton(UIButton())
+                                self.buttonSpeaker.isEnabled = true
+                            } else if QmeraStreamingViewController.isSpeakerPhone {
+                                do {
+                                    let audioSession = AVAudioSession.sharedInstance()
+                                    try audioSession.overrideOutputAudioPort(.speaker)
+                                } catch {
+                                    
+                                }
+                            }
+                        }
+                    }
+                    countLoop = countLoop + 1
+                    if countLoop == 3 {
+                        DispatchQueue.main.async {
+                            if !self.buttonSpeaker.isEnabled{
+                                self.didTapSpeakerButton(UIButton())
+                                self.buttonSpeaker.isEnabled = true
+                            }
+                        }
+                    }
+                } while (QmeraStreamingViewController.isLoop)
+            }
         } else if state == Nexilis.AUDIO_CALL_RINGING {
             let m = message.split(separator: ",")
             let _ = String(m[0])

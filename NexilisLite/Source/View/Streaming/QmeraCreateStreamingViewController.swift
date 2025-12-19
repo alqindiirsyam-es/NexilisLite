@@ -541,7 +541,7 @@ public class QmeraCreateStreamingViewController: UITableViewController {
                 cell.selectionStyle = .default
             } else {
                 let data = users[indexPath.row - 1]
-                getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
                     content.image = image
                 }
                 content.text = data.fullName
@@ -559,7 +559,7 @@ public class QmeraCreateStreamingViewController: UITableViewController {
                 cell.selectionStyle = .default
             } else {
                 let data = groups[indexPath.row - 1]
-                getImage(name: data.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                getImage(name: data.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
                     content.image = image
                 }
                 content.text = data.name

@@ -300,7 +300,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         } else {
                             let dataProfile = getDataProfile(f_pin: dataStatusAck[indexPath.row]["f_pin"] as! String, message_id: data["message_id"] as! String)
                             content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-                            getImage(name: dataProfile["image_id"]!, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                            getImage(name: dataProfile["image_id"]!, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                                 content.image = image
                             })
                             
@@ -334,7 +334,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         } else {
                             let dataProfile = getDataProfile(f_pin: dataStatusRead[indexPath.row]["f_pin"] as! String, message_id: data["message_id"] as! String)
                             content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-                            getImage(name: dataProfile["image_id"]!, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                            getImage(name: dataProfile["image_id"]!, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                                 content.image = image
                             })
                             
@@ -366,7 +366,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     } else {
                         let dataProfile = getDataProfile(f_pin: dataStatusRead[indexPath.row]["f_pin"] as! String, message_id: data["message_id"] as! String)
                         content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-                        getImage(name: dataProfile["image_id"]!, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                        getImage(name: dataProfile["image_id"]!, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                             content.image = image
                         })
                         
@@ -397,7 +397,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     } else {
                         let dataProfile = getDataProfile(f_pin: dataStatusDelivered[indexPath.row]["f_pin"] as! String, message_id: data["message_id"] as! String)
                         content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-                        getImage(name: dataProfile["image_id"]!, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                        getImage(name: dataProfile["image_id"]!, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                             content.image = image
                         })
                         

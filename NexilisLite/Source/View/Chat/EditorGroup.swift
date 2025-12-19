@@ -509,7 +509,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     }
                 }
             }
-        } else if counter != 0 {
+        } else if counter != 0 && dataMessages.count >= counter {
+            let contentHeight = tableChatView.contentSize.height
+            let visibleHeight = tableChatView.frame.height
+            let fullOffset = contentHeight - visibleHeight
+            let offsetY = tableChatView.contentOffset.y
+            let isNearBottom = (fullOffset - offsetY < 50)
             if dataMessages.firstIndex(where: {$0["message_id"] as? String == markerCounter} ) != nil {
                 DispatchQueue.main.async {
                     let data = self.dataMessages.filter({ $0["message_id"] as? String == self.markerCounter })
@@ -522,17 +527,41 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             } else {
                 tableChatView.scrollToTop()
             }
+            if !isNearBottom && !buttonScrollToBottom.isDescendant(of: view) {
+                addButtonScrollToBottom()
+                addCounterAtButttonScrollToBottom()
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
-                if currentIndexpath == nil && counter != 0 {
+                let lastVisibleIndexPath = tableChatView.indexPathsForVisibleRows?.last
+                currentIndexpath = lastVisibleIndexPath
+                if counter != 0 {
                     let idMe = User.getMyPin() as String?
                     if let idx = dataMessages.firstIndex(where: { $0["message_id"] as? String == markerCounter}) {
-                        for i in idx..<dataMessages.count {
-                            if dataMessages[i]["f_pin"] as? String != idMe {
-                                sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                        if currentIndexpath != nil {
+                            let sectionIm = dataDates.firstIndex(of: dataMessages[idx]["chat_date"]  as? String ?? "")
+                            let dataM = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataMessages[idx]["chat_date"]  as? String ?? ""})
+                            let rowIm = dataM.firstIndex(where: { $0["message_id"] as? String == dataMessages[idx]["message_id"] as? String })
+                            if sectionIm != nil && rowIm != nil {
+                                let idxMarker = IndexPath(row: rowIm!, section: sectionIm!)
+                                if currentIndexpath!.section == sectionIm {
+                                    for i in rowIm!..<currentIndexpath!.row + 1 {
+                                        if dataMessages[i]["f_pin"] as? String != idMe {
+                                            sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataM[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataM[i]["message_id"]  as? String ?? "")
+                                            counter -= 0
+                                            updateCounter(counter: counter)
+                                        }
+                                    }
+                                }
                             }
+                        } else {
+                            for i in idx..<dataMessages.count {
+                                if dataMessages[i]["f_pin"] as? String != idMe {
+                                    sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                                }
+                            }
+                            counter = 0
+                            updateCounter(counter: counter)
                         }
-                        counter = 0
-                        updateCounter(counter: counter)
                     }
                 }
             }
@@ -1037,13 +1066,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                     }
                                     var containerView : UIView?
                                     if (isImage) {
-                                        if viewInContainer.subviews[0] is UIVisualEffectView {
+                                        if viewInContainer.subviews[0] is UIVisualEffectView  && viewInContainer.subviews.count > 1 {
                                             containerView = viewInContainer.subviews[1]
                                         } else {
                                             containerView = viewInContainer.subviews[0]
                                         }
                                     } else if viewInContainer.subviews.count > 1 {
-                                        if viewInContainer.subviews[0] is UIVisualEffectView {
+                                        if viewInContainer.subviews[0] is UIVisualEffectView && viewInContainer.subviews.count > 2 {
                                             containerView = viewInContainer.subviews[2]
                                         } else {
                                             containerView = viewInContainer.subviews[1]
@@ -2245,21 +2274,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         self.view.addSubview(buttonScrollToBottom)
         buttonScrollToBottom.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            buttonScrollToBottom.bottomAnchor.constraint(equalTo: buttonSendChat.topAnchor, constant: -50),
-            buttonScrollToBottom.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
-            buttonScrollToBottom.widthAnchor.constraint(equalToConstant: 60),
-            buttonScrollToBottom.heightAnchor.constraint(equalToConstant: 30.0)
+            buttonScrollToBottom.bottomAnchor.constraint(equalTo: buttonSendChat.topAnchor, constant: -30),
+            buttonScrollToBottom.trailingAnchor.constraint(equalTo: self.view.trailingAnchor, constant: -5),
+            buttonScrollToBottom.widthAnchor.constraint(equalToConstant: 35.0),
+            buttonScrollToBottom.heightAnchor.constraint(equalToConstant: 35.0)
         ])
-        buttonScrollToBottom.backgroundColor = .greenColor
-        buttonScrollToBottom.setImage(UIImage(systemName: "chevron.down.circle"), for: .normal)
+        buttonScrollToBottom.backgroundColor = .mainColor
+        buttonScrollToBottom.setImage(UIImage(systemName: "chevron.down"), for: .normal)
         buttonScrollToBottom.imageView?.contentMode = .scaleAspectFit
         buttonScrollToBottom.imageView?.tintColor = .white
-        buttonScrollToBottom.contentVerticalAlignment = .fill
-        buttonScrollToBottom.contentHorizontalAlignment = .fill
         buttonScrollToBottom.imageEdgeInsets.top = 2.0
-        buttonScrollToBottom.imageEdgeInsets.bottom = 2.0
-        buttonScrollToBottom.layer.cornerRadius = 10.0
-        buttonScrollToBottom.layer.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        buttonScrollToBottom.layer.cornerRadius = 17.5
         buttonScrollToBottom.clipsToBounds = true
         buttonScrollToBottom.addTarget(self, action: #selector(scrollTobottomAction), for: .touchUpInside)
     }
@@ -2276,8 +2301,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         indicatorCounterBSTB.layer.borderWidth = 0.5
         indicatorCounterBSTB.layer.borderColor = UIColor.secondaryColor.cgColor
         NSLayoutConstraint.activate([
-            indicatorCounterBSTB.bottomAnchor.constraint(equalTo: buttonScrollToBottom.topAnchor, constant: 5),
-            indicatorCounterBSTB.trailingAnchor.constraint(equalTo: self.view.trailingAnchor, constant: -50),
+            indicatorCounterBSTB.bottomAnchor.constraint(equalTo: buttonScrollToBottom.topAnchor, constant: 10),
+            indicatorCounterBSTB.trailingAnchor.constraint(equalTo: self.view.trailingAnchor, constant: -30),
             indicatorCounterBSTB.widthAnchor.constraint(greaterThanOrEqualToConstant: 15),
             indicatorCounterBSTB.heightAnchor.constraint(equalToConstant: 15)
         ])
@@ -2296,16 +2321,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     @objc func scrollTobottomAction() {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.prepare()
+        generator.impactOccurred()
         tableChatView.scrollToBottom()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [self] in
-            if buttonScrollToBottom.isDescendant(of: self.view) {
-                buttonScrollToBottom.removeConstraints(buttonScrollToBottom.constraints)
-                buttonScrollToBottom.removeFromSuperview()
-                if indicatorCounterBSTB.isDescendant(of: self.view) {
-                    indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
-                    indicatorCounterBSTB.removeFromSuperview()
-                }
-            }
+            removeScrollToBottomButton()
         }
     }
     
@@ -2390,45 +2411,88 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             let auto: Bool = SecureUserDefaults.shared.value(forKey: "autoDownload") ?? false
             if auto {
                 if dataMessages[index]["image_id"] as? String != nil && !((dataMessages[index]["image_id"] as? String)!.isEmpty) {
-                    Download().startHTTP(forKey:dataMessages[index]["image_id"]  as? String ?? "") { (name, progress) in
-                        guard progress == 100 else {
-                            return
-                        }
-                        do {
-                            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                            if let dirPath = paths.first {
-                                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["image_id"]  as? String ?? "")
-                                if FileManager.default.fileExists(atPath: imageURL.path) {
-                                    let image    = UIImage(contentsOfFile: imageURL.path)
-                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                    if save {
-                                        UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                    if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
+                        let valueListGroupImages = listGroupImages.value
+                        for i in 0..<valueListGroupImages.count {
+                            Download().startHTTP(forKey:valueListGroupImages[i].imageId) { (name, progress) in
+                                guard progress == 100 else {
+                                    return
+                                }
+                                let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                                if save {
+                                    do {
+                                        let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                                        let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                                        let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                                        if let dirPath = paths.first {
+                                            let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(valueListGroupImages[i].imageId)
+                                            if FileManager.default.fileExists(atPath: imageURL.path) {
+                                                let image    = UIImage(contentsOfFile: imageURL.path)
+                                                UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                            }
+                                            else if FileEncryption.shared.isSecureExists(filename: valueListGroupImages[i].imageId) {
+                                                if var secureData = try FileEncryption.shared.readSecure(filename: valueListGroupImages[i].imageId) {
+                                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                                                    if dataDecrypt != nil {
+                                                        secureData = dataDecrypt!
+                                                    }
+                                                    let image = UIImage(data: secureData)
+                                                    UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch {
+                                        
                                     }
                                 }
-                                else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
-                                    if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
-                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
-                                        if dataDecrypt != nil {
-                                            secureData = dataDecrypt!
-                                        }
-                                        let image = UIImage(data: secureData)
-                                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                        if save {
-                                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-                                        }
+                                DispatchQueue.main.async { [self] in
+                                    let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+                                    let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+                                    if row != nil && section != nil{
+                                        tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                                     }
                                 }
                             }
-                        } catch {
-                            
                         }
-                        DispatchQueue.main.async { [self] in
-                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
-                            if row != nil && section != nil{
-                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .automatic)
+                    } else {
+                        Download().startHTTP(forKey:dataMessages[index]["image_id"]  as? String ?? "") { (name, progress) in
+                            guard progress == 100 else {
+                                return
+                            }
+                            let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                            if save {
+                                do {
+                                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                                    if let dirPath = paths.first {
+                                        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["image_id"]  as? String ?? "")
+                                        if FileManager.default.fileExists(atPath: imageURL.path) {
+                                            let image    = UIImage(contentsOfFile: imageURL.path)
+                                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                        }
+                                        else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
+                                            if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
+                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                                                if dataDecrypt != nil {
+                                                    secureData = dataDecrypt!
+                                                }
+                                                let image = UIImage(data: secureData)
+                                                UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                                            }
+                                        }
+                                    }
+                                } catch {
+                                    
+                                }
+                            }
+                            DispatchQueue.main.async { [self] in
+                                let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+                                let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+                                if row != nil && section != nil{
+                                    tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                                }
                             }
                         }
                     }
@@ -2437,33 +2501,30 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         guard progress == 100 else {
                             return
                         }
-                        do {
-                            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                            if let dirPath = paths.first {
-                                let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["video_id"]  as? String ?? "")
-                                if FileManager.default.fileExists(atPath: videoURL.path) {
-                                    let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                    if save {
+                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+                        if save {
+                            do {
+                                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                                if let dirPath = paths.first {
+                                    let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["video_id"]  as? String ?? "")
+                                    if FileManager.default.fileExists(atPath: videoURL.path) {
                                         PHPhotoLibrary.shared().performChanges({
                                             PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
                                         }) { saved, error in
                                             
                                         }
                                     }
-                                }
-                                else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
-                                    if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
-                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
-                                        if dataDecrypt != nil {
-                                            secureData = dataDecrypt!
-                                        }
-                                        let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                                        let tempPath = cachesDirectory.appendingPathComponent(name)
-                                        try secureData.write(to: tempPath)
-                                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                        if save {
+                                    else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
+                                        if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
+                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+                                            if dataDecrypt != nil {
+                                                secureData = dataDecrypt!
+                                            }
+                                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+                                            let tempPath = cachesDirectory.appendingPathComponent(name)
+                                            try secureData.write(to: tempPath)
                                             PHPhotoLibrary.shared().performChanges({
                                                 PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempPath)
                                             }) { saved, error in
@@ -2472,17 +2533,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                         }
                                     }
                                 }
-                            }
-                            DispatchQueue.main.async { [self] in
-                                let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-                                let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
-                                if row != nil && section != nil{
-                                    tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .automatic)
-                                }
+                            } catch {
+                                
                             }
                         }
-                        catch {
-                            
+                        DispatchQueue.main.async { [self] in
+                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+                            if row != nil && section != nil{
+                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                            }
                         }
                     }
                 }
@@ -2495,7 +2555,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
                             let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
                             if row != nil && section != nil{
-                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .automatic)
+                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                             }
                         }
                     }
@@ -2512,75 +2572,113 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     private func checkNewMessage(tableView: UITableView) {
-        currentIndexpath = tableView.indexPathsForVisibleRows?.last
-        let indexFirst = tableView.indexPathsForVisibleRows?.first
-        if indexFirst != nil {
-            let dataMessages = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexFirst!.section] })
-            if dataMessages.count == 0 {
-                return
+
+        guard let firstIndex = tableView.indexPathsForVisibleRows?.first,
+              let lastIndex = tableView.indexPathsForVisibleRows?.last
+        else { return }
+
+        currentIndexpath = lastIndex
+
+        // MARK: - Filter messages in this section
+        let sectionDate = dataDates[firstIndex.section]
+        let sectionMessages = dataMessages.filter {
+            ($0["chat_date"] as? String ?? "") == sectionDate
+        }
+
+        guard !sectionMessages.isEmpty else { return }
+
+        // MARK: - Scroll Position
+        let contentHeight = tableView.contentSize.height
+        let visibleHeight = tableView.frame.height
+        let fullOffset = contentHeight - visibleHeight
+        let offsetY = tableView.contentOffset.y
+
+        let isLastSection = (lastIndex.section == dataDates.count - 1)
+        let isNotLastRow = (firstIndex.row != sectionMessages.count - 1)
+        let isFarFromBottom = (fullOffset - offsetY > 100)
+        let isNearBottom = (fullOffset - offsetY < 50)
+
+        // MARK: - Show "Scroll to bottom" button
+        if ((!isLastSection && isFarFromBottom) ||
+            (isLastSection && isNotLastRow && isFarFromBottom)) {
+
+            if !buttonScrollToBottom.isDescendant(of: view) {
+                addButtonScrollToBottom()
+                addCounterAtButttonScrollToBottom()
             }
-            let contentHeight = tableView.contentSize.height
-            let scrollViewHeight = tableView.frame.height
-            let fullContentOffset = contentHeight - scrollViewHeight
-            let contentOffsetY = tableView.contentOffset.y
-            if ((currentIndexpath!.section == dataDates.count - 1 && indexFirst!.row != dataMessages.count - 1) || indexFirst!.section != dataDates.count - 1) && fullContentOffset - contentOffsetY > 100 {
-                if !buttonScrollToBottom.isDescendant(of: self.view) {
-                    addButtonScrollToBottom()
-                    addCounterAtButttonScrollToBottom()
-                }
-            } else if (indexFirst!.section == dataDates.count - 1 && indexFirst!.row == dataMessages.count - 1) || fullContentOffset - contentOffsetY < 50 {
-                if buttonScrollToBottom.isDescendant(of: self.view) {
-                    buttonScrollToBottom.removeConstraints(buttonScrollToBottom.constraints)
-                    buttonScrollToBottom.removeFromSuperview()
-                    if indicatorCounterBSTB.isDescendant(of: self.view) {
-                        indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
-                        indicatorCounterBSTB.removeFromSuperview()
-                    }
-                }
-            }
-//            let indexPathFirst = tableChatView.indexPathsForVisibleRows?.first
-//            if indexPathFirst != nil && listViewOnSection.count != 0 && listViewOnSection.count - 1 >= indexPathFirst!.section {
-//                let headerView = listViewOnSection[indexPathFirst!.section]
-//                if headerView.isHidden {
-//                    headerView.isHidden = false
-//                }
-//            }
-            if dataMessages.count - 1 < currentIndexpath!.row {
-                return
-            }
-            var listData = dataMessages[0...currentIndexpath!.row]
-            listData = listData.filter({$0["status"]  as? String ?? "" != "4" && $0["status"]  as? String ?? "" != "8"})
-            if listData.count != 0 {
-                let idMe = User.getMyPin() as String?
-                for i in 0...listData.count - 1 {
-                    if listData[i]["f_pin"] as? String != idMe {
-                        sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
-                    }
+        }
+        // MARK: - Hide button when at bottom
+        else if isNearBottom {
+            removeScrollToBottomButton()
+        }
+
+        // MARK: - Ensure index exists
+        guard currentIndexpath!.row < dataMessages.count else { return }
+
+        // MARK: - Messages up to visible row
+        var visibleMessages = Array(dataMessages[0...currentIndexpath!.row])
+            .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
+
+        // MARK: - Send Read Status
+        if !visibleMessages.isEmpty {
+            let myPin = User.getMyPin()
+            for msg in visibleMessages {
+                if msg["f_pin"] as? String != myPin {
+                    sendReadMessageStatus(
+                        chat_id: self.dataTopic["chat_id"]  as? String ?? "",
+                        f_pin: msg["f_pin"]  as? String ?? "",
+                        message_scope_id: MessageScope.GROUP,
+                        message_id: msg["message_id"]  as? String ?? ""
+                    )
                 }
             }
         }
-        if counter == 0 && indicatorCounterBSTB.isDescendant(of: self.view) {
-            indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
-            indicatorCounterBSTB.removeFromSuperview()
-        } else if counter != 0 && currentIndexpath != nil {
-            let dataFilter = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[currentIndexpath!.section] })
-            if dataFilter.count == 0 {
-                return
-            }
-            let idx = dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataFilter[currentIndexpath!.row]["message_id"]  as? String ?? ""})
-            if idx == nil {
-                return
-            }
-            if (dataMessages.count - counter) <= idx! {
-                let countUpdate = idx! - (dataMessages.count - counter)
-                counter = counter - (countUpdate + 1)
-                if indicatorCounterBSTB.isDescendant(of: self.view) {
-                    labelCounter.text = "\(counter)"
-                }
-                updateCounter(counter: counter)
+
+        // MARK: - Update Counter
+        updateUnreadCounter()
+    }
+    
+    private func removeScrollToBottomButton() {
+        if buttonScrollToBottom.isDescendant(of: view) {
+            buttonScrollToBottom.removeConstraints(buttonScrollToBottom.constraints)
+            buttonScrollToBottom.removeFromSuperview()
+
+            if indicatorCounterBSTB.isDescendant(of: view) {
+                indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
+                indicatorCounterBSTB.removeFromSuperview()
             }
         }
     }
+
+    private func updateUnreadCounter() {
+        if counter == 0 {
+            if indicatorCounterBSTB.isDescendant(of: view) {
+                indicatorCounterBSTB.removeFromSuperview()
+            }
+            return
+        }
+
+        guard let current = currentIndexpath else { return }
+
+        let sectionDate = dataDates[current.section]
+        let filtered = dataMessages.filter {
+            ($0["chat_date"] as? String ?? "") == sectionDate
+        }
+        guard !filtered.isEmpty else { return }
+
+        guard let idx = dataMessages.firstIndex(where: {
+            ($0["message_id"] as? String ?? "") ==
+            (filtered[current.row]["message_id"] as? String ?? "")
+        }) else { return }
+
+        if idx >= dataMessages.count - counter {
+            let delta = idx - (dataMessages.count - counter)
+            counter -= (delta + 1)
+            labelCounter.text = "\(counter)"
+            updateCounter(counter: counter)
+        }
+    }
+    //sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
 }
 
 extension EditorGroup: ImageVideoPickerDelegate, PreviewAttachmentImageVideoDelegate, PHPickerViewControllerDelegate {

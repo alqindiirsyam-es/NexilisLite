@@ -165,32 +165,83 @@ public class Chat: Model {
         var messages: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                let query = "select m.f_pin, m.l_pin, m.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name from MESSAGE m, BUDDY b where m.l_pin = b.f_pin and m.is_call_center = 0 and message_text LIKE '%\(text)%'"
+                let query = """
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   b.first_name || ' ' || ifnull(b.last_name, '') as name,
+                                   b.image_id as profile, b.official_account,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   '' as group_id, '' as group_name, m.is_bot
+                            from MESSAGE m
+                            join BUDDY b on (m.l_pin = b.f_pin OR m.f_pin = b.f_pin)
+                            where m.message_scope_id = '3' and m.lock <> '1' and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+                            union
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   'Bot' as name, '' as profile, '' as official_account,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   '' as group_id, '' as group_name, m.is_bot
+                            from MESSAGE m
+                            where m.l_pin = '-999' and m.lock <> '1'
+                              and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+                            union
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   'GPT SmartBot' as name, '' as profile, '' as official_account,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   '' as group_id, '' as group_name, m.is_bot
+                            from MESSAGE m
+                            where m.l_pin = '-997' and m.lock <> '1'
+                              and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+                            union
+                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   '\("Lounge".localized())' as name,
+                                   g.image_id as profile, g.official,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   g.group_id, g.f_name as group_name, m.is_bot
+                            from MESSAGE m
+                            join GROUPZ g on m.l_pin = g.group_id
+                            where m.chat_id = '' and m.lock <> '1' and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+                            union
+                            select m.f_pin, m.chat_id, m.message_id, m.message_text, m.server_date,
+                                   m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
+                                   d.title, g.image_id as profile, '' as official_account,
+                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   g.group_id, g.f_name as group_name, m.is_bot
+                            from MESSAGE m
+                            join DISCUSSION_FORUM d on m.chat_id = d.chat_id
+                            join GROUPZ g on d.group_id = g.group_id
+                            where m.lock <> '1' and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+
+                            order by 5 desc
+                            """
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {
-                        let data = cursorData.string(forColumnIndex: 0) ?? ""
                         let chat = Chat(fpin: cursorData.string(forColumnIndex: 0) ?? "",
                                         pin: cursorData.string(forColumnIndex: 1) ?? "",
                                         messageId: cursorData.string(forColumnIndex: 2) ?? "",
-                                        counter: cursorData.string(forColumnIndex: 3) ?? "",
-                                        messageText: cursorData.string(forColumnIndex: 4) ?? "",
-                                        serverDate: cursorData.string(forColumnIndex: 5) ?? "",
-                                        image: cursorData.string(forColumnIndex: 6) ?? "",
-                                        video: cursorData.string(forColumnIndex: 7) ?? "",
-                                        file: cursorData.string(forColumnIndex: 8) ?? "",
-                                        attachmentFlag: cursorData.string(forColumnIndex: 9) ?? "",
-                                        messageScope: cursorData.string(forColumnIndex: 10) ?? "",
-                                        name: cursorData.string(forColumnIndex: 11) ?? "",
-                                        profile: cursorData.string(forColumnIndex: 12) ?? "",
-                                        official: cursorData.string(forColumnIndex: 13) ?? "",
-                                        status: cursorData.string(forColumnIndex: 14) ?? "",
-                                        credential: cursorData.string(forColumnIndex: 15) ?? "",
-                                        lock: cursorData.string(forColumnIndex: 16) ?? "",
-                                        thumb: "",
+                                        counter: "0",
+                                        messageText: cursorData.string(forColumnIndex: 3) ?? "",
+                                        serverDate: cursorData.string(forColumnIndex: 4) ?? "",
+                                        image: cursorData.string(forColumnIndex: 5) ?? "",
+                                        video: cursorData.string(forColumnIndex: 6) ?? "",
+                                        file: cursorData.string(forColumnIndex: 7) ?? "",
+                                        attachmentFlag: cursorData.string(forColumnIndex: 8) ?? "",
+                                        messageScope: cursorData.string(forColumnIndex: 9) ?? "",
+                                        name: cursorData.string(forColumnIndex: 10) ?? "",
+                                        profile: cursorData.string(forColumnIndex: 11) ?? "",
+                                        official: cursorData.string(forColumnIndex: 12) ?? "",
+                                        status: cursorData.string(forColumnIndex: 13) ?? "",
+                                        credential: cursorData.string(forColumnIndex: 14) ?? "",
+                                        lock: cursorData.string(forColumnIndex: 15) ?? "",
+                                        thumb: cursorData.string(forColumnIndex: 16) ?? "",
                                         audio: cursorData.string(forColumnIndex: 17) ?? "",
                                         gif: cursorData.string(forColumnIndex: 18) ?? "",
                                         groupId: cursorData.string(forColumnIndex: 19) ?? "",
-                                        groupName: cursorData.string(forColumnIndex: 20) ?? "")
+                                        groupName: cursorData.string(forColumnIndex: 20) ?? "",
+                                        pinned: 0,
+                                        isBot: Int(cursorData.string(forColumnIndex: 21) ?? "0") ?? 0)
                         messages.append(chat)
                     }
                     cursorData.close()
@@ -246,17 +297,17 @@ public class Chat: Model {
                             join GROUPZ g on m.l_pin = g.group_id
                             where m.message_id = '\(message_id)'
                             union
-                            select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
+                            select m.f_pin, m.chat_id, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    d.title, g.image_id as profile, '' as official_account,
                                    m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    g.group_id, g.f_name as group_name, m.is_bot
                             from MESSAGE m
-                            join DISCUSSION_FORUM d on m.l_pin = d.chat_id
+                            join DISCUSSION_FORUM d on m.chat_id = d.chat_id
                             join GROUPZ g on d.group_id = g.group_id
                             where m.message_id = '\(message_id)'
 
-                            order by 6 desc
+                            order by 5 desc
                             """
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {

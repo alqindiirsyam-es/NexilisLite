@@ -44,6 +44,11 @@ class QmeraVideoViewController: UIViewController {
         UIImageView(),
         UIImageView(),
         UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
         UIImageView()
     ]
     var containerLabelName: [UIView] = [
@@ -51,9 +56,19 @@ class QmeraVideoViewController: UIViewController {
         UIView(),
         UIView(),
         UIView(),
+        UIView(),
+        UIView(),
+        UIView(),
+        UIView(),
+        UIView(),
         UIView()
     ]
     var imageMuted: [UIImageView] = [
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
+        UIImageView(),
         UIImageView(),
         UIImageView(),
         UIImageView(),
@@ -191,6 +206,7 @@ class QmeraVideoViewController: UIViewController {
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
         self.timerTimeout.invalidate()
+        UIApplication.shared.isIdleTimerDisabled = false
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -201,9 +217,10 @@ class QmeraVideoViewController: UIViewController {
             navigationController?.navigationBar.topItem?.backBarButtonItem = nil
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             NotificationCenter.default.removeObserver(self)
+            UIApplication.shared.isIdleTimerDisabled = false
+            Nexilis.floatingButton.isHidden = false
+            self.timerTimeout.invalidate()
         }
-        Nexilis.floatingButton.isHidden = false
-        self.timerTimeout.invalidate()
     }
     
     private func backToDefaultAudioSession() {
@@ -225,6 +242,7 @@ class QmeraVideoViewController: UIViewController {
         Nexilis.floatingButton.isHidden = true
         self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
         navigationController?.changeAppearance(clear: true)
+        UIApplication.shared.isIdleTimerDisabled = true
         
         NotificationCenter.default.addObserver(self, selector: #selector(self.onStatusCall(_:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusCall), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onReceiveMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil)
@@ -1427,8 +1445,19 @@ class QmeraVideoViewController: UIViewController {
         }
         else if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
             DispatchQueue.main.async { [self] in
+                let user = arrayMessage[0]
+                var param = arrayMessage[1]
+                var isMuted:Bool = false
+                if param == "1" {
+                    isMuted = true
+                }
+                if let idx = self.users.firstIndex(where: { $0.pin == user }) {
+                    self.users[idx].isMuted = isMuted
+                    if self.dataPerson.count > 1 {
+                        self.imageMuted[idx].isHidden = !isMuted
+                    }
+                }
                 if self.dataPerson.count == 1 {
-                    var param = arrayMessage[1]
                     if arrayMessage[2] != "." {
                         param = arrayMessage[2]
                     }
@@ -1546,6 +1575,13 @@ class QmeraVideoViewController: UIViewController {
                         labelName.text = namePerson
                         labelName.textAlignment = .center
                         labelName.textColor = .white
+                        
+                        self.scrollRemoteView.addSubview(self.imageMuted[i])
+                        self.imageMuted[i].frame = CGRect(x: 45, y: 170 * i + 60, width: 30, height: 40)
+                        self.imageMuted[i].contentMode = .scaleAspectFit
+                        self.imageMuted[i].image = UIImage(systemName: "mic.slash")
+                        self.imageMuted[i].tintColor = .red
+                        self.imageMuted[i].isHidden = true
                     }
                     self.scrollRemoteView.contentSize.height = CGFloat(170 * 2)
                     if self.buttonWB.isEnabled {
@@ -1561,6 +1597,13 @@ class QmeraVideoViewController: UIViewController {
                             self.buttonRotate.isHidden = false
                             self.buttonMuted.isHidden = false
                             self.buttonCameraOff.isHidden = false
+                        }
+                    }
+                    if !self.mutedZoom.isHidden {
+                        self.mutedZoom.isHidden = true
+                        self.imageMuted[0].isHidden = false
+                        if self.users.count >= 1 {
+                            self.users[0].isMuted = true
                         }
                     }
                 } else if self.dataPerson.count > 1 {
@@ -1597,15 +1640,29 @@ class QmeraVideoViewController: UIViewController {
                         labelName.text = namePerson
                         labelName.textAlignment = .center
                         labelName.textColor = .white
+                        
+                        self.scrollRemoteView.addSubview(self.imageMuted[i])
+                        self.imageMuted[i].frame = CGRect(x: 45, y: 170 * i + 60, width: 30, height: 40)
+                        self.imageMuted[i].image = UIImage(systemName: "mic.slash")
+                        self.imageMuted[i].tintColor = .red
+                        self.imageMuted[i].isHidden = true
                     }
                 }
                 
                 if let user = User.getData(pin: String(arrayMessage[1])) {
                     if !self.users.contains(user) {
                         user.isConnected = true
+                        if self.users.count == 0 && !self.imageMuted[0].isHidden{
+                            user.isMuted = true
+                        }
                         self.users.append(user)
                     } else if let userEx = self.users.firstIndex(where: { $0.pin == String(arrayMessage[1]) }) {
                         self.users[userEx].isConnected = true
+                        if self.users[userEx].isMuted {
+                            self.imageMuted[userEx].isHidden = false
+                        } else {
+                            self.imageMuted[userEx].isHidden = true
+                        }
                     }
                 }
                 if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
@@ -1799,6 +1856,9 @@ class QmeraVideoViewController: UIViewController {
                                     }
                                 }
                             }
+                            if self.users.count >= 1 && self.users[0].isMuted && self.mutedZoom.isHidden {
+                                self.mutedZoom.isHidden = false
+                            }
                         }
                         self.dataPerson.remove(at: indexPerson!)
                     }
@@ -1862,6 +1922,9 @@ class QmeraVideoViewController: UIViewController {
                                         })
                                     }
                                 }
+                            }
+                            if self.users.count >= 1 && self.users[0].isMuted && self.mutedZoom.isHidden {
+                                self.mutedZoom.isHidden = false
                             }
                         }
                     }
@@ -1944,6 +2007,9 @@ class QmeraVideoViewController: UIViewController {
                                     }
                                 }
                             }
+                            if self.users.count >= 1 && self.users[0].isMuted && self.mutedZoom.isHidden {
+                                self.mutedZoom.isHidden = false
+                            }
                         }
                     }
                     if !onGoingCC.isEmpty {
@@ -2012,8 +2078,21 @@ class QmeraVideoViewController: UIViewController {
                             labelName.text = namePerson
                             labelName.textAlignment = .center
                             labelName.textColor = .white
+                            
+                            self.scrollRemoteView.addSubview(self.imageMuted[i])
+                            self.imageMuted[i].frame = CGRect(x: 45, y: 170 * i + 60, width: 30, height: 40)
+                            self.imageMuted[i].image = UIImage(systemName: "mic.slash")
+                            self.imageMuted[i].tintColor = .red
+                            self.imageMuted[i].isHidden = true
                         }
                         self.scrollRemoteView.contentSize.height = CGFloat(170 * 2)
+                        if !self.mutedZoom.isHidden {
+                            self.mutedZoom.isHidden = true
+                            self.imageMuted[0].isHidden = false
+                            if self.users.count >= 1{
+                                self.users[0].isMuted = true
+                            }
+                        }
                     } else {
                         let i = self.dataPerson.count - 1
                         self.scrollRemoteView.addSubview(self.listRemoteViewFix[i])
@@ -2041,6 +2120,12 @@ class QmeraVideoViewController: UIViewController {
                         labelName.text = namePerson
                         labelName.textAlignment = .center
                         labelName.textColor = .white
+                        
+                        self.scrollRemoteView.addSubview(self.imageMuted[i])
+                        self.imageMuted[i].frame = CGRect(x: 45, y: 170 * i + 60, width: 30, height: 40)
+                        self.imageMuted[i].image = UIImage(systemName: "mic.slash")
+                        self.imageMuted[i].tintColor = .red
+                        self.imageMuted[i].isHidden = true
                     }
                     if self.buttonWB.isEnabled {
                         self.buttonWB.isEnabled = false

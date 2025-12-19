@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.81"
+    public static var cpaasVersion = "5.0.82"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -75,6 +75,7 @@ public class Nexilis: NSObject {
     public static var showLibraryNotification = true
     
     public static let STREAMING_SEMINAR_ENDED = 88
+    public static let STREAMING_AFTER_OFFHOOK = 94
     public static let VIDEO_CALL_END = 38
     public static let VIDEO_CALL_MUTE_UNMUTE = 36
     public static let VIDEO_CALL_ZOOM = 35

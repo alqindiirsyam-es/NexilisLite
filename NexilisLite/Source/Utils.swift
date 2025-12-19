@@ -748,11 +748,10 @@ public final class Utils {
     
     private static let sharedSession: URLSession = {
         let urlConfig = URLSessionConfiguration.default
-        urlConfig.timeoutIntervalForRequest = 30.0
-        urlConfig.timeoutIntervalForResource = 60.0
         urlConfig.waitsForConnectivity = true
-        urlConfig.isDiscretionary = false
-        urlConfig.sessionSendsLaunchEvents = true
+        urlConfig.timeoutIntervalForRequest = 25
+        urlConfig.timeoutIntervalForResource = 30
+        urlConfig.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: urlConfig, delegate: SelfSignedURLSessionDelegate(), delegateQueue: nil)
     }()
     
@@ -3439,6 +3438,14 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     private let playPauseButton = UIButton(type: .custom)
     private var isVideoPlaying = false
     public var isSecure = false
+    
+    private let timeCurrentLabel = UILabel()
+    private let timeRemainingLabel = UILabel()
+    private let speedButton = UIButton(type: .system)
+    private let slider = UISlider()
+
+    private var playbackSpeeds: [Float] = [1.0, 1.5, 2.0, 0.5]
+    private var currentSpeedIndex = 0
 
     var isNavigationBarHidden = false {
         didSet { setNeedsStatusBarAppearanceUpdate() }
@@ -3451,6 +3458,15 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     private var privacyOverlay: UIView = {
         let view = UIView()
         view.backgroundColor = .black
+        return view
+    }()
+    
+    private let blurBackground: UIVisualEffectView = {
+        let blur = UIBlurEffect(style: .dark)
+        let view = UIVisualEffectView(effect: blur)
+        view.alpha = 0.45
+        view.layer.cornerRadius = 14
+        view.clipsToBounds = true
         return view
     }()
 
@@ -3522,6 +3538,12 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         statusBarBackgroundView.backgroundColor = .mainColor
         statusBarBackgroundView.autoresizingMask = [.flexibleWidth, .flexibleBottomMargin]
         view.addSubview(statusBarBackgroundView)
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutVideoControls()
+        playerLayer?.frame = view.bounds
     }
     
     private func setupPrivacyOverlay() {
@@ -3637,7 +3659,166 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         view.addSubview(playPauseButton)
         playPauseButton.circle()
         
+        setupVideoControls()
+        
         togglePlayPause()
+    }
+    
+    private func setupVideoControls() {
+        
+        view.addSubview(blurBackground)
+
+        // Current time
+        timeCurrentLabel.text = "0:00"
+        timeCurrentLabel.textColor = .white
+        timeCurrentLabel.font = .systemFont(ofSize: 13)
+        view.addSubview(timeCurrentLabel)
+
+        // Remaining time
+        timeRemainingLabel.text = "-0:00"
+        timeRemainingLabel.textColor = .white
+        timeRemainingLabel.font = .systemFont(ofSize: 13)
+        timeRemainingLabel.textAlignment = .right
+        view.addSubview(timeRemainingLabel)
+
+        // Playback speed button
+        speedButton.setTitle("1×", for: .normal)
+        speedButton.tintColor = .white
+        speedButton.titleLabel?.font = .boldSystemFont(ofSize: 15)
+        speedButton.addTarget(self, action: #selector(toggleSpeed), for: .touchUpInside)
+        view.addSubview(speedButton)
+
+        // Slider
+        let thumbImg = makeThumb(size: 20)
+        slider.setThumbImage(thumbImg, for: .normal)
+        slider.setThumbImage(thumbImg, for: .highlighted)
+        slider.minimumValue = 0
+        slider.maximumValue = 1
+        slider.tintColor = .white
+        slider.addTarget(self, action: #selector(sliderChanged(_:)), for: .valueChanged)
+        view.addSubview(slider)
+
+        layoutVideoControls()
+
+        // Update every 0.2 sec
+        addPeriodicTimeObserver()
+    }
+    
+    func makeThumb(size: CGFloat, color: UIColor = .white) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
+        return renderer.image { _ in
+            let rect = CGRect(origin: .zero, size: CGSize(width: size, height: size))
+            color.setFill()
+            UIBezierPath(ovalIn: rect).fill()
+        }
+    }
+    
+    private func addPeriodicTimeObserver() {
+        guard let player = player else { return }
+
+        player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
+                                       queue: .main) { [weak self] time in
+            guard let self = self,
+                  let duration = player.currentItem?.duration.seconds,
+                  duration > 0 else { return }
+
+            let current = time.seconds
+            let remaining = duration - current
+
+            self.slider.value = Float(current / duration)
+
+            self.timeCurrentLabel.text = self.formatTime(current)
+            self.timeRemainingLabel.text = "-\(self.formatTime(remaining))"
+        }
+    }
+    
+    private func formatTime(_ seconds: Double) -> String {
+        guard !seconds.isNaN else { return "0:00" }
+        
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+    
+    @objc private func sliderChanged(_ sender: UISlider) {
+        guard let duration = player?.currentItem?.duration.seconds, duration > 0 else { return }
+
+        let newTime = Double(sender.value) * duration
+        let cmTime = CMTime(seconds: newTime, preferredTimescale: 600)
+
+        player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+    
+    @objc private func toggleSpeed() {
+        currentSpeedIndex = (currentSpeedIndex + 1) % playbackSpeeds.count
+        let speed = playbackSpeeds[currentSpeedIndex]
+
+        player?.rate = speed
+        if !isVideoPlaying { player?.play() } // auto-play when changing speed
+        isVideoPlaying = true
+
+        speedButton.setTitle(formatSpeed(speed), for: .normal)
+    }
+    
+    private func formatSpeed(_ value: Float) -> String {
+        let intValue = Int(value)
+        if value == Float(intValue) {
+            return "\(intValue)x"   // 1 → "1x", 2 → "2x"
+        } else {
+            return "\(value)x"      // keeps 0.5 → "0.5x"
+        }
+    }
+    
+    private func layoutVideoControls() {
+        let padding: CGFloat = 16
+        let labelWidth: CGFloat = 45
+
+        timeCurrentLabel.frame = CGRect(
+            x: padding,
+            y: view.bounds.height - 50,
+            width: labelWidth,
+            height: 20
+        )
+
+        speedButton.frame = CGRect(
+            x: view.bounds.width - padding - 35,
+            y: view.bounds.height - 50,
+            width: 35,
+            height: 20
+        )
+
+        timeRemainingLabel.frame = CGRect(
+            x: speedButton.frame.minX - labelWidth - 8,
+            y: view.bounds.height - 50,
+            width: labelWidth,
+            height: 20
+        )
+
+        slider.frame = CGRect(
+            x: timeCurrentLabel.frame.maxX + 8,
+            y: view.bounds.height - 50,
+            width: timeRemainingLabel.frame.minX - timeCurrentLabel.frame.maxX - 16,
+            height: 20
+        )
+        
+        let minX = min(
+            timeCurrentLabel.frame.minX,
+            slider.frame.minX
+        )
+
+        let maxX = max(
+            speedButton.frame.maxX,
+            slider.frame.maxX
+        )
+        
+        let y = timeCurrentLabel.frame.minY - 4
+        let height: CGFloat = timeCurrentLabel.frame.height + 8
+        blurBackground.frame = CGRect(
+            x: minX - 8,                  // left padding
+            y: y,                         // top
+            width: (maxX - minX) + 16,    // width + horizontal padding
+            height: height                // height
+        )
     }
     
     @objc private func videoDidFinish() {
@@ -3662,9 +3843,6 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
                 while self.statusBarBackgroundView == nil {
                     Thread.sleep(forTimeInterval: 0.25)
                 }
-                DispatchQueue.main.async {
-                    self.toggleNavigationBar()
-                }
             }
         }
         isVideoPlaying.toggle()
@@ -3684,6 +3862,11 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             navController.setNavigationBarHidden(self.isNavigationBarHidden, animated: true)
             self.statusBarBackgroundView.alpha = self.isNavigationBarHidden ? 0 : 1
             self.playPauseButton.alpha = self.isNavigationBarHidden ? 0 : 1
+            self.timeCurrentLabel.alpha = self.isNavigationBarHidden ? 0 : 1
+            self.timeRemainingLabel.alpha = self.isNavigationBarHidden ? 0 : 1
+            self.speedButton.alpha = self.isNavigationBarHidden ? 0 : 1
+            self.slider.alpha = self.isNavigationBarHidden ? 0 : 1
+            self.blurBackground.alpha = self.isNavigationBarHidden ? 0 : 1
         }
     }
 
@@ -4606,6 +4789,267 @@ class QRScannerViewController: UIViewController {
             self.captureSession.startRunning()
         }
         present(controller, animated: true)
+    }
+}
+
+final class MiniCallBanner: UIView {
+
+    private let muteButton = UIButton(type: .system)
+    private let endCallButton = UIButton(type: .system)
+    private let iconView = UIImageView()
+    private let titleLabel = UILabel()
+
+    private var timer: Timer?
+    private var startDate: Date?
+
+    static let height: CGFloat = 55
+    
+    private var isMuted = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupUI()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupUI()
+    }
+
+    private func setupUI() {
+        // WhatsApp green
+        backgroundColor = .whatsappGreenColor
+
+        // rounded bottom corners only
+//        layer.cornerRadius = 10
+//        layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+//        layer.masksToBounds = true
+
+        // PHONE ICON
+        iconView.image = UIImage(systemName: "phone.fill")
+        iconView.tintColor = .white
+        iconView.contentMode = .scaleAspectFit
+
+        // TITLE LABEL (Name + Duration)
+        titleLabel.textColor = .white
+        titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
+        titleLabel.textAlignment = .center
+
+        // MUTE BUTTON
+        muteButton.tintColor = .white
+        muteButton.backgroundColor = UIColor(white: 0.2, alpha: 0.6)
+        muteButton.setImage(UIImage(systemName: "mic.slash.fill"), for: .normal)
+        muteButton.layer.cornerRadius = 20
+        muteButton.clipsToBounds = true
+
+        // END CALL BUTTON
+        endCallButton.tintColor = .white
+        endCallButton.backgroundColor = UIColor.red
+        endCallButton.setImage(UIImage(systemName: "phone.down.fill"), for: .normal)
+        endCallButton.layer.cornerRadius = 20
+        endCallButton.clipsToBounds = true
+
+        // ============================
+        // LAYOUT
+        // ============================
+
+        let centerStack = UIStackView(arrangedSubviews: [iconView, titleLabel])
+        centerStack.axis = .horizontal
+        centerStack.spacing = 8
+        centerStack.alignment = .center
+
+        addSubview(centerStack)
+        addSubview(muteButton)
+        addSubview(endCallButton)
+
+        centerStack.translatesAutoresizingMaskIntoConstraints = false
+        muteButton.translatesAutoresizingMaskIntoConstraints = false
+        endCallButton.translatesAutoresizingMaskIntoConstraints = false
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+
+            // Center call info
+            centerStack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            centerStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+
+            // Mute button left
+            muteButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            muteButton.centerYAnchor.constraint(equalTo: centerStack.centerYAnchor),
+            muteButton.widthAnchor.constraint(equalToConstant: 40),
+            muteButton.heightAnchor.constraint(equalToConstant: 40),
+
+            // End call button right
+            endCallButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            endCallButton.centerYAnchor.constraint(equalTo: centerStack.centerYAnchor),
+            endCallButton.widthAnchor.constraint(equalToConstant: 40),
+            endCallButton.heightAnchor.constraint(equalToConstant: 40)
+        ])
+    }
+    
+    func toggleMute() {
+        isMuted.toggle()
+
+        if isMuted {
+            muteButton.backgroundColor = .white
+            muteButton.tintColor = .red
+        } else {
+            muteButton.backgroundColor = UIColor(white: 0.2, alpha: 0.6)
+            muteButton.tintColor = .white
+        }
+    }
+
+    // MARK: - Public API
+
+    func configure(name: String, start: Date) {
+        self.startDate = start
+        startTimer()
+        updateTitle(name)
+    }
+
+    private func updateTitle(_ name: String) {
+        let duration = formattedDuration()
+        titleLabel.text = "\(name) - \(duration)"
+    }
+
+    private func formattedDuration() -> String {
+        guard let start = startDate else { return "0:00" }
+        let t = Int(Date().timeIntervalSince(start))
+        return String(format: "%01d:%02d", t/60, t%60)
+    }
+
+    private func startTimer() {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let s = self else { return }
+            s.updateTitle(s.titleLabel.text?.components(separatedBy:" - ").first ?? "")
+        }
+    }
+
+    func onMute(_ target: Any?, action: Selector) {
+        muteButton.addTarget(target, action: action, for: .touchUpInside)
+    }
+
+    func onEnd(_ target: Any?, action: Selector) {
+        endCallButton.addTarget(target, action: action, for: .touchUpInside)
+    }
+}
+
+
+final public class MiniCallBannerManager {
+
+    public static let shared = MiniCallBannerManager()
+
+    private var banner: MiniCallBanner?
+    private var height: CGFloat = 64
+
+    private init() {}
+
+    // MARK: - SHOW Banner
+    public func showBanner(contactName: String, startDate: Date = Date()) {
+        guard let window = UIApplication.shared.keyWindow else { return }
+        if banner != nil { return }
+
+        let banner = MiniCallBanner()
+        banner.configure(name: contactName, start: startDate)
+
+        banner.onMute(self, action: #selector(self.muteTapped))
+        banner.onEnd(self, action: #selector(self.endTapped))
+
+        window.addSubview(banner)
+        banner.translatesAutoresizingMaskIntoConstraints = false
+
+        // Create starting position ABOVE screen
+        let topConstraint = banner.topAnchor.constraint(equalTo: window.topAnchor, constant: -height)
+
+        NSLayoutConstraint.activate([
+            topConstraint,
+            banner.leadingAnchor.constraint(equalTo: window.leadingAnchor),
+            banner.trailingAnchor.constraint(equalTo: window.trailingAnchor),
+            banner.heightAnchor.constraint(equalToConstant: height)
+        ])
+
+        window.layoutIfNeeded()  // Prepare animation
+
+        self.banner = banner
+
+        // === Animate banner dropping down ===
+        topConstraint.constant = window.safeAreaInsets.top
+        UIView.animate(withDuration: 0.30,
+                       delay: 0,
+                       usingSpringWithDamping: 0.85,
+                       initialSpringVelocity: 0.4) {
+            window.layoutIfNeeded()
+        }
+
+        // === Animate pushing UI down ===
+        animatePushUI(+height)
+    }
+    
+    private func animatePushUI(_ offset: CGFloat) {
+        guard let window = UIApplication.shared.keyWindow else { return }
+
+        guard let root = window.rootViewController else { return }
+
+        UIView.animate(withDuration: 0.30) {
+            self.applyInsetRecursively(vc: root, offset: offset)
+        }
+    }
+    
+    private func applyInsetRecursively(vc: UIViewController, offset: CGFloat) {
+
+        // 1. Apply inset to this view controller
+        vc.additionalSafeAreaInsets.top += offset
+        vc.view.layoutIfNeeded()
+
+        // 2. If this VC is NavigationController → apply to visible view controller
+//        if let nav = vc as? UINavigationController,
+//           let visible = nav.visibleViewController {
+//            applyInsetRecursively(vc: visible, offset: offset)
+//        }
+
+        // 3. If this VC is TabBarController → apply to selected view controller
+//        if let tab = vc as? UITabBarController,
+//           let selected = tab.selectedViewController {
+//            applyInsetRecursively(vc: selected, offset: offset)
+//        }
+
+        // 4. If this VC presents another VC → apply to presented VC
+        if let presented = vc.presentedViewController {
+            applyInsetRecursively(vc: presented, offset: offset)
+        }
+
+        // 5. If child view controllers exist → apply to all
+//        for child in vc.children {
+//            applyInsetRecursively(vc: child, offset: offset)
+//        }
+    }
+
+    // MARK: - HIDE Banner
+    func hideBanner() {
+        guard let banner, let window = UIApplication.shared.keyWindow else { return }
+
+        UIView.animate(withDuration: 0.25, animations: {
+            banner.transform = CGAffineTransform(translationX: 0, y: -self.height)
+        }, completion: { _ in
+            banner.removeFromSuperview()
+            self.banner = nil
+        })
+
+        animatePushUI(-height)
+    }
+
+    // MARK: - Button Actions
+    @objc private func muteTapped() {
+        banner?.toggleMute()
+        // integrate with your mute function
+    }
+
+    @objc private func endTapped() {
+        hideBanner()
     }
 }
 

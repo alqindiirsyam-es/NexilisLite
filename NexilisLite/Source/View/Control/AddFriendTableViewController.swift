@@ -236,7 +236,7 @@ class AddFriendTableViewController: UITableViewController {
             user = data[indexPath.row]
         }
         content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-        getImage(name: user.thumb, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+        getImage(name: user.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
             content.image = image
         })
         content.text = user.fullName

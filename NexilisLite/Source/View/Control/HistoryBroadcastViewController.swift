@@ -144,7 +144,7 @@ class HistoryBroadcastViewController: UIViewController, UITableViewDelegate, UIT
             if data.profile.isEmpty && data.pin != "-999" {
                 let user = User.getDataCanNil(pin: data.pin)
                 if user != nil {
-                    imageView.image = UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                    imageView.image = UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 } else {
                     imageView.image = UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 }

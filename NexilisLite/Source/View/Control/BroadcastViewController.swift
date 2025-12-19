@@ -646,7 +646,7 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
                 let data: User
                 data = contacts[indexPath.row]
                 content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-                getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                     content.image = image
                 })
                 if User.isOfficial(official_account: data.official ?? "") || User.isOfficialRegular(official_account: data.official ?? "") {
@@ -675,7 +675,7 @@ class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITex
                 let group: Group
                 group = groups[indexPath.row]
                 content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-                getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
                     content.image = image
 //                    tableView.reloadRows(at: [indexPath], with: .none)
                 }

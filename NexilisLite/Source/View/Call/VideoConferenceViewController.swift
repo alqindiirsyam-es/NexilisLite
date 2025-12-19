@@ -287,6 +287,7 @@ class VideoConferenceViewController: UIViewController {
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
+        UIApplication.shared.isIdleTimerDisabled = false
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -297,8 +298,9 @@ class VideoConferenceViewController: UIViewController {
             navigationController?.navigationBar.topItem?.backBarButtonItem = nil
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             NotificationCenter.default.removeObserver(self)
+            UIApplication.shared.isIdleTimerDisabled = false
+            Nexilis.floatingButton.isHidden = false
         }
-        Nexilis.floatingButton.isHidden = false
     }
     
     private func backToDefaultAudioSession() {
@@ -328,6 +330,7 @@ class VideoConferenceViewController: UIViewController {
         navigationController?.navigationBar.topItem?.backBarButtonItem = UIBarButtonItem(title: "", style: .plain, target: nil, action: nil)
         navigationController?.interactivePopGestureRecognizer?.isEnabled = false
         navigationItem.setHidesBackButton(true, animated: false)
+        UIApplication.shared.isIdleTimerDisabled = true
         if fPin != ""{
             getDataProfile(fPin: fPin)
         }
@@ -1082,8 +1085,19 @@ class VideoConferenceViewController: UIViewController {
         let arrayMessage = message.split(separator: ",")
         if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
             DispatchQueue.main.async { [self] in
+                let user = arrayMessage[0]
+                var param = arrayMessage[1]
+                var isMuted:Bool = false
+                if param == "1" {
+                    isMuted = true
+                }
+                if let idx = self.users.firstIndex(where: { $0.pin == user }) {
+                    self.users[idx].isMuted = isMuted
+                    if self.dataPerson.count > 1 {
+                        self.imageMuted[idx].isHidden = isMuted
+                    }
+                }
                 if self.dataPerson.count == 1 {
-                    var param = arrayMessage[1]
                     if arrayMessage[2] != "." {
                         param = arrayMessage[2]
                     }
@@ -1200,6 +1214,12 @@ class VideoConferenceViewController: UIViewController {
                         labelName.text = namePerson
                         labelName.textAlignment = .center
                         labelName.textColor = .white
+                        
+                        self.scrollRemoteView.addSubview(self.imageMuted[i])
+                        self.imageMuted[i].frame = CGRect(x: 45, y: 170 * i + 60, width: 30, height: 40)
+                        self.imageMuted[i].image = UIImage(systemName: "mic.slash")
+                        self.imageMuted[i].tintColor = .red
+                        self.imageMuted[i].isHidden = true
                     }
                     self.scrollRemoteView.contentSize.height = CGFloat(170 * 2)
                     if self.buttonWB.isEnabled {
@@ -1215,6 +1235,13 @@ class VideoConferenceViewController: UIViewController {
                             self.buttonAddParticipant.isHidden = false
                             self.buttonMuted.isHidden = false
                             self.buttonCameraOff.isHidden = false
+                        }
+                    }
+                    if !self.mutedZoom.isHidden {
+                        self.mutedZoom.isHidden = true
+                        self.imageMuted[0].isHidden = false
+                        if self.users.count >= 1 {
+                            self.users[0].isMuted = true
                         }
                     }
                 } else if self.dataPerson.count > 1 {
@@ -1251,6 +1278,12 @@ class VideoConferenceViewController: UIViewController {
                         labelName.text = namePerson
                         labelName.textAlignment = .center
                         labelName.textColor = .white
+                        
+                        self.scrollRemoteView.addSubview(self.imageMuted[i])
+                        self.imageMuted[i].frame = CGRect(x: 45, y: 170 * i + 60, width: 30, height: 40)
+                        self.imageMuted[i].image = UIImage(systemName: "mic.slash")
+                        self.imageMuted[i].tintColor = .red
+                        self.imageMuted[i].isHidden = true
                     }
                 }
                 
@@ -1260,6 +1293,11 @@ class VideoConferenceViewController: UIViewController {
                         self.users.append(user)
                     } else if let userEx = self.users.firstIndex(where: { $0.pin == String(arrayMessage[1]) }) {
                         self.users[userEx].isConnected = true
+                        if self.users[userEx].isMuted {
+                            self.imageMuted[userEx].isHidden = false
+                        } else {
+                            self.imageMuted[userEx].isHidden = true
+                        }
                     }
                 }
                 if arrayMessage[5] == "2" && self.dataPerson.count == 1 {
@@ -1381,6 +1419,9 @@ class VideoConferenceViewController: UIViewController {
                                         })
                                     }
                                 }
+                            }
+                            if self.users.count >= 1 && self.users[0].isMuted && self.mutedZoom.isHidden {
+                                self.mutedZoom.isHidden = false
                             }
                         }
                         self.dataPerson.remove(at: indexPerson!)

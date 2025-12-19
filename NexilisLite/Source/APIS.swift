@@ -1930,9 +1930,9 @@ public class APIS: NSObject {
                         Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
                         ackAPN(id: id)
                         
-                        DispatchQueue.main.async {
-                            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
-                        }
+//                        DispatchQueue.main.async {
+//                            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+//                        }
                     } else {
                         throw NSError(domain: "Invalid JSON", code: -1)
                     }

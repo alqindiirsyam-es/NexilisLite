@@ -173,7 +173,7 @@ extension SeminarListViewController: UITableViewDataSource {
         cell.imagePerson.layer.masksToBounds = false
         cell.imagePerson.circle()
         cell.imagePerson.clipsToBounds = true
-        cell.imagePerson.image = UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        cell.imagePerson.image = UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
         cell.imagePerson.contentMode = .scaleAspectFit
         let user: SeminarViewer
         if isFilltering {

@@ -16,7 +16,6 @@ class QmeraAudioViewController: UIViewController {
     static private var nMaxSPOn: Float! = 20.0
     static private var nMaxSPOff: Float! = 20.0
     static private var volumeView: MPVolumeView!
-    static private var lastVolume: Float! = AVAudioSession.sharedInstance().outputVolume
     static private var bSpeakerPhone: Bool! = false
     private var tempSpeaker = false
     private var timerSpeaker: Timer?
@@ -312,15 +311,16 @@ class QmeraAudioViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         NotificationCenter.default.removeObserver(self)
         UIDevice.current.isProximityMonitoringEnabled = false
+        UIApplication.shared.isIdleTimerDisabled = false
         Nexilis.floatingButton.isHidden = false
         self.timerTimeout.invalidate()
     }
     
     deinit {
         UIDevice.current.isProximityMonitoringEnabled = false
+        UIApplication.shared.isIdleTimerDisabled = false
         Nexilis.floatingButton.isHidden = false
         NotificationCenter.default.removeObserver(self)
-        AVAudioSession.sharedInstance().removeObserver(self, forKeyPath: "outputVolume")
         self.timerTimeout.invalidate()
     }
     
@@ -354,8 +354,6 @@ class QmeraAudioViewController: UIViewController {
         super.viewDidLoad()
         QmeraAudioViewController.volumeView = MPVolumeView(frame: .zero)
         QmeraAudioViewController.volumeView.isHidden = true
-
-        AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: NSKeyValueObservingOptions.new, context: nil)
         
         Nexilis.floatingButton.isHidden = true
         
@@ -386,6 +384,7 @@ class QmeraAudioViewController: UIViewController {
         }
         
         UIDevice.current.isProximityMonitoringEnabled = true
+        UIApplication.shared.isIdleTimerDisabled = true
         
         NotificationCenter.default.addObserver(self, selector: #selector(onStatusCall(_:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusCall), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onReceiveMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil)
@@ -503,21 +502,6 @@ class QmeraAudioViewController: UIViewController {
         self.timeStartCall = String(Date().currentTimeMillis())
         self.idCall = (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID()
     }
-    
-    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-            if (keyPath! == "outputVolume") {
-                if let newKey = change?[NSKeyValueChangeKey.newKey] as? NSNumber {
-                    QmeraAudioViewController.lastVolume = newKey.floatValue
-                    if (QmeraAudioViewController.bSpeakerPhone) {
-                        let volume = QmeraAudioViewController.lastVolume * QmeraAudioViewController.nMaxSPOn
-                        API.adjustVolume(fValue: volume)
-                    } else {
-                        let volume = QmeraAudioViewController.lastVolume * QmeraAudioViewController.nMaxSPOff
-                        API.adjustVolume(fValue: volume)
-                    }
-                }
-            }
-        }
     
     @objc func onCallFCM(notification: NSNotification) {
         DispatchQueue.main.async {

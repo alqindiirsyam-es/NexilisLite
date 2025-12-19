@@ -131,8 +131,9 @@ class ContactChatViewController: UITableViewController {
 //
 //            }),
             UIAction(title: "Favorite Messages".localized(), image: UIImage(systemName: "star"), handler: {[weak self](_) in
-                let editorStaredVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "staredVC") as! EditorStarMessages
-                self?.navigationController?.show(editorStaredVC, sender: nil)
+//                let editorStaredVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "staredVC") as! EditorStarMessages
+//                self?.navigationController?.show(editorStaredVC, sender: nil)
+                MiniCallBannerManager.shared.showBanner(contactName: "Nike", startDate: Date())
             }),
         ]
         //debug only
@@ -1318,7 +1319,7 @@ extension ContactChatViewController {
                     }
                 }
                 else {
-                    getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                    getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                         imageView.image = image
                     })
                 }
@@ -1458,7 +1459,7 @@ extension ContactChatViewController {
                         }
                     } else {
                         if data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL || data.isParent || data.pin == "-999" {
-                            getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : (data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL) ? "Profile---Purple" : "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                            getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : (data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL) ? "Profile---Black" : "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                                 imageView.image = image
                             })
                         } else {
@@ -1748,15 +1749,24 @@ extension ContactChatViewController {
                     let imageView = UIImageView(image: UIImage(systemName: iconName))
                     imageView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                     cell.accessoryView = imageView
+                    getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                        content.image = image
+                    }
                 }
                 else {
                     cell.accessoryView = nil
                     cell.accessoryType = .none
+                    if group.isOpen == "1" && group.parent == "" {
+                        getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                            content.image = image
+                        }
+                    } else {
+                        getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                            content.image = image
+                        }
+                    }
                 }
                 content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-                getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
-                    content.image = image
-                }
                 cell.contentConfiguration = content
                 if !group.level.isEmpty {
                     if group.level != "-1" && Int(group.level)! < 7 {
@@ -1812,7 +1822,7 @@ extension ContactChatViewController {
                     }
                 }
                 else {
-                    getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                    getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
                         imageView.image = image
                     })
                 }
@@ -1886,15 +1896,24 @@ extension ContactChatViewController {
                 let imageView = UIImageView(image: UIImage(systemName: iconName))
                 imageView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                 cell.accessoryView = imageView
+                getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                    content.image = image
+                }
             }
             else {
                 cell.accessoryView = nil
                 cell.accessoryType = .none
+                if group.isOpen == "1" && group.parent == "" {
+                    getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                        content.image = image
+                    }
+                } else {
+                    getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                        content.image = image
+                    }
+                }
             }
             content.imageProperties.maximumSize = CGSize(width: 40, height: 40)
-            getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
-                content.image = image
-            }
             cell.contentConfiguration = content
             if !group.level.isEmpty {
                 if group.level != "-1" && Int(group.level)! < 7 {

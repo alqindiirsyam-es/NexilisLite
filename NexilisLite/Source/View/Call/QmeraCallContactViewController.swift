@@ -200,7 +200,7 @@ class QmeraCallContactViewController: UITableViewController {
             user = users[indexPath.row]
         }
         content.imageProperties.maximumSize = CGSize(width: 44, height: 44)
-        getImage(name: user.thumb, placeholderImage: UIImage(named: "Profile---Purple", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+        getImage(name: user.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
             content.image = image
         }
         if User.isOfficial(official_account: user.official ?? "") || User.isOfficialRegular(official_account: user.official ?? "") {
