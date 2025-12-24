@@ -131,9 +131,8 @@ class ContactChatViewController: UITableViewController {
 //
 //            }),
             UIAction(title: "Favorite Messages".localized(), image: UIImage(systemName: "star"), handler: {[weak self](_) in
-//                let editorStaredVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "staredVC") as! EditorStarMessages
-//                self?.navigationController?.show(editorStaredVC, sender: nil)
-                MiniCallBannerManager.shared.showBanner(contactName: "Nike", startDate: Date())
+                let editorStaredVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "staredVC") as! EditorStarMessages
+                self?.navigationController?.show(editorStaredVC, sender: nil)
             }),
         ]
         //debug only

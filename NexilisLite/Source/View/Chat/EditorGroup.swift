@@ -542,7 +542,6 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             let dataM = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataMessages[idx]["chat_date"]  as? String ?? ""})
                             let rowIm = dataM.firstIndex(where: { $0["message_id"] as? String == dataMessages[idx]["message_id"] as? String })
                             if sectionIm != nil && rowIm != nil {
-                                let idxMarker = IndexPath(row: rowIm!, section: sectionIm!)
                                 if currentIndexpath!.section == sectionIm {
                                     for i in rowIm!..<currentIndexpath!.row + 1 {
                                         if dataMessages[i]["f_pin"] as? String != idMe {
@@ -561,6 +560,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             }
                             counter = 0
                             updateCounter(counter: counter)
+                        }
+                        if idx != 0 {
+                            for i in 0..<idx {
+                                if dataMessages[i]["f_pin"] as? String != idMe && dataMessages[i][TypeDataMessage.status] as? String != "4" {
+                                    sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                                }
+                            }
                         }
                     }
                 }
@@ -601,6 +607,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     if !last_r.isEmpty {
                         handleReply(indexPath: IndexPath(row: 0, section: 0), reffId: last_r)
                     }
+                }
+            }
+            for i in 0..<dataMessages.count {
+                let idMe = User.getMyPin() as String?
+                if dataMessages[i]["f_pin"] as? String != idMe && dataMessages[i][TypeDataMessage.status] as? String != "4" {
+                    sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                 }
             }
             tableChatView.scrollToBottom(isAnimated: false)
@@ -921,7 +933,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     private func chatDate(stringDate: String) -> String {
-        let date = Date(milliseconds: Int64(stringDate)!)
+        let date = Date(milliseconds: Int64(stringDate) ?? 0)
         let calendar = Calendar.current
         if (calendar.isDateInToday(date)) {
             if !dataDates.contains("Today".localized()){

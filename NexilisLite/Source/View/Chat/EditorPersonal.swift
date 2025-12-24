@@ -726,6 +726,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 counter = 0
                                 updateCounter(counter: counter)
                             }
+                            if idx != 0 {
+                                for i in 0..<idx {
+                                    if dataMessages[i]["f_pin"] as? String != idMe && dataMessages[i][TypeDataMessage.status] as? String != "4" {
+                                        sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -759,6 +766,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         if !last_r.isEmpty {
                             handleReply(indexPath: IndexPath(row: 0, section: 0), reffId: last_r)
                         }
+                    }
+                }
+                for i in 0..<dataMessages.count {
+                    let idMe = User.getMyPin() as String?
+                    if dataMessages[i]["f_pin"] as? String != idMe && dataMessages[i][TypeDataMessage.status] as? String != "4" {
+                        sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                     }
                 }
                 tableChatView.scrollToBottom(isAnimated: false)

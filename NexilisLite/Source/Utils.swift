@@ -3869,6 +3869,10 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             self.blurBackground.alpha = self.isNavigationBarHidden ? 0 : 1
         }
     }
+    
+    override func viewDidDisappear(_ animated: Bool) {
+        self.stopVideo()
+    }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         guard scrollView.zoomScale == 1.0 else { return }

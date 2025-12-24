@@ -503,13 +503,29 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
     private func restoreUcList(dataUcList: [String]) {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
+                var pin = dataUcList[0]
                 var lastMessageId = ""
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE_SUMMARY where l_pin = '\(dataUcList[0])'"), cursor.next() {
-                    lastMessageId = cursor.string(forColumnIndex: 0) ?? ""
+                if pin == User.getMyPin() {
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin from MESSAGE where message_id = '\(dataUcList[1])'"), cursor.next() {
+                        if cursor.next() {
+                            let fPin = cursor.string(forColumnIndex: 0) ?? ""
+                            let lPin = cursor.string(forColumnIndex: 1) ?? ""
+                            if fPin == User.getMyPin() {
+                                pin = lPin
+                            } else {
+                                pin = fPin
+                            }
+                        }
+                        cursor.close()
+                    }
+                } else {
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                        lastMessageId = cursor.string(forColumnIndex: 0) ?? ""
+                    }
                 }
-                if lastMessageId.isEmpty {
+                if lastMessageId.isEmpty && pin != User.getMyPin() {
                     _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
-                        "l_pin" : dataUcList[0],
+                        "l_pin" : pin,
                         "message_id" : dataUcList[1],
                         "counter" : 0,
                         "pinned" : 0,
