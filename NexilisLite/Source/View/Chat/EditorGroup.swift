@@ -546,8 +546,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                                     for i in rowIm!..<currentIndexpath!.row + 1 {
                                         if dataMessages[i]["f_pin"] as? String != idMe {
                                             sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataM[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataM[i]["message_id"]  as? String ?? "")
-                                            counter -= 0
-                                            updateCounter(counter: counter)
+                                            if counter != 0 {
+                                                counter -= 1
+                                                updateCounter(counter: counter)
+                                            }
                                         }
                                     }
                                 }
@@ -7669,7 +7671,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             } else if type == 1 {
                 imageViewer.media = .video(url ?? URL(string: "")!)
             } else if type == 2 {
-                imageViewer.media = .gif(UIImage.gifImageWithData(data ?? Data()) ?? UIImage())
+                imageViewer.media = .gif(data ?? Data())
             }
             
             let navigationController = UINavigationController(rootViewController: imageViewer)

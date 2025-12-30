@@ -1585,6 +1585,7 @@ public class APIS: NSObject {
     public static var uuidCall: UUID?
     public static var fpinCall: String?
     static var isHasFormCS: Bool = false
+    static var listMessageFromAPN: [String] = []
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
         DispatchQueue.main.async {
             if checkAppStateisBackground() {
@@ -1687,7 +1688,11 @@ public class APIS: NSObject {
                                 let lastBadgeNumber = UIApplication.shared.applicationIconBadgeNumber
                                 UIApplication.shared.applicationIconBadgeNumber = lastBadgeNumber + 1
                             }
-                            getMessageById(id: message_id)
+                            if !listMessageFromAPN.contains(message_id) {
+                                listMessageFromAPN.append(message_id)
+                            }
+                            _ = Nexilis.justInit()
+//                            getMessageById(id: message_id)
                         }
                     }
                 }
@@ -1811,9 +1816,31 @@ public class APIS: NSObject {
                                 Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callCancel, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
                             }
                         } else if UIApplication.shared.visibleViewController is QmeraAudioViewController || UIApplication.shared.visibleViewController is QmeraVideoViewController {
+                            CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callCancelName, callerId: callFrom, isVideo: callType != "1", isAutoCancel: true)
                             var dataMessage: [AnyHashable : Any] = [:]
                             dataMessage["call_cancel"] = true
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.callFCM), object: nil, userInfo: dataMessage)
+                        } else {
+                            CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callCancelName, callerId: callFrom, isVideo: callType != "1", isAutoCancel: true)
+                            let center = UNUserNotificationCenter.current()
+                            var textCall = ""
+                            if callType == "1" {
+                                textCall = "audio"
+                            } else {
+                                textCall = "video"
+                            }
+                            let content = UNMutableNotificationContent()
+                            content.title = callCancelName
+                            content.body = "☎️ Missed \(textCall) call".localized()
+                            content.userInfo = ["id" : callFrom, "type" : nxCode, "callType": callType]
+                            content.sound = nil
+                            let request = UNNotificationRequest(identifier: callCancel, content: content, trigger: nil)
+                            center.add(request) { error in
+                                if let error = error {
+                                    print("Error scheduling notification: \(error.localizedDescription)")
+                                }
+                            }
+                            Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callCancel, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
                         }
                     }
                 }
@@ -1951,7 +1978,8 @@ public class APIS: NSObject {
     
     public static func addNotificationNexilis(_ message: TMessage) {
         var text = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
-        text = text.toNormalString()
+//        text = text.toNormalString()
+        text = "You got messages..."
         let nameUser = message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME)
         var threadIdentifier = message.getBody(key: CoreMessage_TMessageKey.OPPOSITE_PIN)
         let scope = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID)
@@ -2066,7 +2094,7 @@ public class APIS: NSObject {
             }
         }
         DispatchQueue.main.async {
-            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
+            UIApplication.shared.applicationIconBadgeNumber += 1
         }
     }
     
@@ -3011,7 +3039,7 @@ public class APIS: NSObject {
         if !isGIF {
             imageViewer.media = .image(image ?? UIImage())
         } else {
-            imageViewer.media = .gif(UIImage.gifImageWithData(data ?? Data()) ?? UIImage())
+            imageViewer.media = .gif(data ?? Data())
         }
         
         let navigationController = UINavigationController(rootViewController: imageViewer)

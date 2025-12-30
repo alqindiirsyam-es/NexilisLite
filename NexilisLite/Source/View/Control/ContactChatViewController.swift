@@ -599,7 +599,8 @@ class ContactChatViewController: UITableViewController {
                     isOpen: cursor.string(forColumnIndex: 8) ?? "",
                     official: cursor.string(forColumnIndex: 9) ?? "",
                     isEducation: cursor.string(forColumnIndex: 10) ?? "",
-                    level: cursor.string(forColumnIndex: 11) ?? "")
+                    level: cursor.string(forColumnIndex: 11) ?? "",
+                    chatModifier: cursor.string(forColumnIndex: 12) ?? "")
                 
                 if group.chatId.isEmpty {
                     let lounge = Group(id: group.id, name: "Lounge".localized(), profile: "", quote: group.quote, by: group.by, date: group.date, parent: group.id, chatId: group.chatId, groupType: group.groupType, isOpen: group.isOpen, official: group.official, isEducation: group.isEducation, isLounge: true, level: group.level != "-1" ? group.level : "2")
@@ -624,6 +625,10 @@ class ContactChatViewController: UITableViewController {
                         group.childs.append(topic)
                     }
                     topicCursor.close()
+                }
+                
+                if !parent.isEmpty {
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getRequestGroupWithoutMemberFromParent(fPin: User.getMyPin() ?? "", groupId: parent))
                 }
                 
                 if !group.id.isEmpty {
@@ -1015,57 +1020,78 @@ extension ContactChatViewController {
         }
     }
     
+    func pullGroupInfo(groupHolder: Group) {
+        if groupHolder.isLounge {
+            return
+        }
+        let groupId = groupHolder.chatId.isEmpty ? groupHolder.id : groupHolder.chatId
+        let idMe = User.getMyPin() ?? ""
+        DispatchQueue.global().async {
+            _ = Nexilis.write(message: CoreMessage_TMessageBank.getRequestGroupWithoutMemberFromParent(fPin: idMe, groupId: groupId))
+        }
+    }
+    
     func checkOverrideAction(groupHolder: Group) -> Bool {
         if groupHolder.isLounge {
             return false
         }
-        let groupId = groupHolder.chatId.isEmpty ? groupHolder.id : groupHolder.chatId
-        switch (groupId){
-            case "18d1c6cffb70215af7b49" //bpkh konsultasi
-            , "18d1c6e37a20215af7b49"
-            , "18d1c6f852d0215af7b49"
-            , "18d1c6ff83a0215af7b49"
-            , "18d1c705e970215af7b49"
-            , "18d30db3bde0230d00c15" //ina konsultasi bot
-            , "18d30e64ce30230d00c15"
-            , "18d30e9b6d80230d00c15"
-            , "18d30ee00610230d00c15"
-            , "18d30f02f850230d00c15":
-                APIS.openSmartChatbot();
-                return true;
-            case "18d30daa4540230d00c15" //ina cc
-            , "18d30e59a950230d00c15"
-            , "18d30e9292b0230d00c15"
-            , "18d30ed8e250230d00c15"
-            , "18d30efa66c0230d00c15"
-            , "18d35b220540215af7b49" //bpkhcc
-            , "18d35b2f5ee0215af7b49"
-            , "18d35b356530215af7b49"
-            , "18d35b411510215af7b49"
-            , "18d35b46ae90215af7b49":
+        let chatModifier = groupHolder.chatModifier
+        if !chatModifier.isEmpty {
+            if chatModifier == "cc" {
                 APIS.openContactCenter();
-                return true;
-            case "18d1c6d9f330215af7b49": //bpkh haji
-                APIS.openUrl(url: Utils.decrypt(str: "6]tov!l_opgn=hgz?ykmgv?yoro3kt?uo>yoro3kt??@yvzzn"))
-                return true;
-            case "18d1c6eefd40215af7b49": //bpkh bpjs
-                APIS.openUrl(url: Utils.decrypt(str: "1>ojq`g@tkqc.cbu:tfhbq:tjmjyfo:pj/tjmjyfo::;tquui"))
-                return true;
-            case "18d30e711c20230d00c15": //ina bpjs
-                APIS.openUrl(url: Utils.decrypt(str: "6]tov!l_ypvh=hgz?ykmgv?yoro3kt?sui>ykrgyomojrkyz??@yvzzn"))
-                return true;
-            case "18d30e47ae60230d00c15": //ina KTP, KK, SKL
-                APIS.openUrl(url: Utils.decrypt(str: "1>ojq`g@qul.cbu:tfhbq:tjmjyfo:npd/tfmbtjhjemftu::;tquui"))
-                return true;
-            case "18d30eb2e910230d00c15": //SIM, SKKB, SKBN
-                APIS.openUrl(url: Utils.decrypt(str: "4[rmt}j]qmw;fex=wiket=wmpm1ir=qsg<wipewmkmhpiwx==>wtxxl"))
-                return true;
-            case "18da1c0200f0215af7b49": //BPKH index BMI
-                APIS.openUrl(url: Utils.decrypt(str: "4[rmt}j]mqf}1ihrm=mqf=wmpm1ir=sm<wmpm1ir==>wtxxl"))
-                return true;
-            default:
-                break;
+            } else if chatModifier == "gpt" {
+                APIS.openSmartChatbot();
+            } else {
+                APIS.openUrl(url: chatModifier)
+            }
+            return true
         }
+//        switch (groupId){
+//            case "18d1c6cffb70215af7b49" //bpkh konsultasi
+//            , "18d1c6e37a20215af7b49"
+//            , "18d1c6f852d0215af7b49"
+//            , "18d1c6ff83a0215af7b49"
+//            , "18d1c705e970215af7b49"
+//            , "18d30db3bde0230d00c15" //ina konsultasi bot
+//            , "18d30e64ce30230d00c15"
+//            , "18d30e9b6d80230d00c15"
+//            , "18d30ee00610230d00c15"
+//            , "18d30f02f850230d00c15":
+//                APIS.openSmartChatbot();
+//                return true;
+//            case "18d30daa4540230d00c15" //ina cc
+//            , "18d30e59a950230d00c15"
+//            , "18d30e9292b0230d00c15"
+//            , "18d30ed8e250230d00c15"
+//            , "18d30efa66c0230d00c15"
+//            , "18d35b220540215af7b49" //bpkhcc
+//            , "18d35b2f5ee0215af7b49"
+//            , "18d35b356530215af7b49"
+//            , "18d35b411510215af7b49"
+//            , "18d35b46ae90215af7b49":
+//                APIS.openContactCenter();
+//                return true;
+//            case "18d1c6d9f330215af7b49": //bpkh haji
+//                APIS.openUrl(url: Utils.decrypt(str: "6]tov!l_opgn=hgz?ykmgv?yoro3kt?uo>yoro3kt??@yvzzn"))
+//                return true;
+//            case "18d1c6eefd40215af7b49": //bpkh bpjs
+//                APIS.openUrl(url: Utils.decrypt(str: "1>ojq`g@tkqc.cbu:tfhbq:tjmjyfo:pj/tjmjyfo::;tquui"))
+//                return true;
+//            case "18d30e711c20230d00c15": //ina bpjs
+//                APIS.openUrl(url: Utils.decrypt(str: "6]tov!l_ypvh=hgz?ykmgv?yoro3kt?sui>ykrgyomojrkyz??@yvzzn"))
+//                return true;
+//            case "18d30e47ae60230d00c15": //ina KTP, KK, SKL
+//                APIS.openUrl(url: Utils.decrypt(str: "1>ojq`g@qul.cbu:tfhbq:tjmjyfo:npd/tfmbtjhjemftu::;tquui"))
+//                return true;
+//            case "18d30eb2e910230d00c15": //SIM, SKKB, SKBN
+//                APIS.openUrl(url: Utils.decrypt(str: "4[rmt}j]qmw;fex=wiket=wmpm1ir=qsg<wipewmkmhpiwx==>wtxxl"))
+//                return true;
+//            case "18da1c0200f0215af7b49": //BPKH index BMI
+//                APIS.openUrl(url: Utils.decrypt(str: "4[rmt}j]mqf}1ihrm=mqf=wmpm1ir=sm<wmpm1ir==>wtxxl"))
+//                return true;
+//            default:
+//                break;
+//        }
         return false
     }
     
@@ -1744,10 +1770,15 @@ extension ContactChatViewController {
                     content.text = group.name
                 }
                 if group.childs.count > 0 {
-                    let iconName = (group.isSelected) ? "chevron.up.circle" : "chevron.down.circle"
-                    let imageView = UIImageView(image: UIImage(systemName: iconName))
-                    imageView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-                    cell.accessoryView = imageView
+                    if group.chatModifier.isEmpty {
+                        let iconName = (group.isSelected) ? "chevron.up.circle" : "chevron.down.circle"
+                        let imageView = UIImageView(image: UIImage(systemName: iconName))
+                        imageView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+                        cell.accessoryView = imageView
+                    } else {
+                        cell.accessoryView = nil
+                        cell.accessoryType = .none
+                    }
                     getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
                         content.image = image
                     }

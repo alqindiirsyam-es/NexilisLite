@@ -711,8 +711,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                         for i in rowIm!..<currentIndexpath!.row + 1 {
                                             if dataMessages[i]["f_pin"] as? String != idMe {
                                                 sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataM[i]["message_id"]  as? String ?? "")
-                                                counter -= 0
-                                                updateCounter(counter: counter)
+                                                if counter != 0 {
+                                                    counter -= 1
+                                                    updateCounter(counter: counter)
+                                                }
                                             }
                                         }
                                     }
@@ -9447,7 +9449,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             } else if type == 1 {
                 imageViewer.media = .video(url ?? URL(string: "")!)
             } else if type == 2 {
-                imageViewer.media = .gif(UIImage.gifImageWithData(data ?? Data()) ?? UIImage())
+                imageViewer.media = .gif(data ?? Data())
             }
             
             let navigationController = UINavigationController(rootViewController: imageViewer)

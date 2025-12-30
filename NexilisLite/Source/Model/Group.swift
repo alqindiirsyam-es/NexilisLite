@@ -26,10 +26,11 @@ public class Group: Model {
     public var childs: [Group] = []
     public var members: [Member] = []
     public let level: String
+    public let chatModifier: String
     
     public var isSelected = false
     
-    public init(id: String, name: String, profile: String, quote: String, by: String, date: String, parent: String, chatId: String = "", groupType: String, isOpen: String, official: String, isEducation: String = "", isLounge: Bool = false, level: String = "") {
+    public init(id: String, name: String, profile: String, quote: String, by: String, date: String, parent: String, chatId: String = "", groupType: String, isOpen: String, official: String, isEducation: String = "", isLounge: Bool = false, level: String = "", chatModifier: String = "") {
         self.id = id
         self.name = name
         self.profile = profile
@@ -44,6 +45,7 @@ public class Group: Model {
         self.isEducation = isEducation
         self.isLounge = isLounge
         self.level = level
+        self.chatModifier = chatModifier
     }
     
     var isInternal: Bool {
@@ -65,7 +67,7 @@ public class Group: Model {
         var group: Group?
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select group_id, f_name, image_id, quote, created_by, created_date, parent, group_type, is_open, official from GROUPZ where group_id = '\(group_id)'"), cursor.next() {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select group_id, f_name, image_id, quote, created_by, created_date, parent, group_type, is_open, official, chat_modifier from GROUPZ where group_id = '\(group_id)'"), cursor.next() {
                     group = Group(id: cursor.string(forColumnIndex: 0) ?? "",
                                   name: cursor.string(forColumnIndex: 1) ?? "",
                                   profile: cursor.string(forColumnIndex: 2) ?? "",
@@ -75,7 +77,8 @@ public class Group: Model {
                                   parent: cursor.string(forColumnIndex: 6) ?? "",
                                   groupType: cursor.string(forColumnIndex: 7) ?? "",
                                   isOpen: cursor.string(forColumnIndex: 8) ?? "",
-                                  official: cursor.string(forColumnIndex: 9) ?? "")
+                                  official: cursor.string(forColumnIndex: 9) ?? "",
+                                  chatModifier: cursor.string(forColumnIndex: 10) ?? "")
                     cursor.close()
                 }
             } catch {

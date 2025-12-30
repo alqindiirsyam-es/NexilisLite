@@ -411,6 +411,17 @@ class QmeraAudioViewController: UIViewController {
                                             self.status.text = "The call was not answered"
                                             self.end.isEnabled = false
                                             Nexilis.stopRingbacktoneCall()
+                                            if self.callFCM {
+                                                DispatchQueue.global().async {
+                                                    if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
+                                                    } else {
+                                                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                                        imageView.tintColor = .white
+                                                        let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                                        banner.show()
+                                                    }
+                                                }
+                                            }
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                                                 self.didEnd(sender: false)
                                             }
@@ -427,6 +438,17 @@ class QmeraAudioViewController: UIViewController {
                                             self.status.text = "The call was not answered"
                                             self.end.isEnabled = false
                                             Nexilis.stopRingbacktoneCall()
+                                            if self.callFCM {
+                                                DispatchQueue.global().async {
+                                                    if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
+                                                    } else {
+                                                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                                        imageView.tintColor = .white
+                                                        let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                                        banner.show()
+                                                    }
+                                                }
+                                            }
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                                                 self.didEnd(sender: false)
                                             }
@@ -471,6 +493,17 @@ class QmeraAudioViewController: UIViewController {
                                 self.status.text = "The call was not answered"
                                 self.end.isEnabled = false
                                 Nexilis.stopRingbacktoneCall()
+                                if self.callFCM {
+                                    DispatchQueue.global().async {
+                                        if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
+                                        } else {
+                                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                            imageView.tintColor = .white
+                                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                            banner.show()
+                                        }
+                                    }
+                                }
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                                     self.didEnd(sender: false)
                                 }
@@ -522,6 +555,17 @@ class QmeraAudioViewController: UIViewController {
                                         self.status.text = "The call was not answered"
                                         self.end.isEnabled = false
                                         Nexilis.stopRingbacktoneCall()
+                                        if self.callFCM {
+                                            DispatchQueue.global().async {
+                                                if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
+                                                } else {
+                                                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                                    imageView.tintColor = .white
+                                                    let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                                                    banner.show()
+                                                }
+                                            }
+                                        }
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                                             self.didEnd(sender: false)
                                         }

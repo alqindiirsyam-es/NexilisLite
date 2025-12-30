@@ -2922,4 +2922,26 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    public static func getRequestGroupWithoutMemberFromParent(fPin: String, groupId: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        tMessage.mCode = CoreMessage_TMessageCode.REQUEST_GROUPS_WITHOUT_MEMBER
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mPIN = fPin
+        tMessage.mBodies[CoreMessage_TMessageKey.F_PIN] = fPin
+        tMessage.mBodies[CoreMessage_TMessageKey.GROUP_ID] = groupId
+        tMessage.mBodies[CoreMessage_TMessageKey.TYPE] = "2" // 1 : ALL, 2 : SPESIFIC PARENT_ID, 3 : SPESIFIC GROUP_ID
+        return tMessage;
+    }
+    
+    public static func getRequestGroupWithoutMember(fPin: String, groupId: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        tMessage.mCode = CoreMessage_TMessageCode.REQUEST_GROUPS_WITHOUT_MEMBER
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mPIN = fPin
+        tMessage.mBodies[CoreMessage_TMessageKey.F_PIN] = fPin
+        tMessage.mBodies[CoreMessage_TMessageKey.GROUP_ID] = groupId
+        tMessage.mBodies[CoreMessage_TMessageKey.TYPE] = "3" // 1 : ALL, 2 : SPESIFIC PARENT_ID, 3 : SPESIFIC GROUP_ID
+        return tMessage;
+    }
+    
 }

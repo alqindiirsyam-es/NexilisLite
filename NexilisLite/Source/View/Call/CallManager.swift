@@ -53,7 +53,7 @@ public class CallManager: NSObject, ObservableObject {
         }
     }
     
-    public func reportIncomingCall(uuid: UUID, callerName: String, callerId: String, isVideo: Bool) {
+    public func reportIncomingCall(uuid: UUID, callerName: String, callerId: String, isVideo: Bool, isAutoCancel: Bool = false) {
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: callerId)
         update.localizedCallerName = callerName
@@ -63,6 +63,11 @@ public class CallManager: NSObject, ObservableObject {
         provider.reportNewIncomingCall(with: uuid, update: update) { error in
             if let error = error {
                 print("Error reporting incoming call: \(error.localizedDescription)")
+            }
+            if isAutoCancel {
+                self.endCall(uuid: uuid) {
+                    
+                }
             }
         }
     }

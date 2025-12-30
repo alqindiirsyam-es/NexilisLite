@@ -15,6 +15,7 @@ import CryptoKit
 import LocalAuthentication
 import AVFoundation
 import PDFKit
+import SDWebImage
 //import var CommonCrypto.CC_MD5_DIGEST_LENGTH
 //import func CommonCrypto.CC_MD5
 //import typealias CommonCrypto.CC_LONG
@@ -3421,7 +3422,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     
     enum MediaType {
         case image(UIImage)
-        case gif(UIImage)
+        case gif(Data)
         case video(URL)
     }
 
@@ -3431,7 +3432,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     public var titleCustom = ""
     public var subtitleCustom = ""
     private let scrollView = UIScrollView()
-    private let imageView = UIImageView()
+    private let imageView = SDAnimatedImageView()
     private var statusBarBackgroundView: UIView!
     private var player: AVPlayer?
     private var playerLayer: AVPlayerLayer?
@@ -3629,10 +3630,9 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         case .image(let img):
             imageView.image = img
 
-        case .gif(let img):
-            imageView.image = img
-            imageView.animationRepeatCount = 0
-            imageView.startAnimating()
+        case .gif(let data):
+            let animatedImage = SDAnimatedImage(data: data)
+            imageView.image = animatedImage
 
         case .video(let url):
             setupVideo(url: url)

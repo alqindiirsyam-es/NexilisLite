@@ -1288,7 +1288,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             } else if type == 1 {
                 imageViewer.media = .video(url ?? URL(string: "")!)
             } else if type == 2 {
-                imageViewer.media = .gif(UIImage.gifImageWithData(data ?? Data()) ?? UIImage())
+                imageViewer.media = .gif(data ?? Data())
             }
             
             let navigationController = UINavigationController(rootViewController: imageViewer)
