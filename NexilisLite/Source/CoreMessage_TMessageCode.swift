@@ -836,5 +836,7 @@ public class CoreMessage_TMessageCode {
     
     public static let GET_MULTI_FACTOR_AUTHENTICATION = "GMFA";
     public static let DEMO_FIDO = "DF01";
+    
+    public static let IS_NEED_SCAN_TOTP = "NST";
 
 }

@@ -757,6 +757,13 @@ public class Nexilis: NSObject {
                                         }
                                     }
                                 }
+                                if jsonData["enable_totp"]! != nil {
+                                    if let data = jsonData["enable_totp"] as? String {
+                                        if data == "1" {
+                                            Utils.setEnableTOTP(value: data)
+                                        }
+                                    }
+                                }
                             }
                             keyTemp = ""
                             keyIvTemp = ""

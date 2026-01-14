@@ -737,6 +737,28 @@ public final class Utils {
         return "0"
     }
     
+    public static func setTOTPSecret(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "totp_secret")
+    }
+
+    public static func getTOTPSecret() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "totp_secret") {
+            return value
+        }
+        return ""
+    }
+    
+    public static func setEnableTOTP(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "enable_totp")
+    }
+    
+    public static func getEnableTOTP() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "enable_totp") {
+            return value
+        }
+        return "0"
+    }
+    
     public static func fetchDataWithCookiesAndUserAgent(from url: URL, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -978,6 +1000,9 @@ public final class Utils {
                     }
                     if Array(json.keys)[i] == "icon_size" {
                         Utils.setIconDockSize(value: Array(json.values)[i] as? String ?? "")
+                    }
+                    if Array(json.keys)[i] == "enable_totp" {
+                        Utils.setEnableTOTP(value: Array(json.values)[i] as? String ?? "0")
                     }
                 }
                 Utils.setFinishInitPrefs(value: true)

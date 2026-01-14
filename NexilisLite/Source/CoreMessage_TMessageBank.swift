@@ -2944,4 +2944,16 @@ public class CoreMessage_TMessageBank {
         return tMessage;
     }
     
+    public static func getNeedScanTOTP(apiKey: String, username: String, password: String) -> TMessage {
+        let tMessage = NexilisLite.TMessage()
+        let me = User.getMyPin() ?? ""
+        tMessage.mPIN = me
+        tMessage.mCode = CoreMessage_TMessageCode.IS_NEED_SCAN_TOTP
+        tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tMessage.mBodies[CoreMessage_TMessageKey.API] = apiKey
+        tMessage.mBodies[CoreMessage_TMessageKey.NAME] = username
+        tMessage.mBodies[CoreMessage_TMessageKey.PSWD] = password
+        return tMessage
+    }
+    
 }
