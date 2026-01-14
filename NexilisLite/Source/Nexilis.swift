@@ -75,7 +75,6 @@ public class Nexilis: NSObject {
     public static var showLibraryNotification = true
     
     public static let STREAMING_SEMINAR_ENDED = 88
-    public static let STREAMING_AFTER_OFFHOOK = 94
     public static let VIDEO_CALL_END = 38
     public static let VIDEO_CALL_MUTE_UNMUTE = 36
     public static let VIDEO_CALL_ZOOM = 35

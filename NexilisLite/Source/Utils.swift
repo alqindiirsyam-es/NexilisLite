@@ -3741,27 +3741,36 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     private func addPeriodicTimeObserver() {
         guard let player = player else { return }
 
-        player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
-                                       queue: .main) { [weak self] time in
+        player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
             guard let self = self,
-                  let duration = player.currentItem?.duration.seconds,
-                  duration > 0 else { return }
+                  let item = player.currentItem else { return }
 
-            let current = time.seconds
-            let remaining = duration - current
+            let durationDouble = item.duration.seconds
+            guard durationDouble.isFinite, durationDouble > 0 else { return }
 
-            self.slider.value = Float(current / duration)
+            // ✅ Convert duration ONCE
+            let durationSeconds = Int(round(durationDouble))
 
-            self.timeCurrentLabel.text = self.formatTime(current)
-            self.timeRemainingLabel.text = "-\(self.formatTime(remaining))"
+            // Clamp & convert current ONCE
+            let currentDouble = min(max(time.seconds, 0), durationDouble)
+            let currentSeconds = min(Int(round(currentDouble)), durationSeconds)
+
+            // ✅ Remaining derived from integers
+            let remainingSeconds = max(durationSeconds - currentSeconds, 0)
+
+            self.slider.value = Float(currentDouble / durationDouble)
+
+            self.timeCurrentLabel.text = self.formatTime(seconds: currentSeconds)
+            self.timeRemainingLabel.text = "-\(self.formatTime(seconds: remainingSeconds))"
         }
     }
     
-    private func formatTime(_ seconds: Double) -> String {
-        guard !seconds.isNaN else { return "0:00" }
-        
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
+    private func formatTime(seconds: Int) -> String {
+        let mins = seconds / 60
+        let secs = seconds % 60
         return String(format: "%d:%02d", mins, secs)
     }
     
@@ -3858,6 +3867,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             player.pause()
             playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
         } else {
+            prepareForVideoPlayback()
             if let currentItem = player.currentItem,
                currentItem.currentTime() >= currentItem.duration {
                 player.seek(to: .zero)
@@ -3871,6 +3881,20 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             }
         }
         isVideoPlaying.toggle()
+    }
+    
+    func prepareForVideoPlayback() {
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(
+                .playback,
+                mode: .moviePlayback,
+                options: [.defaultToSpeaker]
+            )
+            try audioSession.setActive(true)
+        } catch {
+            print("Failed to configure audio session for video")
+        }
     }
     
     func stopVideo() {
