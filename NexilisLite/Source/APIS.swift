@@ -21,6 +21,7 @@ public class APIS: NSObject {
     public static func connect(appName: String, apiKey: String, userName: String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         Nexilis.connect(apiKey: apiKey, userId: userName, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
+        APIS.monitoredActivity()
     }
     
     public static func getTotalCounter() -> Int32 {

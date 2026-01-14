@@ -1094,7 +1094,7 @@ class VideoConferenceViewController: UIViewController {
                 if let idx = self.users.firstIndex(where: { $0.pin == user }) {
                     self.users[idx].isMuted = isMuted
                     if self.dataPerson.count > 1 {
-                        self.imageMuted[idx].isHidden = isMuted
+                        self.imageMuted[idx].isHidden = !isMuted
                     }
                 }
                 if self.dataPerson.count == 1 {

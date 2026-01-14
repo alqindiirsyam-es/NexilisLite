@@ -713,42 +713,44 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
                 }
             }
             sendJoin()
-        } else if state == Nexilis.STREAMING_AFTER_OFFHOOK {
-            DispatchQueue.main.async {
-                self.buttonSpeaker.isEnabled = false
-            }
-            QmeraStreamingViewController.isLoop = true
-            DispatchQueue.global(qos: .userInitiated).async {
-                var countLoop = 0
-                repeat {
-                    Thread.sleep(forTimeInterval : 0.5)
-                    if (QmeraStreamingViewController.isLoop && !API.bAudioEngineIsRunning()) {
-                        API.restartAudioEngine()
-                        DispatchQueue.main.async {
-                            if !self.buttonSpeaker.isEnabled {
-                                self.didTapSpeakerButton(UIButton())
-                                self.buttonSpeaker.isEnabled = true
-                            } else if QmeraStreamingViewController.isSpeakerPhone {
-                                do {
-                                    let audioSession = AVAudioSession.sharedInstance()
-                                    try audioSession.overrideOutputAudioPort(.speaker)
-                                } catch {
-                                    
+            
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1, execute: {
+                DispatchQueue.main.async {
+                    self.buttonSpeaker.isEnabled = false
+                }
+                QmeraStreamingViewController.isLoop = true
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var countLoop = 0
+                    repeat {
+                        Thread.sleep(forTimeInterval : 0.5)
+                        if (QmeraStreamingViewController.isLoop && !API.bAudioEngineIsRunning()) {
+                            API.restartAudioEngine()
+                            DispatchQueue.main.async {
+                                if !self.buttonSpeaker.isEnabled {
+                                    self.didTapSpeakerButton(UIButton())
+                                    self.buttonSpeaker.isEnabled = true
+                                } else if QmeraStreamingViewController.isSpeakerPhone {
+                                    do {
+                                        let audioSession = AVAudioSession.sharedInstance()
+                                        try audioSession.overrideOutputAudioPort(.speaker)
+                                    } catch {
+                                        
+                                    }
                                 }
                             }
                         }
-                    }
-                    countLoop = countLoop + 1
-                    if countLoop == 3 {
-                        DispatchQueue.main.async {
-                            if !self.buttonSpeaker.isEnabled{
-                                self.didTapSpeakerButton(UIButton())
-                                self.buttonSpeaker.isEnabled = true
+                        countLoop = countLoop + 1
+                        if countLoop == 3 {
+                            DispatchQueue.main.async {
+                                if !self.buttonSpeaker.isEnabled{
+                                    self.didTapSpeakerButton(UIButton())
+                                    self.buttonSpeaker.isEnabled = true
+                                }
                             }
                         }
-                    }
-                } while (QmeraStreamingViewController.isLoop)
-            }
+                    } while (QmeraStreamingViewController.isLoop)
+                }
+            })
         } else if state == Nexilis.AUDIO_CALL_RINGING {
             let m = message.split(separator: ",")
             let _ = String(m[0])
