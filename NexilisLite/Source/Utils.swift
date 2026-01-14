@@ -741,11 +741,11 @@ public final class Utils {
         SecureUserDefaults.shared.set(value, forKey: "totp_secret")
     }
 
-    public static func getTOTPSecret() -> String {
+    public static func getTOTPSecret() -> String? {
         if let value: String = SecureUserDefaults.shared.value(forKey: "totp_secret") {
             return value
         }
-        return ""
+        return nil
     }
     
     public static func setEnableTOTP(value: String) {
