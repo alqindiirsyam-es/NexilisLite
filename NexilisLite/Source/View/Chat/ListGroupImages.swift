@@ -123,7 +123,7 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
         let containerImages = UIImageView()
         containerImages.contentMode = .scaleAspectFit
         cell.contentView.addSubview(containerImages)
-        containerImages.anchor(top: cell.contentView.topAnchor, left: cell.contentView.leftAnchor, right: cell.contentView.rightAnchor, height: ListGroupImages.getImageSize(image: listGroupingImages[indexPath.row].thumbId, screenWidth: UIScreen.main.bounds.width, screenHeight: UIScreen.main.bounds.height)!.height)
+        containerImages.anchor(top: cell.contentView.topAnchor, left: cell.contentView.leftAnchor, right: cell.contentView.rightAnchor, height: ListGroupImages.getImageSize(image: listGroupingImages[indexPath.row].thumbId, screenWidth: UIScreen.main.bounds.width, screenHeight: UIScreen.main.bounds.height).height)
         
         if !forwardSession && !deleteSession {
             let longPressRecognizer = LongPressImageVIew(target: self, action: #selector(handleLongPress(_:)))
@@ -266,7 +266,7 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
     
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         if tableView == tableViewImages {
-            return ListGroupImages.getImageSize(image: listGroupingImages[indexPath.row].thumbId, screenWidth: UIScreen.main.bounds.width, screenHeight: UIScreen.main.bounds.height)!.height + 15
+            return ListGroupImages.getImageSize(image: listGroupingImages[indexPath.row].thumbId, screenWidth: UIScreen.main.bounds.width, screenHeight: UIScreen.main.bounds.height).height + 15
         }
         return UITableView.automaticDimension
     }
@@ -675,55 +675,61 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
         Nexilis.deleteQueueMessage(message: tmessage)
     }
     
-    static func getImageSize(image: String, screenWidth: CGFloat, screenHeight: CGFloat) -> CGSize? {
-        let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-        let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-        let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-        if let dirPath = paths.first {
-            let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(image)
-            var imagePath : UIImage?
-            do {
-                if FileManager.default.fileExists(atPath: imageURL.path) {
-                    imagePath = UIImage(contentsOfFile: imageURL.path)
-                }
-                else if FileEncryption.shared.isSecureExists(filename: image) {
-                    if var imageData = try FileEncryption.shared.readSecure(filename: image) {
-                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData)
-                        if dataDecrypt != nil {
-                            imageData = dataDecrypt!
-                        }
-                        imagePath = UIImage(data: imageData)
-                    }
-                }
-                if imagePath == nil {
-                    return CGSize(width: 100, height: 100)
-                }
-            }
-            catch {
-                
-            }
-            let imageWidth = imagePath!.size.width
-            let imageHeight = imagePath!.size.height
+    static func getImageSize(
+        image: String,
+        screenWidth: CGFloat,
+        screenHeight: CGFloat
+    ) -> CGSize {
 
-            // Calculate the aspect ratio of the image
-            let aspectRatio = imageWidth / imageHeight
+        let paths = NSSearchPathForDirectoriesInDomains(
+            .documentDirectory,
+            .userDomainMask,
+            true
+        )
 
-            // Calculate the size to display the image while maintaining its aspect ratio
-            var displayWidth: CGFloat = 0.0
-            var displayHeight: CGFloat = 0.0
-
-            if imageWidth > imageHeight {
-                // Landscape image
-                displayWidth = screenWidth
-                displayHeight = screenWidth / aspectRatio
-            } else {
-                // Portrait or square image
-                displayHeight = screenHeight
-                displayWidth = screenHeight * aspectRatio
-            }
-            return CGSize(width: displayWidth, height: displayHeight)
+        guard let dirPath = paths.first else {
+            return CGSize(width: 100, height: 100)
         }
-        return nil
+
+        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(image)
+        var imagePath: UIImage?
+
+        do {
+            if FileManager.default.fileExists(atPath: imageURL.path) {
+                imagePath = UIImage(contentsOfFile: imageURL.path)
+            } else if FileEncryption.shared.isSecureExists(filename: image) {
+                if var imageData = try FileEncryption.shared.readSecure(filename: image) {
+                    if let decrypted = FileEncryption.shared.decryptFileFromServer(data: imageData) {
+                        imageData = decrypted
+                    }
+                    imagePath = UIImage(data: imageData)
+                }
+            }
+        } catch {
+            return CGSize(width: 100, height: 100)
+        }
+
+        // ✅ SAFE UNWRAP
+        guard let image = imagePath else {
+            return CGSize(width: 100, height: 100)
+        }
+
+        let imageWidth = image.size.width
+        let imageHeight = image.size.height
+        let aspectRatio = imageWidth / imageHeight
+
+        var displayWidth: CGFloat
+        var displayHeight: CGFloat
+
+        if imageWidth > imageHeight {
+            displayWidth = screenWidth
+            displayHeight = screenWidth / aspectRatio
+        } else {
+            displayHeight = screenHeight
+            displayWidth = screenHeight * aspectRatio
+        }
+
+        return CGSize(width: displayWidth, height: displayHeight)
     }
 }
 

@@ -257,7 +257,15 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         DispatchQueue.main.async { [self] in
                             guard progress == 100 else {
                                 if progress != -100 {
-                                    labelRestoring.text = "Downloading...".localized() + "  \(progress)%"
+                                    let formatter = NumberFormatter()
+                                    formatter.minimumFractionDigits = 1
+                                    formatter.maximumFractionDigits = 1
+                                    
+                                    var prog = ""
+                                    if let formatted = formatter.string(from: NSNumber(value: progress)) {
+                                        prog = formatted
+                                    }
+                                    labelRestoring.text = "Downloading...".localized() + "  \(prog)%"
                                 } else {
                                     labelRestoring.text = "Failed Restored Data".localized()
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {

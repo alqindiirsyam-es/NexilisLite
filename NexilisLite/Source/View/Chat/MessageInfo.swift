@@ -786,8 +786,8 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             let containerViewFile = UIView()
             
             if (!thumbChat.isEmpty) {
-                let getHeightImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)!.height
-                let getWidthImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)!.width
+                let getHeightImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).height
+                let getWidthImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).width
                 topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 40 : getHeightImage)
                 
                 containerMessage.addSubview(imageThumb)

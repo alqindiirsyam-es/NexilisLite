@@ -1532,6 +1532,7 @@ public class ImageCache {
     private let cache = NSCache<NSString, UIImage>()
     private let cacheGif = NSCache<NSString, NSData>()
     private var cacheKeyMap: [String: String] = [:]
+    private let cacheQueue = DispatchQueue(label: "io.nexilis.imagecache.queue")
 
     private let imageCacheDirectory: URL
     private let gifCacheDirectory: URL
@@ -1548,16 +1549,37 @@ public class ImageCache {
 
     public func save(image: UIImage, forKey key: String) {
         let sanitizedKey = sanitizeKey(key)
+
         cache.setObject(image, forKey: sanitizedKey as NSString)
-        cacheKeyMap[key] = sanitizedKey
-        saveCacheToDisk(directory: imageCacheDirectory, isGif: false)
+
+        cacheQueue.async {
+            self.cacheKeyMap[key] = sanitizedKey
+            self.scheduleDiskSave()
+        }
     }
 
     public func saveGif(data: NSData, forKey key: String) {
         let sanitizedKey = sanitizeKey(key)
+
         cacheGif.setObject(data, forKey: sanitizedKey as NSString)
-        cacheKeyMap[key] = sanitizedKey
-        saveCacheToDisk(directory: gifCacheDirectory, isGif: true)
+
+        cacheQueue.async {
+            self.cacheKeyMap[key] = sanitizedKey
+            self.scheduleDiskSave()
+        }
+    }
+    
+    private var pendingDiskSave = false
+
+    private func scheduleDiskSave() {
+        guard !pendingDiskSave else { return }
+        pendingDiskSave = true
+
+        cacheQueue.asyncAfter(deadline: .now() + 0.5) {
+            self.saveCacheToDisk(directory: self.imageCacheDirectory, isGif: false)
+            self.saveCacheToDisk(directory: self.gifCacheDirectory, isGif: true)
+            self.pendingDiskSave = false
+        }
     }
 
     public func image(forKey key: String) -> UIImage? {
@@ -1612,15 +1634,25 @@ public class ImageCache {
             return
         }
 
-        for (_, sanitizedKey) in cacheKeyMap {
+        let keyMapSnapshot = cacheKeyMap
+
+        for (_, sanitizedKey) in keyMapSnapshot {
             if isGif {
                 if let gifData = cacheGif.object(forKey: sanitizedKey as NSString) {
-                    try? FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).gif", data: gifData as Data, withoutBiometric: true)
+                    try? FileEncryption.shared.writeSecure(
+                        filename: "\(sanitizedKey).gif",
+                        data: gifData as Data,
+                        withoutBiometric: true
+                    )
                 }
             } else {
                 if let image = cache.object(forKey: sanitizedKey as NSString),
                    let imageData = image.pngData() {
-                    try? FileEncryption.shared.writeSecure(filename: "\(sanitizedKey).png", data: imageData, withoutBiometric: true)
+                    try? FileEncryption.shared.writeSecure(
+                        filename: "\(sanitizedKey).png",
+                        data: imageData,
+                        withoutBiometric: true
+                    )
                 }
             }
         }

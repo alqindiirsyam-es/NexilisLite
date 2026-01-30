@@ -8400,8 +8400,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     countRestImages.textColor = .white
                 }
             } else {
-                let getHeightImage: CGFloat = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)!.height
-                let getWidthImage: CGFloat = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)!.width
+                let getHeightImage: CGFloat = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).height
+                let getWidthImage: CGFloat = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).width
                 topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 45 : getHeightImage + 5)
                 
                 containerMessage.addSubview(imageThumb)
