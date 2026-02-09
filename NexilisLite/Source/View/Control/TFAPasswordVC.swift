@@ -136,8 +136,28 @@ class TFAPasswordVC: UIViewController {
         mainStackView.addArrangedSubview(headerImageView1)
 
         headerImageView2.contentMode = .scaleAspectFit
-        headerImageView2.image = UIImage(named: "pb_mfa_splash", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-        headerImageView2.heightAnchor.constraint(equalToConstant: 200).isActive = true
+        if !Utils.getTfaLogo().isEmpty {
+            let urlString = Utils.getTfaLogo()
+            if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                DispatchQueue.main.async() { [self] in
+                    headerImageView2.image = cachedImage
+                }
+            } else {
+                Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
+                    guard let data = data, error == nil else { return }
+                    // always update the UI from the main thread
+                    DispatchQueue.main.async() { [self] in
+                        if UIImage(data: data) != nil {
+                            headerImageView2.image = UIImage(data: data)!
+                            ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
+                        }
+                    }
+                }
+            }
+        } else {
+            headerImageView2.image = UIImage(named: "pb_mfa_splash_sign_in", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        }
+        headerImageView2.heightAnchor.constraint(equalToConstant: 230).isActive = true
         mainStackView.addArrangedSubview(headerImageView2)
 
         // Header Title Label

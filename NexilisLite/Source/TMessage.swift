@@ -34,7 +34,7 @@ public class TMessage {
     public static let TYPE_NEED_ACK    =  "3"
     
     public init() {
-        mVersion = "1.0.116"
+        mVersion = "1.0.120"
         mBodies[CoreMessage_TMessageKey.IMEI] = Nexilis.getCLMUserId()
 //        mBodies[CoreMessage_TMessageKey.VERCOD] = UIApplication.appVersion
         mBodies[CoreMessage_TMessageKey.VERCOD] = "2.2.177"

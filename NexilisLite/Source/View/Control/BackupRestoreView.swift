@@ -623,6 +623,34 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
         })
     }
     
+    private func restoreMessageStatus(nameColumn: [String], message: [String]) {
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            do {
+                var cValues: [String: Any] = [:]
+                var columnNameMessage: [String] = []
+                if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(MESSAGE_STATUS)") {
+                    while tableInfo.next() {
+                        columnNameMessage.append(tableInfo.string(forColumn: "name")!)
+                    }
+                    tableInfo.close()
+                }
+                for i in 0..<message.count {
+                    if i > nameColumn.count - 1 {
+                        continue
+                    }
+                    if columnNameMessage.contains(nameColumn[i]) {
+                        cValues[nameColumn[i]] = message[i] == "<empty>" || message[i] == "null" ? "" : message[i]
+                    }
+                }
+                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: cValues, replace: true)
+                recordSizeRestore += 1
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+    }
+    
     private func restoreData(file: URL, dirPath: String, indexPath: IndexPath) {
         recordSizeRestore = 0
         let fileManager = FileManager()
@@ -704,6 +732,21 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
                         let dataTaskDetail = valueText[i].components(separatedBy: separator)
                         restoreTaskDetail(nameColumn: nameColumn, data: dataTaskDetail)
+                        DispatchQueue.main.async { [self] in
+                            var text = "Restoring...".localized() + "  \(percent)"
+                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
+                                text = "Finalizing data restore...".localized()
+                            }
+                            labelRestoring.text = text
+                        }
+                    }
+                }
+                else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "MESSAGE_STATUS" {
+                    let nameColumn = valueText[0].components(separatedBy: separator)
+                    for i in 1..<valueText.count - 1 {
+                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
+                        let dataMessageStatus = valueText[i].components(separatedBy: separator)
+                        restoreMessageStatus(nameColumn: nameColumn, message: dataMessageStatus)
                         DispatchQueue.main.async { [self] in
                             var text = "Restoring...".localized() + "  \(percent)"
                             if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
@@ -944,6 +987,43 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                     }
                 }
                 
+                //Make File MESSAGE_STATUS
+                let file_task_status = documentDirectoryUrl.appendingPathComponent("MESSAGE_STATUS").appendingPathExtension("")
+                if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(MESSAGE_STATUS)") {
+                    var text_task_status = ""
+                    while tableInfo.next() {
+                        if text_task_status.isEmpty {
+                            text_task_status.append(tableInfo.string(forColumn: "name")!)
+                        } else {
+                            text_task_status.append(separator)
+                            text_task_status.append(tableInfo.string(forColumn: "name")!)
+                        }
+                    }
+                    text_task_status.append("\n")
+                    tableInfo.close()
+                    
+                    if let cursorData = Database.shared.getRecords(fmdb: fmdb,query: "SELECT * FROM MESSAGE_STATUS") {
+                        let columnCount = cursorData.columnCount
+                        var value_m = ""
+                        while cursorData.next() {
+                            for i in 0..<columnCount - 1 {
+                                value_m.append(cursorData.string(forColumnIndex: i) == nil ? "null" : cursorData.string(forColumnIndex: i)!.isEmpty ? "<empty>" : cursorData.string(forColumnIndex: i)!)
+                                value_m.append(separator)
+                            }
+                            value_m.append("\n")
+                            recordSize += 1
+                        }
+                        text_task_status.append(value_m)
+                        cursorData.close()
+                    }
+                    do {
+                        try text_task_status.write(to: file_task_status, atomically: true, encoding: .utf8)
+                    }
+                    catch {//print(error)
+                        
+                    }
+                }
+                
                 //ZIP ALL FILES
                 let fileManager = FileManager()
                 var destinationURL = documentDirectoryUrl
@@ -972,6 +1052,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         try archive.addEntry(with: file_form_data.lastPathComponent, relativeTo: file_form_data.deletingLastPathComponent())
                         try archive.addEntry(with: file_task_pic.lastPathComponent, relativeTo: file_task_pic.deletingLastPathComponent())
                         try archive.addEntry(with: file_task_detail.lastPathComponent, relativeTo: file_task_detail.deletingLastPathComponent())
+                        try archive.addEntry(with: file_task_status.lastPathComponent, relativeTo: file_task_status.deletingLastPathComponent())
                     } catch {
                         print("Adding entry to ZIP archive failed with error:\(error)")
                     }

@@ -3183,7 +3183,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         let messageId = sender.restorationIdentifier?.components(separatedBy: ",")[1]
         let isAccept = (sender.tag == 0)
         DispatchQueue.global().async {
-            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getAddFriendApproval(lPin: lPin ?? "", isAccept: isAccept), timeout: 5 * 1000) {
+            if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendApproval(lPin: lPin ?? "", isAccept: isAccept), timeout: 5 * 1000) {
                 if response.isOk() {
                     self.deleteMessage(l_pin: self.dataPerson["f_pin"]!!, message_id: messageId ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
                     let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == messageId})

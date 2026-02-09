@@ -771,10 +771,8 @@ public final class Utils {
     
     private static let sharedSession: URLSession = {
         let urlConfig = URLSessionConfiguration.default
-        urlConfig.waitsForConnectivity = true
         urlConfig.timeoutIntervalForRequest = 25
         urlConfig.timeoutIntervalForResource = 30
-        urlConfig.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: urlConfig, delegate: SelfSignedURLSessionDelegate(), delegateQueue: nil)
     }()
     
@@ -1003,6 +1001,9 @@ public final class Utils {
                     }
                     if Array(json.keys)[i] == "enable_totp" {
                         Utils.setEnableTOTP(value: Array(json.values)[i] as? String ?? "0")
+                    }
+                    if Array(json.keys)[i] == "tfa_logo" {
+                        Utils.setTfaLogo(value: Array(json.values)[i] as? String ?? "0")
                     }
                 }
                 Utils.setFinishInitPrefs(value: true)
@@ -1619,6 +1620,17 @@ public final class Utils {
 
     static func getTxnLevel() -> String {
         if let value: String = SecureUserDefaults.shared.value(forKey: "pb_txn_level") {
+            return value
+        }
+        return ""
+    }
+    
+    static func setTfaLogo(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "tfa_logo")
+    }
+
+    static func getTfaLogo() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "tfa_logo") {
             return value
         }
         return ""
@@ -5133,5 +5145,35 @@ extension UIImage {
         return renderer.image { _ in
             self.draw(in: CGRect(origin: .zero, size: size))
         }
+    }
+}
+
+final class PendingMessageStore {
+
+    static let shared = PendingMessageStore()
+    private let key = "pending_message_ids_nexilis"
+
+    func save(_ id: String) {
+        var list = load()
+        if !list.contains(id) {
+            list.append(id)
+        }
+        UserDefaults.standard.set(list, forKey: key)
+    }
+
+    func load() -> [String] {
+        UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+
+    func remove(_ id: String) {
+        var list = load()
+        list.removeAll { $0 == id }
+        UserDefaults.standard.set(list, forKey: key)
+    }
+    
+    func removeAll() {
+        var list = load()
+        list.removeAll()
+        UserDefaults.standard.set(list, forKey: key)
     }
 }

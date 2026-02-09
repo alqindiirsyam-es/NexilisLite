@@ -1692,7 +1692,7 @@ public class APIS: NSObject {
                             if !listMessageFromAPN.contains(message_id) {
                                 listMessageFromAPN.append(message_id)
                             }
-                            _ = Nexilis.justInit()
+                            _ = Nexilis.justInit(isChecking: true)
 //                            getMessageById(id: message_id)
                         }
                     }
@@ -1851,19 +1851,6 @@ public class APIS: NSObject {
     
     static func ackAPN(id: String) {
         DispatchQueue.global(qos: .background).async {
-//            Nexilis.sendStateToServer(s: "send ack from apn")
-//            if API.nGetCLXConnState() == 0 {
-//                do {
-//                    let id = Utils.getConnectionID()
-//                    try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-//                } catch {}
-//            }
-//            while API.nGetCLXConnState() == 0 {
-//                Thread.sleep(forTimeInterval: 0.5)
-//            }
-//            let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getAckMessage(messageId: id), timeout: 30000)
-            
-            //HTTPS
             let parameter: [String : Any] = [
                 "pin": User.getMyPin() ?? "",
                 "message_id": id
@@ -1874,50 +1861,7 @@ public class APIS: NSObject {
     }
     
     private static func getMessageById(id: String, retry: Int = 0) {
-//        if API.nGetCLXConnState() == 0 {
-//            do {
-//                let id = Utils.getConnectionID()
-//                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
-//            } catch {}
-//        }
-//        while API.nGetCLXConnState() == 0 {
-//            Thread.sleep(forTimeInterval: 0.5)
-//        }
-//        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getMessageById(messageId: id), timeout: 30000) {
-//            if response.isOk() {
-//                let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
-//                if let decodedData = Data(base64Encoded: data, options: .ignoreUnknownCharacters) {
-//                    if let respData = String(data: decodedData, encoding: .utf8) {
-//                        let message = TMessage(data: respData)
-//                        if Utils.getSecureFolderOffline() == "0" && IncomingThread.dispatch == nil {
-//                            if FileEncryption.shared.aesKey == nil {
-//                                IncomingThread.dispatch = DispatchGroup()
-//                                IncomingThread.dispatch?.enter()
-//                                Nexilis.getFeatureAccess()
-//                                IncomingThread.dispatch?.wait()
-//                                IncomingThread.dispatch = nil
-//                            }
-//                        }
-////                                print("save from APIS")
-//                        Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
-//                        ackAPN(id: id)
-//                        DispatchQueue.main.async {
-//                            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
-//                        }
-//                    }
-//                }
-//            } else {
-//                let ret = retry + 1
-//                if ret <= 5 {
-//                    getMessageById(id: id, retry: ret)
-//                }
-//            }
-//        } else {
-//            let ret = retry + 1
-//            if ret <= 5 {
-//                getMessageById(id: id, retry: ret)
-//            }
-//        }
+        PendingMessageStore.shared.save(id)
         //HTTPS
         let parameter: [String : Any] = [
             "pin": User.getMyPin() ?? "",
@@ -1926,23 +1870,11 @@ public class APIS: NSObject {
         Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
             if let error = error {
                 print("Error: \(error.localizedDescription)")
-                let ret = retry + 1
-                if ret <= 5 {
-                    let delay = pow(2.0, Double(ret)) // 2, 4, 8, 16...
-                    DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + delay) {
-                        getMessageById(id: id, retry: ret)
-                    }
-                }
                 return
             }
             
             guard let data = data else {
-                let ret = retry + 1
-                if ret <= 5 {
-                    DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1) {
-                        getMessageById(id: id, retry: ret)
-                    }
-                }
+                print("data nil")
                 return
             }
             DispatchQueue.main.async {
@@ -1957,6 +1889,7 @@ public class APIS: NSObject {
                         // simpan message
                         Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
                         ackAPN(id: id)
+                        PendingMessageStore.shared.remove(id)
                         
 //                        DispatchQueue.main.async {
 //                            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
@@ -1966,12 +1899,6 @@ public class APIS: NSObject {
                     }
                 } catch {
                     print("Parsing error: \(error)")
-                    let ret = retry + 1
-                    if ret <= 5 {
-                        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-                            getMessageById(id: id, retry: ret)
-                        }
-                    }
                 }
             }
         }
@@ -2391,6 +2318,13 @@ public class APIS: NSObject {
             if !Utils.isHSAMode() && !Utils.isMiddleMode(){
                 _ = Nexilis.justInit(isChecking: true)
             }
+            let pendingIds = PendingMessageStore.shared.load()
+            // Jika ada ID → pull satu per satu
+            for id in pendingIds {
+                APIS.getMessageById(id: id)
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+            }
+            PendingMessageStore.shared.removeAll()
         }
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
@@ -2620,8 +2554,6 @@ public class APIS: NSObject {
                   let value = userDefaults.string(forKey: "sharedItem"),
                   !value.isEmpty,
                   !isCheckingDataForShare else {
-
-                NotificationCenter.default.post(name: NSNotification.Name("reloadTabChats"), object: nil)
                 return
             }
 
