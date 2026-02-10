@@ -706,10 +706,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 let dataM = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataMessages[idx]["chat_date"]  as? String ?? ""})
                                 let rowIm = dataM.firstIndex(where: { $0["message_id"] as? String == dataMessages[idx]["message_id"] as? String })
                                 if sectionIm != nil && rowIm != nil {
-                                    let idxMarker = IndexPath(row: rowIm!, section: sectionIm!)
                                     if currentIndexpath!.section == sectionIm {
                                         for i in rowIm!..<currentIndexpath!.row + 1 {
-                                            if dataMessages[i]["f_pin"] as? String != idMe {
+                                            if dataM[i]["f_pin"] as? String != idMe {
                                                 sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataM[i]["message_id"]  as? String ?? "")
                                                 if counter != 0 {
                                                     counter -= 1
@@ -6569,7 +6568,11 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 if (type == "me") {
                     if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
                         for i in 0..<groupingImages.count {
-                            self.deleteMessage(l_pin: groupingImages[i].lPin, message_id: groupingImages[i].messageId, scope: MessageScope.WHISPER, type: "1", chat: "")
+                            var pin = groupingImages[i].lPin
+                            if pin == User.getMyPin() ?? "" {
+                                pin = self.dataPerson["f_pin"] as? String ?? ""
+                            }
+                            self.deleteMessage(l_pin: pin, message_id: groupingImages[i].messageId, scope: MessageScope.WHISPER, type: "1", chat: "")
                             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId })
                             if idx != nil {
                                 self.dataMessages.remove(at: idx!)
@@ -6588,7 +6591,11 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                         }
                         self.groupImages.removeValue(forKey: groupingImages[0].messageId)
                     } else {
-                        self.deleteMessage(l_pin: dataMessages[i]["l_pin"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
+                        var pin = dataMessages[i]["l_pin"]  as? String ?? ""
+                        if pin == User.getMyPin() ?? "" {
+                            pin = self.dataPerson["f_pin"] as? String ?? ""
+                        }
+                        self.deleteMessage(l_pin: pin, message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
                         let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
                         if idx != nil {
                             self.dataMessages.remove(at: idx!)

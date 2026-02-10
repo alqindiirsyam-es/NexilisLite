@@ -451,9 +451,9 @@ class OutgoingThread {
                         }
                         var pinned = 0
                         var archived = 0
-                        var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND message_scope_id = '\(MessageScope.WHISPER)' order by server_date desc LIMIT 1"
+                        var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND (message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.MISSED_CALL)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.WHISPER)') AND is_call_center = 0 order by server_date desc LIMIT 1"
                         if scope == "4" {
-                            queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(chat.isEmpty ? pin : l_pin)' AND chat_id = '\(chat)' AND message_scope_id = '\(MessageScope.GROUP)' order by server_date desc LIMIT 1"
+                            queryGetLastMessageId = "SELECT message_id FROM MESSAGE where l_pin = '\(chat.isEmpty ? pin : l_pin)' AND chat_id = '\(chat)' AND message_scope_id = '\(MessageScope.GROUP)' AND is_call_center = 0 order by server_date desc LIMIT 1"
                         }
                         var messageId = ""
                         if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: queryGetLastMessageId), cursorData.next() {
