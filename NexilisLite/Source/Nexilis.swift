@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.86"
+    public static var cpaasVersion = "5.0.87"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1700,8 +1700,8 @@ public class Nexilis: NSObject {
         let message_id = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_ID, default_value : "")
         guard !message_id.isEmpty else {
             if message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_FLAG) == "61" {
-                let nameReq = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT)
-                let nameFpin = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
+                let nameReq = message.getBody(key: CoreMessage_TMessageKey.TAG_SUBACTIVITY)
+                let nameFpin = message.getBody(key: CoreMessage_TMessageKey.TAG_CLIENT)
                 var messageExist = false
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where attachment_flag = '61' and blog_id = '\(nameFpin)'"), cursor.next() {
