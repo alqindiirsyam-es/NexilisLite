@@ -565,7 +565,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         }
                         if idx != 0 {
                             for i in 0..<idx {
-                                if dataMessages[i]["f_pin"] as? String != idMe && dataMessages[i][TypeDataMessage.status] as? String != "4" {
+                                let status = dataMessages[i][TypeDataMessage.status] as? String
+                                if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" {
                                     sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                                 }
                             }
@@ -613,7 +614,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             }
             for i in 0..<dataMessages.count {
                 let idMe = User.getMyPin() as String?
-                if dataMessages[i]["f_pin"] as? String != idMe && dataMessages[i][TypeDataMessage.status] as? String != "4" {
+                let status = dataMessages[i][TypeDataMessage.status] as? String
+                if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" {
                     sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                 }
             }
@@ -2630,7 +2632,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         guard currentIndexpath!.row < dataMessages.count else { return }
 
         // MARK: - Messages up to visible row
-        var visibleMessages = Array(dataMessages[0...currentIndexpath!.row])
+        let visibleMessages = Array(dataMessages[0...currentIndexpath!.row])
             .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
 
         // MARK: - Send Read Status

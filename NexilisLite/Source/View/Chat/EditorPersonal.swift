@@ -729,7 +729,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             }
                             if idx != 0 {
                                 for i in 0..<idx {
-                                    if dataMessages[i]["f_pin"] as? String != idMe && dataMessages[i][TypeDataMessage.status] as? String != "4" {
+                                    let status = dataMessages[i][TypeDataMessage.status] as? String
+                                    if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" {
                                         sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                                     }
                                 }
@@ -771,7 +772,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 }
                 for i in 0..<dataMessages.count {
                     let idMe = User.getMyPin() as String?
-                    if dataMessages[i]["f_pin"] as? String != idMe && dataMessages[i][TypeDataMessage.status] as? String != "4" {
+                    let status = dataMessages[i][TypeDataMessage.status] as? String
+                    if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" {
                         sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                     }
                 }
