@@ -544,7 +544,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             if sectionIm != nil && rowIm != nil {
                                 if currentIndexpath!.section == sectionIm {
                                     for i in rowIm!..<currentIndexpath!.row + 1 {
-                                        if dataM[i]["f_pin"] as? String != idMe {
+                                        if dataM[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataM[i][TypeDataMessage.message_scope_id] as! String, fPin: dataM[i][TypeDataMessage.f_pin] as! String, messageId: dataM[i][TypeDataMessage.message_id] as! String) {
                                             sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataM[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataM[i]["message_id"]  as? String ?? "")
                                             if counter != 0 {
                                                 counter -= 1
@@ -556,7 +556,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                             }
                         } else {
                             for i in idx..<dataMessages.count {
-                                if dataMessages[i]["f_pin"] as? String != idMe {
+                                if dataMessages[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
                                     sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                                 }
                             }
@@ -566,7 +566,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         if idx != 0 {
                             for i in 0..<idx {
                                 let status = dataMessages[i][TypeDataMessage.status] as? String
-                                if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" {
+                                if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
                                     sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                                 }
                             }
@@ -615,7 +615,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             for i in 0..<dataMessages.count {
                 let idMe = User.getMyPin() as String?
                 let status = dataMessages[i][TypeDataMessage.status] as? String
-                if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" {
+                if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
                     sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: dataMessages[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                 }
             }
@@ -676,6 +676,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         }
         let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
         pinAllMessages(dataMessages: dataMessagesPin)
+    }
+    
+    static func conditionSendRead(scope: String, fPin: String, messageId: String) -> Bool {
+        return scope != MessageScope.CALL && scope != MessageScope.MISSED_CALL && !messageId.contains("NTFPIN_") && fPin != "-999"
     }
     
     func getDataProfile(f_pin: String, message_id: String) -> [String: String]{
@@ -1840,7 +1844,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 if listData.count != 0 {
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
-                        if listData[i]["f_pin"] as? String != idMe {
+                        if listData[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: listData[i][TypeDataMessage.message_scope_id] as! String, fPin: listData[i][TypeDataMessage.f_pin] as! String, messageId: listData[i][TypeDataMessage.message_id] as! String) {
                             self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
@@ -1852,7 +1856,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 if listData.count != 0 {
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
-                        if listData[i]["f_pin"] as? String != idMe {
+                        if listData[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: listData[i][TypeDataMessage.message_scope_id] as! String, fPin: listData[i][TypeDataMessage.f_pin] as! String, messageId: listData[i][TypeDataMessage.message_id] as! String) {
                             self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
@@ -2639,7 +2643,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         if !visibleMessages.isEmpty {
             let myPin = User.getMyPin()
             for msg in visibleMessages {
-                if msg["f_pin"] as? String != myPin {
+                if msg["f_pin"] as? String != myPin  && EditorGroup.conditionSendRead(scope: msg[TypeDataMessage.message_scope_id] as! String, fPin: msg[TypeDataMessage.f_pin] as! String, messageId: msg[TypeDataMessage.message_id] as! String) {
                     sendReadMessageStatus(
                         chat_id: self.dataTopic["chat_id"]  as? String ?? "",
                         f_pin: msg["f_pin"]  as? String ?? "",

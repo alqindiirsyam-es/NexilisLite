@@ -708,7 +708,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 if sectionIm != nil && rowIm != nil {
                                     if currentIndexpath!.section == sectionIm {
                                         for i in rowIm!..<currentIndexpath!.row + 1 {
-                                            if dataM[i]["f_pin"] as? String != idMe {
+                                            if dataM[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataM[i][TypeDataMessage.message_scope_id] as! String, fPin: dataM[i][TypeDataMessage.f_pin] as! String, messageId: dataM[i][TypeDataMessage.message_id] as! String) {
                                                 sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataM[i]["message_id"]  as? String ?? "")
                                                 if counter != 0 {
                                                     counter -= 1
@@ -720,7 +720,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 }
                             } else {
                                 for i in idx..<dataMessages.count {
-                                    if dataMessages[i]["f_pin"] as? String != idMe {
+                                    if dataMessages[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i]["message_id"]  as? String ?? "") {
                                         sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                                     }
                                 }
@@ -730,7 +730,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             if idx != 0 {
                                 for i in 0..<idx {
                                     let status = dataMessages[i][TypeDataMessage.status] as? String
-                                    if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" {
+                                    if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i]["message_id"]  as? String ?? "") {
                                         sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                                     }
                                 }
@@ -773,7 +773,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 for i in 0..<dataMessages.count {
                     let idMe = User.getMyPin() as String?
                     let status = dataMessages[i][TypeDataMessage.status] as? String
-                    if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" {
+                    if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
                         sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                     }
                 }
@@ -782,7 +782,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         } else if isContactCenter && onGoingCC {
             let idMe = User.getMyPin() as String?
             for i in 0..<dataMessages.count {
-                if dataMessages[i]["f_pin"] as? String != idMe {
+                if dataMessages[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
                     sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
                 }
             }
@@ -2381,7 +2381,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 if listData.count != 0 && !self.isContactCenter {
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
-                        if listData[i]["f_pin"] as? String != idMe {
+                        if listData[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: listData[i][TypeDataMessage.message_scope_id] as! String, fPin: listData[i][TypeDataMessage.f_pin] as! String, messageId: listData[i][TypeDataMessage.message_id] as! String) {
                             self.sendReadMessageStatus(chat_id: "", f_pin: self.dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
@@ -2393,7 +2393,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 if listData.count != 0 && !self.isContactCenter {
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
-                        if listData[i]["f_pin"] as? String != idMe {
+                        if listData[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: listData[i][TypeDataMessage.message_scope_id] as! String, fPin: listData[i][TypeDataMessage.f_pin] as! String, messageId: listData[i][TypeDataMessage.message_id] as! String) {
                             self.sendReadMessageStatus(chat_id: "", f_pin: self.dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: listData[i]["message_id"]  as? String ?? "")
                         }
                     }
@@ -3995,7 +3995,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if !visibleMessages.isEmpty, !isContactCenter {
             let myPin = User.getMyPin()
             for msg in visibleMessages {
-                if msg["f_pin"] as? String != myPin {
+                if msg["f_pin"] as? String != myPin && EditorGroup.conditionSendRead(scope: msg[TypeDataMessage.message_scope_id] as! String, fPin: msg[TypeDataMessage.f_pin] as! String, messageId: msg["message_id"]  as? String ?? "") {
                     sendReadMessageStatus(
                         chat_id: "",
                         f_pin: dataPerson["f_pin"]!!,
