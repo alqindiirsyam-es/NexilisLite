@@ -1692,8 +1692,8 @@ public class APIS: NSObject {
                             if !listMessageFromAPN.contains(message_id) {
                                 listMessageFromAPN.append(message_id)
                             }
-                            _ = Nexilis.justInit(isChecking: true)
-//                            getMessageById(id: message_id)
+//                            _ = Nexilis.justInit(isChecking: true)
+                            getMessageById(id: message_id)
                         }
                     }
                 }

@@ -9712,10 +9712,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         viewVc.addSubview(privacyOverlay)
                         privacyOverlay.translatesAutoresizingMaskIntoConstraints = false
                         NSLayoutConstraint.activate([
-                            privacyOverlay.topAnchor.constraint(equalTo: view.topAnchor),
-                            privacyOverlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-                            privacyOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                            privacyOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+                            privacyOverlay.topAnchor.constraint(equalTo: viewVc.topAnchor),
+                            privacyOverlay.bottomAnchor.constraint(equalTo: viewVc.bottomAnchor),
+                            privacyOverlay.leadingAnchor.constraint(equalTo: viewVc.leadingAnchor),
+                            privacyOverlay.trailingAnchor.constraint(equalTo: viewVc.trailingAnchor)
                         ])
 
                         // Add WhatsApp-style message
@@ -9746,8 +9746,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         NSLayoutConstraint.activate([
                             stack.centerXAnchor.constraint(equalTo: privacyOverlay.centerXAnchor),
                             stack.centerYAnchor.constraint(equalTo: privacyOverlay.centerYAnchor),
-                            stack.leftAnchor.constraint(equalTo: view.leftAnchor),
-                            stack.rightAnchor.constraint(equalTo: view.rightAnchor),
+                            stack.leftAnchor.constraint(equalTo: viewVc.leftAnchor),
+                            stack.rightAnchor.constraint(equalTo: viewVc.rightAnchor),
                             icon.widthAnchor.constraint(equalToConstant: 80),
                             icon.heightAnchor.constraint(equalToConstant: 80)
                         ])

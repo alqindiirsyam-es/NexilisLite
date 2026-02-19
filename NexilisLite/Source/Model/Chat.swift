@@ -165,6 +165,7 @@ public class Chat: Model {
         var messages: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
+                let myPin = User.getMyPin() ?? ""
                 let query = """
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
@@ -174,7 +175,7 @@ public class Chat: Model {
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             join BUDDY b on (m.l_pin = b.f_pin OR m.f_pin = b.f_pin)
-                            where m.message_scope_id = '3' and m.lock <> '1' and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+                            where b.f_pin <> '\(myPin)' and m.message_scope_id = '3' and (m.lock IS NULL OR m.lock <> '1') and (m.message_text LIKE '%\(text)%' OR name LIKE '%\(text)%') and m.is_call_center = 0
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
@@ -182,8 +183,8 @@ public class Chat: Model {
                                    m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
-                            where m.l_pin = '-999' and m.lock <> '1'
-                              and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+                            where m.l_pin = '-999' and (m.lock IS NULL OR m.lock <> '1')
+                              and (m.message_text LIKE '%\(text)%' OR name LIKE '%\(text)%') and m.is_call_center = 0
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
@@ -191,8 +192,8 @@ public class Chat: Model {
                                    m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
-                            where m.l_pin = '-997' and m.lock <> '1'
-                              and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+                            where m.l_pin = '-997' and (m.lock IS NULL OR m.lock <> '1')
+                              and (m.message_text LIKE '%\(text)%' OR name LIKE '%\(text)%') and m.is_call_center = 0
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
@@ -202,7 +203,7 @@ public class Chat: Model {
                                    g.group_id, g.f_name as group_name, m.is_bot
                             from MESSAGE m
                             join GROUPZ g on m.l_pin = g.group_id
-                            where m.chat_id = '' and m.lock <> '1' and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+                            where m.chat_id = '' and (m.lock IS NULL OR m.lock <> '1') and (m.message_text LIKE '%\(text)%' OR name LIKE '%\(text)%' OR group_name LIKE '%\(text)%') and m.is_call_center = 0
                             union
                             select m.f_pin, m.chat_id, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
@@ -212,7 +213,7 @@ public class Chat: Model {
                             from MESSAGE m
                             join DISCUSSION_FORUM d on m.chat_id = d.chat_id
                             join GROUPZ g on d.group_id = g.group_id
-                            where m.lock <> '1' and m.message_text LIKE '%\(text)%' and m.is_call_center = 0
+                            where (m.lock IS NULL OR m.lock <> '1') and (m.message_text LIKE '%\(text)%' OR d.title LIKE '%\(text)%' OR group_name LIKE '%\(text)%') and m.is_call_center = 0
 
                             order by 5 desc
                             """
@@ -258,6 +259,7 @@ public class Chat: Model {
         var messages: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
+                let myPin = User.getMyPin() ?? ""
                 let query = """
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
@@ -267,7 +269,7 @@ public class Chat: Model {
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             join BUDDY b on (m.l_pin = b.f_pin OR m.f_pin = b.f_pin)
-                            where m.message_id = '\(message_id)'
+                            where b.f_pin <> '\(myPin)' and m.message_scope_id = '3' m.message_id = '\(message_id)'
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
@@ -397,7 +399,7 @@ public class Chat: Model {
                             order by 6 desc
                             """
                 if !lastQuery.isEmpty {
-                    query = "select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.credential, m.lock, m.audio_id, m.gif_id, m.l_pin, m.chat_id from MESSAGE m JOIN BUDDY b ON m.f_pin = b.f_pin where \(lastQuery) and m.is_call_center = 0 order by 6 desc"
+                    query = "select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.credential, m.lock, m.audio_id, m.gif_id, m.l_pin, m.chat_id from MESSAGE m JOIN BUDDY b ON m.f_pin = b.f_pin where \(lastQuery) and m.is_call_center = 0 and m.credential <> '1' order by 6 desc"
                 }
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {
@@ -428,10 +430,10 @@ public class Chat: Model {
                                         profile: cursorData.string(forColumnIndex: 12) ?? "",
                                         official: cursorData.string(forColumnIndex: 13) ?? "",
                                         status: cursorData.string(forColumnIndex: 14) ?? "",
-                                        credential: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 11) ?? "" : cursorData.string(forColumnIndex: 15) ?? "",
-                                        lock: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 12) ?? "" : cursorData.string(forColumnIndex: 16) ?? "",
+                                        credential: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 14) ?? "" : cursorData.string(forColumnIndex: 15) ?? "",
+                                        lock: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 15) ?? "" : cursorData.string(forColumnIndex: 16) ?? "",
                                         thumb: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 3) ?? "" : "",
-                                        audio: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 13) ?? "" : cursorData.string(forColumnIndex: 17) ?? "",
+                                        audio: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 16) ?? "" : cursorData.string(forColumnIndex: 17) ?? "",
                                         gif: !lastQuery.isEmpty ? cursorData.string(forColumnIndex: 17) ?? "" : cursorData.string(forColumnIndex: 18) ?? "",
                                         groupId: cursorData.string(forColumnIndex: 19) ?? "",
                                         groupName: cursorData.string(forColumnIndex: 20) ?? "",

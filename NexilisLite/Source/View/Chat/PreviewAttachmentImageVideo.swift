@@ -185,6 +185,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         buttonSpecFile.circle()
         buttonSpecFile.backgroundColor = .secondaryColor.withAlphaComponent(0.4)
         buttonSpecFile.addTarget(self, action: #selector(showSpecFile), for: .touchUpInside)
+        if self.isConfidential {
+            buttonSpecFile.isEnabled = false
+        }
         
         if let vc = delegate as? EditorGroup {
             self.listMentionWithText = vc.listMentionWithText
@@ -277,6 +280,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 if self.isAck {
                     self.isAck = false
                 }
+                self.specFileString = ""
+                self.buttonSpecFile.setImage(UIImage(named: "pb_ic_attach_spc_off", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal).resize(target: CGSize(width: 40, height: 40)), for: .normal)
+                self.buttonSpecFile.isEnabled = false
                 self.setPreviousVariableMessageMode()
             })
             confidentialAction.setValue(imageConfidential, forKey: "image")
@@ -291,6 +297,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             if self.isConfidential {
                 self.isConfidential = false
             }
+            if !self.buttonSpecFile.isEnabled {
+                self.buttonSpecFile.isEnabled = true
+            }
             self.setPreviousVariableMessageMode()
         })
         ackAction.setValue(imageAck, forKey: "image")
@@ -299,6 +308,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             self.isConfidential = false
             self.isAck = false
             self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+            if !self.buttonSpecFile.isEnabled {
+                self.buttonSpecFile.isEnabled = true
+            }
             self.setPreviousVariableMessageMode()
         }))
         self.present(alertController, animated: true, completion: nil)

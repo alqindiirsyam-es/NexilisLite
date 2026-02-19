@@ -658,7 +658,7 @@ class ContactChatViewController: UITableViewController {
     }
     
     private func getOpenGroups(listGroups: [Group], completion: @escaping ([Group]) -> ()) {
-        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getOpenGroups(p_account: "1,2,3,5,6,7", offset: "0", search: "")) {
+        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getOpenGroups(p_account: "1,2,3,5,6,7", offset: "0", search: "")) {
             var dataGroups: [Group] = []
             if (response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "00") {
                 let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
