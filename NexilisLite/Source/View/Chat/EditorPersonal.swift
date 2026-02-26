@@ -692,8 +692,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     tableChatView.scrollToTop()
                 }
                 if !isNearBottom && !buttonScrollToBottom.isDescendant(of: view) {
-                    addButtonScrollToBottom()
-                    addCounterAtButttonScrollToBottom()
+                    DispatchQueue.main.async { [self] in
+                        addButtonScrollToBottom()
+                        addCounterAtButttonScrollToBottom()
+                    }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
                     let lastVisibleIndexPath = tableChatView.indexPathsForVisibleRows?.last
@@ -1287,6 +1289,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 26) ?? ""
                         row[TypeDataMessage.is_pinned] = cursorData.string(forColumnIndex: 27) ?? ""
                         row[TypeDataMessage.is_bot] = Int (cursorData.string(forColumnIndex: 28) ?? "0")
+//                        print("HUHU: \(row["message_id"])")
                         if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as? String ?? "")'") {
                             while cursorStatus.next() {
                                 row["status"] = cursorStatus.string(forColumnIndex: 0)
@@ -1623,14 +1626,18 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .top, animated: true)
                     }
                 } else if self.buttonScrollToBottom.isDescendant(of: self.view) {
-                    if !self.indicatorCounterBSTB.isDescendant(of: self.view) {
-                        addCounterAtButttonScrollToBottom()
-                    } else {
-                        self.labelCounter.text = "\(counter)"
+                    DispatchQueue.main.async { [self] in
+                        if !self.indicatorCounterBSTB.isDescendant(of: self.view) {
+                            addCounterAtButttonScrollToBottom()
+                        } else {
+                            self.labelCounter.text = "\(counter)"
+                        }
                     }
                 } else {
-                    addButtonScrollToBottom()
-                    addCounterAtButttonScrollToBottom()
+                    DispatchQueue.main.async { [self] in
+                        addButtonScrollToBottom()
+                        addCounterAtButttonScrollToBottom()
+                    }
                 }
             }
         }
@@ -1990,7 +1997,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     else if self.counter != 0 {
                         if !self.indicatorCounterBSTB.isDescendant(of: self.view) && self.buttonScrollToBottom.isDescendant(of: self.view) {
                             self.markerCounter = row["message_id"] as? String
-                            self.addCounterAtButttonScrollToBottom()
+                            DispatchQueue.main.async { [self] in
+                                self.addCounterAtButttonScrollToBottom()
+                            }
                             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
                             if indexMessage != nil {
                                 let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
@@ -3952,7 +3961,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         currentIndexpath = lastIndex
 
         // MARK: - Filter messages in this section
-        let sectionDate = dataDates[firstIndex.section]
+        let sectionDate = dataDates[lastIndex.section]
         let sectionMessages = dataMessages.filter {
             ($0["chat_date"] as? String ?? "") == sectionDate
         }
@@ -3975,20 +3984,24 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             (isLastSection && isNotLastRow && isFarFromBottom)) {
 
             if !buttonScrollToBottom.isDescendant(of: view) {
-                addButtonScrollToBottom()
-                addCounterAtButttonScrollToBottom()
+                DispatchQueue.main.async { [self] in
+                    addButtonScrollToBottom()
+                    addCounterAtButttonScrollToBottom()
+                }
             }
         }
         // MARK: - Hide button when at bottom
         else if isNearBottom {
-            removeScrollToBottomButton()
+            DispatchQueue.main.async { [self] in
+                removeScrollToBottomButton()
+            }
         }
 
         // MARK: - Ensure index exists
-        guard currentIndexpath!.row < dataMessages.count else { return }
+        guard currentIndexpath!.row < sectionMessages.count else { return }
 
         // MARK: - Messages up to visible row
-        let visibleMessages = Array(dataMessages[0...currentIndexpath!.row])
+        let visibleMessages = Array(sectionMessages[0...currentIndexpath!.row])
             .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
 
         // MARK: - Send Read Status
@@ -4007,7 +4020,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
 
         // MARK: - Update Counter
-        updateUnreadCounter()
+        DispatchQueue.main.async { [self] in
+            updateUnreadCounter()
+        }
     }
     
     private func removeScrollToBottomButton() {
