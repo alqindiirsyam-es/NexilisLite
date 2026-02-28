@@ -269,7 +269,7 @@ public class Chat: Model {
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             join BUDDY b on (m.l_pin = b.f_pin OR m.f_pin = b.f_pin)
-                            where b.f_pin <> '\(myPin)' and m.message_scope_id = '3' m.message_id = '\(message_id)'
+                            where b.f_pin <> '\(myPin)' and m.message_scope_id = '3' and m.message_id = '\(message_id)'
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,

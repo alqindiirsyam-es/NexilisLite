@@ -40,6 +40,7 @@ class TFAPasswordVC: UIViewController {
 
     private var isPasswordVisible = false
     var isFromSU = false
+    var countRetry = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -316,12 +317,22 @@ class TFAPasswordVC: UIViewController {
                 guard let privateKey = KeyManagerNexilis.getPrivateKey(useBiometric: Utils.isHSAMode()) else {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
+                            self.countRetry+=1
+                            if self.countRetry == 3 {
+                                exit(0)
+                            }
                             let errorMessage = "Biometric Failed".localized()
                             let dialog = DialogErrorMFA()
                             dialog.modalTransitionStyle = .crossDissolve
                             dialog.modalPresentationStyle = .overCurrentContext
                             dialog.errorDesc = errorMessage
                             dialog.method = self.METHOD
+                            dialog.countRetry = self.countRetry
+                            dialog.isDismiss = { res in
+                                if res == 0 {
+                                    exit(0)
+                                }
+                            }
                             UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                         }
                     }
@@ -339,12 +350,22 @@ class TFAPasswordVC: UIViewController {
                         if data.isEmpty {
                             DispatchQueue.main.async {
                                 Nexilis.hideLoader {
+                                    self.countRetry+=1
+                                    if self.countRetry == 3 {
+                                        exit(0)
+                                    }
                                     let errorMessage = "Auth Failure".localized()
                                     let dialog = DialogErrorMFA()
                                     dialog.modalTransitionStyle = .crossDissolve
                                     dialog.modalPresentationStyle = .overCurrentContext
                                     dialog.errorDesc = errorMessage
                                     dialog.method = self.METHOD
+                                    dialog.countRetry = self.countRetry
+                                    dialog.isDismiss = { res in
+                                        if res == 0 {
+                                            exit(0)
+                                        }
+                                    }
                                     UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                                 }
                             }
@@ -387,12 +408,22 @@ class TFAPasswordVC: UIViewController {
                             else {
                                 DispatchQueue.main.async {
                                     Nexilis.hideLoader {
+                                        self.countRetry+=1
+                                        if self.countRetry == 3 {
+                                            exit(0)
+                                        }
                                         let errorMessage = response.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT, default_value: "Auth Failure".localized())
                                         let dialog = DialogErrorMFA()
                                         dialog.modalTransitionStyle = .crossDissolve
                                         dialog.modalPresentationStyle = .overCurrentContext
                                         dialog.errorDesc = errorMessage
                                         dialog.method = self.METHOD
+                                        dialog.countRetry = self.countRetry
+                                        dialog.isDismiss = { res in
+                                            if res == 0 {
+                                                exit(0)
+                                            }
+                                        }
                                         UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                                     }
                                 }
@@ -402,12 +433,22 @@ class TFAPasswordVC: UIViewController {
                 } else {
                     DispatchQueue.main.async {
                         Nexilis.hideLoader {
+                            self.countRetry+=1
+                            if self.countRetry == 3 {
+                                exit(0)
+                            }
                             let errorMessage = "Unable to access servers. Check your internet connection and try again later".localized()
                             let dialog = DialogErrorMFA()
                             dialog.modalTransitionStyle = .crossDissolve
                             dialog.modalPresentationStyle = .overCurrentContext
                             dialog.errorDesc = errorMessage
                             dialog.method = self.METHOD
+                            dialog.countRetry = self.countRetry
+                            dialog.isDismiss = { res in
+                                if res == 0 {
+                                    exit(0)
+                                }
+                            }
                             UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                         }
                     }
@@ -440,12 +481,22 @@ class TFAPasswordVC: UIViewController {
         } else if stateErr == 1 {
             DispatchQueue.main.async {
                 Nexilis.hideLoader {
+                    self.countRetry+=1
+                    if self.countRetry == 3 {
+                        exit(0)
+                    }
                     let errorMessage = "Terjadi Perubahan Biometric (Touch/Face ID)"
                     let dialog = DialogErrorMFA()
                     dialog.modalTransitionStyle = .crossDissolve
                     dialog.modalPresentationStyle = .overCurrentContext
                     dialog.errorDesc = errorMessage
                     dialog.method = self.METHOD
+                    dialog.countRetry = self.countRetry
+                    dialog.isDismiss = { res in
+                        if res == 0 {
+                            exit(0)
+                        }
+                    }
                     dialog.hideTryAgain = (stateErr == 1)
                     UIApplication.shared.visibleViewController?.present(dialog, animated: true)
                 }

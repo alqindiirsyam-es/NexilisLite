@@ -723,11 +723,12 @@ extension URL {
 }
 
 extension UIColor {
+    public static var hexMainColorString = "#046cfc"
     public static var mainColor: UIColor {
         if Utils.getIsWATheme() {
             return whatsappGreenColor
         }
-        return renderColor(hex: "#046cfc")
+        return renderColor(hex: hexMainColorString)
     }
     
     public static var borderTabColor: UIColor {

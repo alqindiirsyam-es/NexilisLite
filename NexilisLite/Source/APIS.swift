@@ -244,7 +244,7 @@ public class APIS: NSObject {
         }
     }
     
-    public static func openSmartChatbot() {
+    public static func openSmartChatbot(text: String = "") {
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -252,6 +252,7 @@ public class APIS: NSObject {
         }
         let smartChatVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "chatGptVC") as! ChatGPTBotView
         smartChatVC.hidesBottomBarWhenPushed = true
+        smartChatVC.autoText = text
         let navigationController = CustomNavigationController(rootViewController: smartChatVC)
         navigationController.defaultStyle()
         if UIApplication.shared.visibleViewController?.navigationController != nil {
@@ -538,6 +539,10 @@ public class APIS: NSObject {
         } else {
             UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
         }
+    }
+    
+    public static func setMainColor(hexString: String) {
+        UIColor.hexMainColorString = hexString
     }
     
     /*
@@ -1693,6 +1698,7 @@ public class APIS: NSObject {
                                 listMessageFromAPN.append(message_id)
                             }
 //                            _ = Nexilis.justInit(isChecking: true)
+                            PendingMessageStore.shared.save(message_id)
                             getMessageById(id: message_id)
                         }
                     }
@@ -1861,7 +1867,6 @@ public class APIS: NSObject {
     }
     
     private static func getMessageById(id: String, retry: Int = 0) {
-        PendingMessageStore.shared.save(id)
         //HTTPS
         let parameter: [String : Any] = [
             "pin": User.getMyPin() ?? "",
@@ -1911,7 +1916,7 @@ public class APIS: NSObject {
         let nameUser = message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME)
         var threadIdentifier = message.getBody(key: CoreMessage_TMessageKey.OPPOSITE_PIN)
         let scope = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID)
-        if threadIdentifier.isEmpty {
+        if threadIdentifier.isEmpty || threadIdentifier == User.getMyPin() {
             if scope == "4" {
                 threadIdentifier = message.getBody(key: CoreMessage_TMessageKey.CHAT_ID).isEmpty ? message.getBody(key: CoreMessage_TMessageKey.L_PIN) : message.getBody(key: CoreMessage_TMessageKey.CHAT_ID)
             } else {
@@ -2102,7 +2107,7 @@ public class APIS: NSObject {
             } else {
                 let userInfo = response.notification.request.content.userInfo
                 DispatchQueue.main.async {
-                    if let message_id = userInfo[CoreMessage_TMessageKey.MESSAGE_ID] as? String {
+                    if let message_id = userInfo["message_id"] as? String {
                         var f_pin = ""
                         var l_pin = ""
                         var message_scope_id = ""
@@ -3140,7 +3145,7 @@ public class APIS: NSObject {
 }
 
 extension UINavigationController {
-    func defaultStyle() {
+    public func defaultStyle() {
         self.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .black : .white
         self.modalPresentationStyle = .fullScreen
         self.navigationBar.tintColor = .white

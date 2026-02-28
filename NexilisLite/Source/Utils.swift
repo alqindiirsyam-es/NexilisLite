@@ -773,6 +773,9 @@ public final class Utils {
         let urlConfig = URLSessionConfiguration.default
         urlConfig.timeoutIntervalForRequest = 25
         urlConfig.timeoutIntervalForResource = 30
+        urlConfig.httpMaximumConnectionsPerHost = 1
+        urlConfig.waitsForConnectivity = true
+        urlConfig.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: urlConfig, delegate: SelfSignedURLSessionDelegate(), delegateQueue: nil)
     }()
     
@@ -2994,6 +2997,7 @@ public class DialogErrorMFA: UIViewController {
     public var errorDesc = ""
     public var method = ""
     public var hideTryAgain = false
+    public var countRetry = 1
     var isDismiss: ((Int) -> ())?
     
     public override func viewDidLoad() {
@@ -3020,7 +3024,7 @@ public class DialogErrorMFA: UIViewController {
         container.addSubview(imageWarning)
         imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: -5, width: 30, height: 30)
         
-        let imageLogo = UIImageView(image: UIImage(named: "bjb-blue-flat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        let imageLogo = UIImageView(image: UIImage(named: "pb_icon"))
         container.addSubview(imageLogo)
         imageLogo.anchor(top: container.topAnchor, left: container.leftAnchor, paddingTop: 10, paddingLeft: 10, width: 40, height: 40)
         
@@ -3028,10 +3032,12 @@ public class DialogErrorMFA: UIViewController {
         container.addSubview(imageChat)
         imageChat.anchor(top: container.topAnchor, right: container.rightAnchor, paddingTop: 10, paddingRight: 10, width: 30, height: 30)
         
-        var contentDesc = "Silakan coba lagi atau hubungi Contact Center BJB untuk bantuan lebih lanjut"
-        if hideTryAgain {
-            contentDesc = "Silakan hubungi Contact Center BJB untuk bantuan lebih lanjut atau Silahkan Sign Up/Sign In Ulang"
-        }
+        var contentDesc = "Pastikan data yang anda masukkan benar dan valid!"
+        contentDesc += "\nMaksimal Percobaan 3 kali. (\(countRetry)/3)"
+        contentDesc += "\nAktivitas: \(method)"
+//        if hideTryAgain {
+//            contentDesc = "Silakan hubungi Contact Center BJB untuk bantuan lebih lanjut atau Silahkan Sign Up/Sign In Ulang"
+//        }
         let contentS = UILabel()
         contentS.tintColor = .label
         contentS.attributedText = contentDesc.richText()
@@ -3039,33 +3045,29 @@ public class DialogErrorMFA: UIViewController {
         container.addSubview(contentS)
         contentS.anchor(top: title.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 20, paddingLeft: 15, paddingRight: 10)
         
-        let buttonCC = UIButton(type: .custom)
-        buttonCC.setTitle("Call Center", for: .normal)
-        buttonCC.backgroundColor = .gray
-        buttonCC.titleLabel?.textColor = .white
-        buttonCC.titleLabel?.font = .boldSystemFont(ofSize: 14)
-        buttonCC.layer.cornerRadius = 17.5
-        buttonCC.clipsToBounds = true
-        buttonCC.addTarget(self, action: #selector(ccTapped), for: .touchUpInside)
-        container.addSubview(buttonCC)
-        if !hideTryAgain {
-            buttonCC.anchor(top: contentS.bottomAnchor, paddingTop: 20, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
-        } else {
-            buttonCC.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, paddingTop: 20, paddingLeft: 5, width: UIScreen.main.bounds.width / 2 - 30, height: 35)
-        }
+//        let buttonCC = UIButton(type: .custom)
+//        buttonCC.setTitle("Call Center", for: .normal)
+//        buttonCC.backgroundColor = .gray
+//        buttonCC.titleLabel?.textColor = .white
+//        buttonCC.titleLabel?.font = .boldSystemFont(ofSize: 14)
+//        buttonCC.layer.cornerRadius = 17.5
+//        buttonCC.clipsToBounds = true
+//        buttonCC.addTarget(self, action: #selector(ccTapped), for: .touchUpInside)
+//        container.addSubview(buttonCC)
+//        if !hideTryAgain {
+//            buttonCC.anchor(top: contentS.bottomAnchor, paddingTop: 20, centerX: container.centerXAnchor, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
+//        } else {
+//            buttonCC.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, paddingTop: 20, paddingLeft: 5, width: UIScreen.main.bounds.width / 2 - 30, height: 35)
+//        }
         
-        if !hideTryAgain {
-            let buttonTryAgain = UIButton(type: .custom)
-            buttonTryAgain.setTitle("Coba Lagi", for: .normal)
-            buttonTryAgain.backgroundColor = .mainColor
-            buttonTryAgain.titleLabel?.textColor = .white
-            buttonTryAgain.titleLabel?.font = .boldSystemFont(ofSize: 14)
-            buttonTryAgain.layer.cornerRadius = 17.5
-            buttonTryAgain.clipsToBounds = true
-            buttonTryAgain.addTarget(self, action: #selector(tryAgainTapped), for: .touchUpInside)
-            container.addSubview(buttonTryAgain)
-            buttonTryAgain.anchor(top: contentS.bottomAnchor, right: buttonCC.leftAnchor, paddingTop: 20, paddingRight: 5, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
-        }
+        let buttonTryAgain = UIButton(type: .custom)
+        buttonTryAgain.setTitle("Coba Lagi", for: .normal)
+        buttonTryAgain.backgroundColor = .blue
+        buttonTryAgain.titleLabel?.textColor = .white
+        buttonTryAgain.titleLabel?.font = .boldSystemFont(ofSize: 14)
+        buttonTryAgain.layer.cornerRadius = 17.5
+        buttonTryAgain.clipsToBounds = true
+        buttonTryAgain.addTarget(self, action: #selector(tryAgainTapped), for: .touchUpInside)
         
         let buttonReject = UIButton(type: .custom)
         buttonReject.setTitle("Tutup", for: .normal)
@@ -3075,12 +3077,14 @@ public class DialogErrorMFA: UIViewController {
         buttonReject.layer.cornerRadius = 17.5
         buttonReject.clipsToBounds = true
         buttonReject.addTarget(self, action: #selector(rejectTapped), for: .touchUpInside)
-        container.addSubview(buttonReject)
-        if !hideTryAgain {
-            buttonReject.anchor(top: contentS.bottomAnchor, left: buttonCC.rightAnchor, paddingTop: 20, paddingLeft: 5, width: UIScreen.main.bounds.width / 3 - 30, height: 35)
-        } else {
-            buttonReject.anchor(top: contentS.bottomAnchor, right: container.rightAnchor, paddingTop: 20, paddingRight: 5, width: UIScreen.main.bounds.width / 2 - 30, height: 35)
-        }
+        
+        let stack = UIStackView(arrangedSubviews: [buttonTryAgain, buttonReject])
+        stack.axis = .horizontal
+        stack.spacing = 10
+        stack.alignment = .center
+        stack.distribution = .fillEqually
+        container.addSubview(stack)
+        stack.anchor(top: contentS.bottomAnchor, left: container.leftAnchor, right: container.rightAnchor, paddingTop: 10, paddingLeft: 15, paddingRight: 15, height: 35)
         
         let footer = UILabel()
         footer.text = "We value your security".localized()
@@ -3088,7 +3092,7 @@ public class DialogErrorMFA: UIViewController {
         footer.textColor = .gray
         footer.numberOfLines = 0
         container.addSubview(footer)
-        footer.anchor(top: buttonReject.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingBottom: 5, paddingRight: 10)
+        footer.anchor(top: stack.bottomAnchor, bottom: container.bottomAnchor, right: container.rightAnchor, paddingBottom: 5, paddingRight: 10)
         
     }
     
@@ -3157,7 +3161,7 @@ public class DialogBroadcastInApp: UIViewController {
         container.addSubview(imageWarning)
         imageWarning.anchor(top: container.topAnchor, right: title.leftAnchor, paddingTop: 10, paddingRight: -5, width: 30, height: 30)
         
-        let imageLogo = UIImageView(image: UIImage(named: "bjb-blue-flat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+        let imageLogo = UIImageView(image: UIImage(named: "pb_icon"))
         container.addSubview(imageLogo)
         imageLogo.anchor(top: container.topAnchor, left: container.leftAnchor, paddingTop: 10, paddingLeft: 10, width: 40, height: 40)
         

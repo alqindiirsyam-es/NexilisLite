@@ -62,6 +62,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     var buttonUp: UIButton!
     var buttonDown: UIButton!
     var amountTx = "0"
+    var autoText = ""
     
     public var fromNotification = true
     
@@ -650,6 +651,10 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                 UIView.animate(withDuration: 0.5, animations: {
                     self.tableChatView.alpha = 1.0
                 })
+            }
+            if !self.autoText.isEmpty {
+                self.textFieldSend.text = self.autoText
+                self.sendChat(message_text: self.textFieldSend.text, viewController: self)
             }
         })
     }
