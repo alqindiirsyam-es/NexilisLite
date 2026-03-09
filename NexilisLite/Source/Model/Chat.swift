@@ -139,17 +139,17 @@ public class Chat: Model {
         return ""
     }
     
-    public static func getCountSearchMessage(key: String, pin: String, chatId:String = "", isPersonal: Bool, isCC: Int = 0) -> Int {
+    public static func getCountSearchMessage(key: String, pin: String, chatId:String = "", scope: Int, isCC: Int = 0) -> Int {
         var query = ""
         var count = 0
-        if isPersonal {
-            if isCC == 1 {
-                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and call_center_id = '\(pin)'"
-            } else {
-                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and (l_pin = '\(pin)' or f_pin = '\(pin)')"
-            }
+        if isCC == 1 {
+            query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and call_center_id = '\(pin)'"
         } else {
-            query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and l_pin = '\(pin)' and chat_id = '\(chatId)'"
+            if scope == 3 {
+                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and (l_pin = '\(pin)' or f_pin = '\(pin)') and is_call_center = 0"
+            } else {
+                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and l_pin = '\(pin)' and chat_id = '\(chatId)' and is_call_center = 0"
+            }
         }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
@@ -269,7 +269,7 @@ public class Chat: Model {
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             join BUDDY b on (m.l_pin = b.f_pin OR m.f_pin = b.f_pin)
-                            where b.f_pin <> '\(myPin)' and m.message_scope_id = '3' and m.message_id = '\(message_id)'
+                            where b.f_pin <> '\(myPin)' and m.message_id = '\(message_id)'
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,

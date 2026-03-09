@@ -747,7 +747,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             do {
                 var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"]  as? String ?? "")' order by server_date asc LIMIT -1 OFFSET \(offset)"
                 if isHistoryCC {
-                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc LIMIT -1 OFFSET \(offset)"
+                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc LIMIT -1 OFFSET \(offset)"
                 } else if (dataTopic["chat_id"]  as? String ?? "" != "") {
                     query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='\(dataTopic["chat_id"]  as? String ?? "")' order by server_date asc LIMIT -1 OFFSET \(offset)"
                 }
@@ -1335,10 +1335,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                         self.listTimerCredential[row["message_id"]  as? String ?? ""] = 60
                     }
                     self.counter += 1
-                    self.tableChatView.beginUpdates()
                     self.dataMessages.append(row)
                     self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .fade)
-                    self.tableChatView.endUpdates()
+                    self.tableChatView.layoutIfNeeded()
                     if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
                         var timer = Timer()
                         var minute = 60
@@ -2172,10 +2171,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             tableChatView.insertSections(IndexSet(integer: dataDates.count - 1), with: .fade)
         }
         row["chat_date"] = "Today".localized()
-        self.tableChatView.beginUpdates()
         dataMessages.append(row)
         tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .fade)
-        self.tableChatView.endUpdates()
+        tableChatView.layoutIfNeeded()
         if credential == "1" {
             var timer = Timer()
             var minute = 60
@@ -4487,10 +4485,9 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.dataDates.append("Today".localized())
                 self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
             }
-            self.tableChatView.beginUpdates()
             self.dataMessages.append(row)
             self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
-            self.tableChatView.endUpdates()
+            self.tableChatView.layoutIfNeeded()
         }
     }
     
@@ -5596,10 +5593,37 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             guard indexPath.row < dataMessages.count else {
                 return
             }
-//            if copySession && dataMessages[indexPath.row]["f_pin"]  as? String ?? "" != "-999" {
-//                return
-//            }
-            if (dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" != "0" || dataMessages[indexPath.row]["lock"] as? String == "1") && !forwardSession && !deleteSession && !summarizeSession {
+            let imageChat = dataMessages[indexPath.row]["image_id"]  as? String ?? ""
+            let videoChat = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
+            let fileChat = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
+            let audioChat = dataMessages[indexPath.row]["audio_id"]  as? String ?? ""
+            if !imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty || !audioChat.isEmpty {
+                if summarizeSession || copySession {
+                    return
+                } else if forwardSession && !Nexilis.checkingAccess(key: "secure_folder_forward") && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+                    return
+                } else {
+                    var file = imageChat
+                    if file.isEmpty {
+                        file = videoChat
+                        if file.isEmpty {
+                            file = fileChat
+                            if file.isEmpty {
+                                file = audioChat
+                            }
+                        }
+                    }
+                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                    if let dirPath = paths.first {
+                        let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
+                        if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
+                            return
+                        }
+                    }
+                }
+            } else if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999") {
                 return
             }
             let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[indexPath.row]["message_id"]  as? String ?? ""})
@@ -5610,31 +5634,6 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerMultpileSelectSession.subviews.forEach({ $0.removeFromSuperview() })
             addSubviewMultipleSession()
             return
-        }
-        if !(dataMessages[indexPath.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath.row]["file_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath.row]["audio_id"]  as? String ?? "").isEmpty {
-            if !Nexilis.checkingAccess(key: "secure_folder_forward") && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
-                return
-            } else {
-                var file = dataMessages[indexPath.row]["image_id"]  as? String ?? ""
-                if file.isEmpty {
-                    file = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
-                    if file.isEmpty {
-                        file = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
-                        if file.isEmpty {
-                            file = dataMessages[indexPath.row]["audio_id"]  as? String ?? ""
-                        }
-                    }
-                }
-                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                if let dirPath = paths.first {
-                    let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
-                    if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
-                        return
-                    }
-                }
-            }
         }
         let message = dataMessages[indexPath.row]
         if let attachmentFlag = message["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
@@ -5821,17 +5820,19 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         
         if (dataMessages[indexPath.row]["attachment_flag"] as? String == "0" && dataMessages[indexPath.row]["lock"] as? String != "1") || forwardSession || deleteSession || summarizeSession {
             var showSelectedImage = true
-            if (!imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty) && forwardSession {
-                if !Nexilis.checkingAccess(key: "secure_folder_forward") && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+            if !imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty || !audioChat.isEmpty {
+                if summarizeSession || copySession {
+                    showSelectedImage = false
+                } else if forwardSession && !Nexilis.checkingAccess(key: "secure_folder_forward") && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
                     showSelectedImage = false
                 } else {
-                    var file = dataMessages[indexPath.row]["image_id"]  as? String ?? ""
+                    var file = imageChat
                     if file.isEmpty {
-                        file = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
+                        file = videoChat
                         if file.isEmpty {
-                            file = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
+                            file = fileChat
                             if file.isEmpty {
-                                file = dataMessages[indexPath.row]["audio_id"]  as? String ?? ""
+                                file = audioChat
                             }
                         }
                     }
@@ -5845,8 +5846,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         }
                     }
                 }
-            }
-            if dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" && !deleteSession && !summarizeSession {
+            } else if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999") {
                 showSelectedImage = false
             }
             if showSelectedImage {
@@ -8675,7 +8675,7 @@ extension EditorGroup: UISearchBarDelegate {
             timerSearch = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {[self] _ in
                 textSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
                 titleSearchMatches.isHidden = true
-                countMatchesSearch = Chat.getCountSearchMessage(key: textSearch, pin: (self.dataGroup["group_id"] as? String) ?? "", chatId: (self.dataTopic["chat_id"] as? String) ?? "", isPersonal: false)
+                countMatchesSearch = Chat.getCountSearchMessage(key: textSearch, pin: isHistoryCC ? complaintId : (self.dataGroup["group_id"] as? String) ?? "", chatId: (self.dataTopic["chat_id"] as? String) ?? "", scope: 4, isCC: isHistoryCC ? 1 : 0)
                 tableChatView.reloadData()
                 scrollToFirstSearchMessage()
             })

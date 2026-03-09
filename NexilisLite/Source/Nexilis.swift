@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.90"
+    public static var cpaasVersion = "5.0.91"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -807,10 +807,10 @@ public class Nexilis: NSObject {
             }
             if Utils.selectedAppMode == 1 && key == "sign_in_up_email" {
                 return true
-            } else if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
+            } else if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" || key == "create_miniapp" || key == "can_switch_style" {
                 return false
             } else {
-                return false
+                return true
             }
         } else if let jsonArray = try? JSONSerialization.jsonObject(with: dataAccess.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
             if jsonArray[key] != nil {
@@ -821,10 +821,10 @@ public class Nexilis: NSObject {
                 }
                 if Utils.selectedAppMode == 1 && key == "sign_in_up_email" {
                     return true
-                } else if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" {
+                } else if key == "sms" || key == "email" || key == "whatsapp" || key == "battery_optimization_force" || key == "backup_restore" || key == "check_sim_swap" || key == "admin_features" || key == "can_config_fb" || key == "friend_request_approval" || key == "authentication" || key == "sign_in_up_msisdn" || key == "sign_in_up_email" || key == "create_miniapp" || key == "can_switch_style" {
                     return false
                 } else {
-                    return false
+                    return true
                 }
             }
         }

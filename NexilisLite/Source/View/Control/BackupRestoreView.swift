@@ -509,6 +509,9 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
     }
     
     private func restoreUcList(dataUcList: [String]) {
+        if dataUcList.count < 2 {
+            return
+        }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 var pin = dataUcList[0]
@@ -660,99 +663,67 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true, attributes: nil)
             try fileManager.unzipItem(at: file, to: destinationURL)
             
-            let files = try FileManager.default.contentsOfDirectory(atPath: destinationURL.path)
-            for file in files {
-                let nameFile = (file as NSString).lastPathComponent
-                let fileURL = destinationURL.appendingPathComponent(nameFile)
-                var newFileExt: URL?
-                newFileExt = fileURL.deletingPathExtension().appendingPathExtension("txt")
-                try FileManager.default.moveItem(at: fileURL, to: newFileExt!)
-                var textReading = try String(contentsOf: newFileExt ?? fileURL, encoding: .utf8)
-                textReading = textReading.replacingOccurrences(of: "<NL>", with: "\n").replacingOccurrences(of: "<CR>", with: "\r")
-                let valueText = textReading.components(separatedBy: "\n")
-                if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "MESSAGE" {
-                    let nameColumn = valueText[0].components(separatedBy: separator)
-                    for i in 1..<valueText.count - 1 {
-                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
-                        let dataMessage = valueText[i].components(separatedBy: separator)
-                        restoreMessage(nameColumn: nameColumn, message: dataMessage)
-                        DispatchQueue.main.async { [self] in
-                            var text = "Restoring...".localized() + "  \(percent)"
-                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
-                                text = "Finalizing data restore...".localized()
-                            }
-                            labelRestoring.text = text
-                        }
-                    }
-                } else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "UC_LIST" {
-                    for i in 1..<valueText.count - 1 {
-                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
-                        let dataUcList = valueText[i].components(separatedBy: separator)
-                        restoreUcList(dataUcList: dataUcList)
-                        DispatchQueue.main.async { [self] in
-                            var text = "Restoring...".localized() + "  \(percent)"
-                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
-                                text = "Finalizing data restore...".localized()
-                            }
-                            labelRestoring.text = text
-                        }
-                    }
-                } else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "FORM_DATA" {
-                    let nameColumn = valueText[0].components(separatedBy: separator)
-                    for i in 1..<valueText.count - 1 {
-                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
-                        let dataFormData = valueText[i].components(separatedBy: separator)
-                        restoreFormData(nameColumn: nameColumn, data: dataFormData)
-                        DispatchQueue.main.async { [self] in
-                            var text = "Restoring...".localized() + "  \(percent)"
-                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
-                                text = "Finalizing data restore...".localized()
-                            }
-                            labelRestoring.text = text
-                        }
-                    }
-                } else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "TASK_PIC" {
-                    let nameColumn = valueText[0].components(separatedBy: separator)
-                    for i in 1..<valueText.count - 1 {
-                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
-                        let dataTaskPIC = valueText[i].components(separatedBy: separator)
-                        restoreTaskPIC(nameColumn: nameColumn, data: dataTaskPIC)
-                        DispatchQueue.main.async { [self] in
-                            var text = "Restoring...".localized() + "  \(percent)"
-                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
-                                text = "Finalizing data restore...".localized()
-                            }
-                            labelRestoring.text = text
-                        }
-                    }
+            let files = try fileManager.contentsOfDirectory(at: destinationURL, includingPropertiesForKeys: nil)
+            for fileURL in files {
+                let nameFile = fileURL.deletingPathExtension().lastPathComponent
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let newFileURL = fileURL.deletingPathExtension().appendingPathExtension("txt")
+                if !fileManager.fileExists(atPath: newFileURL.path) {
+                    try fileManager.moveItem(at: fileURL, to: newFileURL)
                 }
-                else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "TASK_DETAIL" {
-                    let nameColumn = valueText[0].components(separatedBy: separator)
-                    for i in 1..<valueText.count - 1 {
-                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
-                        let dataTaskDetail = valueText[i].components(separatedBy: separator)
-                        restoreTaskDetail(nameColumn: nameColumn, data: dataTaskDetail)
-                        DispatchQueue.main.async { [self] in
-                            var text = "Restoring...".localized() + "  \(percent)"
-                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
-                                text = "Finalizing data restore...".localized()
-                            }
-                            labelRestoring.text = text
-                        }
+                guard let reader = LineReader(url: newFileURL) else { continue }
+                var headerColumns:[String] = []
+                var isHeader = true
+                for line in reader {
+                    if line.isEmpty { continue }
+                    if isHeader {
+                        headerColumns = line.components(separatedBy: separator)
+                        isHeader = false
+                        continue
                     }
-                }
-                else if nameFile.trimmingCharacters(in: .whitespacesAndNewlines) == "MESSAGE_STATUS" {
-                    let nameColumn = valueText[0].components(separatedBy: separator)
-                    for i in 1..<valueText.count - 1 {
-                        let percent = formatPercentage(numerator: recordSizeRestore, denominator: Int64(recordSizeBackup) ?? 0)
-                        let dataMessageStatus = valueText[i].components(separatedBy: separator)
-                        restoreMessageStatus(nameColumn: nameColumn, message: dataMessageStatus)
-                        DispatchQueue.main.async { [self] in
-                            var text = "Restoring...".localized() + "  \(percent)"
+                    var data = line.components(separatedBy: separator)
+                    if data.count != headerColumns.count {
+                        print("Column mismatch \(line)")
+                        continue
+                    }
+                    if data == headerColumns {
+                        continue
+                    }
+                    for i in 0..<data.count {
+                        data[i] = data[i]
+                            .replacingOccurrences(of: "<NL>", with: "\n")
+                            .replacingOccurrences(of: "<CR>", with: "\r")
+                    }
+                    switch nameFile {
+
+                    case "MESSAGE":
+                        restoreMessage(nameColumn: headerColumns, message: data)
+                    case "UC_LIST":
+                        restoreUcList(dataUcList: data)
+                    case "FORM_DATA":
+                        restoreFormData(nameColumn: headerColumns, data: data)
+                    case "TASK_PIC":
+                        restoreTaskPIC(nameColumn: headerColumns, data: data)
+                    case "TASK_DETAIL":
+                        restoreTaskDetail(nameColumn: headerColumns, data: data)
+                    case "MESSAGE_STATUS":
+                        restoreMessageStatus(nameColumn: headerColumns, message: data)
+                    default:
+                        break
+                    }
+                    recordSizeRestore += 1
+                    if recordSizeRestore % 100 == 0 {
+                        let percent = formatPercentage(
+                            numerator: recordSizeRestore,
+                            denominator: Int64(recordSizeBackup) ?? 0
+                        )
+                        DispatchQueue.main.async {
                             if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
-                                text = "Finalizing data restore...".localized()
+                                self.labelRestoring.text = "Finalizing data restore...".localized()
+                            } else {
+                                self.labelRestoring.text =
+                                "Restoring...".localized() + " \(percent)"
                             }
-                            labelRestoring.text = text
                         }
                     }
                 }
@@ -770,21 +741,16 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
 //            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
                 isRestoreStart = false
-                valueLastBackup = "-"
-                valuesizeBackup = "-"
                 tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1), IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
                 tableView.reloadSections(IndexSet(integer: 3), with: .none)
             })
         } catch {
-            //print(error)
             self.view.makeToast("Backup files are corrupted".localized(), duration: 3)
 //            DispatchQueue.global().async { [self] in
 //                _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupRestored(option: optionBackup, fileid: fileIdBackup))
 //            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
                 isRestoreStart = false
-                valueLastBackup = "-"
-                valuesizeBackup = "-"
                 tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1), IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
                 tableView.reloadSections(IndexSet(integer: 3), with: .none)
             })
@@ -800,228 +766,238 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 var recordSize: Int64 = 0
                 
                 //Make File MESSAGE
-                let file_message = documentDirectoryUrl.appendingPathComponent("MESSAGE").appendingPathExtension("")
+                let url_message = documentDirectoryUrl.appendingPathComponent("MESSAGE").appendingPathExtension("")
+                FileManager.default.createFile(atPath: url_message.path, contents: nil)
+                guard let file_message = try? FileHandle(forWritingTo: url_message) else { return }
                 if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(MESSAGE)") {
-                    var text_message = ""
+                    var columns: [String] = []
                     while tableInfo.next() {
-                        if text_message.isEmpty {
-                            text_message.append(tableInfo.string(forColumn: "name")!)
-                        } else {
-                            text_message.append(separator)
-                            text_message.append(tableInfo.string(forColumn: "name")!)
-                        }
+                        columns.append(tableInfo.string(forColumn: "name")!)
                     }
-                    text_message.append("\n")
+                    let header = columns.joined(separator: separator) + "\n"
+                    file_message.write(header.data(using: .utf8)!)
                     tableInfo.close()
                     
                     if let cursorData = Database.shared.getRecords(fmdb: fmdb,query: "SELECT * FROM MESSAGE") {
                         let columnCount = cursorData.columnCount
-                        var value_m = ""
                         while cursorData.next() {
+                            var line = ""
                             for i in 0..<columnCount {
-                                value_m.append(cursorData.string(forColumnIndex: i) == nil ? "null" : cursorData.string(forColumnIndex: i)!.isEmpty ? "<empty>" : cursorData.string(forColumnIndex: i)!)
-                                value_m.append(separator)
+                                if !line.isEmpty {
+                                    line.append(separator)
+                                }
+                                let value = cursorData.string(forColumnIndex: i)
+                                var text = toWrite(value)
+                                text = text
+                                    .replacingOccurrences(of: "\n", with: "<NL>")
+                                    .replacingOccurrences(of: "\r", with: "<CR>")
+
+                                line.append(text)
                             }
-                            value_m.append("\n")
+                            line.append("\n")
+                            file_message.write(line.data(using: .utf8)!)
                             recordSize += 1
                         }
-                        text_message.append(value_m)
                         cursorData.close()
                     }
-                    do {
-                        try text_message.write(to: file_message, atomically: true, encoding: .utf8)
-                    }
-                    catch {
-                        //print(error)
-                    }
+                    file_message.closeFile()
                 }
                 
                 //Make File UC_LIST
-                let file_uc_list = documentDirectoryUrl.appendingPathComponent("UC_LIST").appendingPathExtension("")
+                let url_uc_list = documentDirectoryUrl.appendingPathComponent("UC_LIST").appendingPathExtension("")
+                FileManager.default.createFile(atPath: url_uc_list.path, contents: nil)
+                guard let file_uc_list = try? FileHandle(forWritingTo: documentDirectoryUrl.appendingPathComponent("UC_LIST").appendingPathExtension("")) else { return }
                 if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(MESSAGE_SUMMARY)") {
-                    var text_uc_list = ""
+                    var columns: [String] = []
                     while tableInfo.next() {
                         if tableInfo.string(forColumn: "name")! == "counter" {
                             continue
                         }
-                        if text_uc_list.isEmpty {
-                            text_uc_list.append(tableInfo.string(forColumn: "name")! == "l_pin" ? "opposite" : tableInfo.string(forColumn: "name")!)
-                        } else {
-                            text_uc_list.append(separator)
-                            text_uc_list.append(tableInfo.string(forColumn: "name")! == "l_pin" ? "opposite" : tableInfo.string(forColumn: "name")!)
-                        }
+                        columns.append(tableInfo.string(forColumn: "name")! == "l_pin" ? "opposite" : tableInfo.string(forColumn: "name")!)
                     }
-                    text_uc_list.append("\n")
+                    let header = columns.joined(separator: separator) + "\n"
+                    file_uc_list.write(header.data(using: .utf8)!)
                     tableInfo.close()
                     
                     if let cursorData = Database.shared.getRecords(fmdb: fmdb,query: "SELECT * FROM MESSAGE_SUMMARY") {
                         let columnCount = cursorData.columnCount
-                        var value_m = ""
                         while cursorData.next() {
-                            for i in 0..<columnCount - 1 {
-                                value_m.append(cursorData.string(forColumnIndex: i) == nil ? "null" : cursorData.string(forColumnIndex: i)!.isEmpty ? "<empty>" : cursorData.string(forColumnIndex: i)!)
-                                value_m.append(separator)
+                            var line = ""
+                            for i in 0..<columnCount {
+                                let columnName = cursorData.columnName(for: i)
+                                if columnName == "counter" {
+                                    continue
+                                }
+                                if !line.isEmpty {
+                                    line.append(separator)
+                                }
+                                let value = cursorData.string(forColumnIndex: i)
+                                var text = toWrite(value)
+                                text = text
+                                    .replacingOccurrences(of: "\n", with: "<NL>")
+                                    .replacingOccurrences(of: "\r", with: "<CR>")
+
+                                line.append(text)
                             }
-                            value_m.append("\n")
+                            line.append("\n")
+                            file_uc_list.write(line.data(using: .utf8)!)
                             recordSize += 1
                         }
-                        text_uc_list.append(value_m)
                         cursorData.close()
                     }
-                    do {
-                        try text_uc_list.write(to: file_uc_list, atomically: true, encoding: .utf8)
-                    }
-                    catch {//print(error)
-                        
-                    }
+                    file_uc_list.closeFile()
                 }
                 
                 //Make File FORM_DATA
-                let file_form_data = documentDirectoryUrl.appendingPathComponent("FORM_DATA").appendingPathExtension("")
+                let url_form_data = documentDirectoryUrl.appendingPathComponent("FORM_DATA").appendingPathExtension("")
+                FileManager.default.createFile(atPath: url_form_data.path, contents: nil)
+                guard let file_form_data = try? FileHandle(forWritingTo: documentDirectoryUrl.appendingPathComponent("FORM_DATA").appendingPathExtension("")) else { return }
                 if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(FORM_DATA)") {
-                    var text_form_data = ""
+                    var columns: [String] = []
                     while tableInfo.next() {
-                        if text_form_data.isEmpty {
-                            text_form_data.append(tableInfo.string(forColumn: "name")!)
-                        } else {
-                            text_form_data.append(separator)
-                            text_form_data.append(tableInfo.string(forColumn: "name")!)
-                        }
+                        columns.append(tableInfo.string(forColumn: "name")!)
                     }
-                    text_form_data.append("\n")
+                    let header = columns.joined(separator: separator) + "\n"
+                    file_form_data.write(header.data(using: .utf8)!)
                     tableInfo.close()
                     
                     if let cursorData = Database.shared.getRecords(fmdb: fmdb,query: "SELECT * FROM FORM_DATA") {
                         let columnCount = cursorData.columnCount
-                        var value_m = ""
                         while cursorData.next() {
-                            for i in 0..<columnCount - 1 {
-                                value_m.append(cursorData.string(forColumnIndex: i) == nil ? "null" : cursorData.string(forColumnIndex: i)!.isEmpty ? "<empty>" : cursorData.string(forColumnIndex: i)!)
-                                value_m.append(separator)
+                            var line = ""
+                            for i in 0..<columnCount {
+                                if !line.isEmpty {
+                                    line.append(separator)
+                                }
+                                let value = cursorData.string(forColumnIndex: i)
+                                var text = toWrite(value)
+                                text = text
+                                    .replacingOccurrences(of: "\n", with: "<NL>")
+                                    .replacingOccurrences(of: "\r", with: "<CR>")
+
+                                line.append(text)
                             }
-                            value_m.append("\n")
+                            line.append("\n")
+                            file_form_data.write(line.data(using: .utf8)!)
                             recordSize += 1
                         }
-                        text_form_data.append(value_m)
                         cursorData.close()
                     }
-                    do {
-                        try text_form_data.write(to: file_form_data, atomically: true, encoding: .utf8)
-                    }
-                    catch {//print(error)
-                        
-                    }
+                    file_form_data.closeFile()
                 }
                 
                 //Make File TASK_PIC
-                let file_task_pic = documentDirectoryUrl.appendingPathComponent("TASK_PIC").appendingPathExtension("")
+                let url_task_pic = documentDirectoryUrl.appendingPathComponent("TASK_PIC").appendingPathExtension("")
+                FileManager.default.createFile(atPath: url_task_pic.path, contents: nil)
+                guard let file_task_pic = try? FileHandle(forWritingTo: documentDirectoryUrl.appendingPathComponent("TASK_PIC").appendingPathExtension("")) else { return }
                 if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(TASK_PIC)") {
-                    var text_task_pic = ""
+                    var columns: [String] = []
                     while tableInfo.next() {
-                        if text_task_pic.isEmpty {
-                            text_task_pic.append(tableInfo.string(forColumn: "name")!)
-                        } else {
-                            text_task_pic.append(separator)
-                            text_task_pic.append(tableInfo.string(forColumn: "name")!)
-                        }
+                        columns.append(tableInfo.string(forColumn: "name")!)
                     }
-                    text_task_pic.append("\n")
+                    let header = columns.joined(separator: separator) + "\n"
+                    file_task_pic.write(header.data(using: .utf8)!)
                     tableInfo.close()
                     
                     if let cursorData = Database.shared.getRecords(fmdb: fmdb,query: "SELECT * FROM TASK_PIC") {
                         let columnCount = cursorData.columnCount
-                        var value_m = ""
                         while cursorData.next() {
-                            for i in 0..<columnCount - 1 {
-                                value_m.append(cursorData.string(forColumnIndex: i) == nil ? "null" : cursorData.string(forColumnIndex: i)!.isEmpty ? "<empty>" : cursorData.string(forColumnIndex: i)!)
-                                value_m.append(separator)
+                            var line = ""
+                            for i in 0..<columnCount {
+                                if !line.isEmpty {
+                                    line.append(separator)
+                                }
+                                let value = cursorData.string(forColumnIndex: i)
+                                var text = toWrite(value)
+                                text = text
+                                    .replacingOccurrences(of: "\n", with: "<NL>")
+                                    .replacingOccurrences(of: "\r", with: "<CR>")
+
+                                line.append(text)
                             }
-                            value_m.append("\n")
+                            line.append("\n")
+                            file_task_pic.write(line.data(using: .utf8)!)
                             recordSize += 1
                         }
-                        text_task_pic.append(value_m)
                         cursorData.close()
                     }
-                    do {
-                        try text_task_pic.write(to: file_task_pic, atomically: true, encoding: .utf8)
-                    }
-                    catch {//print(error)
-                        
-                    }
+                    file_task_pic.closeFile()
                 }
                 
                 //Make File TASK_DETAIL
-                let file_task_detail = documentDirectoryUrl.appendingPathComponent("TASK_DETAIL").appendingPathExtension("")
+                let url_task_detail = documentDirectoryUrl.appendingPathComponent("TASK_DETAIL").appendingPathExtension("")
+                FileManager.default.createFile(atPath: url_task_detail.path, contents: nil)
+                guard let file_task_detail = try? FileHandle(forWritingTo: documentDirectoryUrl.appendingPathComponent("TASK_DETAIL").appendingPathExtension("")) else { return }
                 if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(TASK_DETAIL)") {
-                    var text_task_detail = ""
+                    var columns: [String] = []
                     while tableInfo.next() {
-                        if text_task_detail.isEmpty {
-                            text_task_detail.append(tableInfo.string(forColumn: "name")!)
-                        } else {
-                            text_task_detail.append(separator)
-                            text_task_detail.append(tableInfo.string(forColumn: "name")!)
-                        }
+                        columns.append(tableInfo.string(forColumn: "name")!)
                     }
-                    text_task_detail.append("\n")
+                    let header = columns.joined(separator: separator) + "\n"
+                    file_task_detail.write(header.data(using: .utf8)!)
                     tableInfo.close()
                     
                     if let cursorData = Database.shared.getRecords(fmdb: fmdb,query: "SELECT * FROM TASK_DETAIL") {
                         let columnCount = cursorData.columnCount
-                        var value_m = ""
                         while cursorData.next() {
-                            for i in 0..<columnCount - 1 {
-                                value_m.append(cursorData.string(forColumnIndex: i) == nil ? "null" : cursorData.string(forColumnIndex: i)!.isEmpty ? "<empty>" : cursorData.string(forColumnIndex: i)!)
-                                value_m.append(separator)
+                            var line = ""
+                            for i in 0..<columnCount {
+                                if !line.isEmpty {
+                                    line.append(separator)
+                                }
+                                let value = cursorData.string(forColumnIndex: i)
+                                var text = toWrite(value)
+                                text = text
+                                    .replacingOccurrences(of: "\n", with: "<NL>")
+                                    .replacingOccurrences(of: "\r", with: "<CR>")
+
+                                line.append(text)
                             }
-                            value_m.append("\n")
+                            line.append("\n")
+                            file_task_detail.write(line.data(using: .utf8)!)
                             recordSize += 1
                         }
-                        text_task_detail.append(value_m)
                         cursorData.close()
                     }
-                    do {
-                        try text_task_detail.write(to: file_task_detail, atomically: true, encoding: .utf8)
-                    }
-                    catch {//print(error)
-                        
-                    }
+                    file_task_detail.closeFile()
                 }
                 
                 //Make File MESSAGE_STATUS
-                let file_task_status = documentDirectoryUrl.appendingPathComponent("MESSAGE_STATUS").appendingPathExtension("")
+                let url_task_status = documentDirectoryUrl.appendingPathComponent("MESSAGE_STATUS").appendingPathExtension("")
+                FileManager.default.createFile(atPath: url_task_status.path, contents: nil)
+                guard let file_task_status = try? FileHandle(forWritingTo: documentDirectoryUrl.appendingPathComponent("MESSAGE_STATUS").appendingPathExtension("")) else { return }
                 if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(MESSAGE_STATUS)") {
-                    var text_task_status = ""
+                    var columns: [String] = []
                     while tableInfo.next() {
-                        if text_task_status.isEmpty {
-                            text_task_status.append(tableInfo.string(forColumn: "name")!)
-                        } else {
-                            text_task_status.append(separator)
-                            text_task_status.append(tableInfo.string(forColumn: "name")!)
-                        }
+                        columns.append(tableInfo.string(forColumn: "name")!)
                     }
-                    text_task_status.append("\n")
+                    let header = columns.joined(separator: separator) + "\n"
+                    file_task_status.write(header.data(using: .utf8)!)
                     tableInfo.close()
                     
                     if let cursorData = Database.shared.getRecords(fmdb: fmdb,query: "SELECT * FROM MESSAGE_STATUS") {
                         let columnCount = cursorData.columnCount
-                        var value_m = ""
                         while cursorData.next() {
-                            for i in 0..<columnCount - 1 {
-                                value_m.append(cursorData.string(forColumnIndex: i) == nil ? "null" : cursorData.string(forColumnIndex: i)!.isEmpty ? "<empty>" : cursorData.string(forColumnIndex: i)!)
-                                value_m.append(separator)
+                            var line = ""
+                            for i in 0..<columnCount {
+                                if !line.isEmpty {
+                                    line.append(separator)
+                                }
+                                let value = cursorData.string(forColumnIndex: i)
+                                var text = toWrite(value)
+                                text = text
+                                    .replacingOccurrences(of: "\n", with: "<NL>")
+                                    .replacingOccurrences(of: "\r", with: "<CR>")
+
+                                line.append(text)
                             }
-                            value_m.append("\n")
+                            line.append("\n")
+                            file_task_status.write(line.data(using: .utf8)!)
                             recordSize += 1
                         }
-                        text_task_status.append(value_m)
                         cursorData.close()
                     }
-                    do {
-                        try text_task_status.write(to: file_task_status, atomically: true, encoding: .utf8)
-                    }
-                    catch {//print(error)
-                        
-                    }
+                    file_task_status.closeFile()
                 }
                 
                 //ZIP ALL FILES
@@ -1042,17 +1018,17 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                             self.labelPreparing.text = "Preparing...".localized() + " \(progress.fractionCompleted * 100)%"
                         }
                     }
-                    try fileManager.zipItem(at: file_message, to: zipFiles, progress: unzipProgress)
+                    try fileManager.zipItem(at: url_message, to: zipFiles, progress: unzipProgress)
                     guard let archive = Archive(url: zipFiles, accessMode: .update) else  {
                         print("Failed Archive")
                         return
                     }
                     do {
-                        try archive.addEntry(with: file_uc_list.lastPathComponent, relativeTo: file_uc_list.deletingLastPathComponent())
-                        try archive.addEntry(with: file_form_data.lastPathComponent, relativeTo: file_form_data.deletingLastPathComponent())
-                        try archive.addEntry(with: file_task_pic.lastPathComponent, relativeTo: file_task_pic.deletingLastPathComponent())
-                        try archive.addEntry(with: file_task_detail.lastPathComponent, relativeTo: file_task_detail.deletingLastPathComponent())
-                        try archive.addEntry(with: file_task_status.lastPathComponent, relativeTo: file_task_status.deletingLastPathComponent())
+                        try archive.addEntry(with: url_uc_list.lastPathComponent, relativeTo: url_uc_list.deletingLastPathComponent())
+                        try archive.addEntry(with: url_form_data.lastPathComponent, relativeTo: url_form_data.deletingLastPathComponent())
+                        try archive.addEntry(with: url_task_pic.lastPathComponent, relativeTo: url_task_pic.deletingLastPathComponent())
+                        try archive.addEntry(with: url_task_detail.lastPathComponent, relativeTo: url_task_detail.deletingLastPathComponent())
+                        try archive.addEntry(with: url_task_status.lastPathComponent, relativeTo: url_task_status.deletingLastPathComponent())
                     } catch {
                         print("Adding entry to ZIP archive failed with error:\(error)")
                     }
@@ -1150,6 +1126,19 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
 
 }
 
+func toWrite(_ value: String?) -> String {
+
+    guard let v = value else {
+        return "null"
+    }
+
+    if v.isEmpty {
+        return "<empty>"
+    }
+
+    return v
+}
+
 func formatPercentage(numerator: Int64, denominator: Int64) -> String {
     guard denominator != 0 else { return "NaN" }
 
@@ -1190,3 +1179,31 @@ extension String {
          }
      }
  }
+
+class LineReader: Sequence, IteratorProtocol {
+
+    private let file: UnsafeMutablePointer<FILE>!
+
+    init?(url: URL) {
+        file = fopen(url.path, "r")
+        if file == nil { return nil }
+    }
+
+    deinit {
+        fclose(file)
+    }
+
+    func next() -> String? {
+
+        var line: UnsafeMutablePointer<CChar>? = nil
+        var linecap: Int = 0
+
+        defer { free(line) }
+
+        if getline(&line, &linecap, file) > 0 {
+            return String(cString: line!).trimmingCharacters(in: .newlines)
+        }
+
+        return nil
+    }
+}

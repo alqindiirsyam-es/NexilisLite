@@ -185,7 +185,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         buttonSpecFile.circle()
         buttonSpecFile.backgroundColor = .secondaryColor.withAlphaComponent(0.4)
         buttonSpecFile.addTarget(self, action: #selector(showSpecFile), for: .touchUpInside)
-        if self.isConfidential {
+        if self.isConfidential || self.isCC {
             buttonSpecFile.isEnabled = false
         }
         

@@ -1698,7 +1698,7 @@ public class APIS: NSObject {
                                 listMessageFromAPN.append(message_id)
                             }
 //                            _ = Nexilis.justInit(isChecking: true)
-                            PendingMessageStore.shared.save(message_id)
+//                            PendingMessageStore.shared.save(message_id)
                             getMessageById(id: message_id)
                         }
                     }
@@ -1875,6 +1875,11 @@ public class APIS: NSObject {
         Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
             if let error = error {
                 print("Error: \(error.localizedDescription)")
+                if retry > 0 {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                        self.getMessageById(id: id, retry: retry - 1)
+                    }
+                }
                 return
             }
             
@@ -1895,6 +1900,7 @@ public class APIS: NSObject {
                         Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
                         ackAPN(id: id)
                         PendingMessageStore.shared.remove(id)
+                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                         
 //                        DispatchQueue.main.async {
 //                            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
@@ -2323,13 +2329,18 @@ public class APIS: NSObject {
             if !Utils.isHSAMode() && !Utils.isMiddleMode(){
                 _ = Nexilis.justInit(isChecking: true)
             }
-            let pendingIds = PendingMessageStore.shared.load()
-            // Jika ada ID → pull satu per satu
-            for id in pendingIds {
-                APIS.getMessageById(id: id)
-                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+//            let pendingIds = PendingMessageStore.shared.load()
+//            // Jika ada ID → pull satu per satu
+//            for id in pendingIds {
+//                APIS.getMessageById(id: id)
+//                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+//            }
+//            PendingMessageStore.shared.removeAll()
+            if let me = User.getMyPin() {
+                DispatchQueue.global().async {
+                    let _ = Nexilis.write(message: CoreMessage_TMessageBank.getBatchBuddiesInfos(p_f_pin: me, last_update: 0))
+                }
             }
-            PendingMessageStore.shared.removeAll()
         }
         checkDataForShareExtension()
         UIApplication.shared.applicationIconBadgeNumber = 0
