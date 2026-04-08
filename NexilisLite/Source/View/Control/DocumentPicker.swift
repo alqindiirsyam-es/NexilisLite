@@ -42,8 +42,9 @@ open class DocumentPicker: NSObject {
     
     public func present() {
         self.pickerController = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
-//        self.pickerController?.allowsMultipleSelection = true
+        self.pickerController?.allowsMultipleSelection = true
         self.pickerController!.delegate = self
+        self.pickerController?.modalPresentationStyle = .formSheet
         self.presentationController?.present(self.pickerController!, animated: true)
     }
     

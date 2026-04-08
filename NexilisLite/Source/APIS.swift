@@ -2452,6 +2452,22 @@ public class APIS: NSObject {
         }
     }
     
+    static func showWarningMaxFile() {
+        alertControllerExpired = LibAlertController(
+            title: "⚠️ Failed to Load Files".localized(),
+            message: "You can select up to 10 files only.".localized(),
+            preferredStyle: .alert
+        )
+        
+        alertControllerExpired.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: nil))
+        
+        if UIApplication.shared.visibleViewController?.navigationController != nil {
+            UIApplication.shared.visibleViewController?.navigationController?.present(alertControllerExpired, animated: true, completion: nil)
+        } else {
+            UIApplication.shared.visibleViewController?.present(alertControllerExpired, animated: true, completion: nil)
+        }
+    }
+    
     static func showMessageGuardFile(mime: String) {
         alertControllerExpired = LibAlertController(
             title: "⚠️ Message Guard Announcement".localized(),

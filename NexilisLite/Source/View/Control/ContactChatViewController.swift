@@ -247,6 +247,30 @@ class ContactChatViewController: UITableViewController {
             self.navigationController?.navigationBar.setNeedsLayout()
         }
         getData()
+        DispatchQueue.global().async {
+            self.getOpenGroups(listGroups: self.groups, completion: { g in
+                DispatchQueue.main.async {
+                    self.groups.removeAll(where: { $0.isOpen == "1" && $0.groupType == "NOTJOINED" })
+                    for og in g {
+                        if self.groups.first(where: { $0.id == og.id }) == nil {
+                            self.groups.append(og)
+                        }
+                    }
+                    self.groups.sort { (a, b) -> Bool in
+                        if Int(a.official) == 1 {
+                            return true
+                        } else if Int(b.official) == 1 {
+                            return false
+                        } else {
+                            return Int(a.official) ?? 0 > Int(b.official) ?? 0
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        self.tableView.reloadData()
+                    }
+                }
+            })
+        }
         APIS.setDataForShareExtension()
     }
     
@@ -376,29 +400,29 @@ class ContactChatViewController: UITableViewController {
             }
         case 2:
             Utils.inTabChats = false
-            DispatchQueue.global().async {
-                self.getOpenGroups(listGroups: self.groups, completion: { g in
-                    DispatchQueue.main.async {
-                        for og in g {
-                            if self.groups.first(where: { $0.id == og.id }) == nil {
-                                self.groups.append(og)
-                            }
-                        }
-                        self.groups.sort { (a, b) -> Bool in
-                            if Int(a.official) == 1 {
-                                return true
-                            } else if Int(b.official) == 1 {
-                                return false
-                            } else {
-                                return Int(a.official) ?? 0 > Int(b.official) ?? 0
-                            }
-                        }
-                        DispatchQueue.main.async {
-                            self.tableView.reloadData()
-                        }
-                    }
-                })
-            }
+//            DispatchQueue.global().async {
+//                self.getOpenGroups(listGroups: self.groups, completion: { g in
+//                    DispatchQueue.main.async {
+//                        for og in g {
+//                            if self.groups.first(where: { $0.id == og.id }) == nil {
+//                                self.groups.append(og)
+//                            }
+//                        }
+//                        self.groups.sort { (a, b) -> Bool in
+//                            if Int(a.official) == 1 {
+//                                return true
+//                            } else if Int(b.official) == 1 {
+//                                return false
+//                            } else {
+//                                return Int(a.official) ?? 0 > Int(b.official) ?? 0
+//                            }
+//                        }
+//                        DispatchQueue.main.async {
+//                            self.tableView.reloadData()
+//                        }
+//                    }
+//                })
+//            }
         default:
             Utils.inTabChats = false
         }
@@ -657,7 +681,7 @@ class ContactChatViewController: UITableViewController {
         return data
     }
     
-    private func getOpenGroups(listGroups: [Group], completion: @escaping ([Group]) -> ()) {
+    private func getOpenGroups(listGroups: [Group], completion: @escaping ([Group]) -> (), retry: Int = 3) {
         if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getOpenGroups(p_account: "1,2,3,5,6,7", offset: "0", search: "")) {
             var dataGroups: [Group] = []
             if (response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "00") {
@@ -679,15 +703,21 @@ class ContactChatViewController: UITableViewController {
                             isEducation: "")
                         dataGroups.append(group)
                     }
+                    completion(dataGroups)
+                } else {
+                    if retry != 0 {
+                        getOpenGroups(listGroups: listGroups, completion: completion, retry: retry - 1)
+                    }
                 }
             } else {
-                DispatchQueue.main.async {
-                    self.groups.removeAll()
-                    self.groups.append(contentsOf: listGroups)
-                    self.tableView.reloadData()
+                if retry != 0 {
+                    getOpenGroups(listGroups: listGroups, completion: completion, retry: retry - 1)
                 }
             }
-            completion(dataGroups)
+        } else {
+            if retry != 0 {
+                getOpenGroups(listGroups: listGroups, completion: completion, retry: retry - 1)
+            }
         }
     }
     

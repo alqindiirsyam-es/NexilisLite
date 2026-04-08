@@ -2718,15 +2718,20 @@ extension EditorGroup: ImageVideoPickerDelegate, PreviewAttachmentImageVideoDele
         if (imagevideo != nil) {
             let imageVideoData = imagevideo as! [UIImagePickerController.InfoKey: Any]
             let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-            previewImageVC.imageVideoData = imageVideoData
             if (textFieldSend.textColor != .lightGray) {
                 previewImageVC.currentTextTextField = textFieldSend.text
+            }
+            var att: [AttachmentItem] = []
+            if (imageVideoData[.mediaType] as! String == "public.movie") {
+                if let url = imageVideoData[.mediaURL] as? URL {
+                    att.append(AttachmentItem(type: .video, videoURL: url))
+                }
+            } else {
+                att.append(AttachmentItem(type: .image, image: imageVideoData[.originalImage] as? UIImage))
             }
             previewImageVC.modalPresentationStyle = .custom
             previewImageVC.delegate = self
             previewImageVC.isGroup = true
-            previewImageVC.isAck = self.isAck
-            previewImageVC.isConfidential = self.isConfidential
             self.present(previewImageVC, animated: true, completion: nil)
         }
     }
@@ -2740,137 +2745,94 @@ extension EditorGroup: ImageVideoPickerDelegate, PreviewAttachmentImageVideoDele
             picker.dismiss(animated: true, completion: nil)
             return
         }
-        if result.itemProvider.hasItemConformingToTypeIdentifier("com.compuserve.gif") {
-            picker.dismiss(animated: true, completion: {
-                Nexilis.showLoader(text: "Preparing...".localized())
-                result.itemProvider.loadDataRepresentation(forTypeIdentifier: "com.compuserve.gif") { data, error in
-                    if error != nil {
-                        self.loadAnimatedMedia(from: result.itemProvider) { data, isGIF in
-                            guard let data = data else {
-                                print("Failed to load media")
-                                return
-                            }
-
-                            DispatchQueue.main.async {
-                                Nexilis.hideLoader() {
-                                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                                    if (self.textFieldSend.textColor != .lightGray) {
-                                        previewImageVC.currentTextTextField = self.textFieldSend.text
+        picker.dismiss(animated: true, completion: {
+            let countData = results.count
+            var attachments: [AttachmentItem] = []
+            Nexilis.showLoader(text: "Preparing...".localized())
+            DispatchQueue.global().async {
+                for res in results {
+                    let semaphore = DispatchSemaphore(value: 0)
+                    if res.itemProvider.hasItemConformingToTypeIdentifier("com.compuserve.gif") {
+                        res.itemProvider.loadDataRepresentation(forTypeIdentifier: "com.compuserve.gif") { data, error in
+                            if error != nil {
+                                self.loadAnimatedMedia(from: result.itemProvider) { data, isGIF in
+                                    guard let data = data else {
+                                        print("Failed to load media")
+                                        semaphore.signal()
+                                        return
                                     }
                                     if isGIF {
-                                        previewImageVC.fromCopy = true
-                                        previewImageVC.isGIF = true
-                                        previewImageVC.dataGIF = data
-                                        previewImageVC.modalPresentationStyle = .custom
-                                        previewImageVC.delegate = self
-                                        previewImageVC.isAck = self.isAck
-                                        previewImageVC.isConfidential = self.isConfidential
+                                        attachments.append(AttachmentItem(type: .gif, gif: data))
                                     } else {
                                         let fileManager = FileManager.default
                                         let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
                                         let destinationURL = documentsDirectory.appendingPathComponent(UUID().uuidString + ".mov")
                                         do {
                                             try data.write(to: destinationURL)
-                                            previewImageVC.modalPresentationStyle = .custom
-                                            previewImageVC.urlVideoPhpPicker = destinationURL
-                                            previewImageVC.delegate = self
-                                            previewImageVC.isAck = self.isAck
-                                            previewImageVC.isConfidential = self.isConfidential
+                                            attachments.append(AttachmentItem(type: .video, videoURL: destinationURL))
+                                            semaphore.signal()
                                         } catch {
                                             
                                         }
                                     }
-                                    self.present(previewImageVC, animated: true, completion: nil)
                                 }
+                            } else if let data = data {
+                                attachments.append(AttachmentItem(type: .gif, gif: data))
+                                semaphore.signal()
                             }
                         }
-                    } else if let data = data {
-                        DispatchQueue.main.async {
-                            Nexilis.hideLoader() {
-                                let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                                if (self.textFieldSend.textColor != .lightGray) {
-                                    previewImageVC.currentTextTextField = self.textFieldSend.text
-                                }
-                                previewImageVC.fromCopy = true
-                                previewImageVC.isGIF = true
-                                previewImageVC.dataGIF = data
-                                previewImageVC.modalPresentationStyle = .custom
-                                previewImageVC.delegate = self
-                                previewImageVC.isAck = self.isAck
-                                previewImageVC.isConfidential = self.isConfidential
-                                self.present(previewImageVC, animated: true, completion: nil)
+                    } else if res.itemProvider.hasItemConformingToTypeIdentifier("public.image") {
+                        res.itemProvider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
+                            if let data = data {
+                                attachments.append(AttachmentItem(type: .image, image: UIImage(data: data)))
+                                semaphore.signal()
                             }
                         }
-                    }
-                }
-            })
-        } else if result.itemProvider.hasItemConformingToTypeIdentifier("public.image") {
-            picker.dismiss(animated: true, completion: {
-                Nexilis.showLoader(text: "Preparing...".localized())
-                result.itemProvider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
-                    if let data = data {
-                        do {
-                            DispatchQueue.main.async {
-                                Nexilis.hideLoader {
-                                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                                    if (self.textFieldSend.textColor != .lightGray) {
-                                        previewImageVC.currentTextTextField = self.textFieldSend.text
+                    } else if res.itemProvider.hasItemConformingToTypeIdentifier("public.movie") {
+                        res.itemProvider.loadFileRepresentation(forTypeIdentifier: "public.movie") { url, error in
+                            if let url = url {
+                                let fileManager = FileManager.default
+                                let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                var nameFile = url.lastPathComponent
+                                if nameFile.contains("&uuid"){
+                                    nameFile = UUID().uuidString + ".mov"
+                                }
+                                let destinationURL = documentsDirectory.appendingPathComponent(nameFile)
+                                do {
+                                    if fileManager.fileExists(atPath: destinationURL.path) {
+                                        try fileManager.removeItem(at: destinationURL)
                                     }
-                                    previewImageVC.fromCopy = true
-                                    previewImageVC.image = UIImage(data: data)
-                                    previewImageVC.modalPresentationStyle = .custom
-                                    previewImageVC.delegate = self
-                                    previewImageVC.isAck = self.isAck
-                                    previewImageVC.isConfidential = self.isConfidential
-                                    self.present(previewImageVC, animated: true, completion: nil)
+                                    try fileManager.copyItem(at: url, to: destinationURL)
+                                    attachments.append(AttachmentItem(type: .video, videoURL: destinationURL))
+                                    semaphore.signal()
+                                } catch {
+                                    
                                 }
                             }
-                        } catch {
-                            print("Error loading image data: \(error)")
                         }
-                    } else {
-                        print("Error: \(String(describing: error))")
                     }
+                    semaphore.wait()
                 }
-            })
-        } else if result.itemProvider.hasItemConformingToTypeIdentifier("public.movie") {
-            picker.dismiss(animated: true, completion: {
-                Nexilis.showLoader(text: "Preparing...".localized())
-                result.itemProvider.loadFileRepresentation(forTypeIdentifier: "public.movie") { url, error in
-                    if let url = url {
-                        let fileManager = FileManager.default
-                        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-                        var nameFile = url.lastPathComponent
-                        if nameFile.contains("&uuid"){
-                            nameFile = UUID().uuidString + ".mov"
-                        }
-                        let destinationURL = documentsDirectory.appendingPathComponent(nameFile)
-                        do {
-                            if fileManager.fileExists(atPath: destinationURL.path) {
-                                try fileManager.removeItem(at: destinationURL)
+                if attachments.count == countData {
+                    DispatchQueue.main.async {
+                        Nexilis.hideLoader() {
+                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                            if (self.textFieldSend.textColor != .lightGray) {
+                                previewImageVC.currentTextTextField = self.textFieldSend.text
+                                attachments[0].text = self.textFieldSend.text
                             }
-                            try fileManager.copyItem(at: url, to: destinationURL)
-                            DispatchQueue.main.async {
-                                Nexilis.hideLoader {
-                                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                                    if (self.textFieldSend.textColor != .lightGray) {
-                                        previewImageVC.currentTextTextField = self.textFieldSend.text
-                                    }
-                                    previewImageVC.modalPresentationStyle = .custom
-                                    previewImageVC.urlVideoPhpPicker = destinationURL
-                                    previewImageVC.delegate = self
-                                    previewImageVC.isAck = self.isAck
-                                    previewImageVC.isConfidential = self.isConfidential
-                                    self.present(previewImageVC, animated: true, completion: nil)
-                                }
-                            }
-                        } catch {
-                            print("Error copying video file: \(error.localizedDescription)")
+                            previewImageVC.attachments = attachments
+                            previewImageVC.modalPresentationStyle = .custom
+                            previewImageVC.delegate = self
+                            attachments[0].isAck = self.isAck
+                            attachments[0].isConfidential = self.isConfidential
+                            previewImageVC.isGroup = true
+                            self.present(previewImageVC, animated: true, completion: nil)
                         }
                     }
                 }
-            })
-        }
+            }
+        })
     }
     
     func loadAnimatedMedia(from provider: NSItemProvider, completion: @escaping (Data?, Bool) -> Void) {
@@ -2913,41 +2875,60 @@ extension EditorGroup: ImageVideoPickerDelegate, PreviewAttachmentImageVideoDele
 extension EditorGroup: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPreviewControllerDataSource {
     public func didSelectDocument(document: Any?) {
         if (document != nil) {
-            let urlFile = (document as! [URL])[0] as URL
+            let listFile = document as! [URL]
+            if listFile.count > 10 {
+                APIS.showWarningMaxFile()
+                return
+            }
+            Nexilis.showLoader(text: "Scanning File...".localized())
             DispatchQueue.global().async {
-                if Nexilis.checkingAccess(key: "content_inspection") {
-                    print("Scan Doc")
-                    DispatchQueue.main.async {
-                        Nexilis.showLoader(text: "Scanning File...".localized())
-                    }
-                    let result = urlFile.validateFile()
-                    DispatchQueue.main.async {
-                        Nexilis.hideLoader {
-                            if result == 1 {
+                var isContinue = true
+                var att: [AttachmentItem] = []
+                for file in listFile {
+                    let semaphore = DispatchSemaphore(value: 0)
+                    DispatchQueue.global().async {
+                        if Nexilis.checkingAccess(key: "content_inspection") {
+                            let result = file.validateFile()
+                            DispatchQueue.main.async {
+                                if result == 1 {
+                                    sendIt()
+                                } else {
+                                    Nexilis.hideLoader {
+                                        APIS.showWarningFile(type: result)
+                                        isContinue = false
+                                    }
+                                }
+                                semaphore.signal()
+                            }
+                        } else {
+                            DispatchQueue.main.async {
                                 sendIt()
-                            } else {
-                                APIS.showWarningFile(type: result)
+                            }
+                            semaphore.signal()
+                        }
+                        
+                        func sendIt() {
+                            att.append(AttachmentItem(type: .file, fileURL: file))
+                            if att.count == listFile.count {
+                                Nexilis.hideLoader {
+                                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                                    if (self.textFieldSend.textColor != .lightGray) {
+                                        previewImageVC.currentTextTextField = self.textFieldSend.text
+                                    }
+                                    previewImageVC.modalPresentationStyle = .custom
+                                    
+                                    previewImageVC.delegate = self
+                                    previewImageVC.isGroup = true
+                                    previewImageVC.attachments = att
+                                    self.present(previewImageVC, animated: true, completion: nil)
+                                }
                             }
                         }
                     }
-                } else {
-                    DispatchQueue.main.async {
-                        sendIt()
+                    semaphore.wait()
+                    if !isContinue {
+                        break
                     }
-                }
-                
-                func sendIt() {
-                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                    if (self.textFieldSend.textColor != .lightGray) {
-                        previewImageVC.currentTextTextField = self.textFieldSend.text
-                    }
-                    previewImageVC.modalPresentationStyle = .custom
-                    previewImageVC.isDoc = true
-                    previewImageVC.urlDoc = urlFile
-                    previewImageVC.delegate = self
-                    previewImageVC.isAck = self.isAck
-                    previewImageVC.isConfidential = self.isConfidential
-                    self.present(previewImageVC, animated: true, completion: nil)
                 }
             }
 //            self.previewItem = (document as! [URL])[0] as NSURL
@@ -3158,15 +3139,17 @@ extension EditorGroup: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPrevi
 extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
     func customTextViewDidPasteText(image: UIImage?, dataGIF: Data?) {
         let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-        previewImageVC.image = image
-        previewImageVC.isGIF = image == nil
+        var att: [AttachmentItem] = []
+        if dataGIF == nil {
+            att.append(AttachmentItem(type: .image, image: image))
+        } else {
+            att.append(AttachmentItem(type: .gif, gif: dataGIF))
+        }
         previewImageVC.fromCopy = true
-        previewImageVC.dataGIF = dataGIF
         previewImageVC.currentTextTextField = textFieldSend.text
         previewImageVC.modalPresentationStyle = .custom
         previewImageVC.delegate = self
-        previewImageVC.isAck = self.isAck
-        previewImageVC.isConfidential = self.isConfidential
+        previewImageVC.isGroup = true
         self.present(previewImageVC, animated: true, completion: nil)
     }
     
@@ -3802,7 +3785,10 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     private func handleRichText(_ textView: UITextView) {
-        textView.attributedText = textView.text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: self.listMentionInTextField)
+        textView.preserveCursorPosition(withChanges: { _ in
+            textView.attributedText = textView.text.richText(isEditing: true, group_id: self.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: self.listMentionInTextField)
+            return .preserveCursor
+        })
     }
     
     public func textView(_ textView: UITextView, shouldInteractWith URL: URL?, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
@@ -5600,7 +5586,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             if !imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty || !audioChat.isEmpty {
                 if summarizeSession || copySession {
                     return
-                } else if forwardSession && !Nexilis.checkingAccess(key: "secure_folder_forward") && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+                } else if forwardSession && (!Nexilis.checkingAccess(key: "secure_folder_forward") || !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) {
                     return
                 } else {
                     var file = imageChat
@@ -5623,7 +5609,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         }
                     }
                 }
-            } else if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999") {
+            }
+            if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "11") {
                 return
             }
             let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[indexPath.row]["message_id"]  as? String ?? ""})
@@ -5823,7 +5810,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             if !imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty || !audioChat.isEmpty {
                 if summarizeSession || copySession {
                     showSelectedImage = false
-                } else if forwardSession && !Nexilis.checkingAccess(key: "secure_folder_forward") && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward") {
+                } else if forwardSession && (!Nexilis.checkingAccess(key: "secure_folder_forward") || !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) {
                     showSelectedImage = false
                 } else {
                     var file = imageChat
@@ -5846,7 +5833,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         }
                     }
                 }
-            } else if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999") {
+            }
+            if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "11") {
                 showSelectedImage = false
             }
             if showSelectedImage {
