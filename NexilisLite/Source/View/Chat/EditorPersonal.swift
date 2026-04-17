@@ -3903,7 +3903,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func addCounterAtButttonScrollToBottom() {
-        if tableChatView.alpha != 1 || isSearching {
+        if tableChatView.alpha != 1 || isSearching || counter == 0 {
             return
         }
         self.view.addSubview(indicatorCounterBSTB)
@@ -3944,75 +3944,82 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func checkNewMessage(tableView: UITableView) {
-
-        guard let firstIndex = tableView.indexPathsForVisibleRows?.first,
-              let lastIndex = tableView.indexPathsForVisibleRows?.last
-        else { return }
-
-        currentIndexpath = lastIndex
-
-        // MARK: - Filter messages in this section
-        let sectionDate = dataDates[lastIndex.section]
-        let sectionMessages = dataMessages.filter {
-            ($0["chat_date"] as? String ?? "") == sectionDate
-        }
-
-        guard !sectionMessages.isEmpty else { return }
-
-        // MARK: - Scroll Position
-        let contentHeight = tableView.contentSize.height
-        let visibleHeight = tableView.frame.height
-        let fullOffset = contentHeight - visibleHeight
-        let offsetY = tableView.contentOffset.y
-
-        let isLastSection = (lastIndex.section == dataDates.count - 1)
-        let isNotLastRow = (firstIndex.row != sectionMessages.count - 1)
-        let isFarFromBottom = (fullOffset - offsetY > 100)
-        let isNearBottom = (fullOffset - offsetY < 50)
-
-        // MARK: - Show "Scroll to bottom" button
-        if ((!isLastSection && isFarFromBottom) ||
-            (isLastSection && isNotLastRow && isFarFromBottom)) {
-
-            if !buttonScrollToBottom.isDescendant(of: view) {
-                DispatchQueue.main.async { [self] in
-                    addButtonScrollToBottom()
-                    addCounterAtButttonScrollToBottom()
-                }
-            }
-        }
-        // MARK: - Hide button when at bottom
-        else if isNearBottom {
+        DispatchQueue.global(qos: .userInteractive).async {
             DispatchQueue.main.async { [self] in
-                removeScrollToBottomButton()
-            }
-        }
+                guard let firstIndex = tableView.indexPathsForVisibleRows?.first,
+                      let lastIndex = tableView.indexPathsForVisibleRows?.last
+                else { return }
 
-        // MARK: - Ensure index exists
-        guard currentIndexpath!.row < sectionMessages.count else { return }
+                currentIndexpath = lastIndex
 
-        // MARK: - Messages up to visible row
-        let visibleMessages = Array(sectionMessages[0...currentIndexpath!.row])
-            .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
-
-        // MARK: - Send Read Status
-        if !visibleMessages.isEmpty, !isContactCenter {
-            let myPin = User.getMyPin()
-            for msg in visibleMessages {
-                if msg["f_pin"] as? String != myPin && EditorGroup.conditionSendRead(scope: msg[TypeDataMessage.message_scope_id] as! String, fPin: msg[TypeDataMessage.f_pin] as! String, messageId: msg["message_id"]  as? String ?? "") {
-                    sendReadMessageStatus(
-                        chat_id: "",
-                        f_pin: dataPerson["f_pin"]!!,
-                        message_scope_id: MessageScope.WHISPER,
-                        message_id: msg["message_id"] as? String ?? ""
-                    )
+                // MARK: - Filter messages in this section
+                let sectionDate = dataDates[lastIndex.section]
+                let sectionMessages = dataMessages.filter {
+                    ($0["chat_date"] as? String ?? "") == sectionDate
                 }
-            }
-        }
 
-        // MARK: - Update Counter
-        DispatchQueue.main.async { [self] in
-            updateUnreadCounter()
+                guard !sectionMessages.isEmpty else { return }
+
+                // MARK: - Scroll Position
+                let contentHeight = tableView.contentSize.height
+                let visibleHeight = tableView.frame.height
+                let fullOffset = contentHeight - visibleHeight
+                let offsetY = tableView.contentOffset.y
+
+                let isLastSection = (lastIndex.section == dataDates.count - 1)
+                let isNotLastRow = (firstIndex.row != sectionMessages.count - 1)
+                let isFarFromBottom = (fullOffset - offsetY > 100)
+                let isNearBottom = (fullOffset - offsetY < 50)
+
+                // MARK: - Show "Scroll to bottom" button
+                if ((!isLastSection && isFarFromBottom) ||
+                    (isLastSection && isNotLastRow && isFarFromBottom)) {
+
+                    if !buttonScrollToBottom.isDescendant(of: view) {
+                        addButtonScrollToBottom()
+                        addCounterAtButttonScrollToBottom()
+                    }
+                }
+                // MARK: - Hide button when at bottom
+                else if isNearBottom {
+                    DispatchQueue.main.async { [self] in
+                        removeScrollToBottomButton()
+                    }
+                }
+
+                // MARK: - Ensure index exists
+                guard currentIndexpath!.row < sectionMessages.count else { return }
+
+                // MARK: - Messages up to visible row
+                let visibleMessages = Array(sectionMessages[0...currentIndexpath!.row])
+                    .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
+
+                // MARK: - Send Read Status
+                if !visibleMessages.isEmpty, !isContactCenter {
+                    let myPin = User.getMyPin()
+                    var stringMessage = ""
+                    for msg in visibleMessages {
+                        if msg["f_pin"] as? String != myPin && EditorGroup.conditionSendRead(scope: msg[TypeDataMessage.message_scope_id] as! String, fPin: msg[TypeDataMessage.f_pin] as! String, messageId: msg["message_id"]  as? String ?? "") {
+                            if !stringMessage.isEmpty {
+                                stringMessage += ",\(msg["message_id"] as? String ?? "")"
+                            } else {
+                                stringMessage += msg["message_id"] as? String ?? ""
+                            }
+                        }
+                    }
+                    if !stringMessage.isEmpty {
+                        sendReadMessageStatus(
+                            chat_id: "",
+                            f_pin: dataPerson["f_pin"]!!,
+                            message_scope_id: MessageScope.WHISPER,
+                            message_id: stringMessage
+                        )
+                    }
+                }
+
+                // MARK: - Update Counter
+                updateUnreadCounter()
+            }
         }
     }
     
@@ -4078,6 +4085,9 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
             previewImageVC.modalPresentationStyle = .custom
             previewImageVC.delegate = self
             previewImageVC.isCC = self.isContactCenter
+            att[0].isAck = self.isAck
+            att[0].isConfidential = self.isConfidential
+            previewImageVC.attachments = att
             self.present(previewImageVC, animated: true, completion: nil)
         }
     }
@@ -4266,6 +4276,8 @@ extension EditorPersonal: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPr
                                     
                                     previewImageVC.delegate = self
                                     previewImageVC.isCC = self.isContactCenter
+                                    att[0].isAck = self.isAck
+                                    att[0].isConfidential = self.isConfidential
                                     previewImageVC.attachments = att
                                     self.present(previewImageVC, animated: true, completion: nil)
                                 }
@@ -4506,6 +4518,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         previewImageVC.modalPresentationStyle = .custom
         previewImageVC.delegate = self
         previewImageVC.isCC = self.isContactCenter
+        att[0].isAck = self.isAck
+        att[0].isConfidential = self.isConfidential
+        previewImageVC.attachments = att
         self.present(previewImageVC, animated: true, completion: nil)
     }
     
