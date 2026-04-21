@@ -1822,10 +1822,11 @@ public class APIS: NSObject {
                                 }
                                 Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callCancel, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
                             }
-                        } else if UIApplication.shared.visibleViewController is QmeraAudioViewController || UIApplication.shared.visibleViewController is QmeraVideoViewController {
-                            CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callCancelName, callerId: callFrom, isVideo: callType != "1", isAutoCancel: true)
+                        } else if Nexilis.isOpenPageCall {
+//                            CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callCancelName, callerId: callFrom, isVideo: callType != "1", isAutoCancel: true)
                             var dataMessage: [AnyHashable : Any] = [:]
                             dataMessage["call_cancel"] = true
+                            dataMessage["pin"] = callCancel
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.callFCM), object: nil, userInfo: dataMessage)
                         } else {
                             CallManager.shared.reportIncomingCall(uuid: APIS.uuidCall ?? UUID(), callerName: callCancelName, callerId: callFrom, isVideo: callType != "1", isAutoCancel: true)

@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.93"
+    public static var cpaasVersion = "5.0.94"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -61,6 +61,7 @@ public class Nexilis: NSObject {
     public static var defaultFloatingButton: [Int] = []
     
     public static var showButtonFB = false
+    static var isOpenPageCall = false
     
     static var hasInit = false
     
@@ -927,6 +928,17 @@ public class Nexilis: NSObject {
     }
     
     public static func destroyAll() {
+        if Nexilis.callAPNActivated {
+            if let uuid = APIS.uuidCall {
+                if let callInfo = CallManager.shared.activeCalls[uuid] {
+                    if !callInfo.isAccepted {
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getCancelCall(fPin: callInfo.callerId, type: !callInfo.isVideo ? "1" : "2"))
+                        APIS.uuidCall = nil
+                        Nexilis.callAPNActivated = false
+                    }
+                }
+            }
+        }
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         if !onGoingCC.isEmpty {
             let requester = onGoingCC.components(separatedBy: ",")[0]
@@ -1633,63 +1645,78 @@ public class Nexilis: NSObject {
         return response
     }
     
+    private static let incomingDataQueue = DispatchQueue(label: "com.nexilis.incomingData")
+    private static let waitQueueLock = NSLock()
+
     static func incomingData(packetId: String, data: AnyObject) {
-        let message = TMessage()
-        if data is String {
-            let d = data as! String
-            guard message.unpack(data: d) else {
-                //print("UNKNOWN DATA STRING...", data)
-                if(data.hasPrefix("WB")){
-                    let dataWB = data.components(separatedBy: "/")
-                    if(dataWB[1] == "1"){
-                        let x = dataWB[2]
-                        let y = dataWB[3]
-                        let w = dataWB[4]
-                        let h = dataWB[5]
-                        let fc = dataWB[6]
-                        let sw = dataWB[7]
-                        let xo = dataWB[8]
-                        let yo = dataWB[9]
-                        if(Nexilis.getWhiteboardDelegate() != nil){
-                            Nexilis.getWhiteboardDelegate()!.draw(x: x, y: y, w: w, h: h, fc: fc, sw: sw, xo: xo, yo: yo, data: "")
-                        }
-                    } else if(dataWB[1] == "3") {
-                        if(Nexilis.getWhiteboardDelegate() != nil){
-                            Nexilis.getWhiteboardDelegate()!.clear()
-                        }
-                    } else if(dataWB[1] == "2"){
-                        if(Nexilis.getWhiteboardReceiver() != nil){
-                            Nexilis.getWhiteboardReceiver()!.incomingWB(roomId: dataWB[2])
-                        }
-                    } else if(dataWB[1] == "22"){
-                        
-                    } else if(dataWB[1] == "88"){
-                        if(Nexilis.getWhiteboardReceiver() != nil){
-                            Nexilis.getWhiteboardReceiver()!.cancel(roomId: dataWB[2])
-                        }
-                    }
+        // Semua incoming data diproses secara serial
+        incomingDataQueue.async {
+            let message = TMessage()
+            
+            if let d = data as? String {
+                if !message.unpack(data: d) {
+                    // handle WB data...
+                    handleWhiteboardData(data: d)
+                    return
                 }
-                return
+            } else if let d = data as? [UInt8] {
+                guard message.unpack(bytes_data: d) else {
+                    return
+                }
             }
-        } else if data is [UInt8] {
-            let d = data as! [UInt8]
-            guard message.unpack(bytes_data: d) else {
-                //print("UNKNOWN DATA BYTES...", data)
-                return
+            
+            // Sekarang aman karena di serial queue
+            message.mBodies[CoreMessage_TMessageKey.PACKET_ID] = packetId
+            
+            waitQueueLock.lock()
+            let waitEntry = waitQueue[message.getStatus()]
+            waitQueueLock.unlock()
+            
+            if waitEntry != nil {
+                if message.mBodies.keys.contains(CoreMessage_TMessageKey.ERRCOD) {
+                    waitQueueLock.lock()
+                    waitQueue[message.getStatus()] = message
+                    let groupWait = listDispatchGroups[message.getStatus()]
+                    waitQueueLock.unlock()
+                    
+                    groupWait?.leave()  // leave SETELAH unlock untuk hindari deadlock
+                    return
+                }
+            }
+            
+            IncomingThread.default.addQueue(message: message)
+        }
+    }
+
+    // Pisahkan whiteboard handler agar lebih clean
+    private static func handleWhiteboardData(data: String) {
+        guard data.hasPrefix("WB") else { return }
+        let dataWB = data.components(separatedBy: "/")
+        guard dataWB.count > 1 else { return }
+        
+        DispatchQueue.main.async {
+            switch dataWB[1] {
+            case "1":
+                guard dataWB.count > 9 else { return }
+                Nexilis.getWhiteboardDelegate()?.draw(
+                    x: dataWB[2], y: dataWB[3],
+                    w: dataWB[4], h: dataWB[5],
+                    fc: dataWB[6], sw: dataWB[7],
+                    xo: dataWB[8], yo: dataWB[9],
+                    data: ""
+                )
+            case "2":
+                guard dataWB.count > 2 else { return }
+                Nexilis.getWhiteboardReceiver()?.incomingWB(roomId: dataWB[2])
+            case "3":
+                Nexilis.getWhiteboardDelegate()?.clear()
+            case "88":
+                guard dataWB.count > 2 else { return }
+                Nexilis.getWhiteboardReceiver()?.cancel(roomId: dataWB[2])
+            default:
+                break
             }
         }
-        message.mBodies[CoreMessage_TMessageKey.PACKET_ID] = packetId
-        if let _ = waitQueue[message.getStatus()] {
-//            print("wandw resp: \(message.getCode())")
-            //print("MESSAGE INCOMING DATA \(message.toLogString())")
-            if message.mBodies.keys.contains(CoreMessage_TMessageKey.ERRCOD) {
-                waitQueue[message.getStatus()] = message
-                let groupWait = listDispatchGroups[message.getStatus()]
-                groupWait?.leave()
-                return
-            }
-        }
-        IncomingThread.default.addQueue(message: message)
     }
     
     static func saveMessage(message: TMessage, withStatus: Bool = true, fromAPNS: Bool = false) {

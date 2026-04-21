@@ -1246,189 +1246,196 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     @objc func onReceiveMessage(notification: NSNotification) {
         DispatchQueue.main.async {
-            let data:[AnyHashable : Any] = notification.userInfo!
-            if let dataMessage = data["message"] as? TMessage {
-                let chatData = dataMessage.mBodies
-                let group_id = self.dataGroup["group_id"]  as? String ?? ""
-                let chat_id = self.dataTopic["chat_id"]  as? String ?? ""
-                if chatData[CoreMessage_TMessageKey.L_PIN] == group_id && (chatData[CoreMessage_TMessageKey.CHAT_ID] ?? "") == chat_id {
-                    let idx = self.dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == chatData[CoreMessage_TMessageKey.MESSAGE_ID]})
-                    if idx != nil {
-                        self.dataMessages[idx!][TypeDataMessage.message_text] = chatData[CoreMessage_TMessageKey.MESSAGE_TEXT]
-                        self.dataMessages[idx!][TypeDataMessage.last_edit] = Int64(chatData[CoreMessage_TMessageKey.LAST_EDIT]!)
-                        self.dataMessages[idx!][TypeDataMessage.status] = chatData[CoreMessage_TMessageKey.STATUS]
-                        let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
-                        if row != nil && section != nil  {
-                            self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                        }
-                        return
-                    }
-                    var row: [String: Any?] = [:]
-                    row["message_id"] = chatData[CoreMessage_TMessageKey.MESSAGE_ID]
-                    row["f_pin"] = chatData[CoreMessage_TMessageKey.F_PIN]
-                    row["l_pin"] = chatData[CoreMessage_TMessageKey.L_PIN]
-                    row["message_scope_id"] = chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]
-                    row["server_date"] = chatData[CoreMessage_TMessageKey.SERVER_DATE]
-                    row["status"] = chatData[CoreMessage_TMessageKey.STATUS]
-                    row["message_text"] = chatData[CoreMessage_TMessageKey.MESSAGE_TEXT]
-                    if (chatData.keys.contains(CoreMessage_TMessageKey.AUDIO_ID)) {
-                        row["audio_id"] = chatData[CoreMessage_TMessageKey.AUDIO_ID]
-                    } else {
-                        row["audio_id"] = ""
-                    }
-                    if (chatData.keys.contains(CoreMessage_TMessageKey.GIF_ID)) {
-                        row["gif_id"] = chatData[CoreMessage_TMessageKey.GIF_ID]
-                    } else {
-                        row["gif_id"] = ""
-                    }
-                    if (chatData.keys.contains(CoreMessage_TMessageKey.VIDEO_ID)) {
-                        row["video_id"] = chatData[CoreMessage_TMessageKey.VIDEO_ID]
-                    } else {
-                        row["video_id"] = ""
-                    }
-                    if (chatData.keys.contains(CoreMessage_TMessageKey.IMAGE_ID)) {
-                        row["image_id"] = chatData[CoreMessage_TMessageKey.IMAGE_ID]
-                    } else {
-                        row["image_id"] = ""
-                    }
-                    if (chatData.keys.contains(CoreMessage_TMessageKey.THUMB_ID)) {
-                        row["thumb_id"] = chatData[CoreMessage_TMessageKey.THUMB_ID]
-                    } else {
-                        row["thumb_id"] = ""
-                    }
-                    if (chatData.keys.contains(CoreMessage_TMessageKey.CHAT_ID)) {
-                        row["chat_id"] = chatData[CoreMessage_TMessageKey.CHAT_ID]
-                    } else {
-                        row["chat_id"] = ""
-                    }
-                    if (chatData.keys.contains(CoreMessage_TMessageKey.FILE_ID)) {
-                        row["file_id"] = chatData[CoreMessage_TMessageKey.FILE_ID]
-                    } else {
-                        row["file_id"] = ""
-                    }
-                    if (chatData.keys.contains(CoreMessage_TMessageKey.READ_RECEIPTS)) {
-                        row["read_receipts"] = chatData[CoreMessage_TMessageKey.READ_RECEIPTS]
-                    } else {
-                        row["read_receipts"] = ""
-                    }
-                    if (chatData.keys.contains(CoreMessage_TMessageKey.CREDENTIAL)) {
-                        row["credential"] = chatData[CoreMessage_TMessageKey.CREDENTIAL]
-                    } else {
-                        row["credential"] = ""
-                    }
-                    row["progress"] = 0.0
-                    row["attachment_flag"] = chatData[CoreMessage_TMessageKey.ATTACHMENT_FLAG]
-                    row["reff_id"] = chatData[CoreMessage_TMessageKey.REF_ID] ?? ""
-                    row["lock"] = ""
-                    row["is_stared"] = "0"
-                    row[TypeDataMessage.is_forwarded] = Int(chatData[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE] ?? "0")
-                    row[TypeDataMessage.spec_file] = chatData[CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY]
-                    row["isSelected"] = false
-                    if !self.dataDates.contains("Today".localized()){
-                        self.dataDates.append("Today".localized())
-                        self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .fade)
-                    }
-                    row["chat_date"] = "Today".localized()
-                    row["blog_id"] = chatData[CoreMessage_TMessageKey.BLOG_ID]
-                    if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
-                        self.listTimerCredential[row["message_id"]  as? String ?? ""] = 60
-                    }
-                    self.counter += 1
-                    self.dataMessages.append(row)
-                    self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .fade)
-                    self.tableChatView.layoutIfNeeded()
-                    if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
-                        var timer = Timer()
-                        var minute = 60
-                        self.timerCredential[row["message_id"]  as? String ?? ""] = timer
-                        SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: row["message_id"]  as? String ?? "")
-                        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true, block: {_ in
-                            minute -= 1
-                            self.listTimerCredential[row["message_id"]  as? String ?? ""] = minute
-                            if minute == 0 {
-                                timer.invalidate()
-                                self.listTimerCredential.removeValue(forKey: row["message_id"]  as? String ?? "")
-                                self.timerCredential.removeValue(forKey: row["message_id"]  as? String ?? "")
-                                SecureUserDefaults.shared.removeValue(forKey: row["message_id"]  as? String ?? "")
-                                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == row["message_id"] as? String})
-                                if idx != nil {
-                                    self.dataMessages[idx!]["lock"] = "2"
-                                    self.dataMessages[idx!]["reff_id"] = ""
-                                }
-                                DispatchQueue.global().async {
-                                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                        do {
-                                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                                                "lock" : "2"
-                                            ], _where: "message_id = '\(row["message_id"]  as? String ?? "")'")
-                                        } catch {
-                                            rollback.pointee = true
-                                            print("Access database error: \(error.localizedDescription)")
-                                        }
-                                    })
-                                }
-                            }
-                            let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
-                            let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == row["message_id"] as? String})
-                            let indexPath = IndexPath(row: row!, section: section!)
-                            if row != nil && section != nil{
-                                self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                            }
-                        })
-                    }
-                    if  self.currentIndexpath?.row == (self.dataMessages.count - 2) {
-                        if (self.viewIfLoaded?.window != nil) {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: chatData[CoreMessage_TMessageKey.F_PIN]!, message_scope_id: chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]!, message_id: chatData[CoreMessage_TMessageKey.MESSAGE_ID]!)
-                        }
-                        self.tableChatView.scrollToBottom()
-                        if (self.currentIndexpath!.section <= self.dataDates.count - 1 && self.currentIndexpath!.row <= self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1)  {
-                            self.counter = 0
-                            self.updateCounter(counter: self.counter)
-                        }
-                        let lastMarkerCounter = self.markerCounter
-                        if self.markerCounter != nil {
-                            self.markerCounter = nil
-                        }
-                        let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
-                        if indexMessage != nil {
-                            let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
-                            let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
-                            if row != nil && section != nil  {
-                                self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                            }
-                        }
-                    }
-                    else if self.currentIndexpath == nil {
-                        self.counter = 0
-                        self.updateCounter(counter: self.counter)
-                        if (self.viewIfLoaded?.window != nil) {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: chatData[CoreMessage_TMessageKey.F_PIN]!, message_scope_id: chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]!, message_id: chatData[CoreMessage_TMessageKey.MESSAGE_ID]!)
-                        }
-                    }
-                    else if self.counter != 0 {
-                        if !self.indicatorCounterBSTB.isDescendant(of: self.view) && self.buttonScrollToBottom.isDescendant(of: self.view) {
-                            self.markerCounter = row["message_id"] as? String
-                            DispatchQueue.main.async { [self] in
-                                self.addCounterAtButttonScrollToBottom()
-                            }
-                            let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
-                            if indexMessage != nil {
-                                let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
-                                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
-                                if row != nil && section != nil  {
-                                    self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                                }
-                            }
-                        } else if self.indicatorCounterBSTB.isDescendant(of: self.view) {
-                            self.labelCounter.text = "\(self.counter)"
-                        }
-                    }
-                } else {
-                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+            // FIX 1: Guard userInfo
+            guard let data = notification.userInfo,
+                  let dataMessage = data["message"] as? TMessage else {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name(rawValue: "reloadTabChats"),
+                    object: nil,
+                    userInfo: nil
+                )
+                return
+            }
+            
+            let chatData = dataMessage.mBodies
+            let group_id = self.dataGroup["group_id"] as? String ?? ""
+            let chat_id = self.dataTopic["chat_id"] as? String ?? ""
+            
+            guard chatData[CoreMessage_TMessageKey.L_PIN] == group_id,
+                  (chatData[CoreMessage_TMessageKey.CHAT_ID] ?? "") == chat_id else {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name(rawValue: "reloadTabChats"),
+                    object: nil,
+                    userInfo: nil
+                )
+                return
+            }
+            
+            // FIX 2: Guard required fields sebelum digunakan
+            guard let fPin = chatData[CoreMessage_TMessageKey.F_PIN],
+                  let messageScopeId = chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID],
+                  let messageId = chatData[CoreMessage_TMessageKey.MESSAGE_ID] else {
+                return
+            }
+            
+            // Update existing message
+            if let idx = self.dataMessages.firstIndex(where: {
+                $0[TypeDataMessage.message_id] as? String == chatData[CoreMessage_TMessageKey.MESSAGE_ID]
+            }) {
+                self.dataMessages[idx][TypeDataMessage.message_text] = chatData[CoreMessage_TMessageKey.MESSAGE_TEXT]
+                if let lastEdit = chatData[CoreMessage_TMessageKey.LAST_EDIT] {
+                    self.dataMessages[idx][TypeDataMessage.last_edit] = Int64(lastEdit)
                 }
-            } else {
-                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                self.dataMessages[idx][TypeDataMessage.status] = chatData[CoreMessage_TMessageKey.STATUS]
+                
+                let chatDate = self.dataMessages[idx]["chat_date"] as? String ?? ""
+                if let section = self.dataDates.firstIndex(of: chatDate),
+                   let row = self.dataMessages.filter({
+                       $0["chat_date"] as? String ?? "" == chatDate
+                   }).firstIndex(where: {
+                       $0["message_id"] as? String == self.dataMessages[idx]["message_id"] as? String
+                   }) {
+                    self.tableChatView.reloadRows(
+                        at: [IndexPath(row: row, section: section)],
+                        with: .none
+                    )
+                }
+                return
+            }
+            
+            // Build new row
+            var row: [String: Any?] = [:]
+            row["message_id"] = messageId
+            row["f_pin"] = fPin
+            row["l_pin"] = chatData[CoreMessage_TMessageKey.L_PIN]
+            row["message_scope_id"] = messageScopeId
+            row["server_date"] = chatData[CoreMessage_TMessageKey.SERVER_DATE]
+            row["status"] = chatData[CoreMessage_TMessageKey.STATUS]
+            row["message_text"] = chatData[CoreMessage_TMessageKey.MESSAGE_TEXT]
+            row["audio_id"] = chatData[CoreMessage_TMessageKey.AUDIO_ID] ?? ""
+            row["gif_id"] = chatData[CoreMessage_TMessageKey.GIF_ID] ?? ""
+            row["video_id"] = chatData[CoreMessage_TMessageKey.VIDEO_ID] ?? ""
+            row["image_id"] = chatData[CoreMessage_TMessageKey.IMAGE_ID] ?? ""
+            row["thumb_id"] = chatData[CoreMessage_TMessageKey.THUMB_ID] ?? ""
+            row["chat_id"] = chatData[CoreMessage_TMessageKey.CHAT_ID] ?? ""
+            row["file_id"] = chatData[CoreMessage_TMessageKey.FILE_ID] ?? ""
+            row["read_receipts"] = chatData[CoreMessage_TMessageKey.READ_RECEIPTS] ?? ""
+            row["credential"] = chatData[CoreMessage_TMessageKey.CREDENTIAL] ?? ""
+            row["progress"] = 0.0
+            row["attachment_flag"] = chatData[CoreMessage_TMessageKey.ATTACHMENT_FLAG]
+            row["reff_id"] = chatData[CoreMessage_TMessageKey.REF_ID] ?? ""
+            row["lock"] = ""
+            row["is_stared"] = "0"
+            row[TypeDataMessage.is_forwarded] = Int(chatData[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE] ?? "0")
+            row[TypeDataMessage.spec_file] = chatData[CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY]
+            row["isSelected"] = false
+            row["chat_date"] = "Today".localized()
+            row["blog_id"] = chatData[CoreMessage_TMessageKey.BLOG_ID]
+            
+            if !self.dataDates.contains("Today".localized()) {
+                self.dataDates.append("Today".localized())
+                self.tableChatView.insertSections(
+                    IndexSet(integer: self.dataDates.count - 1),
+                    with: .fade
+                )
+            }
+            
+            let isCredential = (row["credential"] as? String ?? "") == "1"
+            if isCredential {
+                self.listTimerCredential[messageId] = 60
+            }
+            
+            self.counter += 1
+            self.dataMessages.append(row)
+            
+            let todayMessages = self.dataMessages.filter({
+                $0["chat_date"] as? String ?? "" == "Today".localized()
+            })
+            guard let lastSection = self.dataDates.firstIndex(of: "Today".localized()) else { return }
+            
+            self.tableChatView.insertRows(
+                at: [IndexPath(row: todayMessages.count - 1, section: lastSection)],
+                with: .fade
+            )
+            self.tableChatView.layoutIfNeeded()
+            
+            // FIX 3: Timer credential dengan safe index
+            if isCredential {
+                var minute = 60
+                SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: messageId)
+                let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] t in
+                    guard let self = self else { t.invalidate(); return }
+                    minute -= 1
+                    self.listTimerCredential[messageId] = minute
+                    
+                    if minute == 0 {
+                        t.invalidate()
+                        self.listTimerCredential.removeValue(forKey: messageId)
+                        self.timerCredential.removeValue(forKey: messageId)
+                        SecureUserDefaults.shared.removeValue(forKey: messageId)
+                        
+                        if let idx = self.dataMessages.firstIndex(where: {
+                            $0["message_id"] as? String == messageId
+                        }) {
+                            self.dataMessages[idx]["lock"] = "2"
+                            self.dataMessages[idx]["reff_id"] = ""
+                        }
+                        
+                        DispatchQueue.global().async {
+                            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                do {
+                                    _ = Database.shared.updateRecord(
+                                        fmdb: fmdb, table: "MESSAGE",
+                                        cvalues: ["lock": "2"],
+                                        _where: "message_id = '\(messageId)'"
+                                    )
+                                } catch {
+                                    rollback.pointee = true
+                                }
+                            })
+                        }
+                    }
+                    
+                    // FIX: nil check SEBELUM force unwrap
+                    if let section = self.dataDates.indices.last,
+                       let row = self.dataMessages.filter({
+                           $0["chat_date"] as? String ?? "" == self.dataDates[section]
+                       }).firstIndex(where: {
+                           $0["message_id"] as? String == messageId
+                       }) {
+                        self.tableChatView.reloadRows(
+                            at: [IndexPath(row: row, section: section)],
+                            with: .none
+                        )
+                    }
+                }
+                self.timerCredential[messageId] = timer
+            }
+            
+            // FIX 4: Safe currentIndexpath access
+            if let currentIndexpath = self.currentIndexpath,
+               currentIndexpath.row == (self.dataMessages.count - 2) {
+                if self.viewIfLoaded?.window != nil {
+                    self.sendReadMessageStatus(
+                        chat_id: self.dataTopic["chat_id"] as? String ?? "",
+                        f_pin: fPin,
+                        message_scope_id: messageScopeId,
+                        message_id: messageId
+                    )
+                }
+                self.tableChatView.scrollToBottom()
+                // ... rest of scroll logic
+            } else if self.currentIndexpath == nil {
+                self.counter = 0
+                self.updateCounter(counter: self.counter)
+                if self.viewIfLoaded?.window != nil {
+                    self.sendReadMessageStatus(
+                        chat_id: self.dataTopic["chat_id"] as? String ?? "",
+                        f_pin: fPin,
+                        message_scope_id: messageScopeId,
+                        message_id: messageId
+                    )
+                }
             }
         }
     }
@@ -2261,12 +2268,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
                         "counter" : "\(counter)"
                     ], _where: "l_pin = '\(l_pin)'")
+                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                 } catch {
                     rollback.pointee = true
                     print("Access database error: \(error.localizedDescription)")
                 }
             })
-            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
         }
         
     }
@@ -2598,85 +2605,83 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     }
     
     private func checkNewMessage(tableView: UITableView) {
-        DispatchQueue.global(qos: .userInteractive).async {
-            DispatchQueue.main.async { [self] in
-                guard let firstIndex = tableView.indexPathsForVisibleRows?.first,
-                      let lastIndex = tableView.indexPathsForVisibleRows?.last
-                else { return }
+        DispatchQueue.main.async { [self] in
+            guard let firstIndex = tableView.indexPathsForVisibleRows?.first,
+                  let lastIndex = tableView.indexPathsForVisibleRows?.last
+            else { return }
 
-                currentIndexpath = lastIndex
+            currentIndexpath = lastIndex
 
-                // MARK: - Filter messages in this section
-                let sectionDate = dataDates[lastIndex.section]
-                let sectionMessages = dataMessages.filter {
-                    ($0["chat_date"] as? String ?? "") == sectionDate
+            // MARK: - Filter messages in this section
+            let sectionDate = dataDates[lastIndex.section]
+            let sectionMessages = dataMessages.filter {
+                ($0["chat_date"] as? String ?? "") == sectionDate
+            }
+
+            guard !sectionMessages.isEmpty else { return }
+
+            // MARK: - Scroll Position
+            let contentHeight = tableView.contentSize.height
+            let visibleHeight = tableView.frame.height
+            let fullOffset = contentHeight - visibleHeight
+            let offsetY = tableView.contentOffset.y
+
+            let isLastSection = (lastIndex.section == dataDates.count - 1)
+            let isNotLastRow = (firstIndex.row != sectionMessages.count - 1)
+            let isFarFromBottom = (fullOffset - offsetY > 100)
+            let isNearBottom = (fullOffset - offsetY < 50)
+
+            // MARK: - Show "Scroll to bottom" button
+            if ((!isLastSection && isFarFromBottom) ||
+                (isLastSection && isNotLastRow && isFarFromBottom)) {
+
+                if !buttonScrollToBottom.isDescendant(of: view) {
+                    addButtonScrollToBottom()
+                    addCounterAtButttonScrollToBottom()
                 }
-
-                guard !sectionMessages.isEmpty else { return }
-
-                // MARK: - Scroll Position
-                let contentHeight = tableView.contentSize.height
-                let visibleHeight = tableView.frame.height
-                let fullOffset = contentHeight - visibleHeight
-                let offsetY = tableView.contentOffset.y
-
-                let isLastSection = (lastIndex.section == dataDates.count - 1)
-                let isNotLastRow = (firstIndex.row != sectionMessages.count - 1)
-                let isFarFromBottom = (fullOffset - offsetY > 100)
-                let isNearBottom = (fullOffset - offsetY < 50)
-
-                // MARK: - Show "Scroll to bottom" button
-                if ((!isLastSection && isFarFromBottom) ||
-                    (isLastSection && isNotLastRow && isFarFromBottom)) {
-
-                    if !buttonScrollToBottom.isDescendant(of: view) {
-                        addButtonScrollToBottom()
-                        addCounterAtButttonScrollToBottom()
-                    }
+            }
+            // MARK: - Hide button when at bottom
+            else if isNearBottom {
+                DispatchQueue.main.async { [self] in
+                    removeScrollToBottomButton()
                 }
-                // MARK: - Hide button when at bottom
-                else if isNearBottom {
-                    DispatchQueue.main.async { [self] in
-                        removeScrollToBottomButton()
-                    }
-                }
+            }
 
-                // MARK: - Ensure index exists
-                guard currentIndexpath!.row < sectionMessages.count else { return }
+            // MARK: - Ensure index exists
+            guard currentIndexpath!.row < sectionMessages.count else { return }
+            
+            // MARK: - Update Counter
+            updateUnreadCounter()
 
-                // MARK: - Messages up to visible row
-                let visibleMessages = Array(sectionMessages[0...currentIndexpath!.row])
-                    .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
+            // MARK: - Messages up to visible row
+            let visibleMessages = Array(sectionMessages[0...currentIndexpath!.row])
+                .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
 
-                // MARK: - Send Read Status
-                if !visibleMessages.isEmpty {
-                    let myPin = User.getMyPin()
-                    var stringMessage: [String: String] = [:]
-                    for msg in visibleMessages {
-                        if msg["f_pin"] as? String != myPin  && EditorGroup.conditionSendRead(scope: msg[TypeDataMessage.message_scope_id] as! String, fPin: msg[TypeDataMessage.f_pin] as! String, messageId: msg[TypeDataMessage.message_id] as! String) {
-                            if stringMessage[msg["f_pin"]  as? String ?? ""] == nil {
-                                stringMessage[msg["f_pin"]  as? String ?? ""] = msg["message_id"]  as? String ?? ""
-                            } else {
-                                var str1 = stringMessage[msg["f_pin"]  as? String ?? ""]!
-                                str1 += ",\(msg["message_id"]  as? String ?? "")"
-                                stringMessage[msg["f_pin"]  as? String ?? ""] = str1
-                            }
-                        }
-                    }
-                    if stringMessage.count > 0 {
-                        for str in stringMessage {
-                            sendReadMessageStatus(
-                                chat_id: self.dataTopic["chat_id"]  as? String ?? "",
-                                f_pin: str.key,
-                                message_scope_id: MessageScope.GROUP,
-                                message_id: str.value
-                            )
+            // MARK: - Send Read Status
+            if !visibleMessages.isEmpty {
+                let myPin = User.getMyPin()
+                var stringMessage: [String: String] = [:]
+                for msg in visibleMessages {
+                    if msg["f_pin"] as? String != myPin  && EditorGroup.conditionSendRead(scope: msg[TypeDataMessage.message_scope_id] as! String, fPin: msg[TypeDataMessage.f_pin] as! String, messageId: msg[TypeDataMessage.message_id] as! String) {
+                        if stringMessage[msg["f_pin"]  as? String ?? ""] == nil {
+                            stringMessage[msg["f_pin"]  as? String ?? ""] = msg["message_id"]  as? String ?? ""
+                        } else {
+                            var str1 = stringMessage[msg["f_pin"]  as? String ?? ""]!
+                            str1 += ",\(msg["message_id"]  as? String ?? "")"
+                            stringMessage[msg["f_pin"]  as? String ?? ""] = str1
                         }
                     }
                 }
-
-                // MARK: - Update Counter
-                updateUnreadCounter()
+                if stringMessage.count > 0 {
+                    for str in stringMessage {
+                        sendReadMessageStatus(
+                            chat_id: self.dataTopic["chat_id"]  as? String ?? "",
+                            f_pin: str.key,
+                            message_scope_id: MessageScope.GROUP,
+                            message_id: str.value
+                        )
+                    }
+                }
             }
         }
     }

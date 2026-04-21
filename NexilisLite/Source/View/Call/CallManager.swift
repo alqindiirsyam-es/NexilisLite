@@ -15,7 +15,7 @@ import Combine
 public class CallManager: NSObject, ObservableObject {
     
     public static let shared = CallManager()
-    private var activeCalls: [UUID: CallInfo] = [:]
+    var activeCalls: [UUID: CallInfo] = [:]
         
     private let provider: CXProvider
     private let callController = CXCallController()

@@ -207,6 +207,7 @@ class QmeraVideoViewController: UIViewController {
         Nexilis.floatingButton.isHidden = false
         self.timerTimeout.invalidate()
         UIApplication.shared.isIdleTimerDisabled = false
+        Nexilis.isOpenPageCall = false
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -220,6 +221,7 @@ class QmeraVideoViewController: UIViewController {
             UIApplication.shared.isIdleTimerDisabled = false
             Nexilis.floatingButton.isHidden = false
             self.timerTimeout.invalidate()
+            Nexilis.isOpenPageCall = false
         }
     }
     
@@ -509,6 +511,7 @@ class QmeraVideoViewController: UIViewController {
         ])
         if isInisiator {
             labelIncomingOutgoing.text = "Calling".localized() + "..."
+            Nexilis.isOpenPageCall = true
             if ticketId.isEmpty {
                 backToDefaultAudioSession()
                 Nexilis.playRingbacktoneCall()
@@ -759,6 +762,34 @@ class QmeraVideoViewController: UIViewController {
                                         }
                                     }
                                 })
+                            }
+                        }
+                    }
+                }
+            } else if let _ = data["call_cancel"] as? Bool {
+                if self.vcTimer.isValid {
+                    if let pin = data["pin"] as? String {
+                        self.dataPerson.removeAll(where: { $0["f_pin"] == pin })
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        if self.labelIncomingOutgoing.isDescendant(of: self.view) {
+                            self.labelIncomingOutgoing.text = "Busy".localized()
+                        }
+                        if self.buttonDecline.isDescendant(of: self.view) {
+                            self.buttonDecline.removeFromSuperview()
+                        }
+                        if self.buttonAccept.isDescendant(of: self.view) {
+                            self.buttonAccept.removeFromSuperview()
+                        }
+                        self.makeStateCall()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            Nexilis.stopBusyCall()
+                            self.endAllCall()
+                            if self.isInisiator && !self.isPresent {
+                                self.navigationController?.popViewController(animated: true)
+                            } else {
+                                self.dismiss(animated: true, completion: nil)
                             }
                         }
                     }
@@ -1376,19 +1407,21 @@ class QmeraVideoViewController: UIViewController {
                 } else {
                     if self.callFCM {
                         DispatchQueue.global().async {
+                            self.dataPerson.append(data)
                             if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getCalling(fPin: data["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
                                 if response.isOk() {
                                 } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
-                                    self.dataPerson.append(data)
                                     if let user = User.getData(pin: String(data["f_pin"]!!)) {
                                         self.users.append(user)
                                     }
                                     API.initiateCCall(sParty: data["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
                                     Nexilis.playRingbacktoneCall()
                                 } else {
+                                    self.dataPerson.removeAll(where: { $0 == data })
                                     Nexilis.stopRingbacktoneCall()
                                 }
                             } else {
+                                self.dataPerson.removeAll(where: { $0 == data })
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white
                                 let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)

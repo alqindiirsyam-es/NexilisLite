@@ -314,6 +314,7 @@ class QmeraAudioViewController: UIViewController {
         UIApplication.shared.isIdleTimerDisabled = false
         Nexilis.floatingButton.isHidden = false
         self.timerTimeout.invalidate()
+        Nexilis.isOpenPageCall = false
     }
     
     deinit {
@@ -322,6 +323,7 @@ class QmeraAudioViewController: UIViewController {
         Nexilis.floatingButton.isHidden = false
         NotificationCenter.default.removeObserver(self)
         self.timerTimeout.invalidate()
+        Nexilis.isOpenPageCall = false
     }
     
     func showCallBanner() {
@@ -576,21 +578,27 @@ class QmeraAudioViewController: UIViewController {
                     }
                 }
             } else if data["call_cancel"] != nil {
-                DispatchQueue.main.async {
-                    Nexilis.stopRingbacktoneCall()
-                    self.timerTimeout.invalidate()
-                }
-                DispatchQueue.main.async {
-                    let longCall =  "0"
-                    Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
-                    self.status.text = "Busy..."
-                    self.end.isEnabled = false
-                    if self.isOutgoing {
-                        Nexilis.playBusyCall()
+                if self.timer == nil {
+                    DispatchQueue.main.async {
+                        Nexilis.stopRingbacktoneCall()
+                        self.timerTimeout.invalidate()
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        Nexilis.stopBusyCall()
-                        self.didEnd(sender: false)
+                    DispatchQueue.main.async {
+                        let longCall =  "0"
+                        Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
+                        self.status.text = "Busy..."
+                        self.end.isEnabled = false
+                        if self.isOutgoing {
+                            Nexilis.playBusyCall()
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            Nexilis.stopBusyCall()
+                            self.didEnd(sender: false)
+                        }
+                    }
+                } else {
+                    if let pin = data["pin"] as? String {
+                        self.users.removeAll(where: { $0.pin == pin })
                     }
                 }
             }
@@ -668,6 +676,7 @@ class QmeraAudioViewController: UIViewController {
             Nexilis.playRingbacktoneCall()
         }
         status.text = "Calling".localized() + "..."
+        Nexilis.isOpenPageCall = true
         view.addSubview(end)
         end.anchor(bottom: view.bottomAnchor, paddingBottom: 60, centerX: view.centerXAnchor, width: buttonSize, height: buttonSize)
         
@@ -930,9 +939,11 @@ class QmeraAudioViewController: UIViewController {
                                 API.initiateCCall(sParty: user.pin)
                                 Nexilis.playRingbacktoneCall()
                             } else {
+                                self.users.removeAll(where: { $0 == user })
                                 Nexilis.stopRingbacktoneCall()
                             }
                         } else {
+                            self.users.removeAll(where: { $0 == user })
                             DispatchQueue.main.async {
                                 let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
                                 imageView.tintColor = .white

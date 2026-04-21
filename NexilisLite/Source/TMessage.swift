@@ -15,7 +15,21 @@ public class TMessage {
     public var mStatus: String = ""
     public var mPIN: String = ""
     public var mL_PIN: String = ""
-    public var mBodies: [String: String] = [String: String]()
+    private let bodiesLock = NSLock()
+    private var _mBodies: [String: String] = [:]
+    
+    public var mBodies: [String: String] {
+        get {
+            bodiesLock.lock()
+            defer { bodiesLock.unlock() }
+            return _mBodies
+        }
+        set {
+            bodiesLock.lock()
+            defer { bodiesLock.unlock() }
+            _mBodies = newValue
+        }
+    }
     private var mMedia:[UInt8] = [UInt8]()
     
     let C_HEADER:UnicodeScalar = UnicodeScalar(0x01)
@@ -94,22 +108,18 @@ public class TMessage {
     public func getMedia() -> [UInt8] {
         return mMedia
     }
-    public func getBody(key : String) -> String {
-        if let data = mBodies[key] {
-            return data
-        }
-        else {
-            return ""
-        }
+    public func getBody(key: String) -> String {
+        bodiesLock.lock()
+        defer { bodiesLock.unlock() }
+        return _mBodies[key] ?? ""
     }
-    public func getBody(key : String, default_value: String) -> String {
-        if ((mBodies[key] == nil)) {
-            return default_value
-        } else if mBodies[key] == "null" {
-            return default_value
-        } else {
-            return mBodies[key]!
-        }
+    
+    public func getBody(key: String, default_value: String) -> String {
+        bodiesLock.lock()
+        defer { bodiesLock.unlock() }
+        let val = _mBodies[key]
+        if val == nil || val == "null" { return default_value }
+        return val!
     }
     
     public func getBodyAsInteger(key : String, default_value: Int) -> Int {

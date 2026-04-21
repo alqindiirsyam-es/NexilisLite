@@ -14,191 +14,179 @@ import nuSDKService
 class IncomingThread {
     
     static let `default` = IncomingThread()
-    
-    private var isRunning = false
-    
-    private var semaphore = DispatchSemaphore(value: 0)
-    
-    private var dispatchQueue = DispatchQueue(label: "IncomingThread")
-    
     static var dispatch: DispatchGroup?
     
+    private var isRunning = false
+    private var semaphore = DispatchSemaphore(value: 0)
+    private var dispatchQueue = DispatchQueue(label: "IncomingThread")
+    
+    // Tambahkan serial queue khusus untuk proteksi array
+    private let queueLock = DispatchQueue(label: "IncomingThread.queueLock")
     private var queue = [TMessage]()
     
     func addQueue(message: TMessage) {
-        do {
+        queueLock.sync {
             queue.append(message)
-            semaphore.signal()
-        } catch {
-            
         }
+        semaphore.signal()
     }
     
     func getQueue() -> TMessage {
-        do {
-            while queue.isEmpty || queue.count == 0 {
-                semaphore.wait()
-            }
-            return queue.remove(at: 0)
-        } catch {
-            
+        semaphore.wait()
+        return queueLock.sync {
+            queue.remove(at: 0)
         }
     }
     
     func run() {
-        do {
-            if (isRunning) {
-                return
+        guard !isRunning else { return }
+        isRunning = true
+        dispatchQueue.async {
+            while self.isRunning {
+                self.process(message: self.getQueue())
             }
-            isRunning = true
-            dispatchQueue.async {
-                while self.isRunning {
-                    self.process(message: self.getQueue())
-                }
-            }
-        } catch {
-            
         }
     }
     
     private func process(message: TMessage) {
 //        print("incoming process", message.toLogString())
-        if message.getCode() == CoreMessage_TMessageCode.LOGIN_FILE {
+        let code = message.getCode()
+        if code == CoreMessage_TMessageCode.LOGIN_FILE {
             loginFile(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_MYSELF || message.getCode() == CoreMessage_TMessageCode.PUSH_MYSELF_ACK || message.getCode() == CoreMessage_TMessageCode.PULL_MYSELF {
+        } else if code == CoreMessage_TMessageCode.PUSH_MYSELF || code == CoreMessage_TMessageCode.PUSH_MYSELF_ACK || code == CoreMessage_TMessageCode.PULL_MYSELF {
             pushMyself(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_BUDDY {
+        } else if code == CoreMessage_TMessageCode.PUSH_BUDDY {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
                 self.initBatchBuddy(message: message)
             })
             makeNotifAddFriend(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.INIT_BATCH_BUDDY {
+        } else if code == CoreMessage_TMessageCode.INIT_BATCH_BUDDY {
             initBatchBuddy(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.CHANGE_BATCH_PERSON_INFO {
+        } else if code == CoreMessage_TMessageCode.CHANGE_BATCH_PERSON_INFO {
             initBatchBuddy(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.DELETE_BUDDY {
+        } else if code == CoreMessage_TMessageCode.DELETE_BUDDY {
             deleteBuddy(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.INIT_BATCH_GROUP {
+        } else if code == CoreMessage_TMessageCode.INIT_BATCH_GROUP {
             onInitGroupInfoBatch(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.INIT_BATCH_GROUP_NO_MEMBERS {
+        } else if code == CoreMessage_TMessageCode.INIT_BATCH_GROUP_NO_MEMBERS {
             onInitGroupInfoBatchNoMember(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.INIT_BATCH_TOPIC {
+        } else if code == CoreMessage_TMessageCode.INIT_BATCH_TOPIC {
             onInitForumInfoBatch(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.UPLOAD_FILE {
+        } else if code == CoreMessage_TMessageCode.UPLOAD_FILE {
             uploadFile(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEND_CHAT || message.getCode() == CoreMessage_TMessageCode.EDIT_MESSAGE {
+        } else if code == CoreMessage_TMessageCode.SEND_CHAT || code == CoreMessage_TMessageCode.EDIT_MESSAGE {
             receiveMessage(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.UPDATE_CTEXT {
+        } else if code == CoreMessage_TMessageCode.UPDATE_CTEXT {
             receiveMessageStatus(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_GROUP || message.getCode() == CoreMessage_TMessageCode.PUSH_GROUP_A {
+        } else if code == CoreMessage_TMessageCode.PUSH_GROUP || code == CoreMessage_TMessageCode.PUSH_GROUP_A {
             pushGroup(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_GROUP_MEMBER {
+        } else if code == CoreMessage_TMessageCode.PUSH_GROUP_MEMBER {
             pushGroupMembers(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_GROUP_MEMBER_BATCH {
+        } else if code == CoreMessage_TMessageCode.PUSH_GROUP_MEMBER_BATCH {
             pushGroupMembers(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.CHANGE_GROUP_MEMBER_POSITION {
+        } else if code == CoreMessage_TMessageCode.CHANGE_GROUP_MEMBER_POSITION {
             changeGroupPosition(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_CHAT {
+        } else if code == CoreMessage_TMessageCode.PUSH_CHAT {
             onInitForumInfoBatch(message: message, with: true)
-        } else if message.getCode() == CoreMessage_TMessageCode.EXIT_GROUP {
+        } else if code == CoreMessage_TMessageCode.EXIT_GROUP {
             exitGroup(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.CHANGE_GROUP_INFO {
+        } else if code == CoreMessage_TMessageCode.CHANGE_GROUP_INFO {
             changeGroupInfo(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.UPDATE_CHAT {
+        } else if code == CoreMessage_TMessageCode.UPDATE_CHAT {
             updateChat(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.DELETE_CHAT {
+        } else if code == CoreMessage_TMessageCode.DELETE_CHAT {
             deleteChat(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.IMAGE_DOWNLOAD {
+        } else if code == CoreMessage_TMessageCode.IMAGE_DOWNLOAD {
             imageDownload(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_LIVE_VIDEO_LIST {
+        } else if code == CoreMessage_TMessageCode.PUSH_LIVE_VIDEO_LIST {
             getLiveVideoList(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.UPDATE_LIVE_VIDEO {
+        } else if code == CoreMessage_TMessageCode.UPDATE_LIVE_VIDEO {
             getLSTitle(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.LIVE_PROFILE_PUSH_LEAVE {
+        } else if code == CoreMessage_TMessageCode.LIVE_PROFILE_PUSH_LEAVE {
             leftLiveVideo(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.LIVE_PROFILE_PUSH_JOIN {
+        } else if code == CoreMessage_TMessageCode.LIVE_PROFILE_PUSH_JOIN {
             joinLivevideo(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.LIVE_PROFILE_EMOTION_GET {
+        } else if code == CoreMessage_TMessageCode.LIVE_PROFILE_EMOTION_GET {
             getLSData(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.DELETE_CTEXT {
+        } else if code == CoreMessage_TMessageCode.DELETE_CTEXT {
             deleteMessage(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEND_UPDATE_TYPING {
+        } else if code == CoreMessage_TMessageCode.SEND_UPDATE_TYPING {
             sendUpdateTyping(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.LIVE_PROFILE_PUSH_CHAT {
+        } else if code == CoreMessage_TMessageCode.LIVE_PROFILE_PUSH_CHAT {
             getLSChat(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEMINAR_PUSH_JOIN {
+        } else if code == CoreMessage_TMessageCode.SEMINAR_PUSH_JOIN {
             joinSeminar(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEMINAR_PUSH_LEFT {
+        } else if code == CoreMessage_TMessageCode.SEMINAR_PUSH_LEFT {
             leftSeminar(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEMINAR_PUSH_CHAT {
+        } else if code == CoreMessage_TMessageCode.SEMINAR_PUSH_CHAT {
             getSeminarChat(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEMINAR_PUSH_RAISE_HAND {
+        } else if code == CoreMessage_TMessageCode.SEMINAR_PUSH_RAISE_HAND {
             getSeminarRaiseHand(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEMINAR_FACE_DETECTION {
+        } else if code == CoreMessage_TMessageCode.SEMINAR_FACE_DETECTION {
             
-        } else if message.getCode() == CoreMessage_TMessageCode.SCREEN_SHARING {
+        } else if code == CoreMessage_TMessageCode.SCREEN_SHARING {
             incomingScreenSharing(message: message, state: 1)
-        } else if message.getCode() == CoreMessage_TMessageCode.SCREEN_SHARING_STOP {
+        } else if code == CoreMessage_TMessageCode.SCREEN_SHARING_STOP {
             incomingScreenSharing(message: message, state: 88 )
-        } else if message.getCode() == CoreMessage_TMessageCode.CHANGE_PERSON_INFO {
+        } else if code == CoreMessage_TMessageCode.CHANGE_PERSON_INFO {
             changePersonInfo(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEND_COMMENTS {
+        } else if code == CoreMessage_TMessageCode.SEND_COMMENTS {
             receiveComment(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.DELETE_COMMENTS {
+        } else if code == CoreMessage_TMessageCode.DELETE_COMMENTS {
             deleteComment(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.BLOCK_BUDDY {
+        } else if code == CoreMessage_TMessageCode.BLOCK_BUDDY {
             blockBuddy(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.UNBLOCK_BUDDY {
+        } else if code == CoreMessage_TMessageCode.UNBLOCK_BUDDY {
             blockBuddy(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.SEND_SIGNUP_MSISDN {
+        } else if code == CoreMessage_TMessageCode.SEND_SIGNUP_MSISDN {
             sendMSISDN(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.VERIFY_OTP {
+        } else if code == CoreMessage_TMessageCode.VERIFY_OTP {
             verifyOTP(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.REMOVE_FRIEND {
+        } else if code == CoreMessage_TMessageCode.REMOVE_FRIEND {
             deleteBuddy(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_CALL_CENTER || message.getCode() == CoreMessage_TMessageCode.ACCEPT_CALL_CENTER || message.getCode() == CoreMessage_TMessageCode.END_CALL_CENTER || message.getCode() == CoreMessage_TMessageCode.TIMEOUT_CONTACT_CENTER || message.getCode() == CoreMessage_TMessageCode.INVITE_TO_ROOM_CONTACT_CENTER || message.getCode() == CoreMessage_TMessageCode.ACCEPT_CONTACT_CENTER || message.getCode() == CoreMessage_TMessageCode.PUSH_MEMBER_ROOM_CONTACT_CENTER || message.getCode() == CoreMessage_TMessageCode.INVITE_END_CONTACT_CENTER || message.getCode() == CoreMessage_TMessageCode.INVITE_EXIT_CONTACT_CENTER || message.getCode() == CoreMessage_TMessageCode.PUSH_SECOND_CONTACT_CENTER {
+        } else if code == CoreMessage_TMessageCode.PUSH_CALL_CENTER || code == CoreMessage_TMessageCode.ACCEPT_CALL_CENTER || code == CoreMessage_TMessageCode.END_CALL_CENTER || code == CoreMessage_TMessageCode.TIMEOUT_CONTACT_CENTER || code == CoreMessage_TMessageCode.INVITE_TO_ROOM_CONTACT_CENTER || code == CoreMessage_TMessageCode.ACCEPT_CONTACT_CENTER || code == CoreMessage_TMessageCode.PUSH_MEMBER_ROOM_CONTACT_CENTER || code == CoreMessage_TMessageCode.INVITE_END_CONTACT_CENTER || code == CoreMessage_TMessageCode.INVITE_EXIT_CONTACT_CENTER || code == CoreMessage_TMessageCode.PUSH_SECOND_CONTACT_CENTER {
             handleCallCenter(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_DISCUSSION_COMMENT {
+        } else if code == CoreMessage_TMessageCode.PUSH_DISCUSSION_COMMENT {
             if let delegate = Nexilis.shared.messageDelegate {
                 delegate.onReceiveComment(message: message)
             }
             ack(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.APPROVE_FORM {
+        } else if code == CoreMessage_TMessageCode.APPROVE_FORM {
             onApproveForm(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.END_CALL {
+        } else if code == CoreMessage_TMessageCode.END_CALL {
             endCall(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PUSH_SERVICE_BNI {
+        } else if code == CoreMessage_TMessageCode.PUSH_SERVICE_BNI {
             pushServiceBNI(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.MOBILE_INQUIRY {
+        } else if code == CoreMessage_TMessageCode.MOBILE_INQUIRY {
             mobileInquiry(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.INQUIRY {
+        } else if code == CoreMessage_TMessageCode.INQUIRY {
             inquiry(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.BACKUP_AVAILABILITY {
+        } else if code == CoreMessage_TMessageCode.BACKUP_AVAILABILITY {
             backupAvailability(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.FORWARD_MESSAGE {
+        } else if code == CoreMessage_TMessageCode.FORWARD_MESSAGE {
             incomingWBSS(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.INCOMING_CALL_CC {
+        } else if code == CoreMessage_TMessageCode.INCOMING_CALL_CC {
             incomingCallCC(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.GET_WORKING_AREA_CONTACT_CENTER {
+        } else if code == CoreMessage_TMessageCode.GET_WORKING_AREA_CONTACT_CENTER {
             saveWorkingArea(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.ASKING_FOR_END_CALL {
+        } else if code == CoreMessage_TMessageCode.ASKING_FOR_END_CALL {
             askingForEndCall(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.GET_BATCH_GROUP_NO_MEMBERS {
+        } else if code == CoreMessage_TMessageCode.GET_BATCH_GROUP_NO_MEMBERS {
             pushGroupNoMembers(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.INIT_PREFS || message.getCode() == CoreMessage_TMessageCode.PULL_PREFS {
+        } else if code == CoreMessage_TMessageCode.INIT_PREFS || code == CoreMessage_TMessageCode.PULL_PREFS {
             initPrefs(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.NOTIFY_TO_CALLING {
+        } else if code == CoreMessage_TMessageCode.NOTIFY_TO_CALLING {
             notifyCalling(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.CALLING {
+        } else if code == CoreMessage_TMessageCode.CALLING {
             sendOnlineUser(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.PAYMENT_NOTIFICATION {
+        } else if code == CoreMessage_TMessageCode.PAYMENT_NOTIFICATION {
             showTransactionApprovalRequest(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.LOGOUT {
+        } else if code == CoreMessage_TMessageCode.LOGOUT {
             logoutDevice(message: message)
-        } else if message.getCode() == CoreMessage_TMessageCode.UPDATE_MESSAGE {
+        } else if code == CoreMessage_TMessageCode.UPDATE_MESSAGE {
             updateMessage(message: message)
         } else {
-            //print("unprocessed code", message.getCode())
+            //print("unprocessed code", code)
             ack(message: message)
         }
 //        case (CoreMessage_TMessageCode.FORM_PUSH_UPDATE):
@@ -219,7 +207,8 @@ class IncomingThread {
         let scope_id = message.getBody(key: CoreMessage_TMessageKey.SCOPE_ID, default_value: "")
         if item_code == "pinorunpin" {
             if !data.isEmpty {
-                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                if let data = data.data(using: .utf8),
+                   let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                     Database.shared.database?.inTransaction({ (fmdb, rollback) in
                         do {
                             for json in jsonArray {
@@ -382,7 +371,8 @@ class IncomingThread {
     private func saveWorkingArea(message: TMessage) -> Void {
         let data = message.getBody(key: CoreMessage_TMessageKey.DATA)
         if !data.isEmpty {
-            if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+            if let data = data.data(using: .utf8),
+               let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
                         for json in jsonArray {
@@ -537,7 +527,8 @@ class IncomingThread {
     
     private func makeNotifAddFriend(message: TMessage) {
         let data  = message.getBody(key: CoreMessage_TMessageKey.DATA)
-        if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+        if let data = data.data(using: .utf8),
+           let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
             for json in jsonArray {
                 DispatchQueue.main.async {
                     let f_pin = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.F_PIN)
@@ -956,7 +947,8 @@ class IncomingThread {
     private func pushServiceBNI(message: TMessage) -> Void {
         let data = message.getBody(key: CoreMessage_TMessageKey.DATA)
         if !data.isEmpty {
-            if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+            if let data = data.data(using: .utf8),
+               let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
                         for json in jsonArray {
@@ -1123,7 +1115,8 @@ class IncomingThread {
         if(f_pin.isEmpty) {
             let data = message.getBody(key: CoreMessage_TMessageKey.DATA)
             if !data.isEmpty {
-                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                if let data = data.data(using: .utf8),
+                   let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                     Database.shared.database?.inTransaction({ (fmdb, rollback) in
                         do {
                             for json in jsonArray {
@@ -1196,7 +1189,8 @@ class IncomingThread {
     private func pushGroup(message: TMessage) -> Void {
         let data  = message.getBody(key: CoreMessage_TMessageKey.DATA)
         if !data.isEmpty {
-            if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+            if let data = data.data(using: .utf8),
+               let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
                         for json in jsonArray {
@@ -1275,7 +1269,8 @@ class IncomingThread {
     private func pushGroupNoMembers(message: TMessage) -> Void {
         let data  = message.getBody(key: CoreMessage_TMessageKey.DATA)
         if !data.isEmpty {
-            if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+            if let data = data.data(using: .utf8),
+               let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
                         for json in jsonArray {
@@ -1450,7 +1445,8 @@ class IncomingThread {
     
     private func initBatchBuddy(message: TMessage) -> Void {
         let data  = message.getBody(key: CoreMessage_TMessageKey.DATA)
-        if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+        if let data = data.data(using: .utf8),
+           let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     for json in jsonArray {
@@ -1708,7 +1704,8 @@ class IncomingThread {
     
     private func onInitGroupInfoBatch(message: TMessage) -> Void {
         let dataGroup  = message.getBody(key: CoreMessage_TMessageKey.DATA)
-        if let jsonArray = try! JSONSerialization.jsonObject(with: dataGroup.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+        if let data = dataGroup.data(using: .utf8),
+           let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     for json in jsonArray {
@@ -1748,7 +1745,8 @@ class IncomingThread {
                             } catch {}
                         }
                         let member = CoreMessage_TMessageUtil.getString(json: json, key: "member")
-                        if let jsonArrayMember = try! JSONSerialization.jsonObject(with: member.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                        if let data = member.data(using: .utf8),
+                           let jsonArrayMember = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
                             for jsonMember in jsonArrayMember {
                                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "GROUPZ_MEMBER", cvalues: [
                                     "group_id" :CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.GROUP_ID),
@@ -1777,7 +1775,8 @@ class IncomingThread {
     
     private func onInitGroupInfoBatchNoMember(message: TMessage) -> Void {
         let dataGroup  = message.getBody(key: CoreMessage_TMessageKey.DATA)
-        if let jsonArray = try! JSONSerialization.jsonObject(with: dataGroup.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+        if let data = dataGroup.data(using: .utf8),
+           let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     for json in jsonArray {
@@ -1814,7 +1813,8 @@ class IncomingThread {
     
     private func onInitForumInfoBatch(message: TMessage, with isDelegate: Bool = false) -> Void {
         let dataForum  = message.getBody(key: CoreMessage_TMessageKey.DATA)
-        if let jsonArray = try! JSONSerialization.jsonObject(with: dataForum.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+        if let data = dataForum.data(using: .utf8),
+           let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     for json in jsonArray {

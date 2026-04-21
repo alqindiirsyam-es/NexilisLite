@@ -101,12 +101,10 @@ class Callback : CallBack {
     }
     
     func incomingData(sPacketID: String!, oData: AnyObject!) throws {
-        guard let packetId = sPacketID,
-              let data = oData else {
+        guard let packetId = sPacketID, let data = oData else {
             return
         }
-
-        Nexilis.incomingData(packetId: sPacketID!, data: oData!)
+        Nexilis.incomingData(packetId: packetId, data: data)
     }
     
     func lateResponse(sPacketID: String!, sResponse: String!) throws {
