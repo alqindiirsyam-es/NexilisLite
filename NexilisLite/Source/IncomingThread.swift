@@ -23,6 +23,8 @@ class IncomingThread {
     // Tambahkan serial queue khusus untuk proteksi array
     private let queueLock = DispatchQueue(label: "IncomingThread.queueLock")
     private var queue = [TMessage]()
+    private let runLock = DispatchQueue(label: "IncomingThread.runLock")
+    private var _isRunning = false
     
     func addQueue(message: TMessage) {
         queueLock.sync {
@@ -39,13 +41,25 @@ class IncomingThread {
     }
     
     func run() {
-        guard !isRunning else { return }
-        isRunning = true
-        dispatchQueue.async {
-            while self.isRunning {
+        var shouldStart = false
+        runLock.sync {
+            if !_isRunning {
+                _isRunning = true
+                shouldStart = true
+            }
+        }
+        guard shouldStart else { return }
+        dispatchQueue.async { [weak self] in
+            guard let self else { return }
+            while self._isRunning {
                 self.process(message: self.getQueue())
             }
         }
+    }
+
+    func stop() {
+        runLock.sync { _isRunning = false }
+        semaphore.signal() // bebaskan getQueue() yang sedang wait
     }
     
     private func process(message: TMessage) {
@@ -526,132 +540,145 @@ class IncomingThread {
     }
     
     private func makeNotifAddFriend(message: TMessage) {
-        let data  = message.getBody(key: CoreMessage_TMessageKey.DATA)
-        if let data = data.data(using: .utf8),
-           let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-            for json in jsonArray {
+        let data = message.getBody(key: CoreMessage_TMessageKey.DATA)
+        guard let jsonData = data.data(using: .utf8),
+              let jsonArray = try? JSONSerialization.jsonObject(with: jsonData) as? [AnyObject] else { return }
+
+        for json in jsonArray {
+            let fPin = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.F_PIN)
+            let firstName = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.FIRST_NAME)
+            let lastName = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LAST_NAME)
+            let profile = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.THUMB_ID)
+            let fullName = (firstName + " " + lastName).trimmingCharacters(in: .whitespaces)
+
+            // Validasi data dulu di background, TANPA sentuh UI
+            if message.getPIN() == User.getMyPin() { continue }
+            if fullName == "USR\(fPin)" { continue }
+            if message.getBody(key: "is_silent") == "1" { continue }
+
+            var buddyExists = false
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                if let cursor = Database.shared.getRecords(fmdb: fmdb,
+                    query: "SELECT f_pin FROM BUDDY where f_pin='\(fPin)'"), cursor.next() {
+                    buddyExists = true
+                    cursor.close()
+                }
+            })
+            guard !buddyExists else { continue }
+
+            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+            guard onGoingCC.isEmpty else { continue }
+
+            // Baru bangun UI di main thread, sudah tidak ada akses DB di sini
+            DispatchQueue.main.async {
+                self.showAddFriendBanner(fPin: fPin, fullName: fullName, profileThumbId: profile)
+            }
+        }
+    }
+
+    private func showAddFriendBanner(fPin: String, fullName: String, profileThumbId: String) {
+        let container = UIView()
+        container.backgroundColor = .gray
+        let profileImage = UIImageView()
+        profileImage.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(profileImage)
+        NSLayoutConstraint.activate([
+            profileImage.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            profileImage.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            profileImage.widthAnchor.constraint(equalToConstant: 60),
+            profileImage.heightAnchor.constraint(equalToConstant: 60),
+        ])
+
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = UIFont.systemFont(ofSize: 14)
+        titleLabel.text = fullName + " " + "added you as friend".localized()
+        titleLabel.textColor = .white
+        titleLabel.numberOfLines = 0
+        container.addSubview(titleLabel)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: profileImage.trailingAnchor, constant: 8),
+            titleLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8)
+        ])
+
+        if Nexilis.shared.floating != nil { Nexilis.shared.floating.dismiss() }
+        Nexilis.shared.floating = FloatingNotificationBanner(customView: container)
+        Nexilis.shared.floating.bannerHeight = UIScreen.main.bounds.height / 6 - 10
+        Nexilis.shared.floating.transparency = 0.9
+
+        self.loadProfileImage(thumbId: profileThumbId, into: profileImage) {
+            self.showBanner()
+        }
+    }
+
+    private func loadProfileImage(thumbId: String, into imageView: UIImageView, completion: @escaping () -> Void) {
+        guard !thumbId.isEmpty else {
+            imageView.circle()
+            imageView.image = UIImage(systemName: "person")
+            imageView.contentMode = .scaleAspectFit
+            imageView.backgroundColor = .lightGray
+            imageView.tintColor = .white
+            completion()
+            return
+        }
+        imageView.circle()
+        imageView.contentMode = .scaleAspectFill
+
+        // Cek file di background, update UI di main
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let documentDir = try? FileManager.default.url(
+                for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true) {
+                let file = documentDir.appendingPathComponent(thumbId)
+                if FileManager().fileExists(atPath: file.path),
+                   let img = UIImage(contentsOfFile: file.path) {
+                    DispatchQueue.main.async {
+                        imageView.image = img
+                        imageView.backgroundColor = .clear
+                        completion()
+                    }
+                    return
+                }
+            }
+            if FileEncryption.shared.isSecureExists(filename: thumbId),
+               let data = try? FileEncryption.shared.readSecure(filename: thumbId) {
+                let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) ?? data
+                let img = UIImage(data: decrypted)
                 DispatchQueue.main.async {
-                    let f_pin = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.F_PIN)
-                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                        do {
-                            if message.getPIN() == User.getMyPin() {
-                                return
-                            }
-                            if let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin FROM BUDDY where f_pin='\(f_pin)'"), cursorUser.next() {
-                                return
-                            }
-                            if message.getBody(key: "is_silent") == "1" {
-                                return
-                            }
-                            let firstname = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.FIRST_NAME)
-                            let lastname = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LAST_NAME)
-                            let f_pin = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.F_PIN)
-                            if (firstname + " " + lastname).trimmingCharacters(in: .whitespaces) == "USR\(f_pin)" {
-                                return
-                            }
-                            let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-                            if !onGoingCC.isEmpty {
-                                return
-                            }
-                            let container = UIView()
-                            container.backgroundColor = .gray
-                            let profileImage = UIImageView()
-                            profileImage.frame.size = CGSize(width: 60, height: 60)
-                            container.addSubview(profileImage)
-                            profileImage.translatesAutoresizingMaskIntoConstraints = false
-                            NSLayoutConstraint.activate([
-                                profileImage.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8.0),
-                                profileImage.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                                profileImage.widthAnchor.constraint(equalToConstant: 60),
-                                profileImage.heightAnchor.constraint(equalToConstant: 60),
-                            ])
-                            
-                            let title = UILabel()
-                            container.addSubview(title)
-                            title.translatesAutoresizingMaskIntoConstraints = false
-                            NSLayoutConstraint.activate([
-                                title.leadingAnchor.constraint(equalTo: profileImage.trailingAnchor, constant: 8.0),
-                                title.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                                title.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8.0)
-                            ])
-                            title.font = UIFont.systemFont(ofSize: 14)
-                            title.text = (firstname + " " + lastname).trimmingCharacters(in: .whitespaces) + " " + "added you as friend".localized()
-                            title.textColor = .white
-                            title.numberOfLines = 0
-                            
-                            if Nexilis.shared.floating != nil {
-                                Nexilis.shared.floating.dismiss()
-                            }
-                            Nexilis.shared.floating = FloatingNotificationBanner(customView: container)
-                            Nexilis.shared.floating.bannerHeight = UIScreen.main.bounds.height / 6 - 10
-                            Nexilis.shared.floating.transparency = 0.9
-                            
-                            let profile = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.THUMB_ID)
-                            if profile != "" {
-                                profileImage.circle()
-                                do {
-                                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                    let file = documentDir.appendingPathComponent(profile)
-                                    if FileManager().fileExists(atPath: file.path) {
-                                        profileImage.image = UIImage(contentsOfFile: file.path)
-                                        profileImage.backgroundColor = .clear
-                                    } else if FileEncryption.shared.isSecureExists(filename: profile) {
-                                        do {
-                                            if var data = try FileEncryption.shared.readSecure(filename: profile) {
-                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                                if dataDecrypt != nil {
-                                                    data = dataDecrypt!
-                                                }
-                                                profileImage.image = UIImage(data: data)
-                                                profileImage.backgroundColor = .clear
-                                            }
-                                        } catch {
-                                            
-                                        }
-                                    } else {
-                                        Download().startHTTP(forKey: profile) { (name, progress) in
-                                            guard progress == 100 else {
-                                                return
-                                            }
-                                            
-                                            DispatchQueue.main.async {
-                                                if FileEncryption.shared.isSecureExists(filename: profile) {
-                                                    do {
-                                                        if var data = try FileEncryption.shared.readSecure(filename: profile) {
-                                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                                            if dataDecrypt != nil {
-                                                                data = dataDecrypt!
-                                                            }
-                                                            profileImage.image = UIImage(data: data)
-                                                            profileImage.backgroundColor = .clear
-                                                        }
-                                                    } catch {
-                                                        
-                                                    }
-                                                }
-                                                Nexilis.shared.floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
-                                                return
-                                            }
-                                        }
-                                    }
-                                } catch {}
-                                profileImage.contentMode = .scaleAspectFill
-                            } else {
-                                profileImage.circle()
-                                profileImage.image = UIImage(systemName: "person")
-                                profileImage.contentMode = .scaleAspectFit
-                                profileImage.backgroundColor = .lightGray
-                                profileImage.tintColor = .white
-                            }
-                            Nexilis.shared.floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
-                        } catch {
-                            rollback.pointee = true
-                            print("Access database error: \(error.localizedDescription)")
+                    imageView.image = img
+                    imageView.backgroundColor = .clear
+                    completion()
+                }
+                return
+            }
+            // Download jika tidak ada
+            Download().startHTTP(forKey: thumbId) { (_, progress) in
+                guard progress == 100 else { return }
+                DispatchQueue.global(qos: .userInitiated).async {
+                    if FileEncryption.shared.isSecureExists(filename: thumbId),
+                       let data = try? FileEncryption.shared.readSecure(filename: thumbId) {
+                        let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) ?? data
+                        DispatchQueue.main.async {
+                            imageView.image = UIImage(data: decrypted)
+                            imageView.backgroundColor = .clear
+                            completion()
                         }
-                    })
+                    }
                 }
             }
         }
+    }
+
+    private func showBanner() {
+        Nexilis.shared.floating.show(
+            queuePosition: .front, bannerPosition: .top,
+            queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1),
+            on: nil,
+            edgeInsets: UIEdgeInsets(top: 8, left: 8, bottom: 0, right: 8),
+            cornerRadius: 8, shadowColor: .clear, shadowOpacity: .zero,
+            shadowBlurRadius: .zero, shadowCornerRadius: .zero,
+            shadowOffset: .zero, shadowEdgeInsets: nil
+        )
     }
     
     private func inquiry(message: TMessage) {

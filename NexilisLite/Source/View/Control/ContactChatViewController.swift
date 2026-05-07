@@ -1066,7 +1066,7 @@ extension ContactChatViewController {
             return false
         }
         let chatModifier = groupHolder.chatModifier
-        if !chatModifier.isEmpty {
+        if !chatModifier.isEmpty && Int(chatModifier) == nil {
             if chatModifier == "cc" {
                 APIS.openContactCenter();
             } else if chatModifier == "gpt" {
@@ -1800,7 +1800,7 @@ extension ContactChatViewController {
                     content.text = group.name
                 }
                 if group.childs.count > 0 {
-                    if group.chatModifier.isEmpty {
+                    if group.chatModifier.isEmpty || Int(group.chatModifier) != nil {
                         let iconName = (group.isSelected) ? "chevron.up.circle" : "chevron.down.circle"
                         let imageView = UIImageView(image: UIImage(systemName: iconName))
                         imageView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black

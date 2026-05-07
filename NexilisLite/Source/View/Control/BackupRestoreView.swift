@@ -729,8 +729,10 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 }
             }
             if recordSizeRestore < Int64(recordSizeBackup) ?? 0 {
-                labelRestoring.text = "Backup files are corrupted".localized()
-                tableView.reloadSections(IndexSet(integer: 3), with: .none)
+                DispatchQueue.main.async { [self] in
+                    labelRestoring.text = "Backup files are corrupted".localized()
+                    tableView.reloadSections(IndexSet(integer: 3), with: .none)
+                }
             } else {
                 DispatchQueue.main.async { [self] in
                     labelRestoring.text = "Successfully Restored Data".localized()

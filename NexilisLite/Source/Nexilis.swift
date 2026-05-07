@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.0.94"
+    public static var cpaasVersion = "5.0.100"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -57,7 +57,7 @@ public class Nexilis: NSObject {
     
     public static var loadingAlert = LibAlertController()
     
-    public static var floatingButton = FloatingButton()
+    public static var floatingButton: FloatingButton!
     public static var defaultFloatingButton: [Int] = []
     
     public static var showButtonFB = false
@@ -147,6 +147,7 @@ public class Nexilis: NSObject {
     public static func connect(apiKey: String, userId:String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         showFB = showButton
         Nexilis.fromMAB = fromMAB
+        floatingButton = FloatingButton()
         
         Nexilis.shared.createDelegate()
         
@@ -273,39 +274,39 @@ public class Nexilis: NSObject {
     static func startConnect(showButton: Bool = Nexilis.showButtonFB, apiKey: String = Nexilis.sAPIKey, userId: String = "", delegate: ConnectDelegate? = nil, withInit: Bool = true) {
 //        print("startConnect")
         do {
-            func forceShowFB() {
-                DispatchQueue.main.async {
-                    var viewController = UIApplication.shared.windows.first?.rootViewController
-                    var notNull = false
-                    while !notNull {
-                        viewController = UIApplication.shared.windows.first?.rootViewController
-                        if viewController != nil && Utils.getFinishInitPrefsr() {
-                            notNull = true
-                        }
-                    }
-                    if showButton {
-                        addFB()
-                    }
-                    if let rootViewController = viewController {
-                        let isDarkMode = rootViewController.traitCollection.userInterfaceStyle == .dark
-                        if isDarkMode {
-                            UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
-                            let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
-                        } else {
-                            UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
-                            let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-                            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
-                        }
-                    }
-                }
-            }
+//            func forceShowFB() {
+//                DispatchQueue.main.async {
+//                    var viewController = UIApplication.shared.windows.first?.rootViewController
+//                    var notNull = false
+//                    while !notNull {
+//                        viewController = UIApplication.shared.windows.first?.rootViewController
+//                        if viewController != nil && Utils.getFinishInitPrefsr() {
+//                            notNull = true
+//                        }
+//                    }
+//                    if showButton {
+//                        addFB()
+//                    }
+//                    if let rootViewController = viewController {
+//                        let isDarkMode = rootViewController.traitCollection.userInterfaceStyle == .dark
+//                        if isDarkMode {
+//                            UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
+//                            let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+//                            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+//                        } else {
+//                            UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).defaultTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
+//                            let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+//                            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
+//                        }
+//                    }
+//                }
+//            }
             if withInit {
                 if Utils.getFinishInitPrefsr() {
                     Utils.setFinishInitPrefs(value: false)
                 }
                 if !Utils.getPrefTheme().isEmpty {
-                    forceShowFB()
+//                    forceShowFB()
                     Utils.setFinishInitPrefs(value: true)
                 }
             }
@@ -427,12 +428,12 @@ public class Nexilis: NSObject {
                     })
                 }
 //                    getServiceBank()
-                getPullWorkingArea()
+//                getPullWorkingArea()
                 getPullGroupNoMember()
                 getWhitelistFileExt()
                 delegate?.onSuccess(userId: me)
                 initCallback?(1)
-                forceShowFB()
+//                forceShowFB()
                 if (Utils.getSetProfile() && !Utils.getFinishInitPrefsr()) || (!Utils.getForceAnonymous() && !Utils.getFinishInitPrefsr()) {
                     Utils.setFinishInitPrefs(value: true)
                 }
@@ -579,41 +580,43 @@ public class Nexilis: NSObject {
     }
     
     private static func getPullGroupNoMember() {
-        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullGroupNoMember(), timeout: 30 * 1000), response.isOk() {
-            let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
-            if !data.isEmpty {
-                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                        do {
-                            for json in jsonArray {
-                                let group_id = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.GROUP_ID)
-                                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "GROUP_NM", cvalues: [
-                                    "group_id" : group_id,
-                                    "f_name" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.GROUP_NAME),
-                                    "scope_id" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID),
-                                    "image_id": CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.THUMB_ID),
-                                    "quote": CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.QUOTE),
-                                    "last_update" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LAST_UPDATE),
-                                    "created_by" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CREATED_BY),
-                                    "created_date" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CREATED_DATE),
-                                    "ex_block" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.BLOCK),
-                                    "folder_id" : "",
-                                    "chat_modifier" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CHAT_MODIFIER),
-                                    "group_type" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_ORGANIZATION),
-                                    "parent" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID),
-                                    "level" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL),
-                                    "is_open" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_OPEN),
-                                    "official" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.OFFICIAL_ACCOUNT),
-                                    "level_edu" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL_EDU),
-                                    "materi_edu" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MATERI_EDU),
-                                    "is_education" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_EDUCATION)
-                                ], replace: true)
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.pullGroupNoMember(), timeout: 30 * 1000), response.isOk() {
+                let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
+                if !data.isEmpty {
+                    if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            do {
+                                for json in jsonArray {
+                                    let group_id = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.GROUP_ID)
+                                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "GROUP_NM", cvalues: [
+                                        "group_id" : group_id,
+                                        "f_name" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.GROUP_NAME),
+                                        "scope_id" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID),
+                                        "image_id": CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.THUMB_ID),
+                                        "quote": CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.QUOTE),
+                                        "last_update" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LAST_UPDATE),
+                                        "created_by" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CREATED_BY),
+                                        "created_date" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CREATED_DATE),
+                                        "ex_block" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.BLOCK),
+                                        "folder_id" : "",
+                                        "chat_modifier" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.CHAT_MODIFIER),
+                                        "group_type" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_ORGANIZATION),
+                                        "parent" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID),
+                                        "level" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL),
+                                        "is_open" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_OPEN),
+                                        "official" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.OFFICIAL_ACCOUNT),
+                                        "level_edu" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL_EDU),
+                                        "materi_edu" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MATERI_EDU),
+                                        "is_education" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_EDUCATION)
+                                    ], replace: true)
+                                }
+                            } catch {
+                                rollback.pointee = true
+                                print("Access database error: \(error.localizedDescription)")
                             }
-                        } catch {
-                            rollback.pointee = true
-                            print("Access database error: \(error.localizedDescription)")
-                        }
-                    })
+                        })
+                    }
                 }
             }
         }
@@ -638,7 +641,7 @@ public class Nexilis: NSObject {
     }
     
     static func getFeatureAccessWithKey(key: [String]) {
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .userInitiated).async {
             if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getFeatureAccessWithKey(key: key), timeout: 5000) {
                 print("RESPOND: \(response.toLogString())")
             } else {
@@ -654,7 +657,7 @@ public class Nexilis: NSObject {
         }
         isGettingFeatureAccess = true
         DispatchQueue.global(qos: .userInitiated).async {
-            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getFeatureAccessAll(), timeout: 10000), response.isOk() {
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getFeatureAccessAll(), timeout: 10 * 1000), response.isOk() {
                 let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
                 do {
                     if let data = data.data(using: .utf8) {
@@ -845,39 +848,43 @@ public class Nexilis: NSObject {
     }
     
     static func getWhitelistFileExt() {
-        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getWhitelistFileExt(), timeout: 5000), response.isOk() {
-            let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
-//            print("SUCCESS getWhitelistFileExt: \(data)")
-            Utils.setWhitelistFileExt(value: data)
-        } else {
-//            print("GAGAL getWhitelistFileExt")
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getWhitelistFileExt(), timeout: 5000), response.isOk() {
+                let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
+    //            print("SUCCESS getWhitelistFileExt: \(data)")
+                Utils.setWhitelistFileExt(value: data)
+            } else {
+    //            print("GAGAL getWhitelistFileExt")
+            }
         }
     }
     
     private static func getPullWorkingArea() {
-        if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getWorkingAreaContactCenter(), timeout: 30 * 1000), response.isOk() {
-            let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
-            if !data.isEmpty {
-                if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                        do {
-                            for json in jsonArray {
-                                var parent = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID)
-                                if parent.isEmpty {
-                                    parent = "-99"
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let response = Nexilis.writeSync(message: CoreMessage_TMessageBank.getWorkingAreaContactCenter(), timeout: 30 * 1000), response.isOk() {
+                let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
+                if !data.isEmpty {
+                    if let jsonArray = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            do {
+                                for json in jsonArray {
+                                    var parent = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID)
+                                    if parent.isEmpty {
+                                        parent = "-99"
+                                    }
+                                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "WORKING_AREA", cvalues: [
+                                        "area_id" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.WORKING_AREA),
+                                        "name" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.NAME),
+                                        "parent" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID),
+                                        "level" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL)
+                                    ], replace: true)
                                 }
-                                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "WORKING_AREA", cvalues: [
-                                    "area_id" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.WORKING_AREA),
-                                    "name" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.NAME),
-                                    "parent" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.PARENT_ID),
-                                    "level" : CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.LEVEL)
-                                ], replace: true)
+                            } catch {
+                                rollback.pointee = true
+                                print("Access database error: \(error.localizedDescription)")
                             }
-                        } catch {
-                            rollback.pointee = true
-                            print("Access database error: \(error.localizedDescription)")
-                        }
-                    })
+                        })
+                    }
                 }
             }
         }
@@ -5134,7 +5141,7 @@ extension Nexilis: MessageDelegate {
     }
     
     public static func addFriend(fpin: String, completion: @escaping (Bool) -> ()) {
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .userInitiated).async {
             if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendQRCode(fpin: fpin)), response.isOk() {
                 completion(true)
             } else {

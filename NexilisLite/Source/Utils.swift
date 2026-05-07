@@ -1138,42 +1138,51 @@ public final class Utils {
     public static func addBackground(view: UIView?) {
         do {
             if let view = view {
-                DispatchQueue.global().async {
-                    DispatchQueue.main.async {
-                        let listBg = Utils.getBackgroundLight().isEmpty && Utils.getBackgroundDark().isEmpty ? Utils.getBackground() :
-                        UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? Utils.getBackgroundDark() : Utils.getBackgroundLight()
-                        if listBg.isEmpty {
-                           return
+                let isDarkMode = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark
+                DispatchQueue.global(qos: .userInitiated).async {
+                    // Semua komputasi di background thread
+                    let listBg: String
+                    let lightBg = Utils.getBackgroundLight()
+                    let darkBg = Utils.getBackgroundDark()
+
+                    if lightBg.isEmpty && darkBg.isEmpty {
+                        listBg = Utils.getBackground()
+                    } else {
+                        listBg = isDarkMode ? darkBg : lightBg
+                    }
+
+                    guard !listBg.isEmpty else { return }
+
+                    let arrayBg = listBg.split(separator: ",")
+                    let bgChosen = String(arrayBg[Int.random(in: 0..<arrayBg.count)])
+                    let urlString = Utils.getURLBase() + "get_file_from_path?img=" + bgChosen
+
+                    if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                        DispatchQueue.main.async {
+                            let backgroundImage = cachedImage
+                            let backgroundImageView = UIImageView(frame: view.bounds)
+                            backgroundImageView.image = backgroundImage
+                            backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                            view.insertSubview(backgroundImageView, at: 0)
+                            view.sendSubviewToBack(backgroundImageView)
                         }
-                        var bgChoosen = ""
-                        let arrayBg = listBg.split(separator: ",")
-                        bgChoosen = String(arrayBg[Int.random(in: 0..<arrayBg.count)])
-                        let urlString = Utils.getURLBase() + "get_file_from_path?img=" + bgChoosen
-                        if let cachedImage = ImageCache.shared.image(forKey: urlString) {
-                            DispatchQueue.main.async() {
-                                let backgroundImage = cachedImage
-                                let backgroundImageView = UIImageView(frame: view.bounds)
-                                backgroundImageView.image = backgroundImage
-                                backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                                view.insertSubview(backgroundImageView, at: 0)
-                                view.sendSubviewToBack(backgroundImageView)
-                            }
-                            return
-                        }
-                        Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
-                            guard let data = data, error == nil else { return }
-                            // always update the UI from the main thread
-                            DispatchQueue.main.async() {
-                                if UIImage(data: data) != nil {
-                                    let backgroundImage = UIImage(data: data)!
-                                    let backgroundImageView = UIImageView(frame: view.bounds)
-                                    backgroundImageView.image = backgroundImage
-                                    backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                                    view.insertSubview(backgroundImageView, at: 0)
-                                    view.sendSubviewToBack(backgroundImageView)
-                                    ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
-                                }
-                            }
+                        return
+                    }
+
+                    Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, _, error in
+                        guard let data = data, error == nil else { return }
+
+                        // Decode image di background, BUKAN di main thread
+                        guard let image = UIImage(data: data) else { return }
+                        ImageCache.shared.save(image: image, forKey: urlString)
+
+                        DispatchQueue.main.async {
+                            let backgroundImage = UIImage(data: data)!
+                            let backgroundImageView = UIImageView(frame: view.bounds)
+                            backgroundImageView.image = backgroundImage
+                            backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                            view.insertSubview(backgroundImageView, at: 0)
+                            view.sendSubviewToBack(backgroundImageView)
                         }
                     }
                 }
@@ -1184,44 +1193,45 @@ public final class Utils {
     }
     
     public static func randomizeBackground(view: UIView?) {
-        do {
-            if let view = view {
-                DispatchQueue.global().async {
-                    DispatchQueue.main.async {
-                        let listBg = Utils.getBackgroundLight().isEmpty && Utils.getBackgroundDark().isEmpty ? Utils.getBackground() :
-                        UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? Utils.getBackgroundDark() : Utils.getBackgroundLight()
-                        if listBg.isEmpty {
-                           return
-                        }
-                        var bgChoosen = ""
-                        let arrayBg = listBg.split(separator: ",")
-                        bgChoosen = String(arrayBg[Int.random(in: 0..<arrayBg.count)])
-                        let urlString = Utils.getURLBase() + "get_file_from_path?img=" + bgChoosen
-                        if let cachedImage = ImageCache.shared.image(forKey: urlString) {
-                            DispatchQueue.main.async() {
-                                let backgroundImage = cachedImage
-                                let backgroundImageView = view.subviews[0] as? UIImageView
-                                backgroundImageView?.image = backgroundImage
-                            }
-                            return
-                        }
-                        Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, response, error in
-                            guard let data = data, error == nil else { return }
-                            // always update the UI from the main thread
-                            DispatchQueue.main.async() {
-                                if UIImage(data: data) != nil {
-                                    let backgroundImage = UIImage(data: data)!
-                                    let backgroundImageView = view.subviews[0] as? UIImageView
-                                    backgroundImageView?.image = backgroundImage
-                                    ImageCache.shared.save(image: UIImage(data: data)!, forKey: urlString)
-                                }
-                            }
-                        }
-                    }
+        guard let view = view else { return }
+
+        let isDarkMode = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Semua komputasi di background thread
+            let listBg: String
+            let lightBg = Utils.getBackgroundLight()
+            let darkBg = Utils.getBackgroundDark()
+
+            if lightBg.isEmpty && darkBg.isEmpty {
+                listBg = Utils.getBackground()
+            } else {
+                listBg = isDarkMode ? darkBg : lightBg
+            }
+
+            guard !listBg.isEmpty else { return }
+
+            let arrayBg = listBg.split(separator: ",")
+            let bgChosen = String(arrayBg[Int.random(in: 0..<arrayBg.count)])
+            let urlString = Utils.getURLBase() + "get_file_from_path?img=" + bgChosen
+
+            if let cachedImage = ImageCache.shared.image(forKey: urlString) {
+                DispatchQueue.main.async {
+                    (view.subviews[0] as? UIImageView)?.image = cachedImage
+                }
+                return
+            }
+
+            Utils.fetchDataWithCookiesAndUserAgent(from: URL(string: urlString)!) { data, _, error in
+                guard let data = data, error == nil else { return }
+
+                // Decode image di background, BUKAN di main thread
+                guard let image = UIImage(data: data) else { return }
+                ImageCache.shared.save(image: image, forKey: urlString)
+
+                DispatchQueue.main.async {
+                    (view.subviews[0] as? UIImageView)?.image = image
                 }
             }
-        } catch {
-            
         }
     }
     

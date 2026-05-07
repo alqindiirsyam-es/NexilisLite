@@ -165,6 +165,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private weak var lastContextMenuView: UIView?
     private var lastContextMenuInteraction: UIContextMenuInteraction?
     
+    private var readStatusTasks: [Task<Void, Never>] = []
+    
+    var lastScrollCheckTime: Date = Date()
+    
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
         return CGFloat(fontSize)
@@ -319,16 +323,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         center.addObserver(self, selector: #selector(onCheckNewMessages(notification:)), name: NSNotification.Name(rawValue: "checkNewMessagesNexilis"), object: nil)
         
         locationManager.delegate = self
-        locationManager.requestWhenInUseAuthorization()
-        
-        DispatchQueue.global().async { [self] in
-            // Check if location services are enabled
-            if CLLocationManager.locationServicesEnabled() {
-                locationManager.desiredAccuracy = kCLLocationAccuracyBest
-                locationManager.startUpdatingLocation()
-            } else {
-                print("Location services are not enabled.")
-            }
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+
+        let status = locationManager.authorizationStatus
+        if status == .notDetermined {
+            locationManager.requestWhenInUseAuthorization()
+        } else if status == .authorizedWhenInUse || status == .authorizedAlways {
+            locationManager.startUpdatingLocation()
         }
         
         if dataMessageForward != nil {
@@ -345,7 +346,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         tableMention.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
         
         tableChatView.rowHeight = UITableView.automaticDimension
-        tableChatView.estimatedRowHeight = 100
+        tableChatView.estimatedRowHeight = UITableView.automaticDimension
         
         if isContactCenter && !isRequestContactCenter && !onGoingCC {
             var companyName = ""
@@ -398,11 +399,26 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 //        }
     }
     
+    public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            // Ini aman di main thread karena delegate dipanggil di main thread
+            // dan startUpdatingLocation sendiri tidak blocking
+            manager.startUpdatingLocation()
+        default:
+            break
+        }
+    }
+    
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         latitude = "\(location.coordinate.latitude)"
         longitude = "\(location.coordinate.longitude)"
-        locationManager.stopUpdatingLocation()
+        manager.stopUpdatingLocation()
+    }
+    
+    public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("Location error: \(error.localizedDescription)")
     }
     
     public func afterUnfriend() {
@@ -465,7 +481,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         })
         let actionUnblock = UIAction(title: "Unblock".localized(), handler: {(_) in
             if !self.isContactCenter {
-                DispatchQueue.global().async {
+                DispatchQueue.global(qos: .userInitiated).async {
                     if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getUnBlock(l_pin: self.dataPerson["f_pin"]!!)) {
                         if !response.isOk() {
                             DispatchQueue.main.async {
@@ -505,7 +521,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         })
         let actionBlock = UIAction(title: "Block".localized(), handler: {(_) in
             if !self.isContactCenter {
-                DispatchQueue.global().async {
+                DispatchQueue.global(qos: .userInitiated).async {
                     if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getBlock(l_pin: self.dataPerson["f_pin"]!!)) {
                         if !response.isOk() {
                             DispatchQueue.main.async {
@@ -640,6 +656,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         
         changeAppBar()
         getData()
+        getCounter()
+        if counter > 0 && dataMessages.count >= counter {
+            markerCounter = dataMessages[dataMessages.count - counter]["message_id"] as? String
+        }
+        if counter > 0 {
+            counter = 0
+            updateCounter(counter: counter)
+        }
         
         tableChatView.alpha = 0
         tableChatView.delegate = self
@@ -650,11 +674,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         tableChatView.addGestureRecognizer(tapGesture)
         
         if !isContactCenter {
-            getCounter()
-            if counter > 0 && dataMessages.count >= counter {
-                markerCounter = dataMessages[dataMessages.count - counter]["message_id"] as? String
-            }
-            
             if !referenceMessageId.isEmpty {
                 if dataMessages.firstIndex(where: {$0["message_id"] as? String == referenceMessageId} ) != nil {
                     DispatchQueue.main.async {
@@ -673,7 +692,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         }
                     }
                 }
-            } else if counter != 0 && dataMessages.count >= counter {
+            } else if markerCounter != nil {
                 let contentHeight = tableChatView.contentSize.height
                 let visibleHeight = tableChatView.frame.height
                 let fullOffset = contentHeight - visibleHeight
@@ -697,44 +716,53 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         addCounterAtButttonScrollToBottom()
                     }
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
-                    let lastVisibleIndexPath = tableChatView.indexPathsForVisibleRows?.last
-                    currentIndexpath = lastVisibleIndexPath
-                    if counter != 0 {
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.5) { [self] in
+                    DispatchQueue.main.async { [self] in
+                        let lastVisibleIndexPath = tableChatView.indexPathsForVisibleRows?.last
+                        currentIndexpath = lastVisibleIndexPath
+                    }
+                    if markerCounter != nil {
                         let idMe = User.getMyPin() as String?
                         if let idx = dataMessages.firstIndex(where: { $0["message_id"] as? String == markerCounter}) {
-                            if currentIndexpath != nil {
-                                let sectionIm = dataDates.firstIndex(of: dataMessages[idx]["chat_date"]  as? String ?? "")
-                                let dataM = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataMessages[idx]["chat_date"]  as? String ?? ""})
-                                let rowIm = dataM.firstIndex(where: { $0["message_id"] as? String == dataMessages[idx]["message_id"] as? String })
-                                if sectionIm != nil && rowIm != nil {
-                                    if currentIndexpath!.section == sectionIm {
-                                        for i in rowIm!..<currentIndexpath!.row + 1 {
-                                            if dataM[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataM[i][TypeDataMessage.message_scope_id] as! String, fPin: dataM[i][TypeDataMessage.f_pin] as! String, messageId: dataM[i][TypeDataMessage.message_id] as! String) {
-                                                sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataM[i]["message_id"]  as? String ?? "")
-                                                if counter != 0 {
-                                                    counter -= 1
-                                                    updateCounter(counter: counter)
-                                                }
-                                            }
-                                        }
+                            var stringMessage = ""
+                            for i in idx..<dataMessages.count {
+                                if dataMessages[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i]["message_id"]  as? String ?? "") {
+                                    let id = dataMessages[i]["message_id"]  as? String ?? ""
+                                    if !stringMessage.isEmpty {
+                                        stringMessage += ",\(id)"
+                                    } else {
+                                        stringMessage += id
                                     }
                                 }
-                            } else {
-                                for i in idx..<dataMessages.count {
-                                    if dataMessages[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i]["message_id"]  as? String ?? "") {
-                                        sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
-                                    }
-                                }
-                                counter = 0
-                                updateCounter(counter: counter)
+                            }
+                            if !stringMessage.isEmpty {
+                                sendReadMessageStatus(
+                                    chat_id: "",
+                                    f_pin: dataPerson["f_pin"]!!,
+                                    message_scope_id: MessageScope.WHISPER,
+                                    message_id: stringMessage
+                                )
                             }
                             if idx != 0 {
+                                var stringMessage1 = ""
                                 for i in 0..<idx {
                                     let status = dataMessages[i][TypeDataMessage.status] as? String
                                     if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i]["message_id"]  as? String ?? "") {
-                                        sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                                        let id = dataMessages[i]["message_id"]  as? String ?? ""
+                                        if !stringMessage.isEmpty {
+                                            stringMessage += ",\(id)"
+                                        } else {
+                                            stringMessage += id
+                                        }
                                     }
+                                }
+                                if !stringMessage1.isEmpty {
+                                    sendReadMessageStatus(
+                                        chat_id: "",
+                                        f_pin: dataPerson["f_pin"]!!,
+                                        message_scope_id: MessageScope.WHISPER,
+                                        message_id: stringMessage1
+                                    )
                                 }
                             }
                         }
@@ -772,20 +800,52 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         }
                     }
                 }
-                for i in 0..<dataMessages.count {
+                DispatchQueue.global(qos: .userInitiated).async{ [self] in
                     let idMe = User.getMyPin() as String?
-                    let status = dataMessages[i][TypeDataMessage.status] as? String
-                    if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
-                        sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
+                    var stringMessage = ""
+                    for i in 0..<dataMessages.count {
+                        let status = dataMessages[i][TypeDataMessage.status] as? String
+                        if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
+                            let id = dataMessages[i]["message_id"]  as? String ?? ""
+                            if !stringMessage.isEmpty {
+                                stringMessage += ",\(id)"
+                            } else {
+                                stringMessage += id
+                            }
+                        }
+                    }
+                    if !stringMessage.isEmpty {
+                        sendReadMessageStatus(
+                            chat_id: "",
+                            f_pin: dataPerson["f_pin"]!!,
+                            message_scope_id: MessageScope.WHISPER,
+                            message_id: stringMessage
+                        )
                     }
                 }
                 tableChatView.scrollToBottom(isAnimated: false)
             }
         } else if isContactCenter && onGoingCC {
-            let idMe = User.getMyPin() as String?
-            for i in 0..<dataMessages.count {
-                if dataMessages[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
-                    sendReadMessageStatus(chat_id: "", f_pin: dataPerson["f_pin"]!!, message_scope_id: MessageScope.WHISPER, message_id: dataMessages[i]["message_id"]  as? String ?? "")
+            DispatchQueue.global(qos: .userInitiated).async{ [self] in
+                let idMe = User.getMyPin() as String?
+                var stringMessage = ""
+                for i in 0..<dataMessages.count {
+                    if dataMessages[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
+                        let id = dataMessages[i]["message_id"]  as? String ?? ""
+                        if !stringMessage.isEmpty {
+                            stringMessage += ",\(id)"
+                        } else {
+                            stringMessage += id
+                        }
+                    }
+                }
+                if !stringMessage.isEmpty {
+                    sendReadMessageStatus(
+                        chat_id: "",
+                        f_pin: dataPerson["f_pin"]!!,
+                        message_scope_id: MessageScope.WHISPER,
+                        message_id: stringMessage
+                    )
                 }
             }
             tableChatView.scrollToBottom(isAnimated: false)
@@ -1900,7 +1960,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     }
                     row["chat_date"] = "Today".localized()
                     row["blog_id"] = chatData[CoreMessage_TMessageKey.BLOG_ID]
-                    self.counter += 1
+//                    self.counter += 1
+                    self.counter = 0
+                    self.updateCounter(counter: self.counter)
                     if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
                         self.listTimerCredential[row["message_id"]  as? String ?? ""] = 60
                     }
@@ -2762,6 +2824,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func removeAllObjectBeforeDismissVC() {
+        cancelAllReadStatusTasks()
         for timer in self.timerCredential.values {
             timer.invalidate()
         }
@@ -3189,7 +3252,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         let lPin = sender.restorationIdentifier?.components(separatedBy: ",")[0]
         let messageId = sender.restorationIdentifier?.components(separatedBy: ",")[1]
         let isAccept = (sender.tag == 0)
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .userInitiated).async {
             if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendApproval(lPin: lPin ?? "", isAccept: isAccept), timeout: 5 * 1000) {
                 if response.isOk() {
                     self.deleteMessage(l_pin: self.dataPerson["f_pin"]!!, message_id: messageId ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
@@ -3614,239 +3677,337 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
     }
     
-    private func sendReadMessageStatus(chat_id: String, f_pin: String, message_scope_id: String, message_id: String) {
-        let message = CoreMessage_TMessageBank.getUpdateRead(p_chat_id: chat_id, p_f_pin: f_pin, p_scope_id: message_scope_id, qty: 1)
-        let fPin = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
-        let scope = message.getBody(key: CoreMessage_TMessageKey.SCOPE_ID)
-        message.mBodies[CoreMessage_TMessageKey.SERVER_DATE] = String(Date().currentTimeMillis())
-        if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
-            let valueListGroupImages = listGroupImages.value
+    private func sendReadMessageStatus(
+        chat_id: String,
+        f_pin: String,
+        message_scope_id: String,
+        message_id: String
+    ) {
+        guard !f_pin.elementsEqual("-999"),
+              !message_scope_id.elementsEqual("16"),
+              !message_scope_id.elementsEqual("15") else { return }
+
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+
+            let message = CoreMessage_TMessageBank.getUpdateRead(
+                p_chat_id: chat_id,
+                p_f_pin: f_pin,
+                p_scope_id: message_scope_id,
+                qty: 1
+            )
+
+            let fPin = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
+            message.mBodies[CoreMessage_TMessageKey.SERVER_DATE] = String(Date().currentTimeMillis())
+
+            // Resolve message IDs with group images
+            var resolvedMessageId = message_id
+            if message_id.contains(",") {
+                let lId = message_id.components(separatedBy: ",")
+                for id in lId {
+                    if let listGroupImages = await MainActor.run(resultType: [ImageGrouping]?.self, body: {
+                        self.groupImages.first(where: { $0.key == id })?.value
+                    }) {
+                        let mId = listGroupImages.map { $0.messageId }.joined(separator: ",")
+                        resolvedMessageId += "," + mId
+                    }
+                }
+            }
+
             message.mStatus = CoreMessage_TMessageUtil.getTID()
             message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
-            var mId = ""
-            for i in 0..<valueListGroupImages.count {
-                if mId.isEmpty {
-                    mId = "-2,\(valueListGroupImages[i].messageId)"
+            message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(resolvedMessageId)"
+
+            // Loop sampai tidak background, dengan cancel check
+            while !Task.isCancelled {
+                let isBackground = await MainActor.run {
+                    API.nGetCLXConnState() == 0
+                        || !API.bInetConnAvailable()
+                        || APIS.checkAppStateisBackground()
+                }
+
+                guard !isBackground else {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 detik
+                    continue
+                }
+
+                // Kirim request
+                guard !Task.isCancelled else { return }
+
+                if let resp = Nexilis.writeAndWait(message: message), resp.isOk() {
+                    let ids = resolvedMessageId.contains(",")
+                        ? resolvedMessageId.components(separatedBy: ",")
+                        : [resolvedMessageId]
+
+                    Database.shared.database?.inTransaction({ fmdb, rollback in
+                        do {
+                            for id in ids where !id.isEmpty {
+                                _ = Database.shared.updateRecord(
+                                    fmdb: fmdb,
+                                    table: "MESSAGE",
+                                    cvalues: ["status": "4"],
+                                    _where: "message_id = '\(id)'"
+                                )
+                            }
+                        } catch {
+                            rollback.pointee = true
+                        }
+                    })
                 } else {
-                    mId = mId + "," + valueListGroupImages[i].messageId
+                    // Retry sekali, lalu keluar agar tidak infinite
+                    guard !Task.isCancelled else { return }
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    continue
                 }
-            }
-            message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = mId
-        } else {
-            message.mStatus = CoreMessage_TMessageUtil.getTID()
-            message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
-            message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
-        }
-        if (fPin.elementsEqual("-999") || scope.elementsEqual("16") || scope.elementsEqual("15")){
-            return
-        }
-        DispatchQueue.global().async {
-            var isBackground = true
-            while isBackground {
-                DispatchQueue.main.sync {
-                    isBackground = API.nGetCLXConnState() == 0 || !API.bInetConnAvailable() || APIS.checkAppStateisBackground()
-                }
-                if isBackground {
-                    Thread.sleep(forTimeInterval: 1.0)
-                } else {
-                    if let resp = Nexilis.writeAndWait(message: message) {
-                        if resp.isOk() {
-                            if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
-                                let valueListGroupImages = listGroupImages.value
-                                for i in 0..<valueListGroupImages.count {
-                                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                        do {
-                                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                                                "status" : "4"
-                                            ], _where: "message_id = '\(valueListGroupImages[i].messageId)'")
-                                        } catch {
-                                            rollback.pointee = true
-                                            print("Access database error: \(error.localizedDescription)")
-                                        }
-                                    })
-                                }
-                            } else {
-                                Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                    do {
-                                        _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                                            "status" : "4"
-                                        ], _where: "message_id = '\(message_id)'")
-                                    } catch {
-                                        rollback.pointee = true
-                                        print("Access database error: \(error.localizedDescription)")
-                                    }
-                                })
-                            }
-                        } else {
-                            DispatchQueue.main.sync {
-                                self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
-                            }
-                        }
-                    } else {
-                        DispatchQueue.main.sync {
-                            self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
-                        }
-                    }
-                }
+
+                break // sukses, keluar loop
             }
         }
-        if let index = dataMessages.firstIndex(where: {$0["message_id"] as? String == message_id}) {
-            dataMessages[index]["status"] = "4"
-            let auto: Bool = SecureUserDefaults.shared.value(forKey: "autoDownload") ?? false
-            if auto {
-                if dataMessages[index]["image_id"] as? String != nil && !((dataMessages[index]["image_id"] as? String)!.isEmpty) {
-                    if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
-                        let valueListGroupImages = listGroupImages.value
-                        for i in 0..<valueListGroupImages.count {
-                            Download().startHTTP(forKey:valueListGroupImages[i].imageId) { (name, progress) in
-                                guard progress == 100 else {
-                                    return
-                                }
-                                let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                                if save {
-                                    do {
-                                        let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                                        let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                                        let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                                        if let dirPath = paths.first {
-                                            let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(valueListGroupImages[i].imageId)
-                                            if FileManager.default.fileExists(atPath: imageURL.path) {
-                                                let image    = UIImage(contentsOfFile: imageURL.path)
-                                                UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-                                            }
-                                            else if FileEncryption.shared.isSecureExists(filename: valueListGroupImages[i].imageId) {
-                                                if var secureData = try FileEncryption.shared.readSecure(filename: valueListGroupImages[i].imageId) {
-                                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
-                                                    if dataDecrypt != nil {
-                                                        secureData = dataDecrypt!
-                                                    }
-                                                    let image = UIImage(data: secureData)
-                                                    UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    catch {
-                                        
-                                    }
-                                }
-                                DispatchQueue.main.async { [self] in
-                                    let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-                                    let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
-                                    if row != nil && section != nil{
-                                        tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        Download().startHTTP(forKey:dataMessages[index]["image_id"]  as? String ?? "") { (name, progress) in
-                            guard progress == 100 else {
-                                return
-                            }
-                            let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                            if save {
-                                do {
-                                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                                    if let dirPath = paths.first {
-                                        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["image_id"]  as? String ?? "")
-                                        if FileManager.default.fileExists(atPath: imageURL.path) {
-                                            let image    = UIImage(contentsOfFile: imageURL.path)
-                                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-                                        }
-                                        else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
-                                            if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
-                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
-                                                if dataDecrypt != nil {
-                                                    secureData = dataDecrypt!
-                                                }
-                                                let image = UIImage(data: secureData)
-                                                UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
-                                            }
-                                        }
-                                    }
-                                } catch {
-                                    
-                                }
-                            }
-                            DispatchQueue.main.async { [self] in
-                                let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-                                let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
-                                if row != nil && section != nil{
-                                    tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                                }
-                            }
-                        }
-                    }
-                } else if dataMessages[index]["video_id"] as? String != nil && !((dataMessages[index]["video_id"] as? String)!.isEmpty){
-                    Download().startHTTP(forKey: dataMessages[index]["video_id"]  as? String ?? "") { (name, progress) in
-                        guard progress == 100 else {
-                            return
-                        }
-                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-                        if save {
-                            do {
-                                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                                if let dirPath = paths.first {
-                                    let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["video_id"]  as? String ?? "")
-                                    if FileManager.default.fileExists(atPath: videoURL.path) {
-                                        PHPhotoLibrary.shared().performChanges({
-                                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
-                                        }) { saved, error in
-                                            
-                                        }
-                                    }
-                                    else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
-                                        if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
-                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
-                                            if dataDecrypt != nil {
-                                                secureData = dataDecrypt!
-                                            }
-                                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                                            let tempPath = cachesDirectory.appendingPathComponent(name)
-                                            try secureData.write(to: tempPath)
-                                            PHPhotoLibrary.shared().performChanges({
-                                                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempPath)
-                                            }) { saved, error in
-                                                
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch {
-                                
-                            }
-                        }
-                        DispatchQueue.main.async { [self] in
-                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
-                            if row != nil && section != nil{
-                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                            }
-                        }
-                    }
-                }
-                else if dataMessages[index]["file_id"] as? String != nil && !((dataMessages[index]["file_id"] as? String)!.isEmpty) {
-                    Download().startHTTP(forKey: dataMessages[index]["file_id"]  as? String ?? "") { (name, progress) in
-                        guard progress == 100 else {
-                            return
-                        }
-                        DispatchQueue.main.async { [self] in
-                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
-                            if row != nil && section != nil{
-                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                            }
-                        }
-                    }
-                }
-            }
+
+        // Simpan task agar bisa di-cancel
+        Task { @MainActor in
+            self.readStatusTasks.append(task)
         }
     }
+
+    // Panggil saat keluar dari VC
+    private func cancelAllReadStatusTasks() {
+        readStatusTasks.forEach { $0.cancel() }
+        readStatusTasks.removeAll()
+    }
+    
+//    private func sendReadMessageStatus(chat_id: String, f_pin: String, message_scope_id: String, message_id: String) {
+//        if (f_pin.elementsEqual("-999") || message_scope_id.elementsEqual("16") || message_scope_id.elementsEqual("15")){
+//            return
+//        }
+//        DispatchQueue.global(qos: .userInitiated).async {
+//            let message = CoreMessage_TMessageBank.getUpdateRead(p_chat_id: chat_id, p_f_pin: f_pin, p_scope_id: message_scope_id, qty: 1)
+//            let fPin = message.getBody(key: CoreMessage_TMessageKey.F_PIN)
+//            let scope = message.getBody(key: CoreMessage_TMessageKey.SCOPE_ID)
+//            message.mBodies[CoreMessage_TMessageKey.SERVER_DATE] = String(Date().currentTimeMillis())
+//            var message_id = message_id
+//            if message_id.contains(",") {
+//                let lId = message_id.components(separatedBy: ",")
+//                for id in lId {
+//                    if let listGroupImages = self.groupImages.first(where: { $0.key == id }) {
+//                        let valueListGroupImages = listGroupImages.value
+//                        var mId = ""
+//                        for i in 0..<valueListGroupImages.count {
+//                            mId = mId + "," + valueListGroupImages[i].messageId
+//                        }
+//                        message_id += mId
+//                    }
+//                }
+//            }
+//            message.mStatus = CoreMessage_TMessageUtil.getTID()
+//            message.mBodies[CoreMessage_TMessageKey.L_PIN] = f_pin
+//            message.mBodies[CoreMessage_TMessageKey.MESSAGE_ID] = "-2,\(message_id)"
+//            var isBackground = true
+//            while isBackground {
+//                DispatchQueue.main.sync {
+//                    isBackground = API.nGetCLXConnState() == 0 || !API.bInetConnAvailable() || APIS.checkAppStateisBackground()
+//                }
+//                if isBackground {
+//                    Thread.sleep(forTimeInterval: 1.0)
+//                } else {
+//                    if let resp = Nexilis.writeAndWait(message: message) {
+//                        if resp.isOk() {
+//                            if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
+//                                let valueListGroupImages = listGroupImages.value
+//                                for i in 0..<valueListGroupImages.count {
+//                                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+//                                        do {
+//                                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+//                                                "status" : "4"
+//                                            ], _where: "message_id = '\(valueListGroupImages[i].messageId)'")
+//                                        } catch {
+//                                            rollback.pointee = true
+//                                            print("Access database error: \(error.localizedDescription)")
+//                                        }
+//                                    })
+//                                }
+//                            } else {
+//                                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+//                                    do {
+//                                        _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+//                                            "status" : "4"
+//                                        ], _where: "message_id = '\(message_id)'")
+//                                    } catch {
+//                                        rollback.pointee = true
+//                                        print("Access database error: \(error.localizedDescription)")
+//                                    }
+//                                })
+//                            }
+//                        } else {
+//                            DispatchQueue.main.sync {
+//                                self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
+//                            }
+//                        }
+//                    } else {
+//                        DispatchQueue.main.sync {
+//                            self.sendReadMessageStatus(chat_id: chat_id, f_pin: fPin, message_scope_id: message_scope_id, message_id: message_id)
+//                        }
+//                    }
+//                }
+//            }
+//        }
+////        if let index = dataMessages.firstIndex(where: {$0["message_id"] as? String == message_id}) {
+////            dataMessages[index]["status"] = "4"
+////            let auto: Bool = SecureUserDefaults.shared.value(forKey: "autoDownload") ?? false
+////            if auto {
+////                if dataMessages[index]["image_id"] as? String != nil && !((dataMessages[index]["image_id"] as? String)!.isEmpty) {
+////                    if let listGroupImages = self.groupImages.first(where: { $0.key == message_id }) {
+////                        let valueListGroupImages = listGroupImages.value
+////                        for i in 0..<valueListGroupImages.count {
+////                            Download().startHTTP(forKey:valueListGroupImages[i].imageId) { (name, progress) in
+////                                guard progress == 100 else {
+////                                    return
+////                                }
+////                                let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+////                                if save {
+////                                    do {
+////                                        let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+////                                        let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+////                                        let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+////                                        if let dirPath = paths.first {
+////                                            let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(valueListGroupImages[i].imageId)
+////                                            if FileManager.default.fileExists(atPath: imageURL.path) {
+////                                                let image    = UIImage(contentsOfFile: imageURL.path)
+////                                                UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+////                                            }
+////                                            else if FileEncryption.shared.isSecureExists(filename: valueListGroupImages[i].imageId) {
+////                                                if var secureData = try FileEncryption.shared.readSecure(filename: valueListGroupImages[i].imageId) {
+////                                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+////                                                    if dataDecrypt != nil {
+////                                                        secureData = dataDecrypt!
+////                                                    }
+////                                                    let image = UIImage(data: secureData)
+////                                                    UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+////                                                }
+////                                            }
+////                                        }
+////                                    }
+////                                    catch {
+////
+////                                    }
+////                                }
+////                                DispatchQueue.main.async { [self] in
+////                                    let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+////                                    let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+////                                    if row != nil && section != nil{
+////                                        tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+////                                    }
+////                                }
+////                            }
+////                        }
+////                    } else {
+////                        Download().startHTTP(forKey:dataMessages[index]["image_id"]  as? String ?? "") { (name, progress) in
+////                            guard progress == 100 else {
+////                                return
+////                            }
+////                            let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+////                            if save {
+////                                do {
+////                                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+////                                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+////                                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+////                                    if let dirPath = paths.first {
+////                                        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["image_id"]  as? String ?? "")
+////                                        if FileManager.default.fileExists(atPath: imageURL.path) {
+////                                            let image    = UIImage(contentsOfFile: imageURL.path)
+////                                            UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+////                                        }
+////                                        else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
+////                                            if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["image_id"]  as? String ?? "") {
+////                                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+////                                                if dataDecrypt != nil {
+////                                                    secureData = dataDecrypt!
+////                                                }
+////                                                let image = UIImage(data: secureData)
+////                                                UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+////                                            }
+////                                        }
+////                                    }
+////                                } catch {
+////
+////                                }
+////                            }
+////                            DispatchQueue.main.async { [self] in
+////                                let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+////                                let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+////                                if row != nil && section != nil{
+////                                    tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+////                                }
+////                            }
+////                        }
+////                    }
+////                } else if dataMessages[index]["video_id"] as? String != nil && !((dataMessages[index]["video_id"] as? String)!.isEmpty){
+////                    Download().startHTTP(forKey: dataMessages[index]["video_id"]  as? String ?? "") { (name, progress) in
+////                        guard progress == 100 else {
+////                            return
+////                        }
+////                        let save: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
+////                        if save {
+////                            do {
+////                                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+////                                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+////                                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+////                                if let dirPath = paths.first {
+////                                    let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(self.dataMessages[index]["video_id"]  as? String ?? "")
+////                                    if FileManager.default.fileExists(atPath: videoURL.path) {
+////                                        PHPhotoLibrary.shared().performChanges({
+////                                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
+////                                        }) { saved, error in
+////
+////                                        }
+////                                    }
+////                                    else if FileEncryption.shared.isSecureExists(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
+////                                        if var secureData = try FileEncryption.shared.readSecure(filename: self.dataMessages[index]["video_id"]  as? String ?? "") {
+////                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: secureData)
+////                                            if dataDecrypt != nil {
+////                                                secureData = dataDecrypt!
+////                                            }
+////                                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+////                                            let tempPath = cachesDirectory.appendingPathComponent(name)
+////                                            try secureData.write(to: tempPath)
+////                                            PHPhotoLibrary.shared().performChanges({
+////                                                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: tempPath)
+////                                            }) { saved, error in
+////
+////                                            }
+////                                        }
+////                                    }
+////                                }
+////                            } catch {
+////
+////                            }
+////                        }
+////                        DispatchQueue.main.async { [self] in
+////                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+////                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+////                            if row != nil && section != nil{
+////                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+////                            }
+////                        }
+////                    }
+////                }
+////                else if dataMessages[index]["file_id"] as? String != nil && !((dataMessages[index]["file_id"] as? String)!.isEmpty) {
+////                    Download().startHTTP(forKey: dataMessages[index]["file_id"]  as? String ?? "") { (name, progress) in
+////                        guard progress == 100 else {
+////                            return
+////                        }
+////                        DispatchQueue.main.async { [self] in
+////                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
+////                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+////                            if row != nil && section != nil{
+////                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+////                            }
+////                        }
+////                    }
+////                }
+////            }
+////        }
+//    }
     
     private func sendTyping(l_pin: String, isTyping: Bool = false) {
         DispatchQueue.global().async {
@@ -3865,19 +4026,17 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func updateCounter(counter: Int) {
-        DispatchQueue.global().async {
-            Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                do {
-                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
-                        "counter" : "\(counter)"
-                    ], _where: "l_pin = '\(self.dataPerson["f_pin"]!!)'")
-                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-                } catch {
-                    rollback.pointee = true
-                    print("Access database error: \(error.localizedDescription)")
-                }
-            })
-        }
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            do {
+                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+                    "counter" : "\(counter)"
+                ], _where: "l_pin = '\(self.dataPerson["f_pin"]!!)'")
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
     }
     
     private func addButtonScrollToBottom() {
@@ -3981,43 +4140,41 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             }
             // MARK: - Hide button when at bottom
             else if isNearBottom {
-                DispatchQueue.main.async { [self] in
-                    removeScrollToBottomButton()
-                }
+                removeScrollToBottomButton()
             }
 
-            // MARK: - Ensure index exists
-            guard currentIndexpath!.row < sectionMessages.count else { return }
-            
-            // MARK: - Update Counter
-            updateUnreadCounter()
-
-            // MARK: - Messages up to visible row
-            let visibleMessages = Array(sectionMessages[0...currentIndexpath!.row])
-                .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
-
-            // MARK: - Send Read Status
-            if !visibleMessages.isEmpty, !isContactCenter {
-                let myPin = User.getMyPin()
-                var stringMessage = ""
-                for msg in visibleMessages {
-                    if msg["f_pin"] as? String != myPin && EditorGroup.conditionSendRead(scope: msg[TypeDataMessage.message_scope_id] as! String, fPin: msg[TypeDataMessage.f_pin] as! String, messageId: msg["message_id"]  as? String ?? "") {
-                        if !stringMessage.isEmpty {
-                            stringMessage += ",\(msg["message_id"] as? String ?? "")"
-                        } else {
-                            stringMessage += msg["message_id"] as? String ?? ""
-                        }
-                    }
-                }
-                if !stringMessage.isEmpty {
-                    sendReadMessageStatus(
-                        chat_id: "",
-                        f_pin: dataPerson["f_pin"]!!,
-                        message_scope_id: MessageScope.WHISPER,
-                        message_id: stringMessage
-                    )
-                }
-            }
+//            // MARK: - Ensure index exists
+//            guard currentIndexpath!.row < sectionMessages.count else { return }
+//
+//            // MARK: - Messages up to visible row
+//            let visibleMessages = Array(sectionMessages[0...currentIndexpath!.row])
+//                .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
+//
+//            // MARK: - Send Read Status
+//            if !visibleMessages.isEmpty, !isContactCenter {
+//                let myPin = User.getMyPin()
+//                var stringMessage = ""
+//                for msg in visibleMessages {
+//                    if msg["f_pin"] as? String != myPin && EditorGroup.conditionSendRead(scope: msg[TypeDataMessage.message_scope_id] as! String, fPin: msg[TypeDataMessage.f_pin] as! String, messageId: msg["message_id"]  as? String ?? "") {
+//                        if !stringMessage.isEmpty {
+//                            stringMessage += ",\(msg["message_id"] as? String ?? "")"
+//                        } else {
+//                            stringMessage += msg["message_id"] as? String ?? ""
+//                        }
+//                    }
+//                }
+//                if !stringMessage.isEmpty {
+//                    sendReadMessageStatus(
+//                        chat_id: "",
+//                        f_pin: dataPerson["f_pin"]!!,
+//                        message_scope_id: MessageScope.WHISPER,
+//                        message_id: stringMessage
+//                    )
+//                }
+//            }
+//
+//            // MARK: - Update Counter
+//            updateUnreadCounter()
         }
     }
     
@@ -5722,7 +5879,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
     }
     
     func proceedPinUnpinMessage(checkDataPinned: [String: Any?], isPinned: Bool, completion: @escaping (Bool)-> Void) {
-        DispatchQueue.global().async {
+        DispatchQueue.global(qos: .userInitiated).async {
             var jaData = [[String: Any]]()
             var jsonObject = [String: Any]()
             jsonObject[CoreMessage_TMessageKey.MESSAGE_ID] = checkDataPinned["message_id"]  as? String ?? ""
@@ -6783,11 +6940,15 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         lastY = scrollView.contentOffset.y
-        DispatchQueue.main.async { [self] in
-            if tableChatView.alpha != 1 {
+        let now = Date()
+        guard now.timeIntervalSince(lastScrollCheckTime) > 0.3 else { return }
+        lastScrollCheckTime = now
+        
+        DispatchQueue.main.async {
+            if self.tableChatView.alpha != 1 {
                 return
             }
-            checkNewMessage(tableView: self.tableChatView)
+            self.checkNewMessage(tableView: self.tableChatView)
         }
     }
     
@@ -7554,9 +7715,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 statusMessage.heightAnchor.constraint(equalToConstant: 15).isActive = true
                 if dataMessages[indexPath.row]["status"]!  as? String ?? "" == "0" {
                     statusMessage.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
-                } else if dataMessages[indexPath.row]["status"]!  as? String ?? "" == "1" {
-                    statusMessage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
-                } else if (dataMessages[indexPath.row]["status"]!  as? String ?? "" == "2" ) {
+                }
+//                else if dataMessages[indexPath.row]["status"]!  as? String ?? "" == "1" {
+//                    statusMessage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
+//                }
+                else if dataMessages[indexPath.row]["status"]!  as? String ?? "" == "1" || dataMessages[indexPath.row]["status"]!  as? String ?? "" == "2" {
                     statusMessage.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
                 } else if (dataMessages[indexPath.row]["status"]!  as? String ?? "" == "3") {
                     statusMessage.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
@@ -7638,9 +7801,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty) &&
             (dataMessages[indexPath.row]["lock"] as? String) != "2" &&
             (dataMessages[indexPath.row]["lock"] as? String) != "1" {
-            containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40).isActive = true
+            let containerBottomConstraint = containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -40)
+            containerBottomConstraint.priority = .defaultHigh
+            containerBottomConstraint.isActive = true
         } else {
-            containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5).isActive = true
+            let containerBottomConstraint = containerMessage.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -5)
+            containerBottomConstraint.priority = .defaultHigh
+            containerBottomConstraint.isActive = true
         }
         
         let imageStared = UIImageView()
@@ -7765,6 +7932,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
         var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
+        topMarginText.priority = .defaultHigh
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         messageText.font = .systemFont(ofSize: 12 + offset())
         var textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
@@ -7858,7 +8026,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             let textAfterName = textChat.components(separatedBy: "~")[1]
             messageRequestFriend = textName + " " + textAfterName.localized()
         } else {
-            messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15).isActive = true
+            let bottomConstraint = messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15)
+            bottomConstraint.priority = .defaultHigh
+            bottomConstraint.isActive = true
         }
         messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
         let originalMessageText = textChat
@@ -8374,9 +8544,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         statusInImage.anchor(right: containerTimeStatus.rightAnchor, centerY: containerTimeStatus.centerYAnchor, width: 15, height: 15)
                         if listImages[i].status == "0" {
                             statusMessage.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
-                        } else if listImages[i].status == "1" {
-                            statusInImage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.white, renderingMode: .alwaysOriginal)
-                        } else if listImages[i].status == "2"  {
+                        }
+//                        else if listImages[i].status == "1" {
+//                            statusInImage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.white, renderingMode: .alwaysOriginal)
+//                        }
+                        else if listImages[i].status == "1" || listImages[i].status == "2" {
                             statusInImage.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.white)
                         } else if listImages[i].status == "3" {
                             statusInImage.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.white)
@@ -8436,7 +8608,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 imageThumb.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 imageThumb.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage).isActive = true
+                let imgWidthConstraint = imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage)
+                imgWidthConstraint.priority = .defaultHigh
+                imgWidthConstraint.isActive = true
+                let imgMaxWidthConstraint = imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerMessage.widthAnchor, constant: -30)
+                imgMaxWidthConstraint.priority = .required
+                imgMaxWidthConstraint.isActive = true
                 imageThumb.layer.cornerRadius = 5.0
                 imageThumb.clipsToBounds = true
                 imageThumb.contentMode = .scaleAspectFill

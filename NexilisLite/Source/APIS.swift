@@ -21,7 +21,7 @@ public class APIS: NSObject {
     public static func connect(appName: String, apiKey: String, userName: String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         Nexilis.connect(apiKey: apiKey, userId: userName, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
-        APIS.monitoredActivity()
+//        APIS.monitoredActivity()
     }
     
     public static func getTotalCounter() -> Int32 {
@@ -29,24 +29,51 @@ public class APIS: NSObject {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 let query = """
-                            select SUM(counter) as total_counter 
-                            from (
-                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b 
-                                where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0
-                                union all
-                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m 
-                                where ms.l_pin = '-999' and ms.message_id = m.message_id
-                                union all
-                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m 
-                                where ms.l_pin = '-997' and ms.message_id = m.message_id
-                                union all
-                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b 
-                                where ms.l_pin = b.group_id and ms.message_id = m.message_id and m.is_call_center = 0
-                                union all
-                                select ms.counter from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c 
-                                where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id and m.is_call_center = 0
-                            ) as subquery
-                            """
+                    SELECT SUM(counter) as total_counter
+                    FROM (
+                        SELECT ms.counter 
+                        FROM MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b
+                        WHERE ms.l_pin = b.f_pin 
+                          AND ms.message_id = m.message_id 
+                          AND m.is_call_center = 0
+                          AND ms.archived = 0
+
+                        UNION ALL
+
+                        SELECT ms.counter 
+                        FROM MESSAGE_SUMMARY ms, MESSAGE m
+                        WHERE ms.l_pin = '-999' 
+                          AND ms.message_id = m.message_id
+                          AND ms.archived = 0
+
+                        UNION ALL
+
+                        SELECT ms.counter 
+                        FROM MESSAGE_SUMMARY ms, MESSAGE m
+                        WHERE ms.l_pin = '-997' 
+                          AND ms.message_id = m.message_id
+                          AND ms.archived = 0
+
+                        UNION ALL
+
+                        SELECT ms.counter 
+                        FROM MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b
+                        WHERE ms.l_pin = b.group_id 
+                          AND ms.message_id = m.message_id 
+                          AND m.is_call_center = 0
+                          AND ms.archived = 0
+
+                        UNION ALL
+
+                        SELECT ms.counter 
+                        FROM MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c
+                        WHERE b.group_id = c.group_id 
+                          AND ms.l_pin = b.chat_id 
+                          AND ms.message_id = m.message_id 
+                          AND m.is_call_center = 0
+                          AND ms.archived = 0
+                    ) as subquery
+                    """
                 if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query), cursor.next() {
                     counter = cursor.int(forColumnIndex: 0)
                     cursor.close()
@@ -2337,10 +2364,10 @@ public class APIS: NSObject {
 //                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
 //            }
 //            PendingMessageStore.shared.removeAll()
-            if let me = User.getMyPin() {
-                DispatchQueue.global().async {
-                    let _ = Nexilis.write(message: CoreMessage_TMessageBank.getBatchBuddiesInfos(p_f_pin: me, last_update: 0))
-                }
+        }
+        if let me = User.getMyPin() {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let _ = Nexilis.write(message: CoreMessage_TMessageBank.getBatchBuddiesInfos(p_f_pin: me, last_update: 0))
             }
         }
         checkDataForShareExtension()
@@ -2358,7 +2385,7 @@ public class APIS: NSObject {
             Nexilis.getFeatureAccess()
         }
         if (FloatingButton.datePull == nil || !afterEnterBackground) && Utils.getSetProfile() {
-            DispatchQueue.global().async {
+            DispatchQueue.global(qos: .userInitiated).async {
                 while API.nGetCLXConnState() == 0 || User.getMyPin() == nil {
                     Thread.sleep(forTimeInterval: 0.5)
                 }
