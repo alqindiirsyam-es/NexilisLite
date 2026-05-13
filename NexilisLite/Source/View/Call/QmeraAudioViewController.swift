@@ -407,6 +407,7 @@ class QmeraAudioViewController: UIViewController {
                                 DispatchQueue.main.async {
                                     self.status.text = "Ringing".localized() + "..."
                                     self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                        guard self.timer == nil else { return }
                                         DispatchQueue.main.async {
                                             let longCall =  "0"
                                             Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
@@ -434,6 +435,7 @@ class QmeraAudioViewController: UIViewController {
                                 API.initiateCCall(sParty: u.pin)
                                 DispatchQueue.main.async {
                                     self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                        guard self.timer == nil else { return }
                                         DispatchQueue.main.async {
                                             let longCall =  "0"
                                             Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
@@ -489,6 +491,7 @@ class QmeraAudioViewController: UIViewController {
                     API.initiateCCall(sParty: u.pin)
                     DispatchQueue.main.async {
                         self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                            guard self.timer == nil else { return }
                             DispatchQueue.main.async {
                                 let longCall =  "0"
                                 Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)

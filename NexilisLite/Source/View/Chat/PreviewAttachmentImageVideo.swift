@@ -833,7 +833,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                             var thumbName = ""
                             if att.type == .gif {
                                 originalVideoName = "\(Date().currentTimeMillis())_gif"
-                                renamedVideoName = "Nexilis_gif_\(Date().currentTimeMillis())_\(originalVideoName)"
+                                renamedVideoName = "Nexilis_gif_\(originalVideoName)"
                                 thumbName = "THUMB_Nexilis_gif_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).jpeg"
                             } else {
                                 urlVideo = att.videoURL!.absoluteString
@@ -874,7 +874,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                                     //print("error saving file:", error)
                                 }
                             }
-                            delegate!.sendChatFromPreviewImage(message_text: att.text, attachment_flag: "2", image_id: "", video_id: att.type != .gif ? renamedVideoName : "", thumb_id: thumbName, gif_id: att.type == .gif ? renamedVideoName : "", file_id: "", viewController: self, specFile: att.specFileString)
+                            delegate!.sendChatFromPreviewImage(message_text: att.text, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: att.type == .gif ? renamedVideoName : "", file_id: "", viewController: self, specFile: att.specFileString)
                             if i == attachments.count - 1 {
                                 Nexilis.hideLoader { [self] in
                                     self.dismiss(animated: true, completion: nil)

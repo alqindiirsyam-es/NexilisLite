@@ -522,6 +522,7 @@ class QmeraVideoViewController: UIViewController {
                                 DispatchQueue.main.async {
                                     self.labelIncomingOutgoing.text = "Ringing".localized()
                                     self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                        guard !self.vcTimer.isValid else { return }
                                         DispatchQueue.main.async {
                                             if self.labelIncomingOutgoing.isDescendant(of: self.view) {
                                                 self.labelIncomingOutgoing.text = "The call was not answered".localized()
@@ -560,6 +561,7 @@ class QmeraVideoViewController: UIViewController {
                                 API.initiateCCall(sParty: self.dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
                                 DispatchQueue.main.async {
                                     self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                                        guard !self.vcTimer.isValid else { return }
                                         DispatchQueue.main.async {
                                             if self.labelIncomingOutgoing.isDescendant(of: self.view) {
                                                 self.labelIncomingOutgoing.text = "The call was not answered".localized()
@@ -618,6 +620,7 @@ class QmeraVideoViewController: UIViewController {
                     API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
                     DispatchQueue.main.async {
                         self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
+                            guard !self.vcTimer.isValid else { return }
                             DispatchQueue.main.async {
                                 if self.labelIncomingOutgoing.isDescendant(of: self.view) {
                                     self.labelIncomingOutgoing.text = "The call was not answered".localized()
