@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.1"
+    public static var cpaasVersion = "5.1.2"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -257,7 +257,7 @@ public class Nexilis: NSObject {
                     Utils.setConnectionID(value: id)
                 }
 //                print("INIT CONNECTION: \(id)")
-                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00")
+                try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00", bUseTLS: true)
             }
             if !isChecking {
                 while (API.nGetCLXConnState() == 0) {
@@ -1008,9 +1008,9 @@ public class Nexilis: NSObject {
 //            //print("change user to fpin")
 //            Nexilis.dispatch = DispatchGroup()
 //            Nexilis.dispatch?.enter()
-//            
+//
 //            try API.switchUser(cbiI: Callback(), sUserID: f_pin)
-//            
+//
 //            // wait until connection true
 //            Nexilis.dispatch?.wait()
 //            Nexilis.dispatch = nil
@@ -1152,6 +1152,7 @@ public class Nexilis: NSObject {
             return result
         }
         let url = URL(string: Utils.getDomainOpr() + Utils.decrypt(str: "2?vpwqeec[pkcoqf{rk{vgi;2k6t5oS;5ut5x3PwP;rrkf") + apiKey)!
+//        print("URL: \(url)")
         let urlConfig = URLSessionConfiguration.default
         let sessionDelegate = SelfSignedURLSessionDelegate()
         urlConfig.requestCachePolicy = .returnCacheDataElseLoad
@@ -1188,11 +1189,11 @@ public class Nexilis: NSObject {
                         var newDomain = jsonObject["domain"] as! String
                         let jsonAddress = jsonObject["address"] as! [[String: Any]]
                         let newIp = jsonAddress[0]["ip"] as! String
-                        let newPort = jsonAddress[0]["portI"] as! String
+                        let newPort = jsonAddress[0]["portD"] as! String
                         if newDomain.substring(from: newDomain.count-1, to: nil) != "/" {
                             newDomain += "/"
                         }
-                        if (newIp+":"+newPort) != Utils.getIpOpr() || newDomain != Utils.getDomainOpr() {
+                        if !newPort.isEmpty && !newIp.isEmpty && ((newIp+":"+newPort) != Utils.getIpOpr() || newDomain != Utils.getDomainOpr()) {
                             //check new domain
                             if checkNewDomain(newDomain) {
                                 Utils.setDomainOpr(value: newDomain)
