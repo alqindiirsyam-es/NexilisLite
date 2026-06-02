@@ -287,7 +287,9 @@ class QmeraAudioConference: UIViewController {
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             if !onGoingCC.isEmpty {
                 DispatchQueue.global().async {
-                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: user.pin, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "1"))
+                    let myPin = User.getMyPin() ?? ""
+                    let myUser = User.getDataCanNil(pin: myPin)
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: user.pin, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "1", f_name: myUser == nil ? user.fullName : myUser!.fullName, f_thumb: myUser == nil ? user.thumb : myUser!.thumb))
                 }
                 DispatchQueue.main.async {
                     self.isAddCall = user.pin

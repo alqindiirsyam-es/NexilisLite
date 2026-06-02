@@ -697,12 +697,7 @@ public class SignUpSignIn: UIViewController {
                             imageView.tintColor = .white
                             let banner = FloatingNotificationBanner(title: "Successfully Sign-In".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
                             banner.show()
-                            if Nexilis.showFB {
-                                Nexilis.floatingButton.removeFromSuperview()
-                                FloatingButton.datePull = nil
-                                Nexilis.floatingButton = FloatingButton()
-                                Nexilis.addFB()
-                            }
+                            Nexilis.getFeatureAccess()
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onRefreshWebView"), object: nil, userInfo: nil)
                             if self.forceLogin {
                                 self.navigationController?.dismiss(animated: true)
@@ -714,7 +709,6 @@ public class SignUpSignIn: UIViewController {
                                     self.navigationController?.popViewController(animated: true)
                                 }
                             }
-                            Nexilis.getFeatureAccess()
                         })
                     }
                 }
@@ -765,6 +759,7 @@ public class SignUpSignIn: UIViewController {
                         imageView.tintColor = .white
                         let banner = FloatingNotificationBanner(title: "Successfully Sign-Up".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
                         banner.show()
+                        Nexilis.getFeatureAccess()
                         if self.forceLogin {
                             self.navigationController?.dismiss(animated: true)
                         } else {

@@ -2168,7 +2168,7 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
 
-    public static func getCCRoomInvite(l_pin: String, ticket_id: String, channel: String) -> TMessage {
+    public static func getCCRoomInvite(l_pin: String, ticket_id: String, channel: String, f_name: String, f_thumb: String) -> TMessage {
         let tmessage = TMessage()
         let me = User.getMyPin()!
         tmessage.mCode = CoreMessage_TMessageCode.INVITE_TO_ROOM_CONTACT_CENTER
@@ -2177,6 +2177,8 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.L_PIN] = l_pin
         tmessage.mBodies[CoreMessage_TMessageKey.CALL_CENTER_ID] = ticket_id
         tmessage.mBodies[CoreMessage_TMessageKey.CHANNEL] = channel
+        tmessage.mBodies[CoreMessage_TMessageKey.F_DISPLAY_NAME] = f_name
+        tmessage.mBodies[CoreMessage_TMessageKey.THUMB_ID] = f_thumb
         return tmessage
     }
 

@@ -1092,7 +1092,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             searchBar.autocapitalizationType = .none
             searchBar.delegate = self
             searchBar.searchTextField.tintColor = .mainColor
-            searchBar.searchTextField.textColor = .mainColor
+            searchBar.searchTextField.textColor = .black
 //            searchBar.updateHeight(height: 36, radius: 18)
             searchBar.showsCancelButton = false
 //            searchBar.setMagnifyingGlassColorTo(color: .white)
@@ -4488,7 +4488,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             if dataMessages[indexPath!.row]["f_pin"] as? String ?? "" == "-999" {
                 children = [star, reply ,delete]
             }
-            else if !(dataMessages[indexPath!.row]["image_id"] as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["video_id"] as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["file_id"] as? String ?? "").isEmpty {
+            else if (!(dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty) && (dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
                 children = [star, reply, pin, delete]
             } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
                 children = [reply, pin, delete]
@@ -4808,7 +4808,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     }
                     func excEdit() {
                         let lastEdited = Int64(Date().currentTimeMillis())
-                        let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id]  as? String ?? "", l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin]  as? String ?? "", message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id]  as? String ?? "", status: "1", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential]  as? String ?? "", attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag]  as? String ?? "", ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id]  as? String ?? "", message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id]  as? String ?? "", audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id]  as? String ?? "", video_id: dataMessages[indexPath.row][TypeDataMessage.video_id]  as? String ?? "", file_id: dataMessages[indexPath.row][TypeDataMessage.file_id]  as? String ?? "", thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id]  as? String ?? "", reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id]  as? String ?? "", read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts]  as? String ?? "", chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id]  as? String ?? "", is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center]  as? String ?? "", call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id]  as? String ?? "", opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin]  as? String ?? "", server_date: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", local_time_stamp: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", last_edit: lastEdited)
+                        let message = CoreMessage_TMessageBank.editMessage(message_id: dataMessages[indexPath.row][TypeDataMessage.message_id]  as? String ?? "", l_pin: dataMessages[indexPath.row][TypeDataMessage.l_pin]  as? String ?? "", message_scope_id: dataMessages[indexPath.row][TypeDataMessage.message_scope_id]  as? String ?? "", status: dataMessages[indexPath.row][TypeDataMessage.status]  as? String ?? "", message_text: newText, credential: dataMessages[indexPath.row][TypeDataMessage.credential]  as? String ?? "", attachment_flag: dataMessages[indexPath.row][TypeDataMessage.attachment_flag]  as? String ?? "", ex_blog_id: dataMessages[indexPath.row][TypeDataMessage.blog_id]  as? String ?? "", message_large_text: "", ex_format: "", image_id: dataMessages[indexPath.row][TypeDataMessage.image_id]  as? String ?? "", audio_id: dataMessages[indexPath.row][TypeDataMessage.audio_id]  as? String ?? "", video_id: dataMessages[indexPath.row][TypeDataMessage.video_id]  as? String ?? "", file_id: dataMessages[indexPath.row][TypeDataMessage.file_id]  as? String ?? "", thumb_id: dataMessages[indexPath.row][TypeDataMessage.thumb_id]  as? String ?? "", reff_id: dataMessages[indexPath.row][TypeDataMessage.reff_id]  as? String ?? "", read_receipts: dataMessages[indexPath.row][TypeDataMessage.read_receipts]  as? String ?? "", chat_id: dataMessages[indexPath.row][TypeDataMessage.chat_id]  as? String ?? "", is_call_center: dataMessages[indexPath.row][TypeDataMessage.is_call_center]  as? String ?? "", call_center_id: dataMessages[indexPath.row][TypeDataMessage.call_center_id]  as? String ?? "", opposite_pin: dataMessages[indexPath.row][TypeDataMessage.opposite_pin]  as? String ?? "", server_date: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", local_time_stamp: dataMessages[indexPath.row][TypeDataMessage.server_date]  as? String ?? "", last_edit: lastEdited)
                         Nexilis.addQueueMessage(message: message, isEditMessage: true)
                         DispatchQueue.global().async {
                             Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -5755,10 +5755,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let videoChat = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
             let fileChat = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
             let audioChat = dataMessages[indexPath.row]["audio_id"]  as? String ?? ""
+            let messageText = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
             if !imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty || !audioChat.isEmpty {
-                if summarizeSession || copySession {
+                if summarizeSession || (copySession && messageText.isEmpty) {
                     return
-                } else if forwardSession && (!Nexilis.checkingAccess(key: "secure_folder_forward") || !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) {
+                } else if forwardSession && (!Nexilis.checkingAccess(key: "secure_folder_forward") || (!(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward"))) {
                     return
                 } else {
                     var file = imageChat
@@ -5926,6 +5927,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         let audioChat = (dataMessages[indexPath.row]["audio_id"] as? String) ?? ""
         let gifChat = (dataMessages[indexPath.row]["gif_id"] as? String) ?? ""
         let dataTimer = listTimerCredential[(dataMessages[indexPath.row]["message_id"]  as? String ?? "")]
+        var textChat = dataMessages[indexPath.row]["message_text"] as? String ?? ""
         
         cellMessage.contentView.addSubview(containerMessage)
         containerMessage.translatesAutoresizingMaskIntoConstraints = false
@@ -5981,9 +5983,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if (dataMessages[indexPath.row]["attachment_flag"] as? String == "0" && dataMessages[indexPath.row]["lock"] as? String != "1") || forwardSession || deleteSession || summarizeSession {
             var showSelectedImage = true
             if !imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty || !audioChat.isEmpty {
-                if summarizeSession || copySession {
+                if summarizeSession || (copySession && textChat.isEmpty) {
                     showSelectedImage = false
-                } else if forwardSession && (!Nexilis.checkingAccess(key: "secure_folder_forward") || !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) {
+                } else if forwardSession && (!Nexilis.checkingAccess(key: "secure_folder_forward") || (!(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward"))) {
                     showSelectedImage = false
                 } else {
                     var file = imageChat
@@ -6395,7 +6397,6 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         messageText.font = .systemFont(ofSize: 12 + offset())
         
-        var textChat = dataMessages[indexPath.row]["message_text"] as? String ?? ""
         let originalMessageText = textChat
         if (dataMessages[indexPath.row]["lock"] != nil && (dataMessages[indexPath.row]["lock"])! as? String == "1") {
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
@@ -6534,7 +6535,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerMessage.isUserInteractionEnabled = true
         }
         
-        if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String != "11" {
+        if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String != "11"  && !(dataMessages[indexPath.row][TypeDataMessage.message_id] as! String).contains("NTFPIN_") {
             messageText.attributedText = textChat.richText(isSearching: true, textSearch: textSearch, group_id: self.dataGroup["group_id"]  as? String ?? "")
         }
         
@@ -8744,7 +8745,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         var lastIndex = 0
         let messageTextForSearch: [[String: Any?]] = self.dataMessages.reversed()
         for idx in 0..<messageTextForSearch.count {
-            if (messageTextForSearch[idx]["message_text"]  as? String ?? "").lowercased().contains(textSearch) {
+            if (messageTextForSearch[idx]["message_text"]  as? String ?? "").lowercased().contains(textSearch) && !(messageTextForSearch[idx][TypeDataMessage.message_id] as? String ?? "").contains("NTFPIN_") {
                 lastIndex += 1
                 if lastIndex < indexScroll {
                     continue

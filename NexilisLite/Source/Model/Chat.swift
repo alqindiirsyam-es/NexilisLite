@@ -143,12 +143,12 @@ public class Chat: Model {
         var query = ""
         var count = 0
         if isCC == 1 {
-            query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and call_center_id = '\(pin)'"
+            query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and message_id NOT LIKE '%NTFPIN%' and call_center_id = '\(pin)'"
         } else {
             if scope == 3 {
-                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and (l_pin = '\(pin)' or f_pin = '\(pin)') and is_call_center = 0"
+                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and message_id NOT LIKE '%NTFPIN%' and (l_pin = '\(pin)' or f_pin = '\(pin)') and is_call_center = 0"
             } else {
-                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and l_pin = '\(pin)' and chat_id = '\(chatId)' and is_call_center = 0"
+                query = "select message_id FROM MESSAGE where message_text LIKE '%\(key)%' and message_id NOT LIKE '%NTFPIN%' and l_pin = '\(pin)' and chat_id = '\(chatId)' and is_call_center = 0"
             }
         }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in

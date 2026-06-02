@@ -138,7 +138,7 @@ class QmeraVideoViewController: UIViewController {
     private var vcTimer = Timer()
     private var containerTimerVC = UIView()
     private var labelTimerVC = UILabel()
-    private var timerTimeout = Timer()
+    private var taskTimeout: Task<Void, Error>?
     
     let poweredByLabel: UILabel = {
         let label = UILabel()
@@ -205,7 +205,7 @@ class QmeraVideoViewController: UIViewController {
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
         Nexilis.floatingButton.isHidden = false
-        self.timerTimeout.invalidate()
+        self.taskTimeout?.cancel()
         UIApplication.shared.isIdleTimerDisabled = false
         Nexilis.isOpenPageCall = false
     }
@@ -220,7 +220,7 @@ class QmeraVideoViewController: UIViewController {
             NotificationCenter.default.removeObserver(self)
             UIApplication.shared.isIdleTimerDisabled = false
             Nexilis.floatingButton.isHidden = false
-            self.timerTimeout.invalidate()
+            self.taskTimeout?.cancel()
             Nexilis.isOpenPageCall = false
         }
     }
@@ -233,6 +233,68 @@ class QmeraVideoViewController: UIViewController {
             try audioSession.setPreferredSampleRate(48000)
             try audioSession.setActive(true)
         } catch {
+        }
+    }
+    
+    private func timeoutTask() {
+        self.taskTimeout = Task { @MainActor in
+            do {
+                try await Task.sleep(seconds: 30)
+                
+                // Langsung update UI — sudah di MainActor
+                if self.labelIncomingOutgoing.isDescendant(of: self.view) {
+                    self.labelIncomingOutgoing.text = "The call was not answered".localized()
+                }
+                if self.buttonDecline.isDescendant(of: self.view) {
+                    self.buttonDecline.removeFromSuperview()
+                }
+                if self.buttonAccept.isDescendant(of: self.view) {
+                    self.buttonAccept.removeFromSuperview()
+                }
+                Nexilis.stopRingbacktoneCall()
+                self.makeStateCall()
+                if self.callFCM {
+                    // Pindah ke background untuk network call
+                    let fPin = self.dataPerson[0]["f_pin"]!!
+                    await Task.detached(priority: .background) {
+                        if Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: fPin, type: "2"), timeout: 30 * 1000) == nil {
+                            await MainActor.run {
+                                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(
+                                    title: "Unable to access servers. Try again later".localized(),
+                                    subtitle: nil,
+                                    titleFont: UIFont.systemFont(ofSize: 16),
+                                    titleColor: nil,
+                                    titleTextAlign: .left,
+                                    subtitleFont: nil,
+                                    subtitleColor: nil,
+                                    subtitleTextAlign: nil,
+                                    leftView: imageView,
+                                    rightView: nil,
+                                    style: .danger,
+                                    colors: nil,
+                                    iconPosition: .center
+                                )
+                                banner.show()
+                            }
+                        }
+                    }.value
+                }
+                
+                // Delay 3 detik lalu end
+                try await Task.sleep(seconds: 2)
+                Nexilis.stopBusyCall()
+                self.endAllCall()
+                if self.isInisiator && !self.isPresent {
+                    self.navigationController?.popViewController(animated: true)
+                } else {
+                    self.dismiss(animated: true, completion: nil)
+                }
+                
+            } catch is CancellationError {
+//                print("Task dibatalkan")
+            }
         }
     }
 
@@ -272,14 +334,42 @@ class QmeraVideoViewController: UIViewController {
             didTapAcceptCallButton()
         }
         if autoAcceptAPN {
-            DispatchQueue.global().async {
-                self.backToDefaultAudioSession()
-                _ = Nexilis.justInit()
-                _ = Nexilis.write(message: CoreMessage_TMessageBank.getNotifyCalling(fPin: self.fPin, lPin: User.getMyPin()!, type: "2"))
+            self.buttonAccept.isHidden = true
+            self.buttonDecline.isHidden = true
+            if UIApplication.shared.isProtectedDataAvailable {
+                executeAutoAccept()
+            } else {
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(onDeviceUnlocked),
+                    name: UIApplication.protectedDataDidBecomeAvailableNotification,
+                    object: nil
+                )
             }
         }
         self.timeStartCall = String(Date().currentTimeMillis())
         self.idCall = (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID()
+    }
+    
+    @objc private func onDeviceUnlocked() {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil
+        )
+        self.executeAutoAccept()
+    }
+
+    private func executeAutoAccept() {
+        DispatchQueue.global().async {
+            self.backToDefaultAudioSession()
+            _ = Nexilis.justInit()
+            _ = Nexilis.write(message: CoreMessage_TMessageBank.getNotifyCalling(
+                fPin: self.fPin,
+                lPin: User.getMyPin()!,
+                type: "2"
+            ))
+        }
     }
     
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
@@ -521,81 +611,11 @@ class QmeraVideoViewController: UIViewController {
                             if response.isOk() {
                                 DispatchQueue.main.async {
                                     self.labelIncomingOutgoing.text = "Ringing".localized()
-                                    self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
-                                        guard !self.vcTimer.isValid else { return }
-                                        DispatchQueue.main.async {
-                                            if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                                                self.labelIncomingOutgoing.text = "The call was not answered".localized()
-                                            }
-                                            if self.buttonDecline.isDescendant(of: self.view) {
-                                                self.buttonDecline.removeFromSuperview()
-                                            }
-                                            if self.buttonAccept.isDescendant(of: self.view) {
-                                                self.buttonAccept.removeFromSuperview()
-                                            }
-                                            self.makeStateCall()
-                                            if self.callFCM {
-                                                DispatchQueue.global().async {
-                                                    if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
-                                                    } else {
-                                                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                                                        imageView.tintColor = .white
-                                                        let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                                        banner.show()
-                                                    }
-                                                }
-                                            }
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                                Nexilis.stopBusyCall()
-                                                self.endAllCall()
-                                                if self.isInisiator && !self.isPresent {
-                                                    self.navigationController?.popViewController(animated: true)
-                                                } else {
-                                                    self.dismiss(animated: true, completion: nil)
-                                                }
-                                            }
-                                        }
-                                    })
                                 }
+                                self.timeoutTask()
                             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" && self.dataPerson.count > 0 {
                                 API.initiateCCall(sParty: self.dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: self.listRemoteViewFix, ivLocalView: self.cameraView, ivRemoteZ: self.zoomView)
-                                DispatchQueue.main.async {
-                                    self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
-                                        guard !self.vcTimer.isValid else { return }
-                                        DispatchQueue.main.async {
-                                            if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                                                self.labelIncomingOutgoing.text = "The call was not answered".localized()
-                                            }
-                                            if self.buttonDecline.isDescendant(of: self.view) {
-                                                self.buttonDecline.removeFromSuperview()
-                                            }
-                                            if self.buttonAccept.isDescendant(of: self.view) {
-                                                self.buttonAccept.removeFromSuperview()
-                                            }
-                                            self.makeStateCall()
-                                            if self.callFCM {
-                                                DispatchQueue.global().async {
-                                                    if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
-                                                    } else {
-                                                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                                                        imageView.tintColor = .white
-                                                        let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                                        banner.show()
-                                                    }
-                                                }
-                                            }
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                                Nexilis.stopBusyCall()
-                                                self.endAllCall()
-                                                if self.isInisiator && !self.isPresent {
-                                                    self.navigationController?.popViewController(animated: true)
-                                                } else {
-                                                    self.dismiss(animated: true, completion: nil)
-                                                }
-                                            }
-                                        }
-                                    })
-                                }
+                                self.timeoutTask()
                             } else {
                                 DispatchQueue.main.async {
                                     if self.labelIncomingOutgoing.isDescendant(of: self.view) {
@@ -618,43 +638,7 @@ class QmeraVideoViewController: UIViewController {
                     }
                 } else {
                     API.initiateCCall(sParty: dataPerson[0]["f_pin"]!, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-                    DispatchQueue.main.async {
-                        self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
-                            guard !self.vcTimer.isValid else { return }
-                            DispatchQueue.main.async {
-                                if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                                    self.labelIncomingOutgoing.text = "The call was not answered".localized()
-                                }
-                                if self.buttonDecline.isDescendant(of: self.view) {
-                                    self.buttonDecline.removeFromSuperview()
-                                }
-                                if self.buttonAccept.isDescendant(of: self.view) {
-                                    self.buttonAccept.removeFromSuperview()
-                                }
-                                self.makeStateCall()
-                                if self.callFCM {
-                                    DispatchQueue.global().async {
-                                        if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
-                                        } else {
-                                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                                            imageView.tintColor = .white
-                                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                            banner.show()
-                                        }
-                                    }
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                    Nexilis.stopBusyCall()
-                                    self.endAllCall()
-                                    if self.isInisiator && !self.isPresent {
-                                        self.navigationController?.popViewController(animated: true)
-                                    } else {
-                                        self.dismiss(animated: true, completion: nil)
-                                    }
-                                }
-                            }
-                        })
-                    }
+                    self.timeoutTask()
                 }
             } else {
                 backToDefaultAudioSession()
@@ -729,44 +713,9 @@ class QmeraVideoViewController: UIViewController {
                             labelIncomingOutgoing.text = "Ringing".localized()
                         }
                         API.initiateCCall(sParty: l_pin, nCamIdx: 1, nResIdx: 2, nVQuality: 4, ivRemoteView: listRemoteViewFix, ivLocalView: cameraView, ivRemoteZ: zoomView)
-                        if !self.vcTimer.isValid {
-                            DispatchQueue.main.async {
-                                self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
-                                    DispatchQueue.main.async {
-                                        if self.labelIncomingOutgoing.isDescendant(of: self.view) {
-                                            self.labelIncomingOutgoing.text = "The call was not answered".localized()
-                                        }
-                                        if self.buttonDecline.isDescendant(of: self.view) {
-                                            self.buttonDecline.removeFromSuperview()
-                                        }
-                                        if self.buttonAccept.isDescendant(of: self.view) {
-                                            self.buttonAccept.removeFromSuperview()
-                                        }
-                                        self.makeStateCall()
-                                        if self.callFCM {
-                                            DispatchQueue.global().async {
-                                                if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.dataPerson[0]["f_pin"]!!, type: "2"), timeout: 30 * 1000) {
-                                                } else {
-                                                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                                                    imageView.tintColor = .white
-                                                    let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                                    banner.show()
-                                                }
-                                            }
-                                        }
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                            Nexilis.stopBusyCall()
-                                            self.endAllCall()
-                                            if self.isInisiator && !self.isPresent {
-                                                self.navigationController?.popViewController(animated: true)
-                                            } else {
-                                                self.dismiss(animated: true, completion: nil)
-                                            }
-                                        }
-                                    }
-                                })
-                            }
-                        }
+//                        if !self.vcTimer.isValid {
+//                            self.timeoutTask()
+//                        }
                     }
                 }
             } else if let _ = data["call_cancel"] as? Bool {
@@ -940,7 +889,7 @@ class QmeraVideoViewController: UIViewController {
     }
     
     @objc func didTapAcceptCallButton() {
-        self.timerTimeout.invalidate()
+        self.taskTimeout?.cancel()
         if !isInisiator{
             let goAudioCall = Nexilis.checkMicPermission()
             let goVideoCall = Nexilis.checkCameraPermission()
@@ -952,8 +901,12 @@ class QmeraVideoViewController: UIViewController {
                     }
                 }))
                 self.navigationController?.present(alert, animated: true, completion: nil)
+                self.buttonAccept.isHidden = false
+                self.buttonDecline.isHidden = false
                 return
             } else if goVideoCall == -1 {
+                self.buttonAccept.isHidden = false
+                self.buttonDecline.isHidden = false
                 return
             }
 //            Nexilis.startAudio()
@@ -970,6 +923,7 @@ class QmeraVideoViewController: UIViewController {
             self.profileImage.removeFromSuperview()
             self.labelIncomingOutgoing.removeFromSuperview()
             self.buttonAccept.removeFromSuperview()
+            self.buttonDecline.isHidden = false
             NSLayoutConstraint.deactivate([
                 self.constraintLeadingButtonDecline,
                 self.constraintBottomButtonDecline
@@ -1402,7 +1356,9 @@ class QmeraVideoViewController: UIViewController {
                 let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
                 if !onGoingCC.isEmpty {
                     DispatchQueue.global().async {
-                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: data["f_pin"]!!, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "2"))
+                        let myPin = User.getMyPin() ?? ""
+                        let myUser = User.getDataCanNil(pin: myPin)
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: data["f_pin"]!!, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "2", f_name: myUser == nil ? data["name"]!! : myUser!.fullName, f_thumb: myUser == nil ? data["picture"]!! : myUser!.thumb))
                     }
                     DispatchQueue.main.async {
                         self.isAddCall = data["f_pin"]!!
@@ -1520,7 +1476,12 @@ class QmeraVideoViewController: UIViewController {
         let arrayMessage = message.split(separator: ",")
         if state == Nexilis.VIDEO_CALL_INCOMING {
             if autoAcceptAPN {
-                didTapAcceptCallButton()
+                DispatchQueue.global().async {
+                    _ = Nexilis.justInit()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                        self.didTapAcceptCallButton()
+                    })
+                }
             }
         }
         else if state == Nexilis.AUDIO_VIDEO_CALL_MUTED {
@@ -1608,8 +1569,8 @@ class QmeraVideoViewController: UIViewController {
             }
         }
         else if (state == Nexilis.VIDEO_CALL_OFFHOOK) {
+            self.taskTimeout?.cancel()
             DispatchQueue.main.async {
-                self.timerTimeout.invalidate()
                 Nexilis.stopRingbacktoneCall()
             }
             let channel = arrayMessage[3]

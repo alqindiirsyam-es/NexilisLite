@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.2"
+    public static var cpaasVersion = "5.1.3"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -688,6 +688,14 @@ public class Nexilis: NSObject {
                                 if jsonData["default_fb"]! != nil {
                                     if !Utils.getAfterConfigFB() {
                                         Utils.setConfigModeFB(value: jsonData["default_fb"] as! String)
+                                        DispatchQueue.main.async {
+                                            if Nexilis.showFB {
+                                                Nexilis.floatingButton.removeFromSuperview()
+                                                FloatingButton.datePull = nil
+                                                Nexilis.floatingButton = FloatingButton()
+                                                Nexilis.addFB()
+                                            }
+                                        }
                                     }
                                 }
                                 if jsonData["authentication_duration"]! != nil {
@@ -935,17 +943,6 @@ public class Nexilis: NSObject {
     }
     
     public static func destroyAll() {
-        if Nexilis.callAPNActivated {
-            if let uuid = APIS.uuidCall {
-                if let callInfo = CallManager.shared.activeCalls[uuid] {
-                    if !callInfo.isAccepted {
-                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getCancelCall(fPin: callInfo.callerId, type: !callInfo.isVideo ? "1" : "2"))
-                        APIS.uuidCall = nil
-                        Nexilis.callAPNActivated = false
-                    }
-                }
-            }
-        }
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         if !onGoingCC.isEmpty {
             let requester = onGoingCC.components(separatedBy: ",")[0]
@@ -2411,13 +2408,14 @@ public class Nexilis: NSObject {
                                         "longitude" : longitude,
                                         "latitude" : latitude,
                                         "location" : desc,
-                                        "last_update" : lastUpdate], _where: "message_id = '\(message_id)' and f_pin = '\(l_pin)'")
+                                        "last_update" : lastUpdate], _where: "message_id = '\(t)' and f_pin = '\(l_pin)'")
                                 }
                             }
                             cursorStatus.close()
                         } else {
                             if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS where message_id = '\(t)'"), cursorStatus.next() {
-                                if Int(status)! == 2 {
+                                let lastStatus = cursorStatus.int(forColumnIndex: 0)
+                                if lastStatus < Int(status)! {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                         "status" : status,
                                         "time_ack" : time,
@@ -2469,7 +2467,8 @@ public class Nexilis: NSObject {
                         }
                         cursorStatus.close()
                     } else if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS where message_id = '\(message_id)'"), cursorStatus.next() {
-                        if Int(status)! == 2 {
+                        let lastStatus = cursorStatus.int(forColumnIndex: 0)
+                        if lastStatus < Int(status)! {
                             _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
                                 "status" : status,
                                 "time_ack" : time,
@@ -4080,7 +4079,7 @@ extension Nexilis: MessageDelegate {
         }
     }
     
-    static func viewFormCSInvited(pin: String, channel: String, id: String) {
+    static func viewFormCSInvited(pin: String, channel: String, id: String, nameInvited: String, thumbInvited: String) {
         DispatchQueue.main.async {
             let alert = LibAlertController(title: "", message: "\n\n\n\n\n\n\n\n\n\n".localized(), preferredStyle: .alert)
             let newWidth = UIScreen.main.bounds.width * 0.90 - 270
@@ -4098,6 +4097,7 @@ extension Nexilis: MessageDelegate {
             alert.view.subviews.first?.subviews.first?.subviews.first?.backgroundColor = .lightGray
             alert.view.tintColor = .black
             let rejectAction = UIAlertAction(title: "Reject".localized(), style: .destructive, handler: {(_) in
+                APIS.isHasFormCS = false
                 listCCIdInv.removeAll(where: {$0 == id})
                 DispatchQueue.global().async {
                     if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 0, ticket_id: id)) {
@@ -4238,6 +4238,7 @@ extension Nexilis: MessageDelegate {
                     acceptCC()
                 }
                 func acceptCC() {
+                    APIS.isHasFormCS = false
                     DispatchQueue.global().async {
                         if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 1, ticket_id: id)) {
                             if result.isOk() {
@@ -4360,8 +4361,6 @@ extension Nexilis: MessageDelegate {
             containerView.clipsToBounds = true
             containerView.backgroundColor = .secondaryColor.withAlphaComponent(0.5)
             
-            let userData = User.getData(pin: pin)
-            
             let imageProfile = UIImageView()
             containerView.addSubview(imageProfile)
             imageProfile.translatesAutoresizingMaskIntoConstraints = false
@@ -4376,10 +4375,8 @@ extension Nexilis: MessageDelegate {
             imageProfile.backgroundColor = .lightGray.withAlphaComponent(0.3)
             imageProfile.tintColor = .secondaryColor
             imageProfile.image = UIImage(systemName: "person")
-            if userData!.thumb != "" {
-                imageProfile.setImage(name: userData!.thumb)
-                imageProfile.contentMode = .scaleAspectFill
-            }
+            imageProfile.setImage(name: thumbInvited)
+            imageProfile.contentMode = .scaleAspectFill
             
             let labelName = UILabel()
             containerView.addSubview(labelName)
@@ -4400,7 +4397,7 @@ extension Nexilis: MessageDelegate {
                 valueName.leadingAnchor.constraint(equalTo: imageProfile.trailingAnchor, constant: 5)
             ])
             valueName.font = UIFont.systemFont(ofSize: 12)
-            valueName.text = userData!.fullName
+            valueName.text = nameInvited
             valueName.textColor = .mainColor
             
             let labelType = UILabel()
@@ -4485,7 +4482,9 @@ extension Nexilis: MessageDelegate {
                 return
             }
             listCCIdInv.append(message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))
-            Nexilis.viewFormCSInvited(pin: message.getPIN(), channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), id: message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID))
+            if !APIS.isHasFormCS {
+                Nexilis.viewFormCSInvited(pin: message.getPIN(), channel: message.getBody(key: CoreMessage_TMessageKey.CHANNEL), id: message.getBody(key: CoreMessage_TMessageKey.CALL_CENTER_ID), nameInvited: message.getBody(key: CoreMessage_TMessageKey.F_DISPLAY_NAME), thumbInvited: message.getBody(key: CoreMessage_TMessageKey.THUMB_ID))
+            }
         } else if message.getCode() != CoreMessage_TMessageCode.PUSH_CALL_CENTER && message.getCode() != CoreMessage_TMessageCode.ACCEPT_CALL_CENTER && message.getCode() != CoreMessage_TMessageCode.END_CALL_CENTER && message.getCode() != CoreMessage_TMessageCode.TIMEOUT_CONTACT_CENTER && message.getCode() != CoreMessage_TMessageCode.ACCEPT_CONTACT_CENTER && message.getCode() != CoreMessage_TMessageCode.PUSH_MEMBER_ROOM_CONTACT_CENTER && message.getCode() != CoreMessage_TMessageCode.INVITE_END_CONTACT_CENTER && message.getCode() != CoreMessage_TMessageCode.INVITE_EXIT_CONTACT_CENTER || !message.getBody(key: CoreMessage_TMessageKey.MERCHANT_NAME).isEmpty {
             let m = message.mBodies
             if !message.getBody(key: CoreMessage_TMessageKey.MERCHANT_NAME).isEmpty {

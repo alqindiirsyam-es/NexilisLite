@@ -186,7 +186,6 @@ class ContactChatViewController: UITableViewController {
         searchController.searchBar.tintColor = .mainColor
         searchController.searchBar.searchTextField.attributedPlaceholder = NSAttributedString(string: "Search".localized(), attributes: [NSAttributedString.Key.foregroundColor: UIColor.gray, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)])
         
-        
         navigationItem.searchController = searchController
         navigationItem.hidesSearchBarWhenScrolling = false
         
@@ -227,6 +226,9 @@ class ContactChatViewController: UITableViewController {
         navBarAppearance.titleTextAttributes = attributes
         navigationController?.navigationBar.standardAppearance = navBarAppearance
         navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
+        
+        searchController.searchBar.searchTextField.textColor = .black
+        searchController.searchBar.searchTextField.tintColor = .black
 //        removeAllData()
 //        getData()
     }
@@ -1658,9 +1660,11 @@ extension ContactChatViewController {
                                     let status = getRealStatus(messageId: data.messageId)
                                     if status == "0" {
                                         imageStatus.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
-                                    } else if status == "1" {
-                                        imageStatus.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
-                                    } else if status == "2" {
+                                    }
+//                                    else if status == "1" {
+//                                        imageStatus.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
+//                                    }
+                                    else if status == "1" || status == "2" {
                                         imageStatus.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
                                     } else if (status == "3") {
                                         imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)

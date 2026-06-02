@@ -87,7 +87,7 @@ class QmeraAudioViewController: UIViewController {
     
     private var firstCall: Bool = true
     
-    private var timerTimeout = Timer()
+    private var taskTimeout: Task<Void, Error>?
     
 //    private var isSpeaker: Bool = false
     
@@ -313,7 +313,7 @@ class QmeraAudioViewController: UIViewController {
         UIDevice.current.isProximityMonitoringEnabled = false
         UIApplication.shared.isIdleTimerDisabled = false
         Nexilis.floatingButton.isHidden = false
-        self.timerTimeout.invalidate()
+        self.taskTimeout?.cancel()
         Nexilis.isOpenPageCall = false
     }
     
@@ -322,7 +322,7 @@ class QmeraAudioViewController: UIViewController {
         UIApplication.shared.isIdleTimerDisabled = false
         Nexilis.floatingButton.isHidden = false
         NotificationCenter.default.removeObserver(self)
-        self.timerTimeout.invalidate()
+        self.taskTimeout?.cancel()
         Nexilis.isOpenPageCall = false
     }
     
@@ -345,6 +345,65 @@ class QmeraAudioViewController: UIViewController {
             try audioSession.setPreferredSampleRate(44100)
             try audioSession.setActive(true)
         } catch {
+        }
+    }
+    
+    private func timeoutTask() {
+        self.taskTimeout = Task { @MainActor in
+            do {
+                try await Task.sleep(seconds: 30)
+                
+                // Langsung update UI — sudah di MainActor
+                let longCall = "0"
+                Nexilis.saveMessageCall(
+                    idCall: self.idCall,
+                    textMessage: "Outgoing audio call".localized() + " at \(longCall)",
+                    fPin: User.getMyPin() ?? "",
+                    lPin: !self.data.isEmpty ? self.data : self.user?.pin ?? "",
+                    timeCall: self.timeStartCall,
+                    attachment_type: MessageScope.CALL
+                )
+                self.status.text = "The call was not answered"
+                self.end.isEnabled = false
+                Nexilis.stopRingbacktoneCall()
+                
+                if self.callFCM {
+                    guard let userPin = self.user?.pin else { return }
+                    
+                    // Pindah ke background untuk network call
+                    await Task.detached(priority: .background) {
+                        if Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: userPin, type: "1"), timeout: 30 * 1000) == nil {
+                            await MainActor.run {
+                                let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                                imageView.tintColor = .white
+                                let banner = FloatingNotificationBanner(
+                                    title: "Unable to access servers. Try again later".localized(),
+                                    subtitle: nil,
+                                    titleFont: UIFont.systemFont(ofSize: 16),
+                                    titleColor: nil,
+                                    titleTextAlign: .left,
+                                    subtitleFont: nil,
+                                    subtitleColor: nil,
+                                    subtitleTextAlign: nil,
+                                    leftView: imageView,
+                                    rightView: nil,
+                                    style: .danger,
+                                    colors: nil,
+                                    iconPosition: .center
+                                )
+                                banner.show()
+                            }
+                        }
+                    }.value
+                }
+                
+                // Delay 3 detik lalu end
+                try await Task.sleep(seconds: 3)
+                self.didEnd(sender: false)
+                
+            } catch is CancellationError {
+//                print("Task dibatalkan")
+            }
         }
     }
     
@@ -406,63 +465,15 @@ class QmeraAudioViewController: UIViewController {
                             if response.isOk() {
                                 DispatchQueue.main.async {
                                     self.status.text = "Ringing".localized() + "..."
-                                    self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
-                                        guard self.timer == nil else { return }
-                                        DispatchQueue.main.async {
-                                            let longCall =  "0"
-                                            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
-                                            self.status.text = "The call was not answered"
-                                            self.end.isEnabled = false
-                                            Nexilis.stopRingbacktoneCall()
-                                            if self.callFCM {
-                                                DispatchQueue.global().async {
-                                                    if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
-                                                    } else {
-                                                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                                                        imageView.tintColor = .white
-                                                        let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                                        banner.show()
-                                                    }
-                                                }
-                                            }
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                                                self.didEnd(sender: false)
-                                            }
-                                        }
-                                    })
                                 }
+                                self.timeoutTask()
                             } else if response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "01" {
                                 API.initiateCCall(sParty: u.pin)
-                                DispatchQueue.main.async {
-                                    self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
-                                        guard self.timer == nil else { return }
-                                        DispatchQueue.main.async {
-                                            let longCall =  "0"
-                                            Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
-                                            self.status.text = "The call was not answered"
-                                            self.end.isEnabled = false
-                                            Nexilis.stopRingbacktoneCall()
-                                            if self.callFCM {
-                                                DispatchQueue.global().async {
-                                                    if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
-                                                    } else {
-                                                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                                                        imageView.tintColor = .white
-                                                        let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                                        banner.show()
-                                                    }
-                                                }
-                                            }
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                                                self.didEnd(sender: false)
-                                            }
-                                        }
-                                    })
-                                }
+                                self.timeoutTask()
                             } else {
                                 DispatchQueue.main.async {
                                     Nexilis.stopRingbacktoneCall()
-                                    self.timerTimeout.invalidate()
+                                    self.taskTimeout?.cancel()
                                 }
                                 DispatchQueue.main.async {
                                     let longCall =  "0"
@@ -489,32 +500,7 @@ class QmeraAudioViewController: UIViewController {
                     }
                 } else {
                     API.initiateCCall(sParty: u.pin)
-                    DispatchQueue.main.async {
-                        self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
-                            guard self.timer == nil else { return }
-                            DispatchQueue.main.async {
-                                let longCall =  "0"
-                                Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
-                                self.status.text = "The call was not answered"
-                                self.end.isEnabled = false
-                                Nexilis.stopRingbacktoneCall()
-                                if self.callFCM {
-                                    DispatchQueue.global().async {
-                                        if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
-                                        } else {
-                                            let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                                            imageView.tintColor = .white
-                                            let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                            banner.show()
-                                        }
-                                    }
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                                    self.didEnd(sender: false)
-                                }
-                            }
-                        })
-                    }
+                    self.timeoutTask()
                 }
             } else if !ticketId.isEmpty {
                 if isOutgoing {
@@ -548,43 +534,13 @@ class QmeraAudioViewController: UIViewController {
                 if let f_pin = data["f_pin"] as? String {
                     if f_pin == User.getMyPin()!  {
                         API.initiateCCall(sParty: l_pin)
-                        if self.timer == nil {
-                            DispatchQueue.main.async {
-                                self.status.text = "Ringing".localized() + "..."
-                            }
-                            DispatchQueue.main.async {
-                                self.timerTimeout = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false, block: {_ in
-                                    DispatchQueue.main.async {
-                                        let longCall =  "0"
-                                        Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
-                                        self.status.text = "The call was not answered"
-                                        self.end.isEnabled = false
-                                        Nexilis.stopRingbacktoneCall()
-                                        if self.callFCM {
-                                            DispatchQueue.global().async {
-                                                if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
-                                                } else {
-                                                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                                                    imageView.tintColor = .white
-                                                    let banner = FloatingNotificationBanner(title: "Unable to access servers. Try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                                                    banner.show()
-                                                }
-                                            }
-                                        }
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                                            self.didEnd(sender: false)
-                                        }
-                                    }
-                                })
-                            }
-                        }
                     }
                 }
             } else if data["call_cancel"] != nil {
                 if self.timer == nil {
                     DispatchQueue.main.async {
                         Nexilis.stopRingbacktoneCall()
-                        self.timerTimeout.invalidate()
+                        self.taskTimeout?.cancel()
                     }
                     DispatchQueue.main.async {
                         let longCall =  "0"
@@ -927,7 +883,9 @@ class QmeraAudioViewController: UIViewController {
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             if !onGoingCC.isEmpty {
                 DispatchQueue.global().async {
-                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: user.pin, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "1"))
+                    let myPin = User.getMyPin() ?? ""
+                    let myUser = User.getDataCanNil(pin: myPin)
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: user.pin, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "1", f_name: myUser == nil ? user.fullName : myUser!.fullName, f_thumb: myUser == nil ? user.thumb : myUser!.thumb))
                 }
                 DispatchQueue.main.async {
                     self.isAddCall = user.pin
@@ -991,6 +949,7 @@ class QmeraAudioViewController: UIViewController {
                     Nexilis.saveMessageCall(idCall: self.idCall, textMessage: "Incoming audio call".localized() + " at \(self.status.text ?? "")", fPin: !self.data.isEmpty ? self.data : self.user != nil ? self.user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: self.timeStartCall, attachment_type: MessageScope.CALL)
                 }
                 if self.callFCM && self.timer == nil {
+                    print("MASUK CANCEL CALL")
                     DispatchQueue.global().async {
                         if let _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: self.user!.pin, type: "1"), timeout: 30 * 1000) {
                         } else {
@@ -1247,7 +1206,7 @@ class QmeraAudioViewController: UIViewController {
             } else if state == Nexilis.AUDIO_CALL_OFFHOOK || (!ticketId.isEmpty && state == Nexilis.VIDEO_CALL_OFFHOOK) {
                 DispatchQueue.main.async {
                     Nexilis.stopRingbacktoneCall()
-                    self.timerTimeout.invalidate()
+                    self.taskTimeout?.cancel()
                 }
                 if users.count == 1 && firstCall {
                     DispatchQueue.main.async {

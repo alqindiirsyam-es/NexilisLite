@@ -1739,8 +1739,11 @@ public class APIS: NSObject {
     }
     
     private static func ccActionFromAPN(data: [String: Any], fromTapNotif: Bool = false) {
-        let nxCode = data["nx_code"] as? String ?? ""
+        var nxCode = data["nx_code"] as? String ?? ""
         let packetId = data[CoreMessage_TMessageKey.PACKET_ID] as? String ?? ""
+        if nxCode.isEmpty {
+            nxCode = data["nxc"] as? String ?? ""
+        }
         if nxCode == CoreMessage_TMessageCode.PUSH_CALL_CENTER {
             if !fromTapNotif || (fromTapNotif && !isHasFormCS) {
                 isHasFormCS = true
@@ -1779,7 +1782,9 @@ public class APIS: NSObject {
                 let pin = data[CoreMessage_TMessageKey.L_PIN] as? String ?? ""
                 let channel = data[CoreMessage_TMessageKey.CHANNEL] as? String ?? ""
                 let complainId = data[CoreMessage_TMessageKey.CALL_CENTER_ID] as? String ?? ""
-                Nexilis.viewFormCSInvited(pin: pin, channel: channel, id: complainId)
+                let nameInvited = data[CoreMessage_TMessageKey.F_DISPLAY_NAME] as? String ?? ""
+                let thumbInvited = data[CoreMessage_TMessageKey.THUMB_ID] as? String ?? ""
+                Nexilis.viewFormCSInvited(pin: pin, channel: channel, id: complainId, nameInvited: nameInvited, thumbInvited: thumbInvited)
             }
         } else if nxCode == CoreMessage_TMessageCode.PUSH_MEMBER_ROOM_CONTACT_CENTER && !fromTapNotif {
             let dataM = data[CoreMessage_TMessageKey.DATA] as? String ?? ""
@@ -1802,7 +1807,7 @@ public class APIS: NSObject {
             dataMessage["message"] = message
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil, userInfo: dataMessage)
         }
-        if nxCode == CoreMessage_TMessageCode.PUSH_CALL_CENTER || nxCode == CoreMessage_TMessageCode.PUSH_SECOND_CONTACT_CENTER {
+        if nxCode == CoreMessage_TMessageCode.PUSH_CALL_CENTER || nxCode == CoreMessage_TMessageCode.PUSH_SECOND_CONTACT_CENTER || nxCode == CoreMessage_TMessageCode.INVITE_TO_ROOM_CONTACT_CENTER {
             DispatchQueue.global().async {
                 _ = Nexilis.justInit()
                 _ = Nexilis.responseString(packetId: packetId, message: "00")
@@ -2602,6 +2607,18 @@ public class APIS: NSObject {
     }
     
     public static func willTerminate() {
+        if Nexilis.callAPNActivated {
+            if let uuid = APIS.uuidCall {
+                if let callInfo = CallManager.shared.activeCalls[uuid] {
+                    if !callInfo.isAccepted {
+                        print("send cancel from destroyall")
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getCancelCall(fPin: callInfo.callerId, type: !callInfo.isVideo ? "1" : "2"))
+                        APIS.uuidCall = nil
+                        Nexilis.callAPNActivated = false
+                    }
+                }
+            }
+        }
         Nexilis.destroyAll()
     }
     
@@ -2782,7 +2799,11 @@ public class APIS: NSObject {
                     nav.navigationBar.barStyle = .black
 
                     if UIApplication.shared.visibleViewController is UINavigationController && Nexilis.fromMAB {
-                        (targetVC as? EditorPersonal)?.fromNotification = false
+                        if targetVC is EditorPersonal {
+                            (targetVC as? EditorPersonal)?.fromNotification = false
+                        } else {
+                            (targetVC as? EditorGroup)?.fromNotification = false
+                        }
                         UIApplication.shared.visibleViewController?.show(targetVC, sender: nil)
                     } else {
                         UIApplication.shared.visibleViewController?.present(nav, animated: true, completion: nil)
