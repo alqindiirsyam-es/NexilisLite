@@ -162,6 +162,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         contentController.add(self, name: "openGalleryiOS")
         contentController.add(self, name: "openChannel")
         contentController.add(self, name: "setFirstTheme")
+        contentController.add(self, name: "openScanQrNative")
         
         let source: String = "var meta = document.createElement('meta');" +
             "meta.name = 'viewport';" +
@@ -681,6 +682,8 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                     }
                 }
             }
+        } else if message.name == "openScanQrNative" {
+            APIS.openQris()
         }
     }
     

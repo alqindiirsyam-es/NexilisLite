@@ -5841,8 +5841,17 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 children.insert(forward, at: 0)
             }
         } else {
-            if (!(dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty) && (dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty {
-               children = [star, reply , pin, delete]
+            if (!(dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty) {
+                var isEmpty = true
+                let messageText = dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? ""
+                if !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && !messageText.components(separatedBy: "|")[1].isEmpty {
+                    isEmpty = false
+                } else if (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && !messageText.isEmpty {
+                    isEmpty = false
+                }
+                if isEmpty {
+                    children = [star, reply , pin, delete]
+                }
             } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
                children = [reply, delete]
             }
@@ -7066,6 +7075,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
                         if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
                             return
+                        }  else if !fileChat.isEmpty && messageText.components(separatedBy: "|")[1].isEmpty {
+                            return
                         }
                     }
                 }
@@ -7657,6 +7668,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     if let dirPath = paths.first {
                         let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
                         if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
+                            showSelectedImage = false
+                        } else if !fileChat.isEmpty && textChat.components(separatedBy: "|")[1].isEmpty {
                             showSelectedImage = false
                         }
                     }
@@ -10570,7 +10583,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         var lastIndex = 0
         let messageTextForSearch: [[String: Any?]] = self.dataMessages.reversed()
         for idx in 0..<messageTextForSearch.count {
-            if (messageTextForSearch[idx]["message_text"]  as? String ?? "").lowercased().contains(textSearch) && !(messageTextForSearch[idx][TypeDataMessage.message_id] as? String ?? "").contains("NTFPIN_") {
+            if (messageTextForSearch[idx]["message_text"]  as? String ?? "").lowercased().contains(textSearch) && !(messageTextForSearch[idx][TypeDataMessage.message_id] as? String ?? "").contains("NTFPIN_") && (messageTextForSearch[idx]["lock"] as? String ?? "") != "1" {
                 lastIndex += 1
                 if lastIndex < indexScroll {
                     continue

@@ -156,6 +156,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         buttonSpecFile.addTarget(self, action: #selector(showSpecFile), for: .touchUpInside)
         if attachments[currPage].isConfidential || self.isCC {
             buttonSpecFile.isEnabled = false
+            if self.isCC {
+                buttonSpecFile.isHidden = true
+            }
         }
         
         if let vc = delegate as? EditorGroup {

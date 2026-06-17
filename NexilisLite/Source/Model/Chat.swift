@@ -268,7 +268,15 @@ public class Chat: Model {
                                    m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
-                            join BUDDY b on (m.l_pin = b.f_pin OR m.f_pin = b.f_pin)
+                            join BUDDY b on (
+                                (
+                                    m.l_pin LIKE b.f_pin || ',%'
+                                    OR m.l_pin LIKE '%,' || b.f_pin || ',%'
+                                    OR m.l_pin LIKE '%,' || b.f_pin
+                                    OR m.l_pin = b.f_pin
+                                )
+                                OR m.f_pin = b.f_pin
+                            )
                             where b.f_pin <> '\(myPin)' and m.message_id = '\(message_id)'
                             union
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
