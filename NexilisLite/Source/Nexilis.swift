@@ -19,7 +19,7 @@ import CryptoKit
 import WebKit
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.4"
+    public static var cpaasVersion = "5.1.6"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1104,12 +1104,12 @@ public class Nexilis: NSObject {
         var result = [String]()
         let url = URL(string: "https://nexilis.io/dipp/NuN1v3rs3/Qm3r4i0/get_ip?account=\(apiKey)")!
         let urlConfig = URLSessionConfiguration.default
-        let sessionDelegate = SelfSignedURLSessionDelegate()
+        let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
         urlConfig.requestCachePolicy = .returnCacheDataElseLoad
         urlConfig.timeoutIntervalForRequest = 10.0
         urlConfig.timeoutIntervalForResource = 10.0
         let semaphore = DispatchSemaphore(value: 0)
-        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
+        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
             guard let data = data else {
                 semaphore.signal()
                 return
@@ -1151,12 +1151,12 @@ public class Nexilis: NSObject {
         let url = URL(string: Utils.getDomainOpr() + Utils.decrypt(str: "2?vpwqeec[pkcoqf{rk{vgi;2k6t5oS;5ut5x3PwP;rrkf") + apiKey)!
 //        print("URL: \(url)")
         let urlConfig = URLSessionConfiguration.default
-        let sessionDelegate = SelfSignedURLSessionDelegate()
+        let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
         urlConfig.requestCachePolicy = .returnCacheDataElseLoad
         urlConfig.timeoutIntervalForRequest = 10.0
         urlConfig.timeoutIntervalForResource = 10.0
         let semaphore = DispatchSemaphore(value: 0)
-        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
+        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
             guard let data = data,
                 let url = response?.url,
                 let httpResponse = response as? HTTPURLResponse,
@@ -1276,12 +1276,12 @@ public class Nexilis: NSObject {
         var result = false
         let url = URL(string: "\(newDomain)dipp/NuN1v3rs3/Qm3r4i0/get_ip_domain?account=\(Nexilis.sAPIKey)")!
         let urlConfig = URLSessionConfiguration.default
-        let sessionDelegate = SelfSignedURLSessionDelegate()
+        let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
         urlConfig.requestCachePolicy = .returnCacheDataElseLoad
         urlConfig.timeoutIntervalForRequest = 10.0
         urlConfig.timeoutIntervalForResource = 10.0
         let semaphore = DispatchSemaphore(value: 0)
-        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
+        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 200 {
                     guard let url = response?.url,
@@ -5268,5 +5268,73 @@ public class SelfSignedURLSessionDelegate: NSObject, URLSessionTaskDelegate, URL
                 completionHandler(.useCredential, credential)
             }
         }
+    }
+}
+
+public protocol PinValidatingNexilis: AnyObject {
+    func isPinnedHostSN(_ host: String) -> Bool
+    func serverTrustSN(_ trust: SecTrust, matchesPinnedSPKIForHost host: String) -> Bool
+    func reportPinningFailureSN(forHost host: String)
+}
+
+public protocol PinSetMatchingNexilis: AnyObject {
+    func matchesSN(trust: SecTrust) -> Bool
+}
+
+public enum NexilisConfiguration {
+
+    private(set) static weak var pinValidator:  PinValidatingNexilis?
+    private(set) static weak var pinSetMatcher: PinSetMatchingNexilis?
+    
+    public static func configure(
+        pinValidator:  PinValidatingNexilis,
+        pinSetMatcher: PinSetMatchingNexilis
+    ) {
+        Self.pinValidator  = pinValidator
+        Self.pinSetMatcher = pinSetMatcher
+    }
+}
+
+final class PinnedURLSessionNexilisDelegate: NSObject,
+    URLSessionTaskDelegate, URLSessionDataDelegate {
+
+    // Ambil dari NexilisConfiguration — tidak perlu inject per-instance
+    private var pinValidator:  PinValidatingNexilis?  { NexilisConfiguration.pinValidator }
+    private var pinSetMatcher: PinSetMatchingNexilis? { NexilisConfiguration.pinSetMatcher }
+
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition,
+                                                   URLCredential?) -> Void) {
+
+        guard challenge.protectionSpace.authenticationMethod
+                == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        var cfError: CFError?
+        guard SecTrustEvaluateWithError(trust, &cfError) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        let host = challenge.protectionSpace.host
+
+        if let validator = pinValidator, validator.isPinnedHostSN(host) {
+            let spkiMatch  = validator.serverTrustSN(trust, matchesPinnedSPKIForHost: host)
+            let storeMatch = pinSetMatcher?.matchesSN(trust: trust) ?? false
+
+            if spkiMatch || storeMatch {
+                completionHandler(.useCredential, URLCredential(trust: trust))
+            } else {
+                validator.reportPinningFailureSN(forHost: host)
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
+            return
+        }
+
+        completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }

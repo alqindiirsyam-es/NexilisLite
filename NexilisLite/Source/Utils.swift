@@ -776,7 +776,7 @@ public final class Utils {
         urlConfig.httpMaximumConnectionsPerHost = 1
         urlConfig.waitsForConnectivity = true
         urlConfig.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: urlConfig, delegate: SelfSignedURLSessionDelegate(), delegateQueue: nil)
+        return URLSession(configuration: urlConfig, delegate: NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate(), delegateQueue: nil)
     }()
     
     public static func postDataWithCookiesAndUserAgent(from url: URL, parameter: [String: Any] = [:], parameters: [[String: Any]] = [], isFormData: Bool = false, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {

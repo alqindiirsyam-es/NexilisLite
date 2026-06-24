@@ -5007,8 +5007,8 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                     }
                 } else {
                     let urlConfig = URLSessionConfiguration.default
-                    let sessionDelegate = SelfSignedURLSessionDelegate()
-                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
+                    let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
+                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil)
                     let slp = SwiftLinkPreview(session: session,
                                    workQueue: SwiftLinkPreview.defaultWorkQueue,
                                    responseQueue: DispatchQueue.main,
@@ -9077,8 +9077,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 }
                 if dataURL.isEmpty {
                     let urlConfig = URLSessionConfiguration.default
-                    let sessionDelegate = SelfSignedURLSessionDelegate()
-                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
+                    let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
+                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil)
                     let slp = SwiftLinkPreview(session: session,
                                    workQueue: SwiftLinkPreview.defaultWorkQueue,
                                    responseQueue: DispatchQueue.main,

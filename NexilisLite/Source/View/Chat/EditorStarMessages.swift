@@ -1217,8 +1217,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 }
                 if dataURL.isEmpty {
                     let urlConfig = URLSessionConfiguration.default
-                    let sessionDelegate = SelfSignedURLSessionDelegate()
-                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
+                    let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
+                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil)
                     let slp = SwiftLinkPreview(session: session,
                                                workQueue: SwiftLinkPreview.defaultWorkQueue,
                                                responseQueue: DispatchQueue.main,
