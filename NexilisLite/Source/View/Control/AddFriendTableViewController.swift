@@ -99,32 +99,27 @@ class AddFriendTableViewController: UITableViewController {
     @objc func scanQR(sender: Any) {
         let scannerVC = QRScannerController()
         scannerVC.onQRCodeDetected = { qrCode in
-            print("Detected QR Code: \(qrCode)")
-            self.dismiss(animated: true)
-            var isQR = false
-            
-            
-            DispatchQueue.main.async {
-                var dataMessage = CoreMessage_TMessageBank.getAddFriendQRCode(fpin: qrCode)
-                if Nexilis.checkingAccess(key: "friend_request_approval"){
-                    dataMessage = CoreMessage_TMessageBank.getAddFriendRequest(fPin: qrCode)
+//            print("Detected QR Code: \(qrCode)")
+            self.dismiss(animated: true, completion: {
+                DispatchQueue.main.async {
+                    var dataMessage = CoreMessage_TMessageBank.getAddFriendQRCode(fpin: qrCode)
+                    if Nexilis.checkingAccess(key: "friend_request_approval"){
+                        dataMessage = CoreMessage_TMessageBank.getAddFriendRequest(fPin: qrCode)
+                    }
+                    if let response = Nexilis.writeAndWait(message: dataMessage, timeout: 1000 * 30) {
+                        if response.isOk() {
+                            let alert = UIAlertController(title: "Action Successful".localized(), message: Nexilis.checkingAccess(key: "friend_request_approval") ? "Friend request has been sent".localized() : "Successfully added a new friend".localized(), preferredStyle: .alert)
+                            alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                            self.present(alert, animated: true, completion: nil)
+                        }
+                        else {
+                            let alert = UIAlertController(title: "Failed".localized(), message: "QR Code is Invalid or Friend is not found".localized(), preferredStyle: .alert)
+                            alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                            self.present(alert, animated: true, completion: nil)
+                        }
+                    }
                 }
-                if let response = Nexilis.writeAndWait(message: dataMessage, timeout: 1000 * 30) {
-                    print(response.toLogString())
-                    isQR = true
-                }
-                
-                if isQR {
-                    let alert = UIAlertController(title: "Action Successful".localized(), message: Nexilis.checkingAccess(key: "friend_request_approval") ? "Friend request has been sent".localized() : "Successfully added a new friend".localized(), preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
-                    self.present(alert, animated: true, completion: nil)
-                }
-                else {
-                    let alert = UIAlertController(title: "Unable to complete action".localized(), message: "Friend is invalid or not found".localized(), preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
-                    self.present(alert, animated: true, completion: nil)
-                }
-            }
+            })
         }
         present(scannerVC, animated: true, completion: nil)
     }

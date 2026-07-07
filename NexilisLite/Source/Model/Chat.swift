@@ -369,7 +369,7 @@ public class Chat: Model {
 //        })
 //    }
     
-    public static func getData(isImage: Bool = false, isDoc: Bool = false, isVideo: Bool = false, isGIF: Bool = false, isLink: Bool = false, isAudio: Bool = false, isArchived: Bool = false, withText: String = "") -> [Chat] {
+    public static func getData(isUnread: Bool = false, isImage: Bool = false, isDoc: Bool = false, isVideo: Bool = false, isGIF: Bool = false, isLink: Bool = false, isAudio: Bool = false, isArchived: Bool = false, withText: String = "") -> [Chat] {
         var chats: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
@@ -394,20 +394,52 @@ public class Chat: Model {
                 if !lastQuery.isEmpty && !text.isEmpty {
                     lastQuery += "AND (m.message_text LIKE '%\(text)%' OR name LIKE '%\(text)%')"
                 }
+
+                // Kondisi tambahan untuk query aggregate (default)
+                var extraCondition = isArchived ? " and ms.archived <> 0" : " and ms.archived = 0"
+                if isUnread {
+                    extraCondition += " and ms.counter > 0"
+                }
+
                 var query = """
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0\(extraCondition)
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and ms.message_id = m.message_id \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and ms.message_id = m.message_id\(extraCondition)
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and ms.message_id = m.message_id \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and ms.message_id = m.message_id\(extraCondition)
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and ms.message_id = m.message_id and m.is_call_center = 0\(extraCondition)
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id and m.is_call_center = 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0")
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id and m.is_call_center = 0\(extraCondition)
                             order by 6 desc
                             """
                 if !lastQuery.isEmpty {
                     query = "select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.credential, m.lock, m.audio_id, m.gif_id, m.l_pin, m.chat_id from MESSAGE m JOIN BUDDY b ON m.f_pin = b.f_pin where \(lastQuery) and m.is_call_center = 0 and m.credential <> '1' order by 6 desc"
+                } else if isUnread && !text.isEmpty {
+                    query = """
+                            select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, 0 pinned, m.is_bot, m.l_pin
+                            from MESSAGE m
+                            JOIN BUDDY b ON m.f_pin = b.f_pin
+                            where m.is_call_center = 0
+                              and (m.message_text LIKE '%\(text)%' OR b.first_name LIKE '%\(text)%' OR b.last_name LIKE '%\(text)%')
+                              and exists (select 1 from MESSAGE_SUMMARY ms where ms.l_pin = b.f_pin and ms.counter > 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0"))
+                            union all
+                            select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.f_name name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, 0 pinned, m.is_bot, m.l_pin
+                            from MESSAGE m
+                            JOIN GROUPZ b ON m.l_pin = b.group_id
+                            where m.is_call_center = 0
+                              and (m.message_text LIKE '%\(text)%' OR b.f_name LIKE '%\(text)%')
+                              and exists (select 1 from MESSAGE_SUMMARY ms where ms.l_pin = b.group_id and ms.counter > 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0"))
+                            union all
+                            select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, d.title name, c.image_id profile, '' official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, 0 pinned, m.is_bot, m.l_pin
+                            from MESSAGE m
+                            JOIN DISCUSSION_FORUM d ON m.l_pin = d.chat_id
+                            JOIN GROUPZ c ON d.group_id = c.group_id
+                            where m.is_call_center = 0
+                              and (m.message_text LIKE '%\(text)%' OR d.title LIKE '%\(text)%')
+                              and exists (select 1 from MESSAGE_SUMMARY ms where ms.l_pin = d.chat_id and ms.counter > 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0"))
+                            order by 6 desc
+                            """
                 }
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     while cursorData.next() {

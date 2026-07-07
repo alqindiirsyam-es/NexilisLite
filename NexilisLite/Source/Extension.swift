@@ -1414,8 +1414,8 @@ extension UIImageView {
         }
         currentURL = url
         let urlConfig = URLSessionConfiguration.default
-        let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
-        let session = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil)
+        let sessionDelegate = PinnedURLSessionNexilisDelegate()
+        let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
         let task = session.dataTask(with: url) { [weak self] data, response, error in
             self?.currentTask = nil
 

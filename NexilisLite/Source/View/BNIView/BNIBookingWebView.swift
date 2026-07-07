@@ -853,6 +853,14 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                 if isButtonEnabled {
                     SecureUserDefaults.shared.set(isButtonEnabled, forKey: "allowSpeech")
                     self.runVoice()
+                } else {
+                    let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow Speech Recognation permission in your settings".localized(), preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {_ in
+                        if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
+                            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                        }
+                    }))
+                    self.navigationController?.present(alert, animated: true, completion: nil)
                 }
             }
         }
@@ -860,7 +868,22 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     
     func runVoice() {
         if !audioEngine.isRunning {
+            let goAudioCall = Nexilis.checkMicPermission()
+            if !goAudioCall{
+                let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow microphone permission in your settings".localized(), preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {_ in
+                    if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
+                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                    }
+                }))
+                self.navigationController?.present(alert, animated: true, completion: nil)
+                return
+            }
             alertController = LibAlertController(title: "Start Recording".localized(), message: "Say something, I'm listening!".localized(), preferredStyle: .alert)
+            alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: {_ in
+                self.audioEngine.stop()
+                self.recognitionRequest?.endAudio()
+            }))
             self.present(alertController, animated: true)
             self.webView.evaluateJavaScript("toggleVoiceButton(true)")
             self.startRecording()
@@ -899,6 +922,8 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
 
             var isFinal = false
             var text = ""
+            
+            guard (self.alertController.presentingViewController != nil) else { return }
 
             if result != nil {
                 text = result?.bestTranscription.formattedString ?? ""

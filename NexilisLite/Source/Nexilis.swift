@@ -17,9 +17,10 @@ import NotificationBannerSwift
 import SDWebImage
 import CryptoKit
 import WebKit
+import CommonCrypto
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.6"
+    public static var cpaasVersion = "5.1.8"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -666,28 +667,29 @@ public class Nexilis: NSObject {
                             var jsonFAWithAlert: [[String: Any]] = []
                             var keyTemp = ""
                             var keyIvTemp = ""
+                            let metadataKeys: Set<String> = ["scr", "action", "alert_title", "alert_message"]
                             for jsonData in jsonArray {
-                                var tmp = jsonData as! [String: Any]
+                                guard var tmp = jsonData as? [String: Any] else { continue }
                                 tmp.removeValue(forKey: "action")
                                 if !tmp.keys.contains("secure_folder_encrypt_key") && !tmp.keys.contains("secure_folder_encrypt_key_iv") {
                                     jsonFAWithAlert.append(tmp)
                                 }
                                 tmp.removeValue(forKey: "alert_title")
                                 tmp.removeValue(forKey: "alert_message")
-                                if Array(tmp.keys)[0] != "secure_folder_encrypt_key" && Array(tmp.keys)[0] != "secure_folder_encrypt_key_iv" {
-                                    jsonFA[Array(tmp.keys)[0]] = Array(tmp.values)[0]
+
+                                let featureKeys = tmp.keys.filter { !metadataKeys.contains($0) }
+                                for featureKey in featureKeys where featureKey != "secure_folder_encrypt_key" && featureKey != "secure_folder_encrypt_key_iv" {
+                                    jsonFA[featureKey] = tmp[featureKey]
                                 }
-                                if jsonData["upload_max_retry"]! != nil {
-                                    let umr = jsonData["upload_max_retry"] as! String
+                                if let umr = jsonData["upload_max_retry"] as? String {
                                     Utils.setMaxRetryUpload(value: umr)
                                 }
-                                if jsonData["upload_max_time"]! != nil {
-                                    let umt = jsonData["upload_max_time"] as! String
+                                if let umt = jsonData["upload_max_time"] as? String {
                                     Utils.setMaxRetryTimeUpload(value: umt)
                                 }
-                                if jsonData["default_fb"]! != nil {
+                                if let df = jsonData["default_fb"]! as? String {
                                     if !Utils.getAfterConfigFB() {
-                                        Utils.setConfigModeFB(value: jsonData["default_fb"] as! String)
+                                        Utils.setConfigModeFB(value: df)
                                         DispatchQueue.main.async {
                                             if Nexilis.showFB {
                                                 Nexilis.floatingButton.removeFromSuperview()
@@ -698,12 +700,11 @@ public class Nexilis: NSObject {
                                         }
                                     }
                                 }
-                                if jsonData["authentication_duration"]! != nil {
-                                    let ad = jsonData["authentication_duration"] as! String
+                                if let ad = jsonData["authentication_duration"] as? String {
                                     Utils.setAuthenticationDuration(value: ad)
                                 }
-                                if jsonData["secure_folder_encrypt_key"]! != nil {
-                                    keyTemp = jsonData["secure_folder_encrypt_key"] as! String
+                                if let sfek = jsonData["secure_folder_encrypt_key"] as? String {
+                                    keyTemp = sfek
                                     if let dataKey = Data(base64Encoded: keyTemp, options: .ignoreUnknownCharacters) {
                                         FileEncryption.shared.aesKey = SymmetricKey(data: dataKey)
                                         if Utils.getSecureFolderOffline() == "0" {
@@ -717,8 +718,8 @@ public class Nexilis: NSObject {
                                         dispatch.leave()
                                     }
                                 }
-                                if jsonData["secure_folder_encrypt_key_iv"]! != nil {
-                                    keyIvTemp = jsonData["secure_folder_encrypt_key_iv"] as! String
+                                if let sfeki = jsonData["secure_folder_encrypt_key_iv"] as? String {
+                                    keyIvTemp = sfeki
                                     if let dataKey = Data(base64Encoded: keyIvTemp, options: .ignoreUnknownCharacters) {
                                         FileEncryption.shared.aesIV = dataKey
                                         if Utils.getSecureFolderOffline() == "0" {
@@ -728,8 +729,7 @@ public class Nexilis: NSObject {
                                         }
                                     }
                                 }
-                                if jsonData["secure_folder_offline"]! != nil {
-                                    let off = jsonData["secure_folder_offline"] as! String
+                                if let off = jsonData["secure_folder_offline"] as? String {
                                     Utils.setSecureFolderOffline(value: off)
                                     if off == "0" {
                                         Utils.setSecureFolderEncrypt(value: "")
@@ -739,40 +739,30 @@ public class Nexilis: NSObject {
                                         Utils.setSecureFolderEncryptIv(value: keyIvTemp)
                                     }
                                 }
-                                if jsonData["chatbot_greetings"]! != nil {
-                                    if let greeting = jsonData["chatbot_greetings"] as? String {
+                                if let greeting = jsonData["chatbot_greetings"] as? String {
 //                                        print("Chatbot greeting: \(greeting)")
-                                        Utils.setChatbotGreetings(value: greeting)
-                                    }
+                                    Utils.setChatbotGreetings(value: greeting)
                                 }
-                                if jsonData["mfa_signup"]! != nil {
-                                    if let data = jsonData["mfa_signup"] as? String {
+                                if let msu = jsonData["mfa_signup"] as? String {
 //                                        print("mfa_signup: \(data)")
-                                        Utils.setSignUpLevel(value: data)
-                                    }
+                                    Utils.setSignUpLevel(value: msu)
                                 }
-                                if jsonData["mfa_signin"]! != nil {
-                                    if let data = jsonData["mfa_signin"] as? String {
+                                if let msi = jsonData["mfa_signin"] as? String {
 //                                        print("mfa_signin: \(data)")
-                                        Utils.setSignInLevel(value: data)
-                                    }
+                                    Utils.setSignInLevel(value: msi)
                                 }
-                                if jsonData["mfa_trx"]! != nil {
-                                    if let data = jsonData["mfa_trx"] as? String {
+                                if let mt = jsonData["mfa_trx"] as? String {
 //                                        print("mfa_trx: \(data)")
-                                        let encoder = JSONEncoder()
-                                        encoder.outputFormatting = .prettyPrinted
-                                        let jsonData = try encoder.encode(data)
-                                        if let jsonString = String(data: jsonData, encoding: .utf8) {
-                                            Utils.setTxnLevel(value: jsonString)
-                                        }
+                                    let encoder = JSONEncoder()
+                                    encoder.outputFormatting = .prettyPrinted
+                                    let jsonData = try encoder.encode(mt)
+                                    if let jsonString = String(data: jsonData, encoding: .utf8) {
+                                        Utils.setTxnLevel(value: jsonString)
                                     }
                                 }
-                                if jsonData["enable_totp"]! != nil {
-                                    if let data = jsonData["enable_totp"] as? String {
-                                        if data == "1" {
-                                            Utils.setEnableTOTP(value: data)
-                                        }
+                                if let et = jsonData["enable_totp"] as? String {
+                                    if et == "1" {
+                                        Utils.setEnableTOTP(value: et)
                                     }
                                 }
                             }
@@ -825,8 +815,8 @@ public class Nexilis: NSObject {
                 return true
             }
         } else if let jsonArray = try? JSONSerialization.jsonObject(with: dataAccess.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-            if jsonArray[key] != nil {
-                return jsonArray[key] as! String == "1"
+            if let value = jsonArray[key] as? String {
+                return value == "1"
             } else {
                 if key == "sign_in_up_username" {
                     return true
@@ -1104,12 +1094,12 @@ public class Nexilis: NSObject {
         var result = [String]()
         let url = URL(string: "https://nexilis.io/dipp/NuN1v3rs3/Qm3r4i0/get_ip?account=\(apiKey)")!
         let urlConfig = URLSessionConfiguration.default
-        let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
+        let sessionDelegate = PinnedURLSessionNexilisDelegate()
         urlConfig.requestCachePolicy = .returnCacheDataElseLoad
         urlConfig.timeoutIntervalForRequest = 10.0
         urlConfig.timeoutIntervalForResource = 10.0
         let semaphore = DispatchSemaphore(value: 0)
-        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
+        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
             guard let data = data else {
                 semaphore.signal()
                 return
@@ -1151,12 +1141,12 @@ public class Nexilis: NSObject {
         let url = URL(string: Utils.getDomainOpr() + Utils.decrypt(str: "2?vpwqeec[pkcoqf{rk{vgi;2k6t5oS;5ut5x3PwP;rrkf") + apiKey)!
 //        print("URL: \(url)")
         let urlConfig = URLSessionConfiguration.default
-        let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
+        let sessionDelegate = PinnedURLSessionNexilisDelegate()
         urlConfig.requestCachePolicy = .returnCacheDataElseLoad
         urlConfig.timeoutIntervalForRequest = 10.0
         urlConfig.timeoutIntervalForResource = 10.0
         let semaphore = DispatchSemaphore(value: 0)
-        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
+        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
             guard let data = data,
                 let url = response?.url,
                 let httpResponse = response as? HTTPURLResponse,
@@ -1276,12 +1266,12 @@ public class Nexilis: NSObject {
         var result = false
         let url = URL(string: "\(newDomain)dipp/NuN1v3rs3/Qm3r4i0/get_ip_domain?account=\(Nexilis.sAPIKey)")!
         let urlConfig = URLSessionConfiguration.default
-        let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
+        let sessionDelegate = PinnedURLSessionNexilisDelegate()
         urlConfig.requestCachePolicy = .returnCacheDataElseLoad
         urlConfig.timeoutIntervalForRequest = 10.0
         urlConfig.timeoutIntervalForResource = 10.0
         let semaphore = DispatchSemaphore(value: 0)
-        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
+        let task = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil).dataTask(with: url) {(data, response, error) in
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 200 {
                     guard let url = response?.url,
@@ -5271,37 +5261,8 @@ public class SelfSignedURLSessionDelegate: NSObject, URLSessionTaskDelegate, URL
     }
 }
 
-public protocol PinValidatingNexilis: AnyObject {
-    func isPinnedHostSN(_ host: String) -> Bool
-    func serverTrustSN(_ trust: SecTrust, matchesPinnedSPKIForHost host: String) -> Bool
-    func reportPinningFailureSN(forHost host: String)
-}
-
-public protocol PinSetMatchingNexilis: AnyObject {
-    func matchesSN(trust: SecTrust) -> Bool
-}
-
-public enum NexilisConfiguration {
-
-    private(set) static weak var pinValidator:  PinValidatingNexilis?
-    private(set) static weak var pinSetMatcher: PinSetMatchingNexilis?
-    
-    public static func configure(
-        pinValidator:  PinValidatingNexilis,
-        pinSetMatcher: PinSetMatchingNexilis
-    ) {
-        Self.pinValidator  = pinValidator
-        Self.pinSetMatcher = pinSetMatcher
-    }
-}
-
 final class PinnedURLSessionNexilisDelegate: NSObject,
     URLSessionTaskDelegate, URLSessionDataDelegate {
-
-    // Ambil dari NexilisConfiguration — tidak perlu inject per-instance
-    private var pinValidator:  PinValidatingNexilis?  { NexilisConfiguration.pinValidator }
-    private var pinSetMatcher: PinSetMatchingNexilis? { NexilisConfiguration.pinSetMatcher }
-
     func urlSession(_ session: URLSession,
                     didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition,
@@ -5320,21 +5281,47 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
             return
         }
 
-        let host = challenge.protectionSpace.host
-
-        if let validator = pinValidator, validator.isPinnedHostSN(host) {
-            let spkiMatch  = validator.serverTrustSN(trust, matchesPinnedSPKIForHost: host)
-            let storeMatch = pinSetMatcher?.matchesSN(trust: trust) ?? false
-
-            if spkiMatch || storeMatch {
-                completionHandler(.useCredential, URLCredential(trust: trust))
-            } else {
-                validator.reportPinningFailureSN(forHost: host)
-                completionHandler(.cancelAuthenticationChallenge, nil)
-            }
+        guard let serverTrust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
             return
+        }
+        
+        if let publicKeyHash = extractPublicKeyHash(from: serverTrust) {
+            let domain = challenge.protectionSpace.host
+            let storedCertificate = Utils.getCertificatePinningWebview()
+            if let jsonData = storedCertificate.data(using: .utf8),
+               let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
+                if publicKeyHash == certJson[domain] {
+                    completionHandler(.useCredential, URLCredential(trust: serverTrust))
+                } else {
+                    completionHandler(.cancelAuthenticationChallenge, nil)
+                }
+            }
+        } else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
         }
 
         completionHandler(.useCredential, URLCredential(trust: trust))
+    }
+    
+    func extractPublicKeyHash(from serverTrust: SecTrust) -> String? {
+        guard let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else { return nil }
+        guard let publicKey = SecCertificateCopyKey(certificate) else { return nil }
+        
+        var error: Unmanaged<CFError>?
+        guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
+            return nil
+        }
+        
+        // Compute SHA-256 hash
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        publicKeyData.withUnsafeBytes {
+            _ = CC_SHA256($0.baseAddress, CC_LONG(publicKeyData.count), &hash)
+        }
+        
+        let hashData = Data(hash)
+        let base64Hash = hashData.base64EncodedString()
+        
+        return base64Hash
     }
 }

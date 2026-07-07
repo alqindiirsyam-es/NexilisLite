@@ -2923,11 +2923,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     @objc func keyboardWillShow(notification: NSNotification) {
         if self.viewIfLoaded?.window != nil && !isEditingMessage {
-//            if (self.constraintBottomAttachment.constant != 0.0) {
-//                self.constraintBottomAttachment.constant = 0.0
-//                self.viewSticker.removeConstraints(self.viewSticker.constraints)
-//                self.viewSticker.removeFromSuperview()
-//            }
             let info:NSDictionary = notification.userInfo! as NSDictionary
             let keyboardSize = (info[UIResponder.keyboardFrameEndUserInfoKey] as! NSValue).cgRectValue
             
@@ -2936,6 +2931,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
             if self.constraintBottomAttachment.constant != keyboardHeight || self.constraintViewTextField.constant != keyboardHeight - 60 {
+                if self.viewSticker.isDescendant(of: self.view) {
+                    self.constraintBottomAttachment.constant = 0.0
+                    self.viewSticker.removeConstraints(self.viewSticker.constraints)
+                    self.viewSticker.removeFromSuperview()
+                }
 //                self.constraintViewTextField.constant = keyboardHeight - 60
                 self.constraintBottomAttachment.constant = keyboardHeight
                 if self.contraintBottomMention.constant > 0 {
@@ -5007,8 +5007,8 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                     }
                 } else {
                     let urlConfig = URLSessionConfiguration.default
-                    let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
-                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil)
+                    let sessionDelegate = PinnedURLSessionNexilisDelegate()
+                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
                     let slp = SwiftLinkPreview(session: session,
                                    workQueue: SwiftLinkPreview.defaultWorkQueue,
                                    responseQueue: DispatchQueue.main,
@@ -5825,7 +5825,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         if dataMessages[indexPath!.row]["status"]  as? String ?? "" == "0" {
             children = [resend, delete]
         } else if isContactCenter {
-            if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
+            if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" || (!(dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty) {
                 children = [reply]
             }
             else {
@@ -9077,8 +9077,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 }
                 if dataURL.isEmpty {
                     let urlConfig = URLSessionConfiguration.default
-                    let sessionDelegate = NexilisConfiguration.pinSetMatcher != nil ? PinnedURLSessionNexilisDelegate() : SelfSignedURLSessionDelegate()
-                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate as? URLSessionDelegate, delegateQueue: nil)
+                    let sessionDelegate = PinnedURLSessionNexilisDelegate()
+                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
                     let slp = SwiftLinkPreview(session: session,
                                    workQueue: SwiftLinkPreview.defaultWorkQueue,
                                    responseQueue: DispatchQueue.main,
