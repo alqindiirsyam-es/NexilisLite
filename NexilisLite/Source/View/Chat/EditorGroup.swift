@@ -1749,6 +1749,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             case "image":
                 var config = PHPickerConfiguration()
                 config.filter = .images
+                config.selectionLimit = 10
                 config.preferredAssetRepresentationMode = .automatic
                 let picker = PHPickerViewController(configuration: config)
                 picker.delegate = self
@@ -1763,6 +1764,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             case "video":
                 var config = PHPickerConfiguration()
                 config.filter = .videos
+                config.selectionLimit = 10
                 config.preferredAssetRepresentationMode = .automatic
                 let picker = PHPickerViewController(configuration: config)
                 picker.delegate = self

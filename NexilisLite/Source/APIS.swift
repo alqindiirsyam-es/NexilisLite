@@ -83,6 +83,9 @@ public class APIS: NSObject {
                 print("Access database error: \(error.localizedDescription)")
             }
         })
+        DispatchQueue.main.async {
+            UIApplication.shared.applicationIconBadgeNumber = Int(counter ?? 0)
+        }
         return counter ?? 0
     }
     
@@ -1931,13 +1934,11 @@ public class APIS: NSObject {
                         
                         // simpan message
                         Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
+//                        PendingMessageStore.shared.remove(id)
                         ackAPN(id: id)
-                        PendingMessageStore.shared.remove(id)
-                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-                        
-//                        DispatchQueue.main.async {
-//                            UIApplication.shared.applicationIconBadgeNumber = Int(APIS.getTotalCounter())
-//                        }
+                        DispatchQueue.main.async {
+                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                        }
                     } else {
                         throw NSError(domain: "Invalid JSON", code: -1)
                     }
@@ -2376,7 +2377,7 @@ public class APIS: NSObject {
             }
         }
         checkDataForShareExtension()
-        UIApplication.shared.applicationIconBadgeNumber = 0
+//        UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         if Utils.getSecureFolderOffline() == "0" && afterEnterBackground && Database.shared.database == nil && Utils.getSetProfile() && !Utils.isHSAMode() {
             Database.recreateInstance()

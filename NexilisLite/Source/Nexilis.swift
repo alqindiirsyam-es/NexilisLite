@@ -20,7 +20,7 @@ import WebKit
 import CommonCrypto
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.8"
+    public static var cpaasVersion = "5.1.9"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -2754,6 +2754,47 @@ public class Nexilis: NSObject {
             })
         }
         return permissionCheck
+    }
+    
+    public static func disclaimerConsent(
+        isMic: Bool = true,
+        isCamera: Bool = true,
+        completion: @escaping (Bool) -> Void
+    ) {
+        let alert = UIAlertController(
+            title: "Disclaimer and Consent".localized(),
+            message: isMic && isCamera
+                ? "does not store, share, or assign your camera and microphone input to third parties under any circumstances.".localized()
+                : isMic
+                    ? "does not store, share, or assign your microphone input to third parties under any circumstances.".localized()
+                    : "does not store, share, or assign your camera input to third parties under any circumstances.".localized(),
+            preferredStyle: .alert
+        )
+
+        let okAction = UIAlertAction(title: "Accept".localized(), style: .default) { _ in
+            if isMic && isCamera {
+                Utils.setAcceptDisclaimerConsentMic(value: true)
+                Utils.setAcceptDisclaimerConsentCamera(value: true)
+            } else if isMic {
+                Utils.setAcceptDisclaimerConsentMic(value: true)
+            } else {
+                Utils.setAcceptDisclaimerConsentCamera(value: true)
+            }
+            completion(true)
+        }
+
+        let cancelAction = UIAlertAction(title: "Decline".localized(), style: .cancel) { _ in
+            completion(false)
+        }
+
+        alert.addAction(cancelAction)
+        alert.addAction(okAction)
+
+        if let nav = UIApplication.shared.visibleViewController?.navigationController {
+            nav.present(alert, animated: true)
+        } else {
+            UIApplication.shared.visibleViewController?.present(alert, animated: true)
+        }
     }
     
 //    public static func startTimer(){

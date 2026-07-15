@@ -366,6 +366,10 @@ class QmeraAudioViewController: UIViewController {
                 self.status.text = "The call was not answered"
                 self.end.isEnabled = false
                 Nexilis.stopRingbacktoneCall()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: {
+                    Nexilis.stopBusyCall()
+                    self.didEnd(sender: false)
+                })
                 
                 if self.callFCM {
                     guard let userPin = self.user?.pin else { return }
@@ -396,10 +400,6 @@ class QmeraAudioViewController: UIViewController {
                         }
                     }.value
                 }
-                
-                // Delay 3 detik lalu end
-                try await Task.sleep(seconds: 3)
-                self.didEnd(sender: false)
                 
             } catch is CancellationError {
 //                print("Task dibatalkan")

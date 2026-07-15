@@ -91,7 +91,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 x = 0
             }
             minWidth = fixMinWidth
-            thumbnailCollection.frame = CGRect(x: x, y: imagePreview.frame.height - 120, width: fixMinWidth, height: const)
+            thumbnailCollection.frame = CGRect(x: x, y: UIScreen.main.bounds.height - 120, width: fixMinWidth, height: const)
             thumbnailCollection.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "ThumbCell")
             thumbnailCollection.backgroundColor = .clear
             thumbnailCollection.showsHorizontalScrollIndicator = false

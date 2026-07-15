@@ -881,8 +881,21 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
             }
             alertController = LibAlertController(title: "Start Recording".localized(), message: "Say something, I'm listening!".localized(), preferredStyle: .alert)
             alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: {_ in
+                self.recognitionTask?.cancel()
+                self.recognitionTask = nil
+
                 self.audioEngine.stop()
+                self.audioEngine.inputNode.removeTap(onBus: 0)
                 self.recognitionRequest?.endAudio()
+                self.webView.evaluateJavaScript("toggleVoiceButton(false)")
+
+                self.recognitionRequest = nil
+                let audioSession = AVAudioSession.sharedInstance()
+                do {
+                    try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+                } catch {
+                    print("Failed to deactivate audio session")
+                }
             }))
             self.present(alertController, animated: true)
             self.webView.evaluateJavaScript("toggleVoiceButton(true)")

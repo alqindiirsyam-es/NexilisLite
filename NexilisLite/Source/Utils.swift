@@ -421,6 +421,28 @@ public final class Utils {
         return ""
     }
     
+    public static func setAcceptDisclaimerConsentMic(value: Bool) {
+        SecureUserDefaults.shared.set(value, forKey: "accept_disclaimer_consent_mic")
+    }
+
+    public static func acceptDisclaimerConsentMic() -> Bool {
+        if let value: Bool = SecureUserDefaults.shared.value(forKey: "accept_disclaimer_consent_mic") {
+            return value
+        }
+        return false
+    }
+    
+    public static func setAcceptDisclaimerConsentCamera(value: Bool) {
+        SecureUserDefaults.shared.set(value, forKey: "accept_disclaimer_consent_camera")
+    }
+
+    public static func acceptDisclaimerConsentCamera() -> Bool {
+        if let value: Bool = SecureUserDefaults.shared.value(forKey: "accept_disclaimer_consent_camera") {
+            return value
+        }
+        return false
+    }
+    
 //    public static func getMD5(string: String) -> Data {
 //        let length = Int(CC_MD5_DIGEST_LENGTH)
 //        let messageData = string.data(using:.utf8)!

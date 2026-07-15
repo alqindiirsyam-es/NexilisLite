@@ -791,23 +791,23 @@ extension QmeraStreamingViewController: LiveStreamingDelegate {
             let text = m[4].trimmingCharacters(in: .whitespaces)
             chats.append(StreamingChat(name: name, thumb: thumb, messageText: text))
         } else if state == 97 { // someone left
+            DispatchQueue.main.async {
+                self.countViewer.text = "\(Int(self.countViewer.text!)! - 1)"
+            }
             let m = message.split(separator: ",", omittingEmptySubsequences: false)
             let name = m[3].trimmingCharacters(in: .whitespaces)
             let thumb = m[2].trimmingCharacters(in: .whitespaces)
             let text = "Left".localized()
             chats.append(StreamingChat(name: name, thumb: thumb, messageText: text, isInfo: true))
-            DispatchQueue.main.async {
-                self.countViewer.text = "\(Int(self.countViewer.text!)! - 1)"
-            }
         } else if state == 98 { // someone join
+            DispatchQueue.main.async {
+                self.countViewer.text = "\(Int(self.countViewer.text!)! + 1)"
+            }
             let m = message.split(separator: ",", omittingEmptySubsequences: false)
             let name = m[3].trimmingCharacters(in: .whitespaces)
             let thumb = m[2].trimmingCharacters(in: .whitespaces)
             let text = "Joined".localized()
             chats.append(StreamingChat(name: name, thumb: thumb, messageText: text, isInfo: true))
-            DispatchQueue.main.async {
-                self.countViewer.text = "\(Int(self.countViewer.text!)! + 1)"
-            }
         }
     }
     

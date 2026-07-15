@@ -253,6 +253,15 @@ class QmeraVideoViewController: UIViewController {
                 }
                 Nexilis.stopRingbacktoneCall()
                 self.makeStateCall()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: {
+                    Nexilis.stopBusyCall()
+                    self.endAllCall()
+                    if self.isInisiator && !self.isPresent {
+                        self.navigationController?.popViewController(animated: true)
+                    } else {
+                        self.dismiss(animated: true, completion: nil)
+                    }
+                })
                 if self.callFCM {
                     // Pindah ke background untuk network call
                     let fPin = self.dataPerson[0]["f_pin"]!!
@@ -280,16 +289,6 @@ class QmeraVideoViewController: UIViewController {
                             }
                         }
                     }.value
-                }
-                
-                // Delay 3 detik lalu end
-                try await Task.sleep(seconds: 2)
-                Nexilis.stopBusyCall()
-                self.endAllCall()
-                if self.isInisiator && !self.isPresent {
-                    self.navigationController?.popViewController(animated: true)
-                } else {
-                    self.dismiss(animated: true, completion: nil)
                 }
                 
             } catch is CancellationError {

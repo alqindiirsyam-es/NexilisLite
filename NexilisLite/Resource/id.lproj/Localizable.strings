@@ -424,3 +424,7 @@
 "Restart Required" = "Perlu Memulai Ulang Aplikasi";
 "Oops! Something went wrong. Please restart the app to continue." = "Ups! Terjadi kesalahan. Silakan mulai ulang aplikasi untuk melanjutkan.";
 "Show Code" = "Tunjukkan Kode";
+"Disclaimer and Consent" = "Pernyataan dan Persetujuan";
+"does not store, share, or assign your microphone input to third parties under any circumstances." = "Tidak menyimpan, membagikan, atau memberikan akses rekaman mikrofon Anda kepada pihak ketiga dalam keadaan apa pun.";
+"does not store, share, or assign your camera and microphone input to third parties under any circumstances." = "Tidak menyimpan, membagikan, atau memberikan akses rekaman kamera maupun mikrofon Anda kepada pihak ketiga dalam keadaan apa pun.";
+"does not store, share, or assign your camera input to third parties under any circumstances." = "Tidak menyimpan, membagikan, atau memberikan akses rekaman kamera Anda kepada pihak ketiga dalam keadaan apa pun.";
