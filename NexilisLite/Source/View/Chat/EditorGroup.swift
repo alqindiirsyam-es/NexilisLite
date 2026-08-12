@@ -16,7 +16,7 @@ import SwiftLinkPreview
 import SDWebImage
 import PhotosUI
 
-public class EditorGroup: UIViewController, CLLocationManagerDelegate {
+public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGestureRecognizerDelegate, ChatBubbleContextMenuPresenting {
     @IBOutlet var wallpaperView: UIImageView!
     @IBOutlet var viewButton: UIView!
     @IBOutlet var constraintViewTextField: NSLayoutConstraint!
@@ -139,6 +139,48 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     private weak var lastContextMenuView: UIView?
     private var lastContextMenuInteraction: UIContextMenuInteraction?
+    // Fix: title/icon are readable back off a UIAction, its handler is not - so the
+    // handlers are kept here, keyed by the identifier chatMenuAction(...) stamps on each
+    // action, for ChatBubbleContextMenu's hand-drawn rows to invoke.
+    var contextMenuActionHandlers: [String: () -> Void] = [:]
+    var contextMenuActionSeed = 0
+    weak var longBubbleContextMenu: ChatBubbleContextMenu?
+    // Fix: moved here from inside `extension EditorGroup: UIContextMenuInteractionDelegate`
+    // - Swift does not allow stored properties inside extensions ("Extensions must
+    // not contain stored properties"), only in the main class/struct body.
+    // Fix: highlight is now potentially several small "chip" views (one per line the
+    // link's range spans - see highlightRects(for:in:)), not a single view, so a
+    // multi-line link gets one tightly-fitted highlight per line instead of one rect
+    // stretched across all of them.
+    private var currentLinkHighlightViews: [UIView] = []
+    // Fix: a plain UITapGestureRecognizer only cares about touch-down + touch-up +
+    // minimal movement - NOT duration - so it still recognizes (and fires
+    // handleMessageTextTap) the moment the finger lifts after a long press, even
+    // though containerMessage's UIContextMenuInteraction already recognized that same
+    // touch as a long-press and is presenting LinkActionSheetViewController. The two
+    // recognizers live on different views (messageText vs containerMessage), so
+    // there's no reliable, guaranteed-by-default UIKit exclusivity between them to
+    // lean on. This flag makes the "a long-press already handled this touch, don't
+    // also treat the finger-lift as a tap" relationship explicit instead of relying
+    // on gesture-arbitration timing that isn't guaranteed - set true the moment
+    // configurationForMenuAtLocation recognizes a link long-press (which always fires
+    // before the finger lifts), consumed (reset to false) by the very next tap.
+    private var suppressNextLinkTap = false
+    // Fix: dedicated token for the 5s safety-net reset that clears suppressNextLinkTap
+    // if nothing else consumed it (see handleLinkTouchHighlight). Deliberately
+    // separate from linkPressGeneration below - that one bumps on every touch
+    // end/cancel, which would make a generation-gated reset here basically never
+    // fire (defeating the point of a safety net). This token only changes when
+    // suppressNextLinkTap is actually set true, so a stale reset from an earlier
+    // press can tell it's stale (a newer press since changed the token) and skip,
+    // without needing to fire on every unrelated touch.
+    private var suppressLinkTapToken = 0
+    // Fix: identifies which touch-down "generation" a pending long-press
+    // timer belongs to (see handleLinkTouchHighlight) - incremented every time the
+    // finger lifts/moves off a link/a new touch begins, so a timer scheduled for an
+    // earlier touch that already ended can recognize it's stale and do nothing,
+    // instead of firing the action sheet for a touch that's no longer happening.
+    private var linkPressGeneration = 0
     
     private var readStatusTasks: [Task<Void, Never>] = []
     
@@ -300,6 +342,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         center.addObserver(self, selector: #selector(onReceiveMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil)
         center.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
         center.addObserver(self, selector: #selector(onUploadChat(notification:)), name: NSNotification.Name(rawValue: "onUploadChat"), object: nil)
+        // Fix: downloads broadcast their progress now, the same way uploads always
+        // have - so a transfer that was already running when this screen opened (or
+        // was started from another screen entirely) still drives the progress ring.
+        center.addObserver(self, selector: #selector(onDownloadChat(notification:)), name: Download.progressNotification, object: nil)
         center.addObserver(self, selector: #selector(onMemberTopic(notification:)), name: NSNotification.Name(rawValue: "onMember"), object: nil)
         center.addObserver(self, selector: #selector(onGroup(notification:)), name: NSNotification.Name(rawValue: "onGroup"), object: nil)
         center.addObserver(self, selector: #selector(onMemberTopic(notification:)), name: NSNotification.Name(rawValue: "onTopic"), object: nil)
@@ -1114,7 +1160,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         viewAppBar.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(seeProfileTapped)))
     }
     
-    func updateProgress(_ data: [AnyHashable: Any]){
+    // `useFakeProgress` - the upload path only hears from the server a couple of times
+    // per file, so it pads what it shows to keep the ring moving. A download reports
+    // real bytes continuously and must not be padded, or it would jump straight to
+    // full on its second callback (maxFakeProgMultip is 2).
+    func updateProgress(_ data: [AnyHashable: Any], useFakeProgress: Bool = true){
         var isImage = false
         var idx = dataMessages.lastIndex(where: { $0["video_id"] as? String == data["name"] as? String || $0["video_id"] as? String == data["video_id"] as? String })
         if (idx == nil) {
@@ -1132,10 +1182,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
             }
             DispatchQueue.main.async {
                 let indexPath = IndexPath(row: row!, section: section!)
-                if(self.fakeProgMultip < self.maxFakeProgMultip){
+                if useFakeProgress, self.fakeProgMultip < self.maxFakeProgMultip {
                     self.fakeProgMultip = self.fakeProgMultip + 1
                 }
-                let fakeProgress = Double(self.fakeProgMultip) * (100.0 / Double(self.maxFakeProgMultip))
+                let fakeProgress = useFakeProgress ? Double(self.fakeProgMultip) * (100.0 / Double(self.maxFakeProgMultip)) : 0.0
                 let progress = max(data["progress"] as! Double, fakeProgress)
                 if(data["progress"] as! Double == 100.0){
                     self.fakeProgMultip = 0
@@ -1188,10 +1238,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
                 }
                 DispatchQueue.main.async {
                     let indexPath = IndexPath(row: row!, section: section!)
-                    if(self.fakeProgMultip < self.maxFakeProgMultip){
+                    if useFakeProgress, self.fakeProgMultip < self.maxFakeProgMultip {
                         self.fakeProgMultip = self.fakeProgMultip + 1
                     }
-                    let fakeProgress = Double(self.fakeProgMultip) * (100.0 / Double(self.maxFakeProgMultip))
+                    let fakeProgress = useFakeProgress ? Double(self.fakeProgMultip) * (100.0 / Double(self.maxFakeProgMultip)) : 0.0
                     let progress = max(data["progress"] as! Double, fakeProgress)
                     if(data["progress"] as! Double == 100.0){
                         self.fakeProgMultip = 0
@@ -1229,8 +1279,43 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
         }
     }
     
+    @objc func onDownloadChat(notification: NSNotification) {
+        guard let data = notification.userInfo,
+              let progress = data["progress"] as? Double,
+              progress >= 0 else {
+            // Negative means the download failed; leave the ring where it stopped rather
+            // than driving it backwards.
+            return
+        }
+        if progress >= 100, let name = data["name"] as? String {
+            // Covers every kind of attachment, including the ones that never draw a ring
+            // (audio, thumbnails, gifs) - their cell just needs redrawing now the file is
+            // on disk, whichever screen it was that fetched it.
+            reloadMessageRow(withFileNamed: name)
+            return
+        }
+        // The ring cellForRow draws carries a name, so it can be found on whatever cell is
+        // showing the message right now - no guessing at subview positions, and nothing to
+        // do at all when the message is scrolled out of view (cellForRow will draw it at the
+        // right progress when it comes back).
+        if let name = data["name"] as? String {
+            updateTransferSize(forFileNamed: name)
+            if let indexPath = indexPathForMessage(withFileNamed: name),
+               let cell = tableChatView.cellForRow(at: indexPath),
+               ChatTransferRing.setProgress(progress, in: cell) {
+                return
+            }
+        }
+        // Bubbles whose ring predates all this - file attachments - are still driven the way
+        // uploads are.
+        updateProgress(data, useFakeProgress: false)
+    }
+
     @objc func onUploadChat(notification: NSNotification) {
         let data:[AnyHashable : Any] = notification.userInfo!
+        if let name = data["name"] as? String {
+            updateTransferSize(forFileNamed: name)
+        }
         updateProgress(data)
     }
     
@@ -1560,6 +1645,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate {
     
     func closeContextMenuIfNeeded() {
         DispatchQueue.main.async {
+            // Fix: the WhatsApp-style overlay is not a system menu, so removing the
+            // interaction below would leave it on screen - it has to be told to go.
+            self.longBubbleContextMenu?.dismiss(animated: true)
             guard let view = self.lastContextMenuView else { return }
 
             // If we have the original interaction instance, remove it.
@@ -3961,6 +4049,14 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         })
     }
     
+    // Fix: with messageText.isSelectable = false, UIKit no longer invokes this
+    // delegate method at all for any interaction type - link tap handling in
+    // UITextView is gated by isSelectable (same as text selection). It's left in
+    // place, unreachable in practice, purely as a defensive fallback in case that
+    // iOS behavior ever changes - the real logic now lives in
+    // handleMessageTextTap(_:) (taps, via a plain UITapGestureRecognizer) and
+    // contextMenuInteraction(_:configurationForMenuAtLocation:) (long-press, via
+    // containerMessage's UIContextMenuInteraction, presenting LinkActionSheetViewController).
     public func textView(_ textView: UITextView, shouldInteractWith URL: URL?, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
         var urlString: String?
 
@@ -3979,18 +4075,18 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
 
         switch interaction {
         case .invokeDefaultAction:
-            let gesture = ObjectGesture()
-            gesture.message_id = finalURL
-            tapMessageText(gesture)
+            showLinkHighlight(range: characterRange, in: textView)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.hideLinkHighlight()
+            }
+            LinkOpener.open(urlString: finalURL)
             return false
 
         case .presentActions:
-            UIPasteboard.general.string = finalURL
-            self.view.makeToast("Link Copied".localized(), duration: 3)
             return false
 
         case .preview:
-            return true
+            return false
 
         @unknown default:
             return true
@@ -4002,6 +4098,9 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willEndFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
         lastContextMenuView = nil
         lastContextMenuInteraction = nil
+        // The menu is going away and its UIActions own their handlers anyway - keeping the
+        // duplicates here would just be a strong reference back to self that outlives it.
+        contextMenuActionHandlers.removeAll()
         if showMenuContext {
             showMenuContext = false
             interaction.view!.removeInteraction(interaction)
@@ -4012,16 +4111,36 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         lastContextMenuView = interaction.view
         lastContextMenuInteraction = interaction
     }
-    
+
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        // Fix: this used to be where the "Open Link"/"Copy" sheet got triggered too
+        // (containerMessage's UIContextMenuInteraction recognizes a stationary hold
+        // reliably, at its own ~0.3-0.5s default threshold - not directly
+        // configurable via public API). That's now too fast for the requested
+        // "hold for a full second, like WhatsApp" behavior, so the actual timing +
+        // sheet-triggering moved to handleLinkTouchHighlight's own timer (LinkHighlighting.longPressThreshold)
+        // (tracked independently from the moment the finger touches down, via
+        // LinkTouchHighlightGesture). This delegate method now ONLY suppresses the
+        // bubble-wide Star/Reply/Forward/... menu when the touch is on a link -
+        // still necessary, since containerMessage's interaction still recognizes
+        // over links at its own faster threshold and would otherwise show that menu
+        // on top of things well before the threshold is reached.
+        if LinkHighlighting.linkHit(at: location, in: interaction.view) != nil {
+            return nil
+        }
+
         if textFieldSend.isFirstResponder {
             textFieldSend.resignFirstResponder()
         }
+        // Fix: these closures capture self strongly (they always have - they're the very
+        // same closures that used to go straight into UIAction), so the ones registered
+        // by the previous long-press are dropped here rather than piling up on self.
+        contextMenuActionHandlers.removeAll()
         let indexPath = self.tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: self.tableChatView))
         let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath!.section]})
         var star: UIAction
         if (dataMessages[indexPath!.row]["is_stared"]  as? String ?? "" == "0") {
-            star = UIAction(title: "Star".localized(), image: UIImage(systemName: "star"), handler: {(_) in
+            star = chatMenuAction(title: "Star".localized(), image: UIImage(systemName: "star"), handler: {(_) in
                 if self.removed {
                     return
                 }
@@ -4045,7 +4164,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil, userInfo: nil)
             })
         } else {
-            star = UIAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash"), handler: {(_) in
+            star = chatMenuAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash"), handler: {(_) in
                 if self.removed {
                     return
                 }
@@ -4070,7 +4189,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             })
         }
         
-        let reply = UIAction(title: "Reply".localized(), image: UIImage(systemName: "arrowshape.turn.up.left"), handler: {(_) in
+        let reply = chatMenuAction(title: "Reply".localized(), image: UIImage(systemName: "arrowshape.turn.up.left"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -4083,7 +4202,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         })
         var pin: UIAction
         if (dataMessages[indexPath!.row][TypeDataMessage.is_pinned] as? String ?? "0" == "0") {
-            pin = UIAction(title: "Pin".localized(), image: UIImage(systemName: "pin"), handler: {(_) in
+            pin = chatMenuAction(title: "Pin".localized(), image: UIImage(systemName: "pin"), handler: {(_) in
                 if self.removed {
                     return
                 }
@@ -4149,7 +4268,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 }
             })
         } else {
-            pin = UIAction(title: "Unpin".localized(), image: UIImage(systemName: "pin.slash"), handler: {(_) in
+            pin = chatMenuAction(title: "Unpin".localized(), image: UIImage(systemName: "pin.slash"), handler: {(_) in
                 if self.removed {
                     return
                 }
@@ -4168,7 +4287,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 })
             })
         }
-        let replyP = UIAction(title: "Reply Privately".localized(), image: UIImage(systemName: "arrowshape.turn.up.left"), handler: {(_) in
+        let replyP = chatMenuAction(title: "Reply Privately".localized(), image: UIImage(systemName: "arrowshape.turn.up.left"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -4205,7 +4324,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 }
             })
         })
-        let forward = UIAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right"), handler: {(_) in
+        let forward = chatMenuAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -4232,7 +4351,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.tableChatView.reloadData()
             }
         })
-        let copy = UIAction(title: "Copy".localized(), image: UIImage(systemName: "doc.on.doc"), handler: {(_) in
+        let copy = chatMenuAction(title: "Copy".localized(), image: UIImage(systemName: "doc.on.doc"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -4259,11 +4378,11 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.tableChatView.reloadData()
             }
         })
-        let edit = UIAction(title: "Edit".localized(), image: UIImage(systemName: "pencil.tip.crop.circle"), handler: {(_) in
+        let edit = chatMenuAction(title: "Edit".localized(), image: UIImage(systemName: "pencil.tip.crop.circle"), handler: {(_) in
             self.isEditingMessage = true
             self.showEditMessageView(at: indexPath!)
         })
-        let translate = UIAction(title: "Translate".localized(), image: UIImage(systemName: "t.bubble"), handler: {(_) in
+        let translate = chatMenuAction(title: "Translate".localized(), image: UIImage(systemName: "t.bubble"), handler: {(_) in
             self.view.makeToast("Translating...".localized(), duration: 3)
             var translation: String = "English"
             let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
@@ -4303,7 +4422,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 })
             }
         })
-        let gcs = UIAction(title: "Get Chat Suggestion".localized(), image: UIImage(systemName: "exclamationmark.bubble"), handler: {(_) in
+        let gcs = chatMenuAction(title: "Get Chat Suggestion".localized(), image: UIImage(systemName: "exclamationmark.bubble"), handler: {(_) in
             self.view.makeToast("Getting chat suggestion...".localized(), duration: 3)
             let payload: [String : Any] = [
                 "role": "user",
@@ -4339,7 +4458,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 })
             }
         })
-        let summarize = UIAction(title: "Summarize Chat".localized(), image: UIImage(systemName: "doc.text.magnifyingglass"), handler: {(_) in
+        let summarize = chatMenuAction(title: "Summarize Chat".localized(), image: UIImage(systemName: "doc.text.magnifyingglass"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -4367,7 +4486,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
         })
         let more = UIMenu(title: "More...".localized(), children: [translate, gcs, summarize])
-        let info = UIAction(title: "Info".localized(), image: UIImage(systemName: "info.circle"), handler: {(_) in
+        let info = chatMenuAction(title: "Info".localized(), image: UIImage(systemName: "info.circle"), handler: {(_) in
             if self.removed {
                 return
             }
@@ -4377,7 +4496,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             messageInfoVC.isPersonal = false
             self.navigationController?.pushViewController(messageInfoVC, animated: true)
         })
-        let delete = UIAction(title: "Delete".localized(), image: UIImage(systemName: "trash"), attributes: .destructive, handler: {(_) in
+        let delete = chatMenuAction(title: "Delete".localized(), image: UIImage(systemName: "trash"), attributes: .destructive, handler: {(_) in
             if self.removed {
                 return
             }
@@ -4405,7 +4524,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
         })
         
-        let resend = UIAction(title: "Resend".localized(), image: UIImage(systemName: "arrow.clockwise"), handler: {(_) in
+        let resend = chatMenuAction(title: "Resend".localized(), image: UIImage(systemName: "arrow.clockwise"), handler: {(_) in
             let messageId = dataMessages[indexPath!.row][TypeDataMessage.message_id]  as? String ?? ""
             let status = dataMessages[indexPath!.row][TypeDataMessage.status]  as? String ?? ""
             
@@ -4539,6 +4658,11 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         var menuForShow = UIMenu(title: "", children: [mainMenu])
         if isMore {
             menuForShow = UIMenu(title: "", children: [mainMenu, more])
+        }
+        // Fix: the menu is ours, not UIKit's - see presentBubbleContextMenu(for:elements:).
+        if let bubble = interaction.view,
+           presentBubbleContextMenu(for: bubble, elements: menuForShow.children) {
+            return nil
         }
         return UIContextMenuConfiguration(identifier: nil,
                                           previewProvider: nil) { _ in
@@ -5545,6 +5669,225 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             self.bottomAnchorPreviewReply.isActive = true
         }
     }
+
+    // Fix: linkHit/firstTextView/linkInfo/boundingRect moved to LinkHighlighting
+    // (LinkOpener.swift) - shared, stateless helpers also used by EditorPersonal and
+    // EditorStarMessages, so all three screens can't drift out of sync with each
+    // other on how link hit-testing/highlighting is computed.
+
+    // MARK: - Link long-press popup (WhatsApp-style: "Open Link" / "Copy")
+
+    // Fix: WhatsApp-style bottom sheet via UISheetPresentationController (iOS 15+),
+    // replacing the plain UIAlertController(style: .actionSheet). Called from
+    // configurationForMenuAtLocation once containerMessage's existing
+    // UIContextMenuInteraction reliably recognizes a long-press over a link (see the
+    // note above that method for why this routing, rather than a separate gesture
+    // recognizer on messageText, is what actually works consistently for a
+    // stationary press-and-hold).
+    private func presentLinkActionSheet(urlString: String, sourceView: UIView, sourceRect: CGRect) {
+        let openAction: () -> Void = { [weak self] in
+            let gesture = ObjectGesture()
+            gesture.message_id = urlString
+            self?.tapMessageText(gesture)
+        }
+        let copyAction: () -> Void = { [weak self] in
+            UIPasteboard.general.string = urlString
+            self?.view.makeToast("Link Copied".localized(), duration: 3)
+        }
+        // Fix: only offer "Open in Chrome" when Chrome is actually installed.
+        // canOpenURL against a custom scheme silently returns false unless that
+        // scheme is declared in Info.plist's LSApplicationQueriesSchemes - "googlechrome"
+        // was added there for exactly this check.
+        let chromeOpenURL = LinkHighlighting.chromeURL(for: urlString)
+        let chromeInstalled = chromeOpenURL.map { UIApplication.shared.canOpenURL($0) } ?? false
+        let openInChromeAction: (() -> Void)? = chromeInstalled ? { [weak self] in
+            guard let chromeOpenURL = chromeOpenURL else { return }
+            UIApplication.shared.open(chromeOpenURL, options: [:]) { success in
+                if !success {
+                    // Fix: fall back to the regular link-open flow if Chrome, despite
+                    // passing the canOpenURL check, fails to actually handle the URL.
+                    let gesture = ObjectGesture()
+                    gesture.message_id = urlString
+                    self?.tapMessageText(gesture)
+                }
+            }
+        } : nil
+
+        // Fix: UISheetPresentationController is iOS 15+ only (this project's
+        // deployment target is iOS 14 - see Podfile) - fall back to the plain
+        // UIAlertController action sheet on iOS 14 devices.
+        if #available(iOS 15.0, *) {
+            let sheetVC = LinkActionSheetViewController(urlString: urlString, onOpen: openAction, onCopy: copyAction, onOpenInChrome: openInChromeAction)
+            // Fix: hides the highlight no matter how the sheet was dismissed (an
+            // action tapped, or swiped away/tapped-outside with nothing chosen).
+            sheetVC.onDismissed = { [weak self] in self?.hideLinkHighlight() }
+
+            if let sheet = sheetVC.sheetPresentationController {
+                if #available(iOS 16.0, *) {
+                    let contentHeight = sheetVC.preferredContentHeight(forWidth: self.view.bounds.width)
+                    sheet.detents = [.custom(resolver: { _ in contentHeight })]
+                } else {
+                    // Fix: iOS 15 doesn't support custom-height detents - .medium()
+                    // is the closest available and will leave some empty space below
+                    // the content; this is a known, acceptable trade-off on iOS 15
+                    // only, resolved automatically once the device is on iOS 16+.
+                    sheet.detents = [.medium()]
+                }
+                sheet.prefersGrabberVisible = true
+                sheet.preferredCornerRadius = 16
+            }
+            present(sheetVC, animated: true)
+        } else {
+            let alert = UIAlertController(title: nil, message: urlString, preferredStyle: .actionSheet)
+            alert.addAction(UIAlertAction(title: "Open Link".localized(), style: .default) { [weak self] _ in
+                self?.hideLinkHighlight()
+                openAction()
+            })
+            if let openInChromeAction = openInChromeAction {
+                alert.addAction(UIAlertAction(title: "Open in Chrome".localized(), style: .default) { [weak self] _ in
+                    self?.hideLinkHighlight()
+                    openInChromeAction()
+                })
+            }
+            alert.addAction(UIAlertAction(title: "Copy".localized(), style: .default) { [weak self] _ in
+                self?.hideLinkHighlight()
+                copyAction()
+            })
+            alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel) { [weak self] _ in
+                self?.hideLinkHighlight()
+            })
+
+            // Fix: required on iPad (actionSheet crashes there without a popover
+            // anchor) - anchoring it to the link's own rect also means the popover
+            // arrow points straight at the link that was pressed.
+            if let popover = alert.popoverPresentationController {
+                popover.sourceView = sourceView
+                popover.sourceRect = sourceRect
+            }
+            present(alert, animated: true)
+        }
+    }
+
+    // Fix: chromeURL(for:)/highlightRects(for:in:) moved to LinkHighlighting
+    // (LinkOpener.swift) - see the note above linkHit/firstTextView/linkInfo/boundingRect.
+
+    // MARK: - Link touch highlight (shown/hidden on touch-down, tap, and long-press)
+
+    /// Shows the gray highlight over exactly `range`'s glyphs (per line, see
+    /// `LinkHighlighting.highlightRects(for:in:)`) - hides any other highlight first,
+    /// since only one link's popup/action can be active at a time anyway.
+    private func showLinkHighlight(range: NSRange, in textView: UITextView) {
+        hideLinkHighlight()
+        for rect in LinkHighlighting.highlightRects(for: range, in: textView) {
+            guard rect.width > 0, rect.height > 0 else { continue }
+            let chip = UIView(frame: rect.insetBy(dx: -2, dy: -1))
+            chip.backgroundColor = UIColor.systemGray.withAlphaComponent(0.35)
+            chip.layer.cornerRadius = 4
+            chip.isUserInteractionEnabled = false
+            textView.addSubview(chip)
+            currentLinkHighlightViews.append(chip)
+        }
+    }
+
+    private func hideLinkHighlight() {
+        for chip in currentLinkHighlightViews {
+            chip.removeFromSuperview()
+        }
+        currentLinkHighlightViews.removeAll()
+    }
+
+    // MARK: - Link touch-down highlight (instant, purely cosmetic)
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Fix: LinkTouchHighlightGesture only ever draws/erases a highlight - it must
+        // never block or compete with any other gesture (text taps, containerMessage's
+        // UIContextMenuInteraction, table view scrolling) for the same touch. Scoped
+        // to this one class so it doesn't change simultaneous-recognition behavior for
+        // any other gesture recognizer that might use `self` as a delegate elsewhere.
+        if gestureRecognizer is LinkTouchHighlightGesture || otherGestureRecognizer is LinkTouchHighlightGesture {
+            return true
+        }
+        return false
+    }
+
+    // Fix: this is where the "hold for 0.3s -> show LinkActionSheetViewController,
+    // otherwise it's a tap -> open link" decision is made - see the comment on
+    // configurationForMenuAtLocation for why that delegate method (containerMessage's
+    // UIContextMenuInteraction, whose own recognition threshold is a shorter,
+    // non-configurable ~0.3-0.5s) is no longer where the sheet gets triggered from.
+    // This gesture starts tracking from the very first instant of touch-down
+    // (minimumPressDuration = 0 on LinkTouchHighlightGesture), which is what makes
+    // timing an exact, deliberate duration from touch-down possible.
+    @objc private func handleLinkTouchHighlight(_ sender: LinkTouchHighlightGesture) {
+        guard let textView = sender.textView else { return }
+        let point = sender.location(in: textView)
+
+        switch sender.state {
+        case .began:
+            guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else { return }
+            showLinkHighlight(range: info.range, in: textView)
+
+            linkPressGeneration += 1
+            let thisGeneration = linkPressGeneration
+            let urlString = info.urlString
+            let range = info.range
+            DispatchQueue.main.asyncAfter(deadline: .now() + LinkHighlighting.longPressThreshold) { [weak self, weak textView] in
+                guard let self = self, let textView = textView else { return }
+                // Fix: only proceed if nothing happened to this touch since it began
+                // (finger lifted early = a tap, finger moved off the link, or a new
+                // touch started) - a stale timer for a touch that's already over must
+                // not fire the action sheet a second (or two) after the fact.
+                guard self.linkPressGeneration == thisGeneration else { return }
+                self.suppressNextLinkTap = true
+                self.suppressLinkTapToken += 1
+                let myToken = self.suppressLinkTapToken
+                // Fix: safety net - if the eventual finger-lift after this point
+                // never actually triggers handleMessageTextTap (can't be fully
+                // guaranteed without on-device testing), this flag would stay stuck
+                // true forever and silently swallow the NEXT unrelated tap on some
+                // other link. Auto-clear it after a few seconds if nothing consumed
+                // it by then (generous window since the user may keep holding/reading
+                // the sheet for a while before dismissing it). Gated on
+                // suppressLinkTapToken (NOT linkPressGeneration, which bumps on every
+                // touch end/cancel and would make this basically never fire) - so a
+                // stale reset here can't wrongly clear a flag that a SUBSEQUENT,
+                // unrelated long-press has since legitimately set true again.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                    guard let self = self, self.suppressLinkTapToken == myToken else { return }
+                    self.suppressNextLinkTap = false
+                }
+                self.presentLinkActionSheet(urlString: urlString, sourceView: textView, sourceRect: LinkHighlighting.boundingRect(for: range, in: textView))
+            }
+
+        case .changed:
+            if let info = LinkHighlighting.linkInfo(at: point, in: textView) {
+                showLinkHighlight(range: info.range, in: textView)
+            } else {
+                // Fix: finger dragged off the link before the threshold - this is no
+                // longer a press on this link at all, invalidate the pending timer
+                // (via the generation bump) so it doesn't fire late for a touch that
+                // moved elsewhere, and hide the highlight instantly - it must not
+                // linger on a spot the finger isn't over anymore.
+                hideLinkHighlight()
+                linkPressGeneration += 1
+            }
+
+        case .ended, .cancelled, .failed:
+            // Fix: hide the highlight the INSTANT the finger leaves the screen, no
+            // matter why (clean release, cancelled, failed) or what happens next
+            // (a quick tap opening the link, or a long-press that already triggered
+            // the action sheet) - matches WhatsApp, where the highlight tracks the
+            // finger's actual on-screen presence, not some artificial delay tied to
+            // what action follows. Unconditional now (previously deferred to
+            // whichever downstream flow "owned" the touch, which added a visible lag
+            // between finger-lift and the highlight actually disappearing).
+            linkPressGeneration += 1
+            hideLinkHighlight()
+
+        default:
+            break
+        }
+    }
 }
 
 extension EditorGroup: UICollectionViewDelegate, UICollectionViewDataSource {
@@ -5977,13 +6320,49 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         
         let messageText = UITextView()
         messageText.isEditable = false
-        messageText.isSelectable = true
+        // Fix: isSelectable = false (was true) - like WhatsApp, no drag-to-select or
+        // system text-selection UI on message text. Important side effect: a
+        // UITextView's OWN built-in link-tap handling (shouldInteractWith) is gated
+        // by isSelectable too - with it false, that delegate method never fires
+        // anymore, so link taps are now handled by the dedicated tapGesture below
+        // instead, entirely independent of isSelectable.
+        messageText.isSelectable = false
         messageText.dataDetectorTypes = [.link]
         messageText.backgroundColor = .clear
         messageText.isScrollEnabled = false
         messageText.textContainerInset = UIEdgeInsets.zero
         messageText.contentInset = UIEdgeInsets.zero
         messageText.textDragInteraction?.isEnabled = false
+        // Fix: route long-press link handling through containerMessage's EXISTING
+        // UIContextMenuInteraction instead of a separate gesture recognizer trying to
+        // compete with it - see `contextMenuInteraction(_:configurationForMenuAtLocation:)`,
+        // which presents LinkActionSheetViewController right when IT recognizes a
+        // long-press over a link (reliable, since that's the interaction that
+        // reliably wins), then returns nil so no actual context menu UI appears.
+        //
+        // Fix: with isSelectable = false, UITextView's own shouldInteractWith(...)
+        // never fires for taps anymore - this plain tap recognizer replaces it,
+        // entirely independent of isSelectable. Only acts when the tap actually lands
+        // on a detected link (via LinkHighlighting.linkHit(at:in:), same helper the long-press flow
+        // uses); taps elsewhere in the message text do nothing here.
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleMessageTextTap(_:)))
+        messageText.addGestureRecognizer(tapGesture)
+
+        // Fix: purely cosmetic - shows the highlight the instant a finger touches a
+        // link (minimumPressDuration = 0), rather than waiting for the tap gesture to
+        // recognize (finger-up) or the long-press threshold to be met. Never triggers
+        // an action itself, so it's safe for it to lose any gesture-arbitration race:
+        // if a competing recognizer wins and cancels it, the highlight it drew simply
+        // gets cleared, nothing else is affected either way. See LinkOpener.swift's
+        // LinkTouchHighlightGesture doc comment for more detail.
+        let touchHighlightGesture = LinkTouchHighlightGesture(target: self, action: #selector(handleLinkTouchHighlight(_:)))
+        touchHighlightGesture.minimumPressDuration = 0
+        touchHighlightGesture.textView = messageText
+        touchHighlightGesture.delegate = self
+        touchHighlightGesture.cancelsTouchesInView = false
+        touchHighlightGesture.delaysTouchesBegan = false
+        messageText.addGestureRecognizer(touchHighlightGesture)
+
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
         var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32)
@@ -6640,11 +7019,22 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         activityIndicator.centerXAnchor.constraint(equalTo: playButtonAudio.centerXAnchor),
                         activityIndicator.centerYAnchor.constraint(equalTo: playButtonAudio.centerYAnchor)
                     ])
-                    Download().startHTTP(forKey: audioChat) { (name, progress) in
-                        guard progress == 100 else {
-                            return
+                    // Fix: cellForRow runs again on every scroll pass, and each pass used to hand the
+                    // same file another completion to call - dozens of them by the time a transfer
+                    // finished, every one of them reloading the same row. The transfer that is already
+                    // running keeps the row up to date by itself now (see onDownloadChat).
+                    if !Download.isDownloading(forKey: audioChat) {
+                        Download().startHTTP(forKey: audioChat) { [weak self] (name, progress) in
+                            guard progress == 100 else {
+                                return
+                            }
+                            // Fix: was reloadRows(at: [indexPath]) against the table captured while the
+                            // cell was being built - by the time a download finishes, that index path may
+                            // belong to another message, or to no row at all.
+                            DispatchQueue.main.async {
+                                self?.reloadMessageRow(withFileNamed: name)
+                            }
                         }
-                        tableView.reloadRows(at: [indexPath], with: .none)
                     }
                 } else {
                     if !FileManager.default.fileExists(atPath: audioURL.path) {
@@ -6765,11 +7155,22 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                                 
                             }
                         } else {
-                            Download().startHTTP(forKey: listImages[i].thumbId) { (name, progress) in
-                                guard progress == 100 else {
-                                    return
+                            // Fix: cellForRow runs again on every scroll pass, and each pass used to hand the
+                            // same file another completion to call - dozens of them by the time a transfer
+                            // finished, every one of them reloading the same row. The transfer that is already
+                            // running keeps the row up to date by itself now (see onDownloadChat).
+                            if !Download.isDownloading(forKey: listImages[i].thumbId) {
+                                Download().startHTTP(forKey: listImages[i].thumbId) { [weak self] (name, progress) in
+                                    guard progress == 100 else {
+                                        return
+                                    }
+                                    // Fix: was reloadRows(at: [indexPath]) against the table captured while the
+                                    // cell was being built - by the time a download finishes, that index path may
+                                    // belong to another message, or to no row at all.
+                                    DispatchQueue.main.async {
+                                        self?.reloadMessageRow(withFileNamed: name)
+                                    }
                                 }
-                                tableView.reloadRows(at: [indexPath], with: .none)
                             }
                         }
                         
@@ -6932,11 +7333,22 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             
                         }
                     } else {
-                        Download().startHTTP(forKey: thumbChat) { (name, progress) in
-                            guard progress == 100 else {
-                                return
+                        // Fix: cellForRow runs again on every scroll pass, and each pass used to hand the
+                        // same file another completion to call - dozens of them by the time a transfer
+                        // finished, every one of them reloading the same row. The transfer that is already
+                        // running keeps the row up to date by itself now (see onDownloadChat).
+                        if !Download.isDownloading(forKey: thumbChat) {
+                            Download().startHTTP(forKey: thumbChat) { [weak self] (name, progress) in
+                                guard progress == 100 else {
+                                    return
+                                }
+                                // Fix: was reloadRows(at: [indexPath]) against the table captured while the
+                                // cell was being built - by the time a download finishes, that index path may
+                                // belong to another message, or to no row at all.
+                                DispatchQueue.main.async {
+                                    self?.reloadMessageRow(withFileNamed: name)
+                                }
                             }
-                            tableView.reloadRows(at: [indexPath], with: .none)
                         }
                     }
                     
@@ -6947,7 +7359,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
                         blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
                         imageThumb.addSubview(blurEffectView)
-                        if !imageChat.isEmpty {
+                        // Fix: while the image is actually downloading the progress ring stands in for
+                        // this button - they are both centred on the thumbnail and would overlap.
+                        if !imageChat.isEmpty, !Download.isDownloading(forKey: imageChat) {
                             let imageDownload = UIImageView(image: UIImage(systemName: "arrow.down.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .bold, scale: .default)))
                             imageThumb.addSubview(blurEffectView)
                             imageThumb.addSubview(imageDownload)
@@ -6966,7 +7380,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     
                 }
                 
-                if (videoChat != "" && gifChat.isEmpty) {
+                // Fix: same for the play button - the ring replaces it for as long as the video
+                // is being fetched.
+                if videoChat != "" && gifChat.isEmpty && !Download.isDownloading(forKey: videoChat) {
                     let imagePlay = UIImageView(image: UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold, scale: .default))?.imageWithInsets(insets: UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10))?.withTintColor(.white))
                     imagePlay.circle()
                     imageThumb.addSubview(imagePlay)
@@ -6981,11 +7397,22 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     if let dirPath = paths.first {
                         let gifURL = URL(fileURLWithPath: dirPath).appendingPathComponent(gifChat)
                         if !FileManager.default.fileExists(atPath: gifURL.path) && !FileEncryption.shared.isSecureExists(filename: gifChat) {
-                            Download().startHTTP(forKey: gifChat) { (name, progress) in
-                                guard progress == 100 else {
-                                    return
+                            // Fix: cellForRow runs again on every scroll pass, and each pass used to hand the
+                            // same file another completion to call - dozens of them by the time a transfer
+                            // finished, every one of them reloading the same row. The transfer that is already
+                            // running keeps the row up to date by itself now (see onDownloadChat).
+                            if !Download.isDownloading(forKey: gifChat) {
+                                Download().startHTTP(forKey: gifChat) { [weak self] (name, progress) in
+                                    guard progress == 100 else {
+                                        return
+                                    }
+                                    // Fix: was reloadRows(at: [indexPath]) against the table captured while the
+                                    // cell was being built - by the time a download finishes, that index path may
+                                    // belong to another message, or to no row at all.
+                                    DispatchQueue.main.async {
+                                        self?.reloadMessageRow(withFileNamed: name)
+                                    }
                                 }
-                                tableView.reloadRows(at: [indexPath], with: .none)
                             }
                         } else {
                             imageThumb.addSubview(imageGif)
@@ -7049,6 +7476,22 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     imageupload.leadingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: 10).isActive = true
                     imageupload.widthAnchor.constraint(equalToConstant: 20).isActive = true
                     imageupload.heightAnchor.constraint(equalToConstant: 20).isActive = true
+                    // Fix: the same caption as the download ring - how much of the file has gone up
+                    // so far, out of how much there is (TransferBytes, filled in by Network).
+                    let uploadingChat = !videoChat.isEmpty ? videoChat : imageChat
+                    let uploadChip = ChatTransferRing.addSizeLabel(to: imageThumb, fileName: uploadingChat)
+                    NSLayoutConstraint.activate([
+                        uploadChip.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                        uploadChip.leadingAnchor.constraint(equalTo: container.trailingAnchor, constant: 6)
+                    ])
+                }
+                
+                // Fix: the download ring is drawn from here now, not built by hand in
+                // contentMessageTapped - so it survives the cell being recycled, and shows up
+                // by itself on a transfer that was already running when this screen opened.
+                let downloadingChat = !videoChat.isEmpty ? videoChat : imageChat
+                if !downloadingChat.isEmpty, Download.isDownloading(forKey: downloadingChat) {
+                    ChatTransferRing.add(to: imageThumb, fileName: downloadingChat, progress: Download.progress(forKey: downloadingChat) ?? 0)
                 }
                 
                 if !copySession && !forwardSession && !deleteSession && !summarizeSession {
@@ -7193,6 +7636,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 imageupload.translatesAutoresizingMaskIntoConstraints = false
                 imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
                 imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
+                // Fix: the ring on a file bubble says how far along it is in bytes now, the
+                // same as the one on photos and videos. It hangs under the file name, which
+                // stays put - so a file that is merely not downloaded yet looks exactly as it
+                // always did, and the caption only takes up room once there is a size to show.
+                let transferSizeChip = ChatTransferRing.addSizeLabel(to: containerViewFile, fileName: fileChat, chromeless: true)
+                NSLayoutConstraint.activate([
+                    transferSizeChip.topAnchor.constraint(equalTo: nameFile.bottomAnchor, constant: 2),
+                    transferSizeChip.leadingAnchor.constraint(equalTo: nameFile.leadingAnchor)
+                ])
             } else {
                 nameFile.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5).isActive = true
             }
@@ -7957,27 +8409,20 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         print("Error reading secure file")
                     }
                 } else {
-                    for view in sender.imageView.subviews {
-                        if view is UIImageView {
-                            view.removeFromSuperview()
-                        }
-                    }
-                    let activityIndicator = UIActivityIndicatorView(style: .large)
-                    activityIndicator.color = .mainColor
-                    activityIndicator.hidesWhenStopped = true
-                    activityIndicator.center = CGPoint(x:sender.imageView.frame.width/2,
-                                                       y: sender.imageView.frame.height/2)
-                    activityIndicator.startAnimating()
-                    sender.imageView.addSubview(activityIndicator)
-                    Download().startHTTP(forKey: sender.image_id) { (name, progress) in
-                        guard progress == 100 else {
+                    // Fix: this used to put a spinner of its own on the bubble. The progress ring
+                    // cellForRow draws does that job now - for images as well as videos - so all this
+                    // has left to do is redraw the row once the file is here.
+                    Download().startHTTP(forKey: sender.image_id) { [weak self] (name, progress) in
+                        guard progress >= 100 || progress < 0 else {
                             return
                         }
                         DispatchQueue.main.async {
-                            activityIndicator.stopAnimating()
-                            self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
+                            self?.reloadMessageRow(withFileNamed: name)
                         }
                     }
+                    // Draw the row again so the ring appears straight away, at whatever progress the
+                    // transfer is already at.
+                    reloadMessageRow(withFileNamed: sender.image_id)
                 }
             }
         } else if (sender.gif_id != "") {
@@ -8025,58 +8470,36 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         
                     }
                 } else {
-                    if downloadList[sender.video_id] != nil && downloadList[sender.video_id] == sender.indexPath {
+                    // Fix: this also compared the index path, so the same file could be started
+                    // again from a row that had shifted, stacking a second progress ring on the
+                    // bubble. All that matters is whether this screen is already following it.
+                    if downloadList[sender.video_id] != nil {
                         return
                     }
                     downloadList[sender.video_id] = sender.indexPath
-                    for view in sender.imageView.subviews {
-                        if view is UIImageView {
-                            view.removeFromSuperview()
+                    // Fix: this used to build a progress ring by hand, onto the one cell instance that
+                    // had been tapped - lost the moment that cell was recycled. cellForRow draws it now,
+                    // and onDownloadChat moves it, so this only has to start the transfer.
+                    Download().startHTTP(forKey: sender.video_id) { [weak self] (name, progress) in
+                        guard progress >= 100 || progress < 0 else {
+                            return
                         }
-                    }
-                    let container = UIView()
-                    sender.imageView.addSubview(container)
-                    container.translatesAutoresizingMaskIntoConstraints = false
-                    container.centerXAnchor.constraint(equalTo: sender.imageView.centerXAnchor).isActive = true
-                    container.centerYAnchor.constraint(equalTo: sender.imageView.centerYAnchor).isActive = true
-                    container.widthAnchor.constraint(equalToConstant: 50).isActive = true
-                    container.heightAnchor.constraint(equalToConstant: 50).isActive = true
-                    let circlePath = UIBezierPath(arcCenter: CGPoint(x: 25, y: 25), radius: 20, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
-                    let trackShape = CAShapeLayer()
-                    trackShape.path = circlePath.cgPath
-                    trackShape.fillColor = UIColor.clear.cgColor
-                    trackShape.lineWidth = 10
-                    trackShape.strokeColor = UIColor.mentionColor.withAlphaComponent(0.3).cgColor
-                    container.backgroundColor = .clear
-                    container.layer.addSublayer(trackShape)
-                    let shapeLoading = CAShapeLayer()
-                    shapeLoading.path = circlePath.cgPath
-                    shapeLoading.fillColor = UIColor.clear.cgColor
-                    shapeLoading.lineWidth = 10
-                    shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.mentionColor.cgColor
-                    container.layer.addSublayer(shapeLoading)
-                    let imageDownload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
-                    imageDownload.tintColor = .white
-                    container.addSubview(imageDownload)
-                    imageDownload.translatesAutoresizingMaskIntoConstraints = false
-                    imageDownload.centerXAnchor.constraint(equalTo: sender.imageView.centerXAnchor).isActive = true
-                    imageDownload.centerYAnchor.constraint(equalTo: sender.imageView.centerYAnchor).isActive = true
-                    imageDownload.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                    imageDownload.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    Download().startHTTP(forKey: sender.video_id) { (name, progress) in
                         DispatchQueue.main.async {
-                            guard progress == 100 else {
-                                shapeLoading.strokeEnd = CGFloat(progress / 100)
+                            guard let self = self else {
                                 return
                             }
-                            let idx = self.dataMessages.firstIndex(where: { $0["video_id"]  as? String ?? "" == sender.video_id})
-                            if idx != nil {
-                                self.dataMessages[idx!]["progress"] = progress
-                                self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
+                            // A download that failed used to stay in downloadList forever, and the guard
+                            // above this call then swallowed every retry.
+                            self.downloadList.removeValue(forKey: name)
+                            if progress >= 100, let idx = self.dataMessages.firstIndex(where: { $0["video_id"] as? String ?? "" == name }) {
+                                self.dataMessages[idx]["progress"] = 100.0
                             }
+                            self.reloadMessageRow(withFileNamed: name)
                         }
                     }
+                    // Draw the row again so the ring appears straight away, at whatever progress the
+                    // transfer is already at.
+                    reloadMessageRow(withFileNamed: sender.video_id)
                 }
             }
         } else if (sender.file_id != "") {
@@ -8212,57 +8635,36 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         
                     }
                 } else {
-                    if downloadList[sender.file_id] != nil && downloadList[sender.file_id] == sender.indexPath {
+                    // Fix: this also compared the index path, so the same file could be started
+                    // again from a row that had shifted, stacking a second progress ring on the
+                    // bubble. All that matters is whether this screen is already following it.
+                    if downloadList[sender.file_id] != nil {
                         return
                     }
                     downloadList[sender.file_id] = sender.indexPath
-                    for view in sender.containerFile.subviews {
-                        if !(view is UIImageView) && !(view is UILabel) {
-                            view.removeFromSuperview()
+                    // Fix: this used to build a progress ring by hand, onto the one cell instance that
+                    // had been tapped - lost the moment that cell was recycled. cellForRow draws it now,
+                    // and onDownloadChat moves it, so this only has to start the transfer.
+                    Download().startHTTP(forKey: sender.file_id) { [weak self] (name, progress) in
+                        guard progress >= 100 || progress < 0 else {
+                            return
                         }
-                    }
-                    let containerLoading = UIView()
-                    sender.containerFile.addSubview(containerLoading)
-                    containerLoading.translatesAutoresizingMaskIntoConstraints = false
-                    containerLoading.centerYAnchor.constraint(equalTo: sender.containerFile.centerYAnchor).isActive = true
-                    containerLoading.leadingAnchor.constraint(equalTo: sender.labelFile.trailingAnchor, constant: 5).isActive = true
-                    containerLoading.trailingAnchor.constraint(equalTo: sender.containerFile.trailingAnchor, constant: -5).isActive = true
-                    containerLoading.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                    containerLoading.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    let circlePath = UIBezierPath(arcCenter: CGPoint(x: 15, y: 15), radius: 10, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
-                    let trackShape = CAShapeLayer()
-                    trackShape.path = circlePath.cgPath
-                    trackShape.fillColor = UIColor.clear.cgColor
-                    trackShape.lineWidth = 5
-                    trackShape.strokeColor = UIColor.mentionColor.withAlphaComponent(0.3).cgColor
-                    containerLoading.layer.addSublayer(trackShape)
-                    let shapeLoading = CAShapeLayer()
-                    shapeLoading.path = circlePath.cgPath
-                    shapeLoading.fillColor = UIColor.clear.cgColor
-                    shapeLoading.lineWidth = 3
-                    shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.mentionColor.cgColor
-                    containerLoading.layer.addSublayer(shapeLoading)
-                    let imageupload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
-                    imageupload.tintColor = .white
-                    containerLoading.addSubview(imageupload)
-                    imageupload.translatesAutoresizingMaskIntoConstraints = false
-                    imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
-                    imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
-                    
-                    Download().startHTTP(forKey: sender.file_id) { (name, progress) in
                         DispatchQueue.main.async {
-                            guard progress == 100 else {
-                                shapeLoading.strokeEnd = CGFloat(progress / 100)
+                            guard let self = self else {
                                 return
                             }
-                            let idx = self.dataMessages.firstIndex(where: { $0["file_id"]  as? String ?? "" == sender.file_id})
-                            if idx != nil {
-                                self.dataMessages[idx!]["progress"] = progress
-                                self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
+                            // A download that failed used to stay in downloadList forever, and the guard
+                            // above this call then swallowed every retry.
+                            self.downloadList.removeValue(forKey: name)
+                            if progress >= 100, let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as? String ?? "" == name }) {
+                                self.dataMessages[idx]["progress"] = 100.0
                             }
+                            self.reloadMessageRow(withFileNamed: name)
                         }
                     }
+                    // Draw the row again so the ring appears straight away, at whatever progress the
+                    // transfer is already at.
+                    reloadMessageRow(withFileNamed: sender.file_id)
                 }
             }
         } else {
@@ -8322,8 +8724,41 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         return mutableAttributedString
     }
         
+    // Fix: delegates to LinkOpener.swift - the single shared, corrected
+    // implementation also used by EditorPersonal, EditorStarMessages, ChatGPTBotView,
+    // and MessageInfo. See LinkOpener.swift for the full list of bugs fixed.
     @objc func tapMessageText(_ sender: ObjectGesture) {
         LinkOpener.open(urlString: sender.message_id)
+    }
+
+    // Fix: replaces UITextView's own shouldInteractWith(...) tap handling, which
+    // stopped firing once messageText.isSelectable was set to false (link tap
+    // handling in UITextView is gated by isSelectable, same as text selection) -
+    // this plain tap gesture is independent of that setting. Long-press is handled
+    // separately, timed by handleLinkTouchHighlight (see its doc comment), which
+    // presents LinkActionSheetViewController if held past the threshold.
+    //
+    // Fix: no longer touches the highlight at all - that's now owned entirely by
+    // handleLinkTouchHighlight, tied 1:1 to the finger's actual on-screen state
+    // (visible while touching a link, gone the instant it isn't), matching WhatsApp.
+    // This method's only job is deciding whether to open the link.
+    @objc private func handleMessageTextTap(_ sender: UITapGestureRecognizer) {
+        // Fix: a long-press that turned into LinkActionSheetViewController already
+        // set this flag before the finger lifted - this same finger-lift also
+        // satisfies a plain UITapGestureRecognizer's (very loose, duration-agnostic)
+        // recognition criteria, so without this check the link would open a second
+        // time right on top of the action sheet appearing. Consume-and-return: this
+        // tap is "spent" on the long-press that already happened, not a new one.
+        if suppressNextLinkTap {
+            suppressNextLinkTap = false
+            return
+        }
+
+        guard let textView = sender.view as? UITextView else { return }
+        let point = sender.location(in: textView)
+        guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else { return }
+
+        LinkOpener.open(urlString: info.urlString)
     }
     
     //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
@@ -8837,3 +9272,943 @@ extension EditorGroup: UISearchBarDelegate {
     }
 }
     
+
+// MARK: - WhatsApp-style context menu for very long message bubbles
+
+// Fix: EditorGroup, EditorPersonal and EditorStarMessages each build their own bubble menu
+// but need the very same plumbing around it - hand the handlers out of UIAction, work out
+// whether the bubble is too long for the system menu, and put up ChatBubbleContextMenu when
+// it is. That plumbing lives here once; the three screens only have to hold the state it
+// works on.
+protocol ChatBubbleContextMenuPresenting: UIViewController {
+    // Handlers of the actions in the menu currently being built, keyed by the identifier
+    // chatMenuAction(...) stamps on each one. Cleared whenever the menu goes away - these
+    // closures capture the view controller strongly.
+    var contextMenuActionHandlers: [String: () -> Void] { get set }
+    var contextMenuActionSeed: Int { get set }
+    var longBubbleContextMenu: ChatBubbleContextMenu? { get set }
+}
+
+extension ChatBubbleContextMenuPresenting {
+    // Fix: every UIAction in the bubble menu is now built through this instead of
+    // UIAction(...) directly, purely so the handler stays reachable afterwards: UIAction
+    // exposes no way to read (let alone invoke) the closure it was created with, and the
+    // WhatsApp-style menu in ChatBubbleContextMenu draws its own rows and therefore needs
+    // to be able to run the very same handlers. The action gets an explicit identifier
+    // and that identifier is what maps back to the closure here. Cleared on every new
+    // long-press (see configurationForMenuAtLocation) - these closures capture self
+    // strongly, exactly like they always have as UIAction handlers, so they must not be
+    // kept around any longer than the menu they belong to.
+    func chatMenuAction(title: String, image: UIImage? = nil, attributes: UIMenuElement.Attributes = [], handler: @escaping UIActionHandler) -> UIAction {
+        contextMenuActionSeed += 1
+        let identifier = UIAction.Identifier("nexilis.chat.menu.\(contextMenuActionSeed)")
+        let action = UIAction(title: title, image: image, identifier: identifier, attributes: attributes, handler: handler)
+        contextMenuActionHandlers[identifier.rawValue] = { handler(action) }
+        return action
+    }
+
+    // Fix: flattens the UIMenu tree that gets handed to UIKit into the plain model
+    // ChatBubbleContextMenu renders. Inline sections (mainMenu) are spliced in place, the
+    // way UIKit itself displays them; a real submenu ("More...") stays a submenu.
+    func chatContextMenuItems(from elements: [UIMenuElement]) -> [ChatContextMenuItem] {
+        var items: [ChatContextMenuItem] = []
+        for element in elements {
+            if let action = element as? UIAction {
+                items.append(ChatContextMenuItem(title: action.title,
+                                                 image: action.image,
+                                                 isDestructive: action.attributes.contains(.destructive),
+                                                 children: [],
+                                                 handler: contextMenuActionHandlers[action.identifier.rawValue]))
+            } else if let menu = element as? UIMenu {
+                let children = chatContextMenuItems(from: menu.children)
+                if menu.options.contains(.displayInline) {
+                    items.append(contentsOf: children)
+                } else {
+                    // A UIMenu carries no image of its own, so the submenu row would come
+                    // out bare - it gets the ellipsis the system menu uses for one.
+                    items.append(ChatContextMenuItem(title: menu.title,
+                                                     image: menu.image ?? UIImage(systemName: "ellipsis.circle"),
+                                                     isDestructive: false,
+                                                     children: children,
+                                                     handler: nil))
+                }
+            }
+        }
+        return items
+    }
+
+    // Fix: the bubble menu, for every message - the delegate returns nil so no system menu
+    // appears (the same trick the link long-press already uses) and this goes up instead.
+    //
+    // It started out as the long-message case only: UIKit always lays its menu out BELOW
+    // the preview and shrinks the preview to whatever room is left, which turns a wall of
+    // text into an unreadable sliver, so those needed a menu that floats over the message
+    // instead. Short bubbles now come here too, for the submenu: UIKit gives no control
+    // whatsoever over how it presents one ("More..." gets a back-button header nobody
+    // asked for), and the only way for "More..." to behave the same everywhere is for the
+    // menu to be the same everywhere. ChatBubbleContextMenu lays itself out to match -
+    // menu under the bubble when both fit, floating over it when they do not.
+    func presentBubbleContextMenu(for bubble: UIView, elements: [UIMenuElement]) -> Bool {
+        guard let host = bubble.window else {
+            return false
+        }
+        let bubbleSize = bubble.bounds.size
+        guard bubbleSize.width > 1, bubbleSize.height > 1 else {
+            return false
+        }
+        // Secure-folder bubbles live inside UITextField's secure canvas view (see
+        // SecureField.secureContainer), which UIKit deliberately keeps out of every kind
+        // of snapshot - rendering one would yield a blank sheet, so those keep the system
+        // menu no matter how long they are.
+        if type(of: bubble).description().contains("CanvasView") {
+            return false
+        }
+        let items = chatContextMenuItems(from: elements)
+        guard !items.isEmpty else {
+            return false
+        }
+        longBubbleContextMenu?.dismiss(animated: false)
+        guard let overlay = ChatBubbleContextMenu(bubble: bubble, items: items) else {
+            return false
+        }
+        overlay.onDismiss = { [weak self] in
+            self?.longBubbleContextMenu = nil
+            // These capture self strongly; the overlay is gone, so nothing should still be
+            // holding them (the row that was tapped keeps its own copy until it has run).
+            self?.contextMenuActionHandlers.removeAll()
+        }
+        longBubbleContextMenu = overlay
+        // Fix: the touch that summoned this menu is still live on the bubble underneath, and
+        // its tap recognizers are still tracking it. UIKit used to cancel them for us when it
+        // put its own menu up - now that the menu is ours, lifting the finger was reaching
+        // the thumbnail's tap recognizer and opening the photo (or playing the video) behind
+        // the menu. Cancelling them here is what the system menu did on our behalf before.
+        cancelPendingTouches(in: bubble)
+        overlay.present(in: host)
+        return true
+    }
+
+    // Toggling isEnabled cancels whatever a recognizer is currently tracking and makes it
+    // ignore the rest of that touch sequence, while leaving it armed for the next one. Only
+    // taps: the long-press recognizers are what put the menu up in the first place, and they
+    // finish on their own when the finger lifts. Buttons inside the bubble - the audio play
+    // button - track touches themselves rather than through a recognizer, and would fire on
+    // touch-up for the same reason, so their tracking is ended too.
+    private func cancelPendingTouches(in view: UIView) {
+        for recognizer in view.gestureRecognizers ?? [] where recognizer is UITapGestureRecognizer && recognizer.isEnabled {
+            recognizer.isEnabled = false
+            recognizer.isEnabled = true
+        }
+        if let control = view as? UIControl, control.isTracking {
+            control.cancelTracking(with: nil)
+        }
+        for subview in view.subviews {
+            cancelPendingTouches(in: subview)
+        }
+    }
+
+}
+
+
+// Fix: the plain model behind ChatBubbleContextMenu's hand-drawn rows. It exists because
+// UIAction keeps the closure it was built with private - there is no way to read it back,
+// so EditorGroup.chatMenuAction(...) registers each handler as it creates the action and
+// EditorGroup.chatContextMenuItems(from:) pairs the two up again into these.
+struct ChatContextMenuItem {
+    let title: String
+    let image: UIImage?
+    let isDestructive: Bool
+    // Non-empty only for a real submenu ("More..."); tapping such a row swaps the panel
+    // contents for its children instead of running anything.
+    let children: [ChatContextMenuItem]
+    let handler: (() -> Void)?
+}
+
+// Fix: the bubble menu for every message, replacing UIKit's own - see
+// ChatBubbleContextMenuPresenting.presentBubbleContextMenu(for:elements:) for why UIKit's
+// could not be kept. It matches the system menu it stands in for down to the measured
+// point (metrics below), and lays itself out the same way for an ordinary message: menu
+// under the bubble, bubble left where it is. For a message too long to fit alongside its
+// menu it does what UIKit cannot - the bubble stays at natural, readable size and the menu
+// floats over it, WhatsApp-style, instead of the whole message being scaled into a sliver.
+final class ChatBubbleContextMenu: UIView, UIGestureRecognizerDelegate, UIScrollViewDelegate {
+
+    // Fix: every number below was measured off a screenshot of the real system menu in
+    // this same chat, so this reads as the same control it replaced: 250pt wide, 42pt rows, 10pt of padding at each end of the platter, a
+    // section separator inset 24pt sitting in a 10 + 1 + 10 gap, titles at 65pt when the
+    // row has an icon and 30pt when it does not.
+    private enum Metrics {
+        static let bubbleTopMargin: CGFloat = 12
+        static let panelWidth: CGFloat = 250
+        static let panelCornerRadius: CGFloat = 26
+        static let rowHeight: CGFloat = 42
+        static let panelVerticalPadding: CGFloat = 10
+        static let sectionSpacing: CGFloat = 10
+        static let separatorHeight: CGFloat = 1
+        static let separatorInset: CGFloat = 24
+        static let screenMargin: CGFloat = 16
+        // Gap the system context menu leaves between its preview and the menu itself.
+        static let bubbleMenuSpacing: CGFloat = 8
+        static let iconLeading: CGFloat = 29
+        static let iconSize: CGFloat = 22
+        static let iconPointSize: CGFloat = 19
+        static let titleLeading: CGFloat = 65
+        static let titleLeadingWithoutIcon: CGFloat = 30
+        // Fix: the two offsets the menu hides/comes back at are deliberately different -
+        // with a single one, a finger resting right on the boundary would flicker the menu
+        // in and out. Coming back only at the very top also makes the rule easy to feel:
+        // the menu belongs to the top of the message, scroll away from it and it gets out
+        // of the way of the text it was covering.
+        static let panelHideOffset: CGFloat = 24
+        static let panelShowOffset: CGFloat = 2
+    }
+
+    // Measured off the system menu: its rim is not a dark hairline at all, it is a bright
+    // one - the highlight along the edge of the glass. On a light theme it reads as almost
+    // pure white against whatever is behind the platter.
+    private static let panelBorderColor = UIColor { traits in
+        return traits.userInterfaceStyle == .dark
+            ? UIColor.white.withAlphaComponent(0.18)
+            : UIColor.white.withAlphaComponent(0.90)
+    }
+
+    // Also measured: ~8% black over the platter, i.e. far lighter than UIColor.separator.
+    private static let separatorColor = UIColor { traits in
+        return traits.userInterfaceStyle == .dark
+            ? UIColor.white.withAlphaComponent(0.12)
+            : UIColor.black.withAlphaComponent(0.09)
+    }
+
+    private enum RowAction {
+        case back
+        case submenu(Int)
+        case run(() -> Void)
+        case none
+    }
+
+    var onDismiss: (() -> Void)?
+
+    private let backdrop = UIVisualEffectView(effect: nil)
+    private let bubbleScrollView = UIScrollView()
+    private let bubbleView = UIImageView()
+    // Fix: the blur has to be clipped to the rounded corners, a drop shadow must NOT be
+    // clipped - so they cannot live on the same view. The container carries the shadow
+    // (and, being the outer view, the frame/alpha/transform everything else animates).
+    private let panelContainer = UIView()
+    private let panel = UIVisualEffectView(effect: nil)
+    private let panelTint = UIView()
+    private let panelScrollView = UIScrollView()
+    private let rowsContainer = UIView()
+
+    private let bubbleSize: CGSize
+    private let bubbleOriginFrame: CGRect
+    private let alignRight: Bool
+    private let rootItems: [ChatContextMenuItem]
+    private var displayedItems: [ChatContextMenuItem]
+    // Fix: the submenu is left by tapping the very same row that opened it, drawn again at
+    // the bottom of the submenu - so this keeps hold of that row rather than a plain
+    // "is a submenu showing" flag.
+    private var submenuParent: ChatContextMenuItem?
+    private var rowActions: [RowAction] = []
+    private var rowsHeight: CGFloat = 0
+    private var isDismissing = false
+    private var isPanelHidden = false
+    // Set in layoutSubviews - see the placement comment there.
+    private var placesPanelBelowBubble = false
+
+    init?(bubble: UIView, items: [ChatContextMenuItem]) {
+        guard let window = bubble.window,
+              let snapshot = ChatBubbleContextMenu.snapshotImage(of: bubble) else {
+            return nil
+        }
+        bubbleSize = bubble.bounds.size
+        bubbleOriginFrame = bubble.convert(bubble.bounds, to: window)
+        // Which side the menu hangs off is just which side of the screen the bubble is on
+        // - outgoing messages sit right, incoming sit left, same as WhatsApp.
+        alignRight = bubbleOriginFrame.midX > window.bounds.midX
+        rootItems = items
+        displayedItems = items
+        super.init(frame: window.bounds)
+
+        bubbleView.image = snapshot
+        setUp()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // MARK: - Setup
+
+    private func setUp() {
+        backgroundColor = .clear
+
+        addSubview(backdrop)
+
+        bubbleScrollView.showsVerticalScrollIndicator = false
+        bubbleScrollView.showsHorizontalScrollIndicator = false
+        bubbleScrollView.contentInsetAdjustmentBehavior = .never
+        bubbleScrollView.backgroundColor = .clear
+        bubbleScrollView.delegate = self
+        bubbleScrollView.addSubview(bubbleView)
+        addSubview(bubbleScrollView)
+
+        // Fix: the thinnest material there is - the menu sits directly on top of the bubble,
+        // and anything thicker came out looking like just more white bubble. This is what
+        // gives the system context menu its glass: the content underneath stays visible
+        // through the blur instead of being painted over.
+        panel.effect = UIBlurEffect(style: .systemUltraThinMaterial)
+        panel.layer.cornerRadius = Metrics.panelCornerRadius
+        panel.layer.cornerCurve = .continuous
+        panel.clipsToBounds = true
+        // ...and on top of it a wash in the direction the system platter goes: frosted
+        // WHITE on a light theme (bright, not grey - the menu should read lighter than the
+        // bubble it covers), a dark wash on a dark theme so the rows stay legible. Partial
+        // alpha on purpose - it tints the glass rather than replacing it. 0.38 is what
+        // lands on the brightness the system menu measured at over the same chat; this is
+        // the one number to touch if the platter ever wants to be lighter or darker.
+        panelTint.backgroundColor = UIColor { traits in
+            return traits.userInterfaceStyle == .dark
+                ? UIColor.black.withAlphaComponent(0.18)
+                : UIColor.white.withAlphaComponent(0.38)
+        }
+        panelTint.isUserInteractionEnabled = false
+        panel.contentView.addSubview(panelTint)
+
+        panelContainer.backgroundColor = .clear
+        // The shadow does most of the work of separating menu from bubble - without it a
+        // translucent panel on top of a light bubble has no edge at all.
+        panelContainer.layer.shadowColor = UIColor.black.cgColor
+        panelContainer.layer.shadowOpacity = 0.14
+        panelContainer.layer.shadowRadius = 18
+        panelContainer.layer.shadowOffset = CGSize(width: 0, height: 6)
+        // Plus the bright rim along the edge of the glass, which is what actually draws the
+        // platter's outline in the system menu - 2px, so it stays a rim and not a frame.
+        // Resolved for real in present(in:): a CGColor cannot be dynamic, and up here there
+        // is no window to resolve it against yet.
+        panel.layer.borderWidth = 2.0 / UIScreen.main.scale
+        panelScrollView.showsVerticalScrollIndicator = false
+        panelScrollView.contentInsetAdjustmentBehavior = .never
+        panelScrollView.addSubview(rowsContainer)
+        panel.contentView.addSubview(panelScrollView)
+        panelContainer.addSubview(panel)
+        addSubview(panelContainer)
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleBackgroundTap))
+        tap.delegate = self
+        addGestureRecognizer(tap)
+
+        buildRows()
+    }
+
+    // MARK: - Rows
+
+    private func buildRows() {
+        rowsContainer.subviews.forEach({ $0.removeFromSuperview() })
+        rowActions.removeAll()
+
+        var rows: [(ChatContextMenuItem, RowAction, Bool)] = []
+        for (index, item) in displayedItems.enumerated() {
+            // A submenu row ("More...") is its own section in the system menu too, so it
+            // keeps the hairline that separated it there.
+            let startsSection = !item.children.isEmpty
+            let action: RowAction
+            if !item.children.isEmpty {
+                action = .submenu(index)
+            } else if let handler = item.handler {
+                action = .run(handler)
+            } else {
+                action = .none
+            }
+            rows.append((item, action, startsSection))
+        }
+        // Fix: no "Back" row - the way out of a submenu is the identical "More..." row it
+        // was opened from, in the identical place (own section, bottom of the platter), so
+        // every level of the menu looks the same and the row just toggles.
+        if let parent = submenuParent {
+            rows.append((parent, .back, true))
+        }
+
+        // The platter breathes at both ends - the system menu leaves 10pt above its first
+        // row and below its last one, and without that the rows look crammed against the
+        // rounded corners.
+        var y: CGFloat = Metrics.panelVerticalPadding
+        let width = panelWidthForCurrentBounds()
+        for (item, action, startsSection) in rows {
+            if startsSection && y > Metrics.panelVerticalPadding {
+                // 10pt - hairline - 10pt, and inset from both edges, exactly like the
+                // section separator in the system menu.
+                y += Metrics.sectionSpacing
+                let separator = UIView(frame: CGRect(x: Metrics.separatorInset,
+                                                     y: y,
+                                                     width: max(0, width - Metrics.separatorInset * 2),
+                                                     height: Metrics.separatorHeight))
+                separator.backgroundColor = ChatBubbleContextMenu.separatorColor
+                separator.autoresizingMask = [.flexibleWidth]
+                rowsContainer.addSubview(separator)
+                y += Metrics.separatorHeight + Metrics.sectionSpacing
+            }
+            let row = makeRow(item)
+            row.frame = CGRect(x: 0, y: y, width: width, height: Metrics.rowHeight)
+            row.autoresizingMask = [.flexibleWidth]
+            row.tag = rowActions.count
+            row.addTarget(self, action: #selector(handleRowTap(_:)), for: .touchUpInside)
+            rowsContainer.addSubview(row)
+            rowActions.append(action)
+            y += Metrics.rowHeight
+        }
+        rowsHeight = y + Metrics.panelVerticalPadding
+        setNeedsLayout()
+    }
+
+    private func makeRow(_ item: ChatContextMenuItem) -> UIControl {
+        let row = MenuRow(frame: .zero)
+        row.titleLabel.text = item.title
+        row.iconView.image = item.image
+        row.hasIcon = item.image != nil
+        let tint: UIColor = item.isDestructive ? .systemRed : .label
+        row.titleLabel.textColor = tint
+        row.iconView.tintColor = tint
+        return row
+    }
+
+    private func panelWidthForCurrentBounds() -> CGFloat {
+        return min(Metrics.panelWidth, bounds.width - Metrics.screenMargin * 2)
+    }
+
+    // MARK: - Layout
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        backdrop.frame = bounds
+
+        let safeTop = safeAreaInsets.top > 0 ? safeAreaInsets.top : 20
+        let safeBottom = safeAreaInsets.bottom
+        let topLimit = safeTop + Metrics.bubbleTopMargin
+        let bottomLimit = bounds.height - max(safeBottom, Metrics.screenMargin)
+
+        let panelWidth = panelWidthForCurrentBounds()
+        let maxPanelHeight = max(Metrics.rowHeight * 3, bottomLimit - topLimit - 80)
+        let panelHeight = min(rowsHeight, maxPanelHeight)
+
+        // Fix: two placements, picked by whether the whole bubble and the whole menu fit on
+        // screen together.
+        //
+        // They do (an ordinary short message): the menu goes directly UNDER the bubble and
+        // the bubble stays where it is in the chat, exactly like the system context menu -
+        // it only gets pushed up if the menu would not otherwise fit below it.
+        //
+        // They do not (a wall of text): the bubble goes to the top at full size and the
+        // menu floats over its lower half, anchored to the bottom of the screen - the
+        // WhatsApp behaviour. Scrolling the message then slides the menu out of the way,
+        // see scrollViewDidScroll(_:).
+        let fitsTogether = bubbleSize.height + Metrics.bubbleMenuSpacing + panelHeight <= bottomLimit - topLimit
+        placesPanelBelowBubble = fitsTogether
+
+        let bubbleTop: CGFloat
+        let bubbleViewportHeight: CGFloat
+        let panelY: CGFloat
+        if fitsTogether {
+            let highestTop = bottomLimit - panelHeight - Metrics.bubbleMenuSpacing - bubbleSize.height
+            bubbleTop = min(max(bubbleOriginFrame.minY, topLimit), highestTop)
+            bubbleViewportHeight = bubbleSize.height
+            panelY = bubbleTop + bubbleSize.height + Metrics.bubbleMenuSpacing
+        } else {
+            bubbleTop = topLimit
+            bubbleViewportHeight = max(0, bounds.height - bubbleTop)
+            panelY = bottomLimit - panelHeight
+        }
+
+        // Frames have to be assigned with the entrance/exit transform temporarily undone -
+        // UIView.frame is meaningless while a transform is applied.
+        withoutTransform(bubbleScrollView) {
+            bubbleScrollView.frame = CGRect(x: bubbleOriginFrame.minX,
+                                            y: bubbleTop,
+                                            width: bubbleSize.width,
+                                            height: bubbleViewportHeight)
+        }
+        bubbleView.frame = CGRect(origin: .zero, size: bubbleSize)
+        bubbleScrollView.contentSize = bubbleSize
+        bubbleScrollView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: fitsTogether ? 0 : safeBottom, right: 0)
+        bubbleScrollView.isScrollEnabled = bubbleSize.height > bubbleScrollView.bounds.height
+
+        // The menu grows out of the corner nearest the bubble - its top corner when it
+        // hangs below the bubble, its bottom corner when it sits over one.
+        let anchorPoint = CGPoint(x: alignRight ? 1.0 : 0.0, y: fitsTogether ? 0.0 : 1.0)
+        if panelContainer.layer.anchorPoint != anchorPoint {
+            panelContainer.layer.anchorPoint = anchorPoint
+        }
+        var panelX = alignRight ? bubbleOriginFrame.maxX - panelWidth : bubbleOriginFrame.minX
+        panelX = min(max(panelX, Metrics.screenMargin), bounds.width - Metrics.screenMargin - panelWidth)
+        withoutTransform(panelContainer) {
+            panelContainer.frame = CGRect(x: panelX,
+                                          y: panelY,
+                                          width: panelWidth,
+                                          height: panelHeight)
+        }
+        panel.frame = panelContainer.bounds
+        panelContainer.layer.shadowPath = UIBezierPath(roundedRect: panelContainer.bounds,
+                                                       cornerRadius: Metrics.panelCornerRadius).cgPath
+        panelTint.frame = panel.contentView.bounds
+        panelScrollView.frame = panel.contentView.bounds
+        rowsContainer.frame = CGRect(x: 0, y: 0, width: panelWidth, height: rowsHeight)
+        panelScrollView.contentSize = CGSize(width: panelWidth, height: rowsHeight)
+        panelScrollView.isScrollEnabled = rowsHeight > panelHeight
+    }
+
+    private func withoutTransform(_ view: UIView, _ body: () -> Void) {
+        let transform = view.transform
+        view.transform = .identity
+        body()
+        view.transform = transform
+    }
+
+    // MARK: - Present / dismiss
+
+    func present(in host: UIView) {
+        frame = host.bounds
+        autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        host.addSubview(self)
+        // Now that there is a window to inherit traits from, the hairline can be resolved
+        // for the appearance actually in use.
+        panel.layer.borderColor = ChatBubbleContextMenu.panelBorderColor.resolvedColor(with: traitCollection).cgColor
+        layoutIfNeeded()
+
+        // The bubble starts exactly where the real one is in the chat and slides into
+        // place, so the message never appears to jump to somewhere it never was.
+        bubbleScrollView.transform = CGAffineTransform(translationX: 0,
+                                                       y: bubbleOriginFrame.minY - bubbleScrollView.frame.minY)
+        panelContainer.alpha = 0
+        panelContainer.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0, options: [.allowUserInteraction], animations: {
+            self.backdrop.effect = UIBlurEffect(style: .systemThinMaterial)
+            self.bubbleScrollView.transform = .identity
+        })
+        UIView.animate(withDuration: 0.22, delay: 0.06, options: [.allowUserInteraction, .curveEaseOut], animations: {
+            self.panelContainer.alpha = 1
+            self.panelContainer.transform = .identity
+        })
+    }
+
+    func dismiss(animated: Bool, completion: (() -> Void)? = nil) {
+        guard !isDismissing else {
+            return
+        }
+        isDismissing = true
+        let finish: () -> Void = { [weak self] in
+            self?.removeFromSuperview()
+            self?.onDismiss?()
+            completion?()
+        }
+        guard animated else {
+            finish()
+            return
+        }
+        // Sliding back to where the bubble came from only makes sense while the preview is
+        // still at the top of the message; once it has been scrolled, that position no
+        // longer corresponds to anything on screen, so it just fades.
+        let returnsHome = bubbleScrollView.contentOffset.y <= 0.5
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn], animations: {
+            self.backdrop.effect = nil
+            self.panelContainer.alpha = 0
+            self.panelContainer.transform = CGAffineTransform(scaleX: 0.85, y: 0.85)
+            self.bubbleScrollView.alpha = 0
+            if returnsHome {
+                self.bubbleScrollView.transform = CGAffineTransform(translationX: 0,
+                                                                    y: self.bubbleOriginFrame.minY - self.bubbleScrollView.frame.minY)
+            }
+        }, completion: { _ in
+            finish()
+        })
+    }
+
+    // MARK: - Actions
+
+    @objc private func handleBackgroundTap() {
+        dismiss(animated: true)
+    }
+
+    @objc private func handleRowTap(_ sender: UIControl) {
+        guard sender.tag >= 0, sender.tag < rowActions.count else {
+            return
+        }
+        switch rowActions[sender.tag] {
+        case .back:
+            submenuParent = nil
+            displayedItems = rootItems
+            swapRows()
+        case .submenu(let index):
+            guard index < displayedItems.count else {
+                return
+            }
+            submenuParent = displayedItems[index]
+            displayedItems = displayedItems[index].children
+            swapRows()
+        case .run(let handler):
+            // The handler runs only once the overlay is gone: several of them push view
+            // controllers or start a selection session, and neither should happen while a
+            // full-screen overlay is still sitting on top of the chat.
+            dismiss(animated: true, completion: handler)
+        case .none:
+            dismiss(animated: true)
+        }
+    }
+
+    private func swapRows() {
+        UIView.transition(with: panel, duration: 0.2, options: [.transitionCrossDissolve], animations: {
+            self.buildRows()
+            self.layoutIfNeeded()
+        })
+    }
+
+    // MARK: - Reading the message underneath the menu
+
+    // Fix: the menu deliberately covers the lower part of the bubble, which is fine for
+    // picking an action but in the way the moment you actually want to read the message.
+    // So it steps aside as soon as the preview is scrolled down, and comes back once the
+    // message is scrolled all the way back to the top - the position it was anchored to
+    // in the first place.
+    public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView === bubbleScrollView, !isDismissing else {
+            return
+        }
+        // Only when the menu is actually covering the message. Below a short bubble it
+        // covers nothing, and there is nothing to scroll away from either.
+        guard !placesPanelBelowBubble else {
+            return
+        }
+        let offset = scrollView.contentOffset.y
+        if !isPanelHidden && offset > Metrics.panelHideOffset {
+            setPanelHidden(true)
+        } else if isPanelHidden && offset <= Metrics.panelShowOffset {
+            setPanelHidden(false)
+        }
+    }
+
+    private func setPanelHidden(_ hidden: Bool) {
+        guard hidden != isPanelHidden else {
+            return
+        }
+        isPanelHidden = hidden
+        // While it is out of the way it must not swallow taps either - see
+        // gestureRecognizer(_:shouldReceive:), which lets a tap in that area dismiss.
+        panelContainer.isUserInteractionEnabled = !hidden
+        // beginFromCurrentState so flicking up and straight back down picks up wherever
+        // the previous animation had got to instead of snapping.
+        UIView.animate(withDuration: hidden ? 0.18 : 0.22,
+                       delay: 0,
+                       options: [.allowUserInteraction, .beginFromCurrentState, hidden ? .curveEaseIn : .curveEaseOut],
+                       animations: {
+            self.panelContainer.alpha = hidden ? 0 : 1
+            // Shrinks towards the corner it grew out of, same as the entrance.
+            self.panelContainer.transform = hidden ? CGAffineTransform(scaleX: 0.94, y: 0.94) : .identity
+        })
+    }
+
+    // MARK: - UIGestureRecognizerDelegate
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // Tapping the bubble (or the dimmed chat behind it) dismisses; tapping the menu
+        // itself must reach the rows - unless it has stepped aside for scrolling, in which
+        // case that area is just more bubble.
+        if isPanelHidden {
+            return true
+        }
+        return !panelContainer.frame.contains(touch.location(in: self))
+    }
+
+    // MARK: - Snapshot
+
+    private static func snapshotImage(of view: UIView) -> UIImage? {
+        let size = view.bounds.size
+        guard size.width > 1, size.height > 1 else {
+            return nil
+        }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = false
+        // A wall of text is easily a few thousand points tall, and at 3x that turns into a
+        // 100MB+ bitmap - so past a sane pixel budget the scale gets dialled back. Only the
+        // extreme messages ever hit this, and they are the ones being skimmed anyway.
+        let maxPixels: CGFloat = 12_000_000
+        let pixels = size.width * size.height * format.scale * format.scale
+        if pixels > maxPixels {
+            format.scale = max(1.0, format.scale * sqrt(maxPixels / pixels))
+        }
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            // layer.render, not drawHierarchy: most of a long bubble is scrolled off screen
+            // and drawHierarchy(afterScreenUpdates: false) can come back blank for parts the
+            // render server never had to draw. Walking the layer tree by hand always draws
+            // everything, which is exactly what a full-length snapshot needs.
+            view.layer.render(in: context.cgContext)
+        }
+    }
+
+    // MARK: - Row
+
+    private final class MenuRow: UIControl {
+        let titleLabel = UILabel()
+        let iconView = UIImageView()
+        // A row with no icon pulls its title over to where the icon would have started -
+        // that is what the system menu does with an icon-less row.
+        var hasIcon = true
+
+        private let highlightView = UIView()
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            highlightView.backgroundColor = UIColor.label.withAlphaComponent(0.1)
+            highlightView.alpha = 0
+            highlightView.isUserInteractionEnabled = false
+            addSubview(highlightView)
+
+            titleLabel.font = .systemFont(ofSize: 17)
+            titleLabel.isUserInteractionEnabled = false
+            addSubview(titleLabel)
+
+            // .center with an explicit symbol configuration, not .scaleAspectFit: the icons
+            // must all be drawn at one size (like a font), not stretched to whatever box
+            // each one happens to be given.
+            iconView.contentMode = .center
+            iconView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: Metrics.iconPointSize, weight: .regular)
+            iconView.isUserInteractionEnabled = false
+            addSubview(iconView)
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override var isHighlighted: Bool {
+            didSet {
+                highlightView.alpha = isHighlighted ? 1 : 0
+            }
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            highlightView.frame = bounds
+            iconView.frame = CGRect(x: Metrics.iconLeading,
+                                    y: (bounds.height - Metrics.iconSize) / 2.0,
+                                    width: Metrics.iconSize,
+                                    height: Metrics.iconSize)
+            let titleX = hasIcon ? Metrics.titleLeading : Metrics.titleLeadingWithoutIcon
+            titleLabel.frame = CGRect(x: titleX,
+                                      y: 0,
+                                      width: max(0, bounds.width - titleX - 12),
+                                      height: bounds.height)
+        }
+    }
+}
+
+// MARK: - Transfers
+
+extension EditorGroup {
+    // Fix: a transfer reports back long after it was started, and the index path it was
+    // started from is only good at that one moment - a message arriving or being deleted
+    // shifts it, and leaving and re-entering the chat rebuilds the table from scratch. So
+    // the row is looked up again, by the file the transfer is for, every time it reports.
+    func indexPathForMessage(withFileNamed name: String) -> IndexPath? {
+        guard !name.isEmpty else {
+            return nil
+        }
+        let fileKeys = ["image_id", "video_id", "file_id", "audio_id", "thumb_id", "gif_id"]
+        guard let index = dataMessages.lastIndex(where: { message in
+            return fileKeys.contains(where: { (message[$0] as? String ?? "") == name })
+        }) else {
+            return nil
+        }
+        guard let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as? String ?? "") else {
+            return nil
+        }
+        let messageId = dataMessages[index]["message_id"] as? String
+        guard let row = dataMessages
+            .filter({ $0["chat_date"] as? String ?? "" == dataDates[section] })
+            .firstIndex(where: { $0["message_id"] as? String == messageId }) else {
+            return nil
+        }
+        return IndexPath(row: row, section: section)
+    }
+
+    // Keeps the "3,4 MB / 12 MB" caption beside a progress ring current. Does nothing when
+    // the message is not on screen - cellForRow fills the caption in when it comes back.
+    func updateTransferSize(forFileNamed name: String) {
+        guard let indexPath = indexPathForMessage(withFileNamed: name),
+              let cell = tableChatView.cellForRow(at: indexPath) else {
+            return
+        }
+        ChatTransferRing.updateSizeText(forFileNamed: name, in: cell)
+    }
+
+    // Reloads the row a transfer belongs to, if it is still on screen at all. Safe to call
+    // from a download that outlived the screen which started it.
+    func reloadMessageRow(withFileNamed name: String) {
+        guard let indexPath = indexPathForMessage(withFileNamed: name),
+              indexPath.section < tableChatView.numberOfSections,
+              indexPath.row < tableChatView.numberOfRows(inSection: indexPath.section) else {
+            return
+        }
+        tableChatView.reloadRows(at: [indexPath], with: .none)
+    }
+}
+
+// MARK: - Download progress ring
+
+// Fix: this ring used to be built by hand inside contentMessageTapped, which meant it only
+// ever existed on the one cell instance that had been tapped: scroll it out of view and the
+// recycled cell came back without it, leave the chat and come back and it was gone for good
+// - while the transfer itself carried on. Drawing it from cellForRow instead makes it a
+// function of the transfer's state, so whatever cell is showing that message draws the ring,
+// at the progress the transfer has actually reached.
+enum ChatTransferRing {
+
+    // The progress layer is named so it can be found again on whatever cell is showing the
+    // message when an update arrives, without having to guess at subview indexes.
+    static let layerName = "nexilis.transfer.progress"
+
+    // The size caption is looked up by tag for the same reason the layer is looked up by
+    // name: whichever cell happens to be showing the message has to be updatable without
+    // anyone holding on to the view.
+    static let sizeLabelTag = 748_213
+
+    private static let size: CGFloat = 50
+    private static let lineWidth: CGFloat = 10
+
+    /// "3,4 MB / 12 MB" for a transfer in flight, or nil when its size is not known yet.
+    static func sizeText(forFileNamed name: String) -> String? {
+        guard let bytes = TransferBytes.get(name: name), bytes.total > 0 else {
+            return nil
+        }
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        // Both halves in the same unit, so the two numbers can be compared at a glance.
+        formatter.allowedUnits = bytes.total >= 1_000_000 ? [.useMB] : [.useKB]
+        let done = formatter.string(fromByteCount: max(0, min(bytes.completed, bytes.total)))
+        let total = formatter.string(fromByteCount: bytes.total)
+        return "\(done) / \(total)"
+    }
+
+    /// The caption itself: a dark chip, because it sits over photo thumbnails of any colour.
+    /// `chromeless` drops the chip background, for a surface that is already dark enough on
+    /// its own - the file bubble's strip.
+    @discardableResult
+    static func addSizeLabel(to container: UIView, fileName: String, chromeless: Bool = false) -> UIView {
+        let chip = UIView()
+        chip.backgroundColor = chromeless ? .clear : .black.withAlphaComponent(0.45)
+        chip.layer.cornerRadius = 8
+        chip.clipsToBounds = true
+        container.addSubview(chip)
+        chip.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 11, weight: chromeless ? .regular : .semibold)
+        label.textColor = chromeless ? .white.withAlphaComponent(0.75) : .white
+        label.textAlignment = .center
+        label.tag = sizeLabelTag
+        label.text = sizeText(forFileNamed: fileName)
+        chip.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        let inset: CGFloat = chromeless ? 0 : 6
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: chip.topAnchor, constant: 2),
+            label.bottomAnchor.constraint(equalTo: chip.bottomAnchor, constant: -2),
+            label.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: inset),
+            label.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -inset)
+        ])
+        // Nothing to show yet - it stays out of the way until the first byte count arrives,
+        // and updateSizeText will bring it back.
+        chip.isHidden = label.text == nil
+        return chip
+    }
+
+    static func add(to container: UIView, fileName: String, progress: Double) {
+        let ring = UIView()
+        ring.backgroundColor = .clear
+        container.addSubview(ring)
+        ring.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            ring.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            ring.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            ring.widthAnchor.constraint(equalToConstant: size),
+            ring.heightAnchor.constraint(equalToConstant: size)
+        ])
+
+        let circlePath = UIBezierPath(arcCenter: CGPoint(x: size / 2, y: size / 2),
+                                      radius: size / 2 - 5,
+                                      startAngle: -(.pi / 2),
+                                      endAngle: .pi * 2,
+                                      clockwise: true)
+        let track = CAShapeLayer()
+        track.path = circlePath.cgPath
+        track.fillColor = UIColor.clear.cgColor
+        track.lineWidth = lineWidth
+        track.strokeColor = UIColor.mentionColor.withAlphaComponent(0.3).cgColor
+        ring.layer.addSublayer(track)
+
+        let loading = CAShapeLayer()
+        loading.path = circlePath.cgPath
+        loading.fillColor = UIColor.clear.cgColor
+        loading.lineWidth = lineWidth
+        loading.strokeEnd = CGFloat(min(max(progress, 0), 100) / 100)
+        loading.strokeColor = UIColor.mentionColor.cgColor
+        loading.name = layerName
+        ring.layer.addSublayer(loading)
+
+        let arrow = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
+        arrow.tintColor = .white
+        ring.addSubview(arrow)
+        arrow.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            arrow.centerXAnchor.constraint(equalTo: ring.centerXAnchor),
+            arrow.centerYAnchor.constraint(equalTo: ring.centerYAnchor),
+            arrow.widthAnchor.constraint(equalToConstant: 30),
+            arrow.heightAnchor.constraint(equalToConstant: 30)
+        ])
+
+        let chip = addSizeLabel(to: container, fileName: fileName)
+        NSLayoutConstraint.activate([
+            chip.topAnchor.constraint(equalTo: ring.bottomAnchor, constant: 6),
+            chip.centerXAnchor.constraint(equalTo: ring.centerXAnchor)
+        ])
+    }
+
+    /// Updates the size caption on whichever cell is showing the transfer. Harmless when
+    /// that cell has no caption, or is not on screen at all.
+    static func updateSizeText(forFileNamed name: String, in cell: UITableViewCell) {
+        guard let label = cell.contentView.viewWithTag(sizeLabelTag) as? UILabel else {
+            return
+        }
+        label.text = sizeText(forFileNamed: name)
+        label.superview?.isHidden = label.text == nil
+    }
+
+    // Moves the ring drawn into `cell`, if that cell has one. Returns false when it has not,
+    // so the caller can fall back to whatever else knows how to draw progress there.
+    @discardableResult
+    static func setProgress(_ progress: Double, in cell: UITableViewCell) -> Bool {
+        guard let loading = progressLayer(in: cell.contentView.layer) else {
+            return false
+        }
+        // No implicit animation: these arrive about once per percent and the default
+        // quarter-second fade would just smear one into the next.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        loading.strokeEnd = CGFloat(min(max(progress, 0), 100) / 100)
+        CATransaction.commit()
+        return true
+    }
+
+    private static func progressLayer(in layer: CALayer) -> CAShapeLayer? {
+        if let shape = layer as? CAShapeLayer, shape.name == layerName {
+            return shape
+        }
+        for sublayer in layer.sublayers ?? [] {
+            if let found = progressLayer(in: sublayer) {
+                return found
+            }
+        }
+        return nil
+    }
+}

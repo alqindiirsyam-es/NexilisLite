@@ -197,7 +197,6 @@ public class Network {
     public func uploadHTTP(_ endUrl: String, files: [URL] = [], filename: [String] = [], parameters: [String : Any] = [:], completion: @escaping (Bool, Double)->()) -> UploadRequest {
         
         var filesIn = [URL]()
-        var filesTempServer = [URL]()
         filesIn.append(contentsOf: files)
         if !filename.isEmpty {
             do {
@@ -263,20 +262,33 @@ public class Network {
 //            print("Response progress: \(progress.fractionCompleted*100)")
             let frac = progress.fractionCompleted*100
             if frac != 100.0 {
+                // Recorded per file so the chat can label the upload ring with the size it
+                // is working through, the same way downloads do.
+                for url in filesIn {
+                    TransferBytes.set(name: url.lastPathComponent,
+                                      completed: progress.completedUnitCount,
+                                      total: progress.totalUnitCount)
+                }
                 completion(!progress.isCancelled,frac)
             }
         }
         .responseJSON { result in
+            // Fix: this used to clear `filesTempServer`, an array nothing ever put anything
+            // into - so every file uploaded over HTTP stayed registered as "uploading"
+            // forever, holding its Network object alive with it. The files that were
+            // actually sent are `filesIn`, and they are released whichever way the request
+            // ended.
+            for url in filesIn {
+                _ = Nexilis.removeUploadFile(forKey: url.lastPathComponent)
+                TransferBytes.clear(name: url.lastPathComponent)
+            }
             if let response = result.response, response.statusCode == 200 {
                 //print("Response success")
-                for url in filesTempServer {
-                    Nexilis.removeUploadFile(forKey: url.lastPathComponent)
-                }
                 completion(true,100)
                 
             }
             else {
-                let statusCode = result.response?.statusCode
+//                let statusCode = result.response?.statusCode
 //                print("Response fail: \(statusCode) <><> \(result)")
                 completion(false,0)
             }

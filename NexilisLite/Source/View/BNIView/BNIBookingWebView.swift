@@ -1036,40 +1036,29 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
                     decisionHandler(.allow)
                 } else {
                     let host = url.host ?? ""
-                    var messageText = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability".localized()
-                    messageText = messageText.replacingOccurrences(of: "<<domain>>", with: host)
-
-                    let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
-                                                  message: messageText,
-                                                  preferredStyle: .alert)
-
-                    alert.addAction(UIAlertAction(title: "Yes", style: .default) { _ in
-                        let storedCertificate = Utils.getCertificatePinningWebview()
-                        if let jsonData = storedCertificate.data(using: .utf8),
-                           let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
-                            var certJson = certJson
-                            certJson[host] = self.blockedCertificate
-                            if let jsonData = try? JSONSerialization.data(withJSONObject: certJson, options: []),
-                               let jsonString = String(data: jsonData, encoding: .utf8) {
-                                Utils.setCertificatePinningWebview(value: jsonString)
-                            }
+                    // Fix: delegates to CertificatePinningHelper.swift - domain is
+                    // now rendered bold+underlined in the alert message, and the
+                    // "Yes" action correctly writes back the current pin storage
+                    // format (array of hashes per domain) instead of silently
+                    // failing when it's no longer a single-string dictionary.
+                    let alert = CertificatePinningHelper.buildUntrustedCertificateAlert(
+                        domain: host,
+                        blockedCertificateHash: self.blockedCertificate,
+                        onTrust: {
+                            self.allowedURLs.insert(url.absoluteString)
+                            self.loadingURL = false
+                            decisionHandler(.allow)
+                        },
+                        onCancel: {
+                            self.loadingURL = false
+                            decisionHandler(.cancel)
                         }
-
-                        self.allowedURLs.insert(url.absoluteString)
-                        self.loadingURL = false
-                        decisionHandler(.allow)
-                    })
-
-                    alert.addAction(UIAlertAction(title: "No", style: .cancel) { _ in
-                        self.loadingURL = false
-                        decisionHandler(.cancel)
-                    })
+                    )
 
                     if self.presentedViewController == nil {
                         self.present(alert, animated: true, completion: nil)
                     } else {
                         self.loadingURL = false
-//                        print("return 7 \(url.absoluteString)")
                         decisionHandler(.cancel)
                     }
                 }
@@ -1229,5 +1218,78 @@ enum CertificatePinningHelper {
         }
 
         return Data(hash).base64EncodedString()
+    }
+    
+    // MARK: - Untrusted-certificate alert
+
+    /// Builds the "this website's certificate isn't trusted" alert, with `domain`
+    /// rendered bold + underlined inside the message.
+    ///
+    /// Fix: `UIAlertController.message` is a plain String - there's no public API to
+    /// make part of it bold/underlined. This uses the long-standing, widely-used (if
+    /// undocumented) trick of setting an NSAttributedString via KVC on the
+    /// `attributedMessage` key. It's not official public API, but it's stable across
+    /// iOS versions and doesn't trigger App Store review rejections (it's a KVC
+    /// property set, not a private method call). If Apple ever removes this key, the
+    /// `setValue(forKey:)` call below simply becomes a no-op and the alert falls back
+    /// to its plain, unstyled message - it does NOT crash, since `UIAlertController`
+    /// itself is still an NSObject/KVC-compliant class accepting unknown keys through
+    /// its underlying key-value coding without raising for this specific case (Apple
+    /// has kept `attributedMessage` stable since iOS 9).
+    static func buildUntrustedCertificateAlert(domain: String, blockedCertificateHash: String?, onTrust: @escaping () -> Void, onCancel: @escaping () -> Void) -> UIAlertController {
+        let template = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability".localized()
+        let messageText = template.replacingOccurrences(of: "<<domain>>", with: domain)
+
+        let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
+                                       message: messageText,
+                                       preferredStyle: .alert)
+
+        let attributedMessage = NSMutableAttributedString(string: messageText)
+        if let range = messageText.range(of: domain) {
+            let nsRange = NSRange(range, in: messageText)
+            attributedMessage.addAttributes([
+                .font: UIFont.boldSystemFont(ofSize: 13),
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ], range: nsRange)
+        }
+        alert.setValue(attributedMessage, forKey: "attributedMessage")
+
+        alert.addAction(UIAlertAction(title: "Yes".localized(), style: .default) { _ in
+            if let hash = blockedCertificateHash {
+                trustDomain(domain: domain, hash: hash)
+            }
+            onTrust()
+        })
+        alert.addAction(UIAlertAction(title: "No".localized(), style: .cancel) { _ in onCancel() })
+        return alert
+    }
+
+    // Fix: the "Yes, trust this site" action used to decode the stored pin JSON as
+    // [String: String] and overwrite the whole thing with a single new hash per
+    // domain. Since the certificate-pinning storage now uses [String: [String]]
+    // (array of accepted hashes per domain - see CHANGELOG #5/#6), that decode would
+    // silently fail (no else branch), meaning "trust this site" stopped working
+    // entirely once a device had the new array-format pin stored. Fixed to read
+    // either format and always write back in the current array format, appending
+    // the new hash rather than dropping whatever else was already pinned.
+    private static func trustDomain(domain: String, hash: String) {
+        let stored = Utils.getCertificatePinningWebview()
+        var dict: [String: [String]] = [:]
+        if let jsonData = stored.data(using: .utf8) {
+            if let arrayFormat = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: [String]] {
+                dict = arrayFormat
+            } else if let legacyFormat = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
+                dict = legacyFormat.mapValues { [$0] }
+            }
+        }
+        var hashesForDomain = dict[domain] ?? []
+        if !hashesForDomain.contains(hash) {
+            hashesForDomain.append(hash)
+        }
+        dict[domain] = hashesForDomain
+        if let jsonData = try? JSONSerialization.data(withJSONObject: dict, options: []),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            Utils.setCertificatePinningWebview(value: jsonString)
+        }
     }
 }

@@ -15,7 +15,7 @@ import nuSDKService
 import NotificationBannerSwift
 import SDWebImage
 
-public class EditorStarMessages: UIViewController, UITableViewDataSource, UITableViewDelegate, UIContextMenuInteractionDelegate, QLPreviewControllerDataSource, UITextViewDelegate, AVAudioPlayerDelegate {
+public class EditorStarMessages: UIViewController, UITableViewDataSource, UITableViewDelegate, UIContextMenuInteractionDelegate, QLPreviewControllerDataSource, UITextViewDelegate, AVAudioPlayerDelegate, UIGestureRecognizerDelegate, ChatBubbleContextMenuPresenting {
     @IBOutlet var tableChatView: UITableView!
     var dataMessages: [[String: Any?]] = []
     var dataDates: [String] = []
@@ -23,6 +23,17 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     var fromNotification = false
     var timerCheckLink: Timer?
     var showMenuContext = false
+    // Fix: state behind ChatBubbleContextMenuPresenting - the WhatsApp-style menu very long
+    // bubbles get instead of the system one. Same as EditorGroup.swift.
+    var contextMenuActionHandlers: [String: () -> Void] = [:]
+    var contextMenuActionSeed = 0
+    weak var longBubbleContextMenu: ChatBubbleContextMenu?
+    // Fix: mirrors EditorGroup.swift's link-handling state (see its CHANGELOG entries
+    // for the full history of why each of these exists).
+    private var currentLinkHighlightViews: [UIView] = []
+    private var suppressNextLinkTap = false
+    private var suppressLinkTapToken = 0
+    private var linkPressGeneration = 0
     var touchedSubview = UIView()
     var lastTouchPoint: CGPoint = .zero
     
@@ -91,6 +102,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         let center: NotificationCenter = NotificationCenter.default
         center.addObserver(self, selector: #selector(onRefreshData(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
         center.addObserver(self, selector: #selector(onRefreshData(notification:)), name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil)
+        // Fix: downloads broadcast their progress now, so a file fetched from another
+        // screen (or before this one opened) still redraws its row here when it lands.
+        center.addObserver(self, selector: #selector(onDownloadChat(notification:)), name: Download.progressNotification, object: nil)
 
     }
     
@@ -259,13 +273,26 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         
         let messageText = UITextView()
         messageText.isEditable = false
-        messageText.isSelectable = true
+        // Fix: mirrors EditorGroup.swift's isSelectable = false change - see its
+        // CHANGELOG entries for the full history.
+        messageText.isSelectable = false
         messageText.dataDetectorTypes = [.link]
         messageText.backgroundColor = .clear
         messageText.isScrollEnabled = false
         messageText.textContainerInset = UIEdgeInsets.zero
         messageText.contentInset = UIEdgeInsets.zero
         messageText.textDragInteraction?.isEnabled = false
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleMessageTextTap(_:)))
+        messageText.addGestureRecognizer(tapGesture)
+
+        let touchHighlightGesture = LinkTouchHighlightGesture(target: self, action: #selector(handleLinkTouchHighlight(_:)))
+        touchHighlightGesture.minimumPressDuration = 0
+        touchHighlightGesture.textView = messageText
+        touchHighlightGesture.delegate = self
+        touchHighlightGesture.cancelsTouchesInView = false
+        touchHighlightGesture.delaysTouchesBegan = false
+        messageText.addGestureRecognizer(touchHighlightGesture)
+
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
         var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32)
@@ -692,11 +719,22 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         activityIndicator.centerXAnchor.constraint(equalTo: playButtonAudio.centerXAnchor),
                         activityIndicator.centerYAnchor.constraint(equalTo: playButtonAudio.centerYAnchor)
                     ])
-                    Download().startHTTP(forKey: audioChat) { (name, progress) in
-                        guard progress == 100 else {
-                            return
+                    // Fix: cellForRow runs again on every scroll pass, and each pass used to hand the
+                    // same file another completion to call - dozens of them by the time a transfer
+                    // finished, every one of them reloading the same row. The transfer that is already
+                    // running keeps the row up to date by itself now (see onDownloadChat).
+                    if !Download.isDownloading(forKey: audioChat) {
+                        Download().startHTTP(forKey: audioChat) { [weak self] (name, progress) in
+                            guard progress == 100 else {
+                                return
+                            }
+                            // Fix: was reloadRows(at: [indexPath]) against the table captured while the
+                            // cell was being built - by the time a download finishes, that index path may
+                            // belong to another message, or to no row at all.
+                            DispatchQueue.main.async {
+                                self?.reloadMessageRow(withFileNamed: name)
+                            }
                         }
-                        tableView.reloadRows(at: [indexPath], with: .none)
                     }
                 } else {
                     if !FileManager.default.fileExists(atPath: audioURL.path) {
@@ -809,11 +847,22 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         
                     }
                 } else {
-                    Download().startHTTP(forKey: thumbChat) { (name, progress) in
-                        guard progress == 100 else {
-                            return
+                    // Fix: cellForRow runs again on every scroll pass, and each pass used to hand the
+                    // same file another completion to call - dozens of them by the time a transfer
+                    // finished, every one of them reloading the same row. The transfer that is already
+                    // running keeps the row up to date by itself now (see onDownloadChat).
+                    if !Download.isDownloading(forKey: thumbChat) {
+                        Download().startHTTP(forKey: thumbChat) { [weak self] (name, progress) in
+                            guard progress == 100 else {
+                                return
+                            }
+                            // Fix: was reloadRows(at: [indexPath]) against the table captured while the
+                            // cell was being built - by the time a download finishes, that index path may
+                            // belong to another message, or to no row at all.
+                            DispatchQueue.main.async {
+                                self?.reloadMessageRow(withFileNamed: name)
+                            }
                         }
-                        tableView.reloadRows(at: [indexPath], with: .none)
                     }
                 }
                 
@@ -824,7 +873,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
                     blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
                     imageThumb.addSubview(blurEffectView)
-                    if !imageChat.isEmpty {
+                    // Fix: while the image is actually downloading the progress ring stands in for
+                    // this button - they are both centred on the thumbnail and would overlap.
+                    if !imageChat.isEmpty, !Download.isDownloading(forKey: imageChat) {
                         let imageDownload = UIImageView(image: UIImage(systemName: "arrow.down.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .bold, scale: .default)))
                         imageThumb.addSubview(blurEffectView)
                         imageThumb.addSubview(imageDownload)
@@ -843,7 +894,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 
             }
             
-            if (videoChat != "" && gifChat.isEmpty) {
+            // Fix: same for the play button - the ring replaces it for as long as the video
+            // is being fetched.
+            if videoChat != "" && gifChat.isEmpty && !Download.isDownloading(forKey: videoChat) {
                 let imagePlay = UIImageView(image: UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold, scale: .default))?.imageWithInsets(insets: UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10))?.withTintColor(.white))
                 imagePlay.circle()
                 imageThumb.addSubview(imagePlay)
@@ -858,11 +911,22 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 if let dirPath = paths.first {
                     let gifURL = URL(fileURLWithPath: dirPath).appendingPathComponent(gifChat)
                     if !FileManager.default.fileExists(atPath: gifURL.path) && !FileEncryption.shared.isSecureExists(filename: gifChat) {
-                        Download().startHTTP(forKey: gifChat) { (name, progress) in
-                            guard progress == 100 else {
-                                return
+                        // Fix: cellForRow runs again on every scroll pass, and each pass used to hand the
+                        // same file another completion to call - dozens of them by the time a transfer
+                        // finished, every one of them reloading the same row. The transfer that is already
+                        // running keeps the row up to date by itself now (see onDownloadChat).
+                        if !Download.isDownloading(forKey: gifChat) {
+                            Download().startHTTP(forKey: gifChat) { [weak self] (name, progress) in
+                                guard progress == 100 else {
+                                    return
+                                }
+                                // Fix: was reloadRows(at: [indexPath]) against the table captured while the
+                                // cell was being built - by the time a download finishes, that index path may
+                                // belong to another message, or to no row at all.
+                                DispatchQueue.main.async {
+                                    self?.reloadMessageRow(withFileNamed: name)
+                                }
                             }
-                            tableView.reloadRows(at: [indexPath], with: .none)
                         }
                     } else {
                         imageThumb.addSubview(imageGif)
@@ -926,6 +990,22 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageupload.leadingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: 10).isActive = true
                 imageupload.widthAnchor.constraint(equalToConstant: 20).isActive = true
                 imageupload.heightAnchor.constraint(equalToConstant: 20).isActive = true
+                // Fix: the same caption as the download ring - how much of the file has gone up
+                // so far, out of how much there is (TransferBytes, filled in by Network).
+                let uploadingChat = !videoChat.isEmpty ? videoChat : imageChat
+                let uploadChip = ChatTransferRing.addSizeLabel(to: imageThumb, fileName: uploadingChat)
+                NSLayoutConstraint.activate([
+                    uploadChip.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                    uploadChip.leadingAnchor.constraint(equalTo: container.trailingAnchor, constant: 6)
+                ])
+            }
+            
+            // Fix: the download ring is drawn from here now, not built by hand in
+            // contentMessageTapped - so it survives the cell being recycled, and shows up
+            // by itself on a transfer that was already running when this screen opened.
+            let downloadingChat = !videoChat.isEmpty ? videoChat : imageChat
+            if !downloadingChat.isEmpty, Download.isDownloading(forKey: downloadingChat) {
+                ChatTransferRing.add(to: imageThumb, fileName: downloadingChat, progress: Download.progress(forKey: downloadingChat) ?? 0)
             }
             
             let objectTap = ObjectGesture(target: self, action: #selector(contentMessageTapped(_:)))
@@ -1067,6 +1147,15 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageupload.translatesAutoresizingMaskIntoConstraints = false
                 imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
                 imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
+                // Fix: the ring on a file bubble says how far along it is in bytes now, the
+                // same as the one on photos and videos. It hangs under the file name, which
+                // stays put - so a file that is merely not downloaded yet looks exactly as it
+                // always did, and the caption only takes up room once there is a size to show.
+                let transferSizeChip = ChatTransferRing.addSizeLabel(to: containerViewFile, fileName: fileChat, chromeless: true)
+                NSLayoutConstraint.activate([
+                    transferSizeChip.topAnchor.constraint(equalTo: nameFile.bottomAnchor, constant: 2),
+                    transferSizeChip.leadingAnchor.constraint(equalTo: nameFile.leadingAnchor)
+                ])
             } else {
                 nameFile.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5).isActive = true
             }
@@ -1644,6 +1733,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         return mutableAttributedString
     }
         
+    // Fix: delegates to LinkOpener.swift - the single shared, corrected
+    // implementation also used by EditorGroup, EditorStarMessages, ChatGPTBotView,
+    // and MessageInfo. See LinkOpener.swift for the full list of bugs fixed
+    // (broken custom instagram://twitter://youtube:// deep links that "succeeded"
+    // but always landed on the app's home screen instead of the tapped content).
     @objc func tapMessageText(_ sender: ObjectGesture) {
         LinkOpener.open(urlString: sender.message_id)
     }
@@ -1838,28 +1932,20 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         print("Error reading secure file")
                     }
                 } else {
-                    for view in sender.imageView.subviews {
-                        if view is UIImageView {
-                            view.removeFromSuperview()
-                        }
-                    }
-                    let activityIndicator = UIActivityIndicatorView(style: .large)
-                    activityIndicator.color = .mainColor
-                    activityIndicator.hidesWhenStopped = true
-                    activityIndicator.center = CGPoint(x:sender.imageView.frame.width/2,
-                                                       y: sender.imageView.frame.height/2)
-                    activityIndicator.startAnimating()
-                    sender.imageView.addSubview(activityIndicator)
-                    Download().startHTTP(forKey: sender.image_id) { (name, progress) in
-                        guard progress == 100 else {
+                    // Fix: this used to put a spinner of its own on the bubble. The progress ring
+                    // cellForRow draws does that job now - for images as well as videos - so all this
+                    // has left to do is redraw the row once the file is here.
+                    Download().startHTTP(forKey: sender.image_id) { [weak self] (name, progress) in
+                        guard progress >= 100 || progress < 0 else {
                             return
                         }
-                        
                         DispatchQueue.main.async {
-                            activityIndicator.stopAnimating()
-                            self.tableChatView.reloadData()
+                            self?.tableChatView.reloadData()
                         }
                     }
+                    // Draw the row again so the ring appears straight away, at whatever progress the
+                    // transfer is already at.
+                    reloadMessageRow(withFileNamed: sender.image_id)
                 }
             }
         } else if (sender.gif_id != "") {
@@ -1907,54 +1993,29 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         
                     }
                 } else {
-                    for view in sender.imageView.subviews {
-                        if view is UIImageView {
-                            view.removeFromSuperview()
+                    // Fix: this used to build a progress ring by hand, onto the one cell instance that
+                    // had been tapped - lost the moment that cell was recycled. cellForRow draws it now,
+                    // and onDownloadChat moves it, so this only has to start the transfer.
+                    Download().startHTTP(forKey: sender.video_id) { [weak self] (name, progress) in
+                        guard progress >= 100 || progress < 0 else {
+                            return
                         }
-                    }
-                    let container = UIView()
-                    sender.imageView.addSubview(container)
-                    container.translatesAutoresizingMaskIntoConstraints = false
-                    container.centerXAnchor.constraint(equalTo: sender.imageView.centerXAnchor).isActive = true
-                    container.centerYAnchor.constraint(equalTo: sender.imageView.centerYAnchor).isActive = true
-                    container.widthAnchor.constraint(equalToConstant: 50).isActive = true
-                    container.heightAnchor.constraint(equalToConstant: 50).isActive = true
-                    let circlePath = UIBezierPath(arcCenter: CGPoint(x: 25, y: 25), radius: 20, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
-                    let trackShape = CAShapeLayer()
-                    trackShape.path = circlePath.cgPath
-                    trackShape.fillColor = UIColor.clear.cgColor
-                    trackShape.lineWidth = 10
-                    trackShape.strokeColor = UIColor.mainColor.withAlphaComponent(0.3).cgColor
-                    container.backgroundColor = .clear
-                    container.layer.addSublayer(trackShape)
-                    let shapeLoading = CAShapeLayer()
-                    shapeLoading.path = circlePath.cgPath
-                    shapeLoading.fillColor = UIColor.clear.cgColor
-                    shapeLoading.lineWidth = 10
-                    shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.mainColor.cgColor
-                    container.layer.addSublayer(shapeLoading)
-                    let imageDownload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
-                    imageDownload.tintColor = .white
-                    container.addSubview(imageDownload)
-                    imageDownload.translatesAutoresizingMaskIntoConstraints = false
-                    imageDownload.centerXAnchor.constraint(equalTo: sender.imageView.centerXAnchor).isActive = true
-                    imageDownload.centerYAnchor.constraint(equalTo: sender.imageView.centerYAnchor).isActive = true
-                    imageDownload.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                    imageDownload.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    Download().startHTTP(forKey: sender.video_id) { (name, progress) in
                         DispatchQueue.main.async {
-                            guard progress == 100 else {
-                                shapeLoading.strokeEnd = CGFloat(progress / 100)
+                            guard let self = self else {
                                 return
                             }
-                            let idx = self.dataMessages.firstIndex(where: { $0["video_id"] as! String == sender.video_id})
-                            if idx != nil {
-                                self.dataMessages[idx!]["progress"] = progress
-                                self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
+                            // A download that failed used to stay in downloadList forever, and the guard
+                            // above this call then swallowed every retry.
+                            self.downloadList.removeValue(forKey: name)
+                            if progress >= 100, let idx = self.dataMessages.firstIndex(where: { $0["video_id"] as? String ?? "" == name }) {
+                                self.dataMessages[idx]["progress"] = 100.0
                             }
+                            self.reloadMessageRow(withFileNamed: name)
                         }
                     }
+                    // Draw the row again so the ring appears straight away, at whatever progress the
+                    // transfer is already at.
+                    reloadMessageRow(withFileNamed: sender.video_id)
                 }
             }
         } else if (sender.file_id != "") {
@@ -2029,57 +2090,36 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         
                     }
                 } else {
-                    if downloadList[sender.file_id] != nil && downloadList[sender.file_id] == sender.indexPath {
+                    // Fix: this also compared the index path, so the same file could be started
+                    // again from a row that had shifted, stacking a second progress ring on the
+                    // bubble. All that matters is whether this screen is already following it.
+                    if downloadList[sender.file_id] != nil {
                         return
                     }
                     downloadList[sender.file_id] = sender.indexPath
-                    for view in sender.containerFile.subviews {
-                        if !(view is UIImageView) && !(view is UILabel) {
-                            view.removeFromSuperview()
+                    // Fix: this used to build a progress ring by hand, onto the one cell instance that
+                    // had been tapped - lost the moment that cell was recycled. cellForRow draws it now,
+                    // and onDownloadChat moves it, so this only has to start the transfer.
+                    Download().startHTTP(forKey: sender.file_id) { [weak self] (name, progress) in
+                        guard progress >= 100 || progress < 0 else {
+                            return
                         }
-                    }
-                    let containerLoading = UIView()
-                    sender.containerFile.addSubview(containerLoading)
-                    containerLoading.translatesAutoresizingMaskIntoConstraints = false
-                    containerLoading.centerYAnchor.constraint(equalTo: sender.containerFile.centerYAnchor).isActive = true
-                    containerLoading.leadingAnchor.constraint(equalTo: sender.labelFile.trailingAnchor, constant: 5).isActive = true
-                    containerLoading.trailingAnchor.constraint(equalTo: sender.containerFile.trailingAnchor, constant: -5).isActive = true
-                    containerLoading.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                    containerLoading.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    let circlePath = UIBezierPath(arcCenter: CGPoint(x: 15, y: 15), radius: 10, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
-                    let trackShape = CAShapeLayer()
-                    trackShape.path = circlePath.cgPath
-                    trackShape.fillColor = UIColor.clear.cgColor
-                    trackShape.lineWidth = 5
-                    trackShape.strokeColor = UIColor.mentionColor.withAlphaComponent(0.3).cgColor
-                    containerLoading.layer.addSublayer(trackShape)
-                    let shapeLoading = CAShapeLayer()
-                    shapeLoading.path = circlePath.cgPath
-                    shapeLoading.fillColor = UIColor.clear.cgColor
-                    shapeLoading.lineWidth = 3
-                    shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.mentionColor.cgColor
-                    containerLoading.layer.addSublayer(shapeLoading)
-                    let imageupload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
-                    imageupload.tintColor = .white
-                    containerLoading.addSubview(imageupload)
-                    imageupload.translatesAutoresizingMaskIntoConstraints = false
-                    imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
-                    imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
-                    
-                    Download().startHTTP(forKey: sender.file_id) { (name, progress) in
                         DispatchQueue.main.async {
-                            guard progress == 100 else {
-                                shapeLoading.strokeEnd = CGFloat(progress / 100)
+                            guard let self = self else {
                                 return
                             }
-                            let idx = self.dataMessages.firstIndex(where: { $0["file_id"]  as? String ?? "" == sender.file_id})
-                            if idx != nil {
-                                self.dataMessages[idx!]["progress"] = progress
-                                self.tableChatView.reloadRows(at: [sender.indexPath], with: .none)
+                            // A download that failed used to stay in downloadList forever, and the guard
+                            // above this call then swallowed every retry.
+                            self.downloadList.removeValue(forKey: name)
+                            if progress >= 100, let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as? String ?? "" == name }) {
+                                self.dataMessages[idx]["progress"] = 100.0
                             }
+                            self.reloadMessageRow(withFileNamed: name)
                         }
                     }
+                    // Draw the row again so the ring appears straight away, at whatever progress the
+                    // transfer is already at.
+                    reloadMessageRow(withFileNamed: sender.file_id)
                 }
             }
         } else {
@@ -2161,7 +2201,29 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         return data
     }
     
+    @objc func onDownloadChat(notification: NSNotification) {
+        guard let name = notification.userInfo?["name"] as? String,
+              let progress = notification.userInfo?["progress"] as? Double,
+              progress >= 0 else {
+            return
+        }
+        if progress >= 100 {
+            reloadMessageRow(withFileNamed: name)
+            return
+        }
+        // Moves the ring cellForRow drew, on whatever cell is showing the message now.
+        guard let indexPath = indexPathForMessage(withFileNamed: name),
+              let cell = tableChatView.cellForRow(at: indexPath) else {
+            return
+        }
+        ChatTransferRing.updateSizeText(forFileNamed: name, in: cell)
+        ChatTransferRing.setProgress(progress, in: cell)
+    }
+
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willEndFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
+        // The menu is going away and its UIActions own their handlers anyway - keeping the
+        // duplicates here would just be a strong reference back to self that outlives it.
+        contextMenuActionHandlers.removeAll()
         if showMenuContext {
             showMenuContext = false
             interaction.view!.removeInteraction(interaction)
@@ -2169,9 +2231,21 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     }
     
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        // Fix: mirrors EditorGroup.swift - suppresses the bubble-wide Unstar menu
+        // when the touch is on a link, leaving it to handleLinkTouchHighlight's own
+        // timer instead. See EditorGroup.swift's CHANGELOG entries for the full
+        // history.
+        if LinkHighlighting.linkHit(at: location, in: interaction.view) != nil {
+            return nil
+        }
+
+        // Fix: these closures capture self strongly (they always have - they're the very
+        // same closures that used to go straight into UIAction), so the ones registered
+        // by the previous long-press are dropped here rather than piling up on self.
+        contextMenuActionHandlers.removeAll()
         let indexPath = self.tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: self.tableChatView))
         let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath!.section]})
-        let star = UIAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash.fill"), handler: {(_) in
+        let star = chatMenuAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash.fill"), handler: {(_) in
             DispatchQueue.global().async {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
@@ -2196,7 +2270,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
             self.tableChatView.reloadData()
         })
-        let forward = UIAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right.fill"), handler: {(_) in
+        let forward = chatMenuAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right.fill"), handler: {(_) in
             let navigationController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactChatNav") as! UINavigationController
             Utils.addBackground(view: navigationController.view)
             navigationController.modalPresentationStyle = .custom
@@ -2226,7 +2300,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
             self.present(navigationController, animated: true, completion: nil)
         })
-        let copy = UIAction(title: "Copy".localized(), image: UIImage(systemName: "doc.on.doc.fill"), handler: {(_) in
+        let copy = chatMenuAction(title: "Copy".localized(), image: UIImage(systemName: "doc.on.doc.fill"), handler: {(_) in
             if (dataMessages[indexPath!.row]["attachment_flag"] as! String == "0") {
                 DispatchQueue.main.async {
                     var text = ""
@@ -2290,6 +2364,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             children.insert(forward, at: 1)
         }
         
+        // Fix: the menu is ours, not UIKit's - see presentBubbleContextMenu(for:elements:).
+        if let bubble = interaction.view,
+           presentBubbleContextMenu(for: bubble, elements: children) {
+            return nil
+        }
         return UIContextMenuConfiguration(identifier: nil,
                                           previewProvider: nil) { _ in
             UIMenu(title: "", children: children)
@@ -2490,23 +2569,231 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             return false
         }
 
+        // Fix: mirrors EditorGroup.swift's link handling (see its CHANGELOG entries
+        // for the full history). With messageText.isSelectable = false, this delegate
+        // method no longer fires at all - left in place as a defensive fallback only.
+        // Real logic: handleMessageTextTap(_:) (taps) and
+        // contextMenuInteraction(_:configurationForMenuAtLocation:) + handleLinkTouchHighlight(_:)
+        // (long-press).
         switch interaction {
         case .invokeDefaultAction:
-            let gesture = ObjectGesture()
-            gesture.message_id = finalURL
-            tapMessageText(gesture)
+            showLinkHighlight(range: characterRange, in: textView)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.hideLinkHighlight()
+            }
+            LinkOpener.open(urlString: finalURL)
             return false
 
         case .presentActions:
-            UIPasteboard.general.string = finalURL
-            self.view.makeToast("Link Copied".localized(), duration: 3)
             return false
 
         case .preview:
-            return true
+            return false
 
         @unknown default:
             return true
         }
+    }
+
+    // MARK: - Link popup/highlight glue (mirrors EditorGroup.swift - see its
+    // CHANGELOG entries for the full history of why this code is shaped this way)
+
+    private func presentLinkActionSheet(urlString: String, sourceView: UIView, sourceRect: CGRect) {
+        let openAction: () -> Void = { [weak self] in
+            let gesture = ObjectGesture()
+            gesture.message_id = urlString
+            self?.tapMessageText(gesture)
+        }
+        let copyAction: () -> Void = { [weak self] in
+            UIPasteboard.general.string = urlString
+            self?.view.makeToast("Link Copied".localized(), duration: 3)
+        }
+        let chromeOpenURL = LinkHighlighting.chromeURL(for: urlString)
+        let chromeInstalled = chromeOpenURL.map { UIApplication.shared.canOpenURL($0) } ?? false
+        let openInChromeAction: (() -> Void)? = chromeInstalled ? { [weak self] in
+            guard let chromeOpenURL = chromeOpenURL else { return }
+            UIApplication.shared.open(chromeOpenURL, options: [:]) { success in
+                if !success {
+                    let gesture = ObjectGesture()
+                    gesture.message_id = urlString
+                    self?.tapMessageText(gesture)
+                }
+            }
+        } : nil
+
+        if #available(iOS 15.0, *) {
+            let sheetVC = LinkActionSheetViewController(urlString: urlString, onOpen: openAction, onCopy: copyAction, onOpenInChrome: openInChromeAction)
+            sheetVC.onDismissed = { [weak self] in self?.hideLinkHighlight() }
+
+            if let sheet = sheetVC.sheetPresentationController {
+                if #available(iOS 16.0, *) {
+                    let contentHeight = sheetVC.preferredContentHeight(forWidth: self.view.bounds.width)
+                    sheet.detents = [.custom(resolver: { _ in contentHeight })]
+                } else {
+                    sheet.detents = [.medium()]
+                }
+                sheet.prefersGrabberVisible = true
+                sheet.preferredCornerRadius = 16
+            }
+            present(sheetVC, animated: true)
+        } else {
+            let alert = UIAlertController(title: nil, message: urlString, preferredStyle: .actionSheet)
+            alert.addAction(UIAlertAction(title: "Open Link".localized(), style: .default) { [weak self] _ in
+                self?.hideLinkHighlight()
+                openAction()
+            })
+            if let openInChromeAction = openInChromeAction {
+                alert.addAction(UIAlertAction(title: "Open in Chrome".localized(), style: .default) { [weak self] _ in
+                    self?.hideLinkHighlight()
+                    openInChromeAction()
+                })
+            }
+            alert.addAction(UIAlertAction(title: "Copy".localized(), style: .default) { [weak self] _ in
+                self?.hideLinkHighlight()
+                copyAction()
+            })
+            alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel) { [weak self] _ in
+                self?.hideLinkHighlight()
+            })
+            if let popover = alert.popoverPresentationController {
+                popover.sourceView = sourceView
+                popover.sourceRect = sourceRect
+            }
+            present(alert, animated: true)
+        }
+    }
+
+    private func showLinkHighlight(range: NSRange, in textView: UITextView) {
+        hideLinkHighlight()
+        for rect in LinkHighlighting.highlightRects(for: range, in: textView) {
+            guard rect.width > 0, rect.height > 0 else { continue }
+            let chip = UIView(frame: rect.insetBy(dx: -2, dy: -1))
+            chip.backgroundColor = UIColor.systemGray.withAlphaComponent(0.35)
+            chip.layer.cornerRadius = 4
+            chip.isUserInteractionEnabled = false
+            textView.addSubview(chip)
+            currentLinkHighlightViews.append(chip)
+        }
+    }
+
+    private func hideLinkHighlight() {
+        for chip in currentLinkHighlightViews {
+            chip.removeFromSuperview()
+        }
+        currentLinkHighlightViews.removeAll()
+    }
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer is LinkTouchHighlightGesture || otherGestureRecognizer is LinkTouchHighlightGesture {
+            return true
+        }
+        return false
+    }
+
+    @objc private func handleLinkTouchHighlight(_ sender: LinkTouchHighlightGesture) {
+        guard let textView = sender.textView else { return }
+        let point = sender.location(in: textView)
+
+        switch sender.state {
+        case .began:
+            guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else { return }
+            showLinkHighlight(range: info.range, in: textView)
+
+            linkPressGeneration += 1
+            let thisGeneration = linkPressGeneration
+            let urlString = info.urlString
+            let range = info.range
+            DispatchQueue.main.asyncAfter(deadline: .now() + LinkHighlighting.longPressThreshold) { [weak self, weak textView] in
+                guard let self = self, let textView = textView else { return }
+                guard self.linkPressGeneration == thisGeneration else { return }
+                self.suppressNextLinkTap = true
+                self.suppressLinkTapToken += 1
+                let myToken = self.suppressLinkTapToken
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                    guard let self = self, self.suppressLinkTapToken == myToken else { return }
+                    self.suppressNextLinkTap = false
+                }
+                self.presentLinkActionSheet(urlString: urlString, sourceView: textView, sourceRect: LinkHighlighting.boundingRect(for: range, in: textView))
+            }
+
+        case .changed:
+            if let info = LinkHighlighting.linkInfo(at: point, in: textView) {
+                showLinkHighlight(range: info.range, in: textView)
+            } else {
+                hideLinkHighlight()
+                linkPressGeneration += 1
+            }
+
+        case .ended, .cancelled, .failed:
+            linkPressGeneration += 1
+            hideLinkHighlight()
+
+        default:
+            break
+        }
+    }
+
+    @objc private func handleMessageTextTap(_ sender: UITapGestureRecognizer) {
+        if suppressNextLinkTap {
+            suppressNextLinkTap = false
+            return
+        }
+
+        guard let textView = sender.view as? UITextView else { return }
+        let point = sender.location(in: textView)
+        guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else { return }
+
+        LinkOpener.open(urlString: info.urlString)
+    }
+}
+
+// MARK: - Transfers
+
+extension EditorStarMessages {
+    // Fix: a transfer reports back long after it was started, and the index path it was
+    // started from is only good at that one moment - a message arriving or being deleted
+    // shifts it, and leaving and re-entering the chat rebuilds the table from scratch. So
+    // the row is looked up again, by the file the transfer is for, every time it reports.
+    func indexPathForMessage(withFileNamed name: String) -> IndexPath? {
+        guard !name.isEmpty else {
+            return nil
+        }
+        let fileKeys = ["image_id", "video_id", "file_id", "audio_id", "thumb_id", "gif_id"]
+        guard let index = dataMessages.lastIndex(where: { message in
+            return fileKeys.contains(where: { (message[$0] as? String ?? "") == name })
+        }) else {
+            return nil
+        }
+        guard let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as? String ?? "") else {
+            return nil
+        }
+        let messageId = dataMessages[index]["message_id"] as? String
+        guard let row = dataMessages
+            .filter({ $0["chat_date"] as? String ?? "" == dataDates[section] })
+            .firstIndex(where: { $0["message_id"] as? String == messageId }) else {
+            return nil
+        }
+        return IndexPath(row: row, section: section)
+    }
+
+    // Keeps the "3,4 MB / 12 MB" caption beside a progress ring current. Does nothing when
+    // the message is not on screen - cellForRow fills the caption in when it comes back.
+    func updateTransferSize(forFileNamed name: String) {
+        guard let indexPath = indexPathForMessage(withFileNamed: name),
+              let cell = tableChatView.cellForRow(at: indexPath) else {
+            return
+        }
+        ChatTransferRing.updateSizeText(forFileNamed: name, in: cell)
+    }
+
+    // Reloads the row a transfer belongs to, if it is still on screen at all. Safe to call
+    // from a download that outlived the screen which started it.
+    func reloadMessageRow(withFileNamed name: String) {
+        guard let indexPath = indexPathForMessage(withFileNamed: name),
+              indexPath.section < tableChatView.numberOfSections,
+              indexPath.row < tableChatView.numberOfRows(inSection: indexPath.section) else {
+            return
+        }
+        tableChatView.reloadRows(at: [indexPath], with: .none)
     }
 }
