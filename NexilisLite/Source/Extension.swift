@@ -925,6 +925,71 @@ extension UITextView {
         case preserveCursor
     }
 
+    /// Rewrites the styled text of a message being composed.
+    ///
+    /// Fix: this used to be `preserveCursorPosition { attributedText = ... }` on every single
+    /// keystroke. Assigning attributedText replaces the whole text storage, and UITextView
+    /// answers that by re-deciding where it should be scrolled to; putting the selection back
+    /// afterwards makes it decide a second time. On a message more than a few lines long the
+    /// two decisions disagree, which is the blink and the jump to the bottom of the box on
+    /// every character typed.
+    ///
+    /// So: nothing happens at all when the styling came out the same as what is already there
+    /// (which is most keystrokes - the styling only changes when a marker like *bold* is
+    /// completed), and when it does change the scroll position the user had is put back,
+    /// without animation. The caret is only scrolled to if it would otherwise be off screen.
+    func applyRichText(_ styledText: NSAttributedString) {
+        if let current = attributedText, current.isEqual(to: styledText) {
+            return
+        }
+        // Fix (second pass): restoring contentOffset after assigning attributedText was not
+        // enough - UITextView re-decides its scroll position again after the delegate call
+        // returns, so the restore was simply overwritten and the box still ended up at the
+        // bottom. The way out is not to replace the text at all: while composing, richText
+        // keeps every character exactly as typed (the *bold* markers stay in place), so all
+        // that ever differs is the styling. Setting attributes on the existing text storage
+        // changes no characters, which means the caret does not move and nothing has any
+        // reason to scroll - there is nothing left to restore afterwards.
+        if styledText.string == textStorage.string {
+            let fullRange = NSRange(location: 0, length: textStorage.length)
+            textStorage.beginEditing()
+            styledText.enumerateAttributes(in: fullRange, options: []) { attributes, range, _ in
+                textStorage.setAttributes(attributes, range: range)
+            }
+            textStorage.endEditing()
+            return
+        }
+        // The characters really did change - an @mention expanding into a full name is the
+        // one case that does that mid-edit. Rare enough to accept the replacement, but the
+        // scroll position is still put back as well as it can be.
+        let savedSelection = selectedRange
+        let savedOffset = contentOffset
+        UIView.performWithoutAnimation {
+            attributedText = styledText
+            let length = attributedText?.length ?? 0
+            let location = min(max(savedSelection.location, 0), length)
+            selectedRange = NSRange(location: location, length: min(savedSelection.length, length - location))
+            layoutIfNeeded()
+            let maxOffsetY = max(0, contentSize.height + contentInset.top + contentInset.bottom - bounds.height)
+            let restored = CGPoint(x: savedOffset.x, y: min(max(savedOffset.y, 0), maxOffsetY))
+            if !restored.equalTo(contentOffset) {
+                setContentOffset(restored, animated: false)
+            }
+            // Typing on the last line grows the text and can push the caret below what the
+            // restored offset shows, so that one case still needs a nudge - the smallest one
+            // that brings it back into view.
+            if let caretPosition = selectedTextRange?.end {
+                let caret = caretRect(for: caretPosition)
+                if !caret.isNull, caret.height.isFinite, caret.origin.y.isFinite {
+                    let visible = CGRect(origin: contentOffset, size: bounds.size)
+                    if !visible.contains(CGPoint(x: visible.midX, y: caret.midY)) {
+                        scrollRectToVisible(caret, animated: false)
+                    }
+                }
+            }
+        }
+    }
+
     func preserveCursorPosition(withChanges mutatingFunction: (UITextPosition?) -> (ShouldChangeCursor)) {
 
         //save the cursor positon

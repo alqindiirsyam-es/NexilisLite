@@ -6,6 +6,8 @@
 //
 
 import UIKit
+import PhotosUI
+import ImageIO
 
 public protocol ImageVideoPickerDelegate: AnyObject {
     func didSelect(imagevideo: Any?)
@@ -95,4 +97,166 @@ extension ImageVideoPicker: UIImagePickerControllerDelegate {
 
 extension ImageVideoPicker: UINavigationControllerDelegate {
     
+}
+
+// MARK: - Turning picked items into attachments
+
+/// Fix: "Preparing..." used to walk the picked items one at a time on a background thread,
+/// blocking on a semaphore between each - so five photos meant five loads back to back, and
+/// a thread parked for all of them. Worse, several failure paths never signalled that
+/// semaphore (a write that threw, an image that came back nil), and the ones that did still
+/// had to satisfy `attachments.count == results.count` before the loader was allowed to go
+/// away: one item failing left "Preparing..." on screen for good.
+///
+/// This loads every item at once, keeps their order, always reports back exactly once per
+/// item, and reports progress - which matters most for the case that made this slow in the
+/// first place: a photo or video shot on the camera that iCloud has since offloaded, where
+/// most of the wait is the download coming back.
+final class PickerAttachmentLoader {
+
+    // What the picked image is loaded at. The send path resizes to 1280 anyway
+    // (compressImageLikeWhatsApp), so decoding a 12MP camera photo at full size only to
+    // throw most of it away is the expensive part being avoided here.
+    private static let maxImagePixelSize: CGFloat = 2048
+
+    private static let gifType = "com.compuserve.gif"
+    private static let imageType = "public.image"
+    private static let movieType = "public.movie"
+    private static let quickTimeType = "com.apple.quicktime-movie"
+
+    static func load(results: [PHPickerResult],
+                     onProgress: @escaping (Double) -> Void,
+                     completion: @escaping ([AttachmentItem]) -> Void) {
+        guard !results.isEmpty else {
+            completion([])
+            return
+        }
+        // Slots, not appends: the items finish in whatever order they finish, and the order
+        // they were picked in is the order they have to be sent in.
+        var loaded = [AttachmentItem?](repeating: nil, count: results.count)
+        let lock = NSLock()
+        let group = DispatchGroup()
+        let overall = Progress(totalUnitCount: Int64(results.count) * 100)
+        var observation: NSKeyValueObservation?
+        observation = overall.observe(\.fractionCompleted, options: [.new]) { progress, _ in
+            let fraction = progress.fractionCompleted
+            DispatchQueue.main.async {
+                onProgress(fraction)
+            }
+        }
+
+        for (index, result) in results.enumerated() {
+            group.enter()
+            let provider = result.itemProvider
+            var hasFinished = false
+            let finish: (AttachmentItem?) -> Void = { item in
+                // Belt and braces: a provider calling back twice would unbalance the group.
+                lock.lock()
+                let alreadyDone = hasFinished
+                hasFinished = true
+                if !alreadyDone {
+                    loaded[index] = item
+                }
+                lock.unlock()
+                if !alreadyDone {
+                    group.leave()
+                }
+            }
+
+            if provider.hasItemConformingToTypeIdentifier(gifType) {
+                let child = provider.loadDataRepresentation(forTypeIdentifier: gifType) { data, _ in
+                    if let data = data {
+                        finish(AttachmentItem(type: .gif, gif: data))
+                    } else {
+                        // Not really a gif after all - the picker offers that type for some
+                        // animated items that are actually QuickTime movies.
+                        loadQuickTimeFallback(provider: provider, finish: finish)
+                    }
+                }
+                overall.addChild(child, withPendingUnitCount: 100)
+            } else if provider.hasItemConformingToTypeIdentifier(imageType) {
+                let child = provider.loadFileRepresentation(forTypeIdentifier: imageType) { url, _ in
+                    guard let url = url, let image = downsampledImage(at: url) else {
+                        finish(nil)
+                        return
+                    }
+                    finish(AttachmentItem(type: .image, image: image))
+                }
+                overall.addChild(child, withPendingUnitCount: 100)
+            } else if provider.hasItemConformingToTypeIdentifier(movieType) {
+                let child = provider.loadFileRepresentation(forTypeIdentifier: movieType) { url, _ in
+                    guard let url = url, let destination = copyIntoDocuments(url) else {
+                        finish(nil)
+                        return
+                    }
+                    finish(AttachmentItem(type: .video, videoURL: destination))
+                }
+                overall.addChild(child, withPendingUnitCount: 100)
+            } else {
+                overall.completedUnitCount += 100
+                finish(nil)
+            }
+        }
+
+        group.notify(queue: .main) {
+            observation?.invalidate()
+            observation = nil
+            completion(loaded.compactMap({ $0 }))
+        }
+    }
+
+    private static func loadQuickTimeFallback(provider: NSItemProvider, finish: @escaping (AttachmentItem?) -> Void) {
+        guard provider.hasItemConformingToTypeIdentifier(quickTimeType) else {
+            finish(nil)
+            return
+        }
+        provider.loadFileRepresentation(forTypeIdentifier: quickTimeType) { url, _ in
+            guard let url = url, let destination = copyIntoDocuments(url) else {
+                finish(nil)
+                return
+            }
+            finish(AttachmentItem(type: .video, videoURL: destination))
+        }
+    }
+
+    // The URL a provider hands over is only valid inside its callback, so the file has to be
+    // taken out of there before returning.
+    private static func copyIntoDocuments(_ url: URL) -> URL? {
+        let fileManager = FileManager.default
+        guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        var nameFile = url.lastPathComponent
+        if nameFile.contains("&uuid") || nameFile.isEmpty {
+            nameFile = UUID().uuidString + ".mov"
+        }
+        let destinationURL = documentsDirectory.appendingPathComponent(nameFile)
+        do {
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.copyItem(at: url, to: destinationURL)
+            return destinationURL
+        } catch {
+            return nil
+        }
+    }
+
+    // ImageIO decodes straight to the size asked for, so a 12MP HEIC never has to exist as a
+    // 48MB bitmap on the way in - which is where most of the "Preparing..." on a camera photo
+    // was going.
+    private static func downsampledImage(at url: URL) -> UIImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxImagePixelSize
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            // Whatever it is, ImageIO could not read it - fall back to letting UIImage try.
+            return (try? Data(contentsOf: url)).flatMap({ UIImage(data: $0) })
+        }
+        return UIImage(cgImage: cgImage)
+    }
 }

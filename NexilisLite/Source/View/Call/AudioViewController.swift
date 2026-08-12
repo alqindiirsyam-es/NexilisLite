@@ -210,7 +210,7 @@ extension UIImageView {
                 }
             } else {
                 Download().startHTTP(forKey: url) { (name, progress) in
-                    print ("masuk download \(progress)")
+//                    print ("masuk download \(progress)")
                     guard progress == 100 else {
                         return
                     }

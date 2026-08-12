@@ -2137,7 +2137,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     return
                 }
                 let indexPath = IndexPath(row: row!, section: section!)
-                self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
+                self.tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     if let cell = self.tableChatView.cellForRow(at: indexPath) {
                         let containerMessage = cell.contentView.subviews[0]

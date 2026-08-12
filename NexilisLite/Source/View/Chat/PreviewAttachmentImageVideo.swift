@@ -46,7 +46,16 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     
     var previewCollection: UICollectionView!
     var thumbnailCollection: UICollectionView!
+    // The strip is laid out, not framed - see viewDidLoad. Its width still has to change as
+    // attachments are deleted, so the constraint is kept.
+    private var thumbnailWidthConstraint: NSLayoutConstraint?
+    // Pulling a frame out of a video is expensive enough to be worth doing once per file:
+    // it used to run again for every single cell dequeue, in both collections.
+    private var videoThumbnailCache: [String: UIImage] = [:]
     var attachments: [AttachmentItem] = []
+    // Ticks the "Compressing NN%" text on the loader while an export is running; see
+    // showCompressionProgress(for:).
+    private var compressionProgressTimer: Timer?
     var currPage = 0
     let const: CGFloat = 50
     var minWidth: CGFloat!
@@ -56,6 +65,11 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         if self.isMovingFromParent {
             NotificationCenter.default.removeObserver(self)
         }
+    }
+
+    deinit {
+        // A repeating timer holds its target; without this it would outlive the screen.
+        compressionProgressTimer?.invalidate()
     }
     
     override func viewDidLoad() {
@@ -86,12 +100,21 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             thumbnailCollection = UICollectionView(frame: .zero, collectionViewLayout: layoutThumb)
             self.view.addSubview(thumbnailCollection)
             let fixMinWidth: CGFloat = minWidth < maxWidth ? minWidth : maxWidth
-            var x = (imagePreview.frame.width / 2) - (fixMinWidth / 2)
-            if fixMinWidth == maxWidth {
-                x = 0
-            }
             minWidth = fixMinWidth
-            thumbnailCollection.frame = CGRect(x: x, y: UIScreen.main.bounds.height - 120, width: fixMinWidth, height: const)
+            // Fix: this used to be a hardcoded frame at `UIScreen.main.bounds.height - 120`,
+            // worked out in viewDidLoad before anything had been laid out - on some screens
+            // that lands right on top of the text field, and it stays there when the
+            // keyboard pushes the text field up. Anchoring it above the text field puts it
+            // in the right place on every screen and lets it follow the keyboard for free.
+            thumbnailCollection.translatesAutoresizingMaskIntoConstraints = false
+            let thumbnailWidth = thumbnailCollection.widthAnchor.constraint(equalToConstant: fixMinWidth)
+            thumbnailWidthConstraint = thumbnailWidth
+            NSLayoutConstraint.activate([
+                thumbnailCollection.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                thumbnailCollection.bottomAnchor.constraint(equalTo: textFieldSend.topAnchor, constant: -12),
+                thumbnailWidth,
+                thumbnailCollection.heightAnchor.constraint(equalToConstant: const)
+            ])
             thumbnailCollection.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "ThumbCell")
             thumbnailCollection.backgroundColor = .clear
             thumbnailCollection.showsHorizontalScrollIndicator = false
@@ -454,16 +477,12 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     }
     
     private func handleRichText(_ textView: UITextView) {
+        // See UITextView.applyRichText - it is what keeps this from blinking and jumping to
+        // the bottom of the box on every keystroke.
         if let vc = delegate as? EditorGroup {
-            textView.preserveCursorPosition(withChanges: { _ in
-                textView.attributedText = textView.text.richText(isEditing: true, group_id: vc.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: self.listMentionInTextField)
-                return .preserveCursor
-            })
+            textView.applyRichText(textView.text.richText(isEditing: true, group_id: vc.dataGroup["group_id"]  as? String ?? "", listMentionInTextField: self.listMentionInTextField))
         } else {
-            textView.preserveCursorPosition(withChanges: { _ in
-                textView.attributedText = textView.text.richText(isEditing: true)
-                return .preserveCursor
-            })
+            textView.applyRichText(textView.text.richText(isEditing: true))
         }
         attachments[currPage].text = textView.text
     }
@@ -671,246 +690,289 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     }
     
     @objc func sendTapped() {
-        var i = 0
         Nexilis.showLoader(text: "Sending...".localized())
-        DispatchQueue.global().async { [self] in
-            for att in attachments {
-                let semaphore = DispatchSemaphore(value: 0)
-                if att.type == .file {
-                    DispatchQueue.global().async { [self] in
-                        guard let previewItem = self.attachments[i].fileURL else { return }
-                        guard var dataFile = try? Data(contentsOf: previewItem as URL) else { return }
-                        func sanitizeFile(mimeType: String, sanitizeAction: (Data) -> MessageGuardLite.Result) -> Data? {
-                            let res = sanitizeAction(dataFile)
+        // Fix: the attachments used to be walked by a for loop on a background thread that
+        // blocked on a semaphore after each one and, for a video, on a DispatchGroup until
+        // the export had finished. Both are blocking waits, held by a thread at the QoS this
+        // screen was started from, while the work being waited on runs lower -
+        // AVAssetExportSession does its encoding on its own default-priority thread. That is
+        // exactly the priority inversion the Thread Performance Checker reported, with a
+        // thread parked for the entire length of a compression on top of it. Nothing waits
+        // now: each attachment starts the next one from its own completion.
+        //
+        // The DispatchGroup it waited on was Nexilis.dispatch, which is shared - Callback's
+        // connectionStateChanged calls leave() on it whenever the connection changes state.
+        // A reconnect in the middle of a compression would release the wait early and leave
+        // the export's own leave() to over-release the group.
+        sendAttachment(at: 0)
+    }
 
-                            if res.verdict == .block {
-                                DispatchQueue.main.async {
-                                    APIS.showMessageGuardFile(mime: res.mime)
-                                }
-                                return nil
-                            }
-                            return res.data ?? Data()
-                        }
-                        func processIt(with data: Data) {
-                            guard let urlFile = att.fileURL?.absoluteString else { return }
-                            let originalFileName = (urlFile as NSString).lastPathComponent.removingPercentEncoding ?? "file"
-                            let renamedNameFile = "Nexilis_\(Date().currentTimeMillis())_\(originalFileName)"
+    private func sendAttachment(at index: Int) {
+        guard index < attachments.count else {
+            finishSending()
+            return
+        }
+        let attachment = attachments[index]
+        let sendNext: () -> Void = { [weak self] in
+            self?.sendAttachment(at: index + 1)
+        }
+        switch attachment.type {
+        case .file:
+            sendFileAttachment(attachment, completion: sendNext)
+        case .image:
+            sendImageAttachment(attachment, completion: sendNext)
+        default:
+            sendVideoAttachment(attachment, completion: sendNext)
+        }
+    }
 
-                            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                            let fileURL = documentsDirectory.appendingPathComponent(renamedNameFile)
-
-                            if !FileManager.default.fileExists(atPath: fileURL.path) {
-                                try? data.write(to: fileURL)
-                            }
-
-                            DispatchQueue.main.async { [self] in
-                                delegate!.sendChatFromPreviewImage(message_text: "\(originalFileName)|\(att.text)", attachment_flag: "6", image_id: "", video_id: "", thumb_id: "", gif_id: "",  file_id: renamedNameFile, viewController: self, specFile: att.specFileString)
-                                if i == attachments.count - 1 {
-                                    Nexilis.hideLoader { [self] in
-                                        self.dismiss(animated: true, completion: nil)
-                                    }
-                                } else {
-                                    semaphore.signal()
-                                }
-                            }
-                        }
-                        if Nexilis.checkingAccess(key: "message_guard") {
-                            let guardLite = MessageGuardLite(limits: .defaults())
-                            let mimeType = MessageGuardLite.sniffMime(dataFile)
-
-                            if mimeType == "image/png" || mimeType == "image/jpeg" {
-                                if let sanitized = sanitizeFile(mimeType: mimeType, sanitizeAction: guardLite.sanitizeImage) {
-                                    dataFile = sanitized
-                                } else { return }
-                            } else if mimeType == "application/pdf" {
-                                if let sanitized = sanitizeFile(mimeType: mimeType, sanitizeAction: guardLite.sanitizePdf) {
-                                    dataFile = sanitized
-                                } else { return }
-                            }
-                            processIt(with: dataFile)
-                        } else {
-                            processIt(with: dataFile)
-                        }
-                    }
-                } else if att.type == .image {
-                    DispatchQueue.global().async { [self] in
-                        var originalImageName = ""
-                        if (fromCopy) {
-                            originalImageName = "\(Date().currentTimeMillis())"
-                        }
-                        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                        let compressedImageName = "Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName.components(separatedBy: ".")[0]).jpeg"
-                        let thumbName = "THUMB_Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName.components(separatedBy: ".")[0]).jpeg"
-                        let fileURL = documentsDirectory.appendingPathComponent(compressedImageName)
-                        var compressedImage = att.image?.jpeg ?? Data()
-                        if Nexilis.checkingAccess(key: "message_guard") {
-                            let guardLite = MessageGuardLite(limits: .defaults())
-                            let res = guardLite.sanitizeImage(compressedImage)
-                            if res.verdict != .block {
-                                compressedImage = res.data ?? Data()
-                            } else {
-                                DispatchQueue.main.async {
-                                    APIS.showMessageGuardFile(mime: res.mime)
-                                }
-                                return
-                            }
-                        }
-                        if let compressed = compressImageLikeWhatsApp(UIImage(data: compressedImage) ?? UIImage()) {
-                            compressedImage = compressed
-                        }
-                        let data = compressedImage
-                        if !FileManager.default.fileExists(atPath: fileURL.path) {
-                            do {
-                                try data.write(to: fileURL)
-                                //print("file saved")
-                            } catch {
-                                //print("error saving file:", error)
-                            }
-                        }
-                        let thumbImage = UIImage(data: compressedImage)
-                        let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
-                        if let dataThumb = thumbImage!.jpegData(compressionQuality:  0.25),
-                           !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
-                            do {
-                                try dataThumb.write(to: fileURLTHUMB)
-                                //print("thumb saved")
-                            } catch {
-                                //print("error saving file:", error)
-                            }
-                        }
-                        DispatchQueue.main.async { [self] in
-                            delegate!.sendChatFromPreviewImage(message_text: att.text, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", file_id: "", viewController: self, specFile: att.specFileString)
-                            if i == attachments.count - 1 {
-                                Nexilis.hideLoader { [self] in
-                                    self.dismiss(animated: true, completion: nil)
-                                }
-                            } else {
-                                semaphore.signal()
-                            }
-                        }
-                    }
-                } else {
-                    DispatchQueue.main.async { [self] in
-                        previewCollection.reloadData()
-                    }
-                    DispatchQueue.global().async { [self] in
-                        var dataVideo: Data?
-                        if att.videoURL != nil || att.gif != nil {
-                            if att.videoURL != nil {
-                                dataVideo = try? Data(contentsOf: att.videoURL!)
-                            } else {
-                                dataVideo = att.gif
-                            }
-                        }
-                        if att.type == .video {
-                            Nexilis.dispatch = DispatchGroup()
-                            Nexilis.dispatch?.enter()
-                            let compressedURL = NSURL.fileURL(withPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
-                            compressVideo(inputURL: att.videoURL!,
-                                          outputURL: compressedURL) { exportSession in
-                                guard let session = exportSession else {
-                                    if let dispatch = Nexilis.dispatch {
-                                        dispatch.leave()
-                                    }
-                                    return
-                                }
-                                
-                                if session.status == .completed {
-                                    guard let compressedData = try? Data(contentsOf: compressedURL) else {
-                                        return
-                                    }
-                                    dataVideo = compressedData
-                                    if let dispatch = Nexilis.dispatch {
-                                        dispatch.leave()
-                                    }
-                                }
-                            }
-                            Nexilis.dispatch?.wait()
-                            Nexilis.dispatch = nil
-                        }
-                        DispatchQueue.main.async { [self] in
-                            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                            var urlVideo = ""
-                            var originalVideoName = ""
-                            var renamedVideoName = ""
-                            var thumbName = ""
-                            if att.type == .gif {
-                                originalVideoName = "\(Date().currentTimeMillis())_gif"
-                                renamedVideoName = "Nexilis_gif_\(originalVideoName)"
-                                thumbName = "THUMB_Nexilis_gif_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).jpeg"
-                            } else {
-                                urlVideo = att.videoURL!.absoluteString
-                                originalVideoName = (urlVideo as NSString).lastPathComponent
-                                renamedVideoName = "Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).mp4"
-                                thumbName = "THUMB_Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).jpeg"
-                            }
-                            let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
-                            if !FileManager.default.fileExists(atPath: fileURL.path) {
-                                do {
-                                    if let dataVideo = dataVideo {
-                                        try dataVideo.write(to: fileURL)
-                                    }
-                                    //print("file saved")
-                                } catch {
-                                    //print("error saving file:", error)
-                                }
-                            }
-                            var dataThumbVideo: Data?
-                            if att.type != .gif {
-                                let thumb = thumbnail(url: att.videoURL!)
-                                dataThumbVideo = thumb!.jpegData(compressionQuality:  0.5)
-                            }
-                            let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
-                            if !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
-                                do {
-                                    if let dataThumbVideo = dataThumbVideo, att.type == .video {
-                                        try dataThumbVideo.write(to: fileURLTHUMB)
-                                    } else {
-                                        if let dataThumbGif = UIImage(data: dataVideo!) {
-                                            if let compressedDataThumbGif = dataThumbGif.jpegData(compressionQuality: 0.5) {
-                                                try compressedDataThumbGif.write(to: fileURLTHUMB)
-                                            }
-                                        }
-                                    }
-                                    //print("thumb saved")
-                                } catch {
-                                    //print("error saving file:", error)
-                                }
-                            }
-                            delegate!.sendChatFromPreviewImage(message_text: att.text, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: att.type == .gif ? renamedVideoName : "", file_id: "", viewController: self, specFile: att.specFileString)
-                            if i == attachments.count - 1 {
-                                Nexilis.hideLoader { [self] in
-                                    self.dismiss(animated: true, completion: nil)
-                                }
-                            } else {
-                                semaphore.signal()
-                            }
-                        }
-                    }
-                }
-                semaphore.wait()
-                i+=1
+    private func finishSending() {
+        DispatchQueue.main.async {
+            Nexilis.hideLoader { [weak self] in
+                self?.dismiss(animated: true, completion: nil)
             }
         }
     }
-    
+
+    // Fix: every way out of these calls the completion. They used to just `return`, which
+    // left the semaphore un-signalled - the loop then waited for a signal that was never
+    // coming, and the "Sending..." loader stayed up for good.
+    private func sendFileAttachment(_ att: AttachmentItem, completion: @escaping () -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            guard let previewItem = att.fileURL,
+                  var dataFile = try? Data(contentsOf: previewItem) else {
+                completion()
+                return
+            }
+            func sanitize(with action: (Data) -> MessageGuardLite.Result) -> Data? {
+                let res = action(dataFile)
+                if res.verdict == .block {
+                    DispatchQueue.main.async {
+                        APIS.showMessageGuardFile(mime: res.mime)
+                    }
+                    return nil
+                }
+                return res.data ?? Data()
+            }
+            if Nexilis.checkingAccess(key: "message_guard") {
+                let guardLite = MessageGuardLite(limits: .defaults())
+                let mimeType = MessageGuardLite.sniffMime(dataFile)
+                if mimeType == "image/png" || mimeType == "image/jpeg" {
+                    guard let sanitized = sanitize(with: guardLite.sanitizeImage) else {
+                        completion()
+                        return
+                    }
+                    dataFile = sanitized
+                } else if mimeType == "application/pdf" {
+                    guard let sanitized = sanitize(with: guardLite.sanitizePdf) else {
+                        completion()
+                        return
+                    }
+                    dataFile = sanitized
+                }
+            }
+            guard let urlFile = att.fileURL?.absoluteString else {
+                completion()
+                return
+            }
+            let originalFileName = (urlFile as NSString).lastPathComponent.removingPercentEncoding ?? "file"
+            let renamedNameFile = "Nexilis_\(Date().currentTimeMillis())_\(originalFileName)"
+            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let fileURL = documentsDirectory.appendingPathComponent(renamedNameFile)
+            if !FileManager.default.fileExists(atPath: fileURL.path) {
+                try? dataFile.write(to: fileURL)
+            }
+            DispatchQueue.main.async { [self] in
+                delegate!.sendChatFromPreviewImage(message_text: "\(originalFileName)|\(att.text)", attachment_flag: "6", image_id: "", video_id: "", thumb_id: "", gif_id: "",  file_id: renamedNameFile, viewController: self, specFile: att.specFileString)
+                completion()
+            }
+        }
+    }
+
+    private func sendImageAttachment(_ att: AttachmentItem, completion: @escaping () -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            var originalImageName = ""
+            if (fromCopy) {
+                originalImageName = "\(Date().currentTimeMillis())"
+            }
+            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let compressedImageName = "Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName.components(separatedBy: ".")[0]).jpeg"
+            let thumbName = "THUMB_Nexilis_image_\(Date().currentTimeMillis())_\(originalImageName.components(separatedBy: ".")[0]).jpeg"
+            let fileURL = documentsDirectory.appendingPathComponent(compressedImageName)
+            var compressedImage = att.image?.jpeg ?? Data()
+            if Nexilis.checkingAccess(key: "message_guard") {
+                let guardLite = MessageGuardLite(limits: .defaults())
+                let res = guardLite.sanitizeImage(compressedImage)
+                if res.verdict != .block {
+                    compressedImage = res.data ?? Data()
+                } else {
+                    DispatchQueue.main.async {
+                        APIS.showMessageGuardFile(mime: res.mime)
+                    }
+                    completion()
+                    return
+                }
+            }
+            if let compressed = compressImageLikeWhatsApp(UIImage(data: compressedImage) ?? UIImage()) {
+                compressedImage = compressed
+            }
+            let data = compressedImage
+            if !FileManager.default.fileExists(atPath: fileURL.path) {
+                do {
+                    try data.write(to: fileURL)
+                } catch {
+                }
+            }
+            let thumbImage = UIImage(data: compressedImage)
+            let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
+            if let dataThumb = thumbImage?.jpegData(compressionQuality:  0.25),
+               !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
+                do {
+                    try dataThumb.write(to: fileURLTHUMB)
+                } catch {
+                }
+            }
+            DispatchQueue.main.async { [self] in
+                delegate!.sendChatFromPreviewImage(message_text: att.text, attachment_flag: "1", image_id: compressedImageName, video_id: "", thumb_id: thumbName, gif_id: "", file_id: "", viewController: self, specFile: att.specFileString)
+                completion()
+            }
+        }
+    }
+
+    private func sendVideoAttachment(_ att: AttachmentItem, completion: @escaping () -> Void) {
+        DispatchQueue.main.async { [self] in
+            previewCollection.reloadData()
+        }
+        guard att.type == .video, let videoURL = att.videoURL else {
+            // A gif already carries its bytes with it - there is nothing to compress.
+            writeVideoAttachment(att, sourceURL: nil, completion: completion)
+            return
+        }
+        let compressedURL = URL(fileURLWithPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
+        // Returns straight away: AVFoundation encodes on its own thread and calls back when
+        // it is done, so no thread of ours is blocked in the meantime.
+        let session = compressVideo(inputURL: videoURL, outputURL: compressedURL) { [weak self] exportSession in
+            guard let self = self else {
+                return
+            }
+            self.stopCompressionProgress()
+            let usable = exportSession?.status == .completed && FileManager.default.fileExists(atPath: compressedURL.path)
+            self.writeVideoAttachment(att, sourceURL: usable ? compressedURL : videoURL, completion: completion)
+        }
+        if let session = session {
+            showCompressionProgress(for: session)
+        }
+    }
+
+    // Fix: this used to run on the MAIN queue, and it read the whole video into memory with
+    // Data(contentsOf:) before writing it back out again. A clip from the iPhone camera is
+    // routinely hundreds of megabytes: that is a memory spike big enough to be killed for,
+    // and the UI was frozen for the whole of it. Copying the file hands the bytes to the
+    // filesystem instead of through the app, and none of it touches the main thread.
+    private func writeVideoAttachment(_ att: AttachmentItem, sourceURL: URL?, completion: @escaping () -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            var originalVideoName = ""
+            var renamedVideoName = ""
+            var thumbName = ""
+            if att.type == .gif {
+                originalVideoName = "\(Date().currentTimeMillis())_gif"
+                renamedVideoName = "Nexilis_gif_\(originalVideoName)"
+                thumbName = "THUMB_Nexilis_gif_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).jpeg"
+            } else {
+                let urlVideo = att.videoURL?.absoluteString ?? ""
+                originalVideoName = (urlVideo as NSString).lastPathComponent
+                renamedVideoName = "Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).mp4"
+                thumbName = "THUMB_Nexilis_video_\(Date().currentTimeMillis())_\(originalVideoName.components(separatedBy: ".")[0]).jpeg"
+            }
+            let fileURL = documentsDirectory.appendingPathComponent(renamedVideoName)
+            if !FileManager.default.fileExists(atPath: fileURL.path) {
+                if let sourceURL = sourceURL {
+                    try? FileManager.default.copyItem(at: sourceURL, to: fileURL)
+                } else if let gif = att.gif {
+                    try? gif.write(to: fileURL)
+                }
+            }
+            let fileURLTHUMB = documentsDirectory.appendingPathComponent(thumbName)
+            if !FileManager.default.fileExists(atPath: fileURLTHUMB.path) {
+                if att.type == .video, let videoURL = att.videoURL,
+                   let dataThumbVideo = thumbnail(url: videoURL)?.jpegData(compressionQuality: 0.5) {
+                    try? dataThumbVideo.write(to: fileURLTHUMB)
+                } else if let gif = att.gif, let dataThumbGif = UIImage(data: gif),
+                          let compressedDataThumbGif = dataThumbGif.jpegData(compressionQuality: 0.5) {
+                    try? compressedDataThumbGif.write(to: fileURLTHUMB)
+                }
+            }
+            // The compressed copy has been handed over; the temporary file it lived in is of
+            // no further use and can be tens of megabytes.
+            if let sourceURL = sourceURL, sourceURL.path.hasPrefix(NSTemporaryDirectory()) {
+                try? FileManager.default.removeItem(at: sourceURL)
+            }
+            DispatchQueue.main.async { [self] in
+                delegate!.sendChatFromPreviewImage(message_text: att.text, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: att.type == .gif ? renamedVideoName : "", file_id: "", viewController: self, specFile: att.specFileString)
+                completion()
+            }
+        }
+    }
+
+    // Fix: a long compression used to sit behind a "Sending..." alert that never changed,
+    // which is what made it read as a freeze even while it was making progress.
+    private func showCompressionProgress(for session: AVAssetExportSession) {
+        DispatchQueue.main.async { [weak self] in
+            self?.compressionProgressTimer?.invalidate()
+            self?.compressionProgressTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { timer in
+                guard session.status == .exporting || session.status == .waiting else {
+                    timer.invalidate()
+                    return
+                }
+                Nexilis.loadingAlert.message = "\("Compressing".localized()) \(Int(session.progress * 100))%"
+            }
+        }
+    }
+
+    private func stopCompressionProgress() {
+        DispatchQueue.main.async { [weak self] in
+            self?.compressionProgressTimer?.invalidate()
+            self?.compressionProgressTimer = nil
+            Nexilis.loadingAlert.message = "Sending...".localized()
+        }
+    }
+
+
+    // Fix: the preset was AVAssetExportPresetHighestQuality, which asks for the source's own
+    // quality back - re-encoding a clip straight off the iPhone camera (4K, tens of Mbps)
+    // at essentially the bitrate it already had. The "compressed" file routinely came out no
+    // smaller than the original, which is why sending a camera video took so long and
+    // uploaded so much. Sizing the output to the resolution a chat video is actually watched
+    // at is where the saving is: 720p takes a 4K clip down by roughly an order of magnitude,
+    // and the preset only ever scales down, so a video that is already smaller is left at
+    // its own size.
+    @discardableResult
     func compressVideo(inputURL: URL,
                        outputURL: URL,
-                       handler:@escaping (_ exportSession: AVAssetExportSession?) -> Void) {
+                       handler:@escaping (_ exportSession: AVAssetExportSession?) -> Void) -> AVAssetExportSession? {
         let urlAsset = AVURLAsset(url: inputURL, options: nil)
+        let compatible = AVAssetExportSession.exportPresets(compatibleWith: urlAsset)
+        let preset = [AVAssetExportPreset1280x720,
+                      AVAssetExportPreset960x540,
+                      AVAssetExportPresetMediumQuality].first(where: { compatible.contains($0) })
+            ?? AVAssetExportPresetMediumQuality
         guard let exportSession = AVAssetExportSession(asset: urlAsset,
-                                                       presetName: AVAssetExportPresetHighestQuality) else {
+                                                       presetName: preset) else {
             handler(nil)
             
-            return
+            return nil
         }
         
         exportSession.outputURL = outputURL
         exportSession.outputFileType = .mp4
+        // Puts the moov atom at the front, so the receiver can start playing while the rest
+        // is still arriving instead of having to download the whole file first.
         exportSession.shouldOptimizeForNetworkUse = true
         exportSession.exportAsynchronously {
             handler(exportSession)
         }
+        return exportSession
     }
     
     func compressImageLikeWhatsApp(_ image: UIImage, maxFileSizeMB: Double = 1.0, maxDimension: CGFloat = 1280) -> Data? {
@@ -1029,8 +1091,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             if item.type == .image {
                 cell.imageView.image = item.image
             } else if item.type == .video {
-                let thumb = thumbnail(url: item.videoURL!)
-                cell.imageView.image = thumb
+                cell.imageView.image = cachedThumbnail(for: item.videoURL!)
                 cell.url = item.videoURL!
                 cell.setupNewView()
             } else if item.type == .gif {
@@ -1046,6 +1107,12 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 withReuseIdentifier: "ThumbCell",
                 for: indexPath
             )
+            // Fix: a plain UICollectionViewCell has nothing to reset itself, and this piled
+            // another image view (and, for the selected one, another border and trash icon)
+            // on top of whatever the recycled cell was still showing. It went unnoticed
+            // while nothing ever reloaded these cells; now that the selection moves, it
+            // would leave the old highlight behind.
+            cell.contentView.subviews.forEach({ $0.removeFromSuperview() })
             let img = UIImageView(frame: cell.bounds)
             img.contentMode = .scaleAspectFill
             img.layer.cornerRadius = 4
@@ -1054,8 +1121,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             if item.type == .image {
                 img.image = item.image
             }
-            if item.type == .video {
-                img.image = thumbnail(url: item.videoURL!)
+            if item.type == .video, let videoURL = item.videoURL {
+                img.image = cachedThumbnail(for: videoURL)
             }
             if item.type == .gif {
                 img.image = UIImage(data: item.gif!)
@@ -1120,11 +1187,8 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: { [self] in
                 if attachments.count > 1 {
                     minWidth = minWidth - 53
-                    var x = (imagePreview.frame.width / 2) - (minWidth / 2)
-                    if minWidth == maxWidth {
-                        x = 0
-                    }
-                    thumbnailCollection.frame = CGRect(x: x, y: thumbnailCollection.frame.origin.y, width: minWidth, height: const)
+                    thumbnailWidthConstraint?.constant = minWidth
+                    view.layoutIfNeeded()
                     let idxReload = index > attachments.count - 1 ? attachments.count - 1 : index
                     currPage = idxReload
                     
@@ -1162,6 +1226,17 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         }
     }
     
+    private func cachedThumbnail(for url: URL) -> UIImage? {
+        if let cached = videoThumbnailCache[url.absoluteString] {
+            return cached
+        }
+        let image = thumbnail(url: url)
+        if let image = image {
+            videoThumbnailCache[url.absoluteString] = image
+        }
+        return image
+    }
+
     func thumbnail(url:URL)->UIImage?{
         let asset = AVURLAsset(url: url, options: nil)
         let imgGenerator = AVAssetImageGenerator(asset: asset)
@@ -1178,6 +1253,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             let centerX = scrollView.contentOffset.x + scrollView.frame.width / 2
             let page = Int(centerX / scrollView.frame.width)
             if page != currPage {
+                let previousPage = currPage
                 currPage = page
                 
                 DispatchQueue.main.async { [self] in
@@ -1206,10 +1282,31 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                         }
                     }
                 }
-                
-//                thumbnailCollection.reloadData()
+
+                updateThumbnailSelection(previousPage: previousPage, animated: true)
             }
         }
+    }
+
+    // Fix: the strip was left exactly where it was whenever the pager moved - the call that
+    // would have redrawn it is the commented-out reloadData this replaces. So the highlight
+    // stayed on whichever thumbnail had it first, and with more than a few attachments the
+    // one actually being previewed was often not even scrolled into view.
+    private func updateThumbnailSelection(previousPage: Int, animated: Bool) {
+        guard let thumbnailCollection = thumbnailCollection,
+              currPage >= 0, currPage < attachments.count else {
+            return
+        }
+        // Only the two that change - a full reloadData would rebuild every thumbnail on
+        // every swipe.
+        var toReload = [IndexPath(item: currPage, section: 0)]
+        if previousPage >= 0, previousPage < attachments.count, previousPage != currPage {
+            toReload.append(IndexPath(item: previousPage, section: 0))
+        }
+        thumbnailCollection.reloadItems(at: toReload)
+        thumbnailCollection.scrollToItem(at: IndexPath(item: currPage, section: 0),
+                                         at: .centeredHorizontally,
+                                         animated: animated)
     }
     
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {

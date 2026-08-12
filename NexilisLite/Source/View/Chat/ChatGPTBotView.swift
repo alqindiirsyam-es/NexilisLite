@@ -2365,7 +2365,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
 //            }
 //        }
 //    }
-//    
+//
 //    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
 //        if !decelerate {
 //            let indexPath = tableChatView.indexPathsForVisibleRows?.first
@@ -2409,10 +2409,9 @@ extension ChatGPTBotView: UITextViewDelegate {
             })
         }
         if textView.text.contains("*") || textView.text.contains("_") || textView.text.contains("^") || textView.text.contains("~") {
-            textView.preserveCursorPosition(withChanges: { _ in
-                textView.attributedText = textView.text.richText(isEditing: true)
-                return .preserveCursor
-            })
+            // See UITextView.applyRichText - it is what keeps this from blinking and jumping
+            // to the bottom of the box on every keystroke.
+            textView.applyRichText(textView.text.richText(isEditing: true))
         }
     }
     

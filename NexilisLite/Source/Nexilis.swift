@@ -5398,9 +5398,9 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
             return
         }
 
-        #if DEBUG
-        print("[Pinning] domain=\(domain) computedHash=\(publicKeyHash) acceptedHashes=\(acceptedHashes) storedPinJSON=\(storedCertificate)")
-        #endif
+//        #if DEBUG
+//        print("[Pinning] domain=\(domain) computedHash=\(publicKeyHash) acceptedHashes=\(acceptedHashes) storedPinJSON=\(storedCertificate)")
+//        #endif
 
         if acceptedHashes.contains(publicKeyHash) {
             completionHandler(.useCredential, URLCredential(trust: serverTrust))

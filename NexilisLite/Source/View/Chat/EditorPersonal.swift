@@ -699,7 +699,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.referenceChatDate}).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
                         if row != nil && section != nil {
                             let indexPath = IndexPath(row: row!, section: section!)
-                            self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: false)
+                            self.tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: false)
                             self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
                                 self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
@@ -719,7 +719,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         if data.count > 0 {
                             let section = self.dataDates.firstIndex(of: data[0]["chat_date"]  as? String ?? "")
                             let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == data[0]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.markerCounter})
-                            self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .bottom, animated: false)
+                            self.tableChatView.safeScrollToRow(at: IndexPath(row: row!, section: section!), at: .bottom, animated: false)
                         }
                     }
                 } else {
@@ -1736,7 +1736,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     if indexMessage != nil {
                         let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
                         let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
-                        self.tableChatView.scrollToRow(at: IndexPath(row: row!, section: section!), at: .top, animated: true)
+                        self.tableChatView.safeScrollToRow(at: IndexPath(row: row!, section: section!), at: .top, animated: true)
                     }
                 } else if self.buttonScrollToBottom.isDescendant(of: self.view) {
                     DispatchQueue.main.async { [self] in
@@ -2668,7 +2668,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 ])
                 if (self.currentIndexpath != nil) {
                     DispatchQueue.main.async {
-                        self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
+                        self.tableChatView.safeScrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
                     }
                 } else {
                     self.tableChatView.scrollToBottom()
@@ -3009,7 +3009,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     self.tableChatView.scrollToBottom()
                 } else {
                     if (self.currentIndexpath != nil) {
-                        self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
+                        self.tableChatView.safeScrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
                     } else {
                         self.tableChatView.scrollToBottom()
                     }
@@ -4315,130 +4315,50 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
             let cancelButtonAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
             UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes , for: .normal)
         }
-        guard let result = results.first else {
+        guard !results.isEmpty else {
             picker.dismiss(animated: true, completion: nil)
             return
         }
-        picker.dismiss(animated: true, completion: {
-            let countData = results.count
-            var attachments: [AttachmentItem] = []
+        picker.dismiss(animated: true, completion: { [weak self] in
             Nexilis.showLoader(text: "Preparing...".localized())
-            DispatchQueue.global().async {
-                for res in results {
-                    let semaphore = DispatchSemaphore(value: 0)
-                    if res.itemProvider.hasItemConformingToTypeIdentifier("com.compuserve.gif") {
-                        res.itemProvider.loadDataRepresentation(forTypeIdentifier: "com.compuserve.gif") { data, error in
-                            if error != nil {
-                                self.loadAnimatedMedia(from: result.itemProvider) { data, isGIF in
-                                    guard let data = data else {
-                                        print("Failed to load media")
-                                        semaphore.signal()
-                                        return
-                                    }
-                                    if isGIF {
-                                        attachments.append(AttachmentItem(type: .gif, gif: data))
-                                    } else {
-                                        let fileManager = FileManager.default
-                                        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-                                        let destinationURL = documentsDirectory.appendingPathComponent(UUID().uuidString + ".mov")
-                                        do {
-                                            try data.write(to: destinationURL)
-                                            attachments.append(AttachmentItem(type: .video, videoURL: destinationURL))
-                                            semaphore.signal()
-                                        } catch {
-                                            
-                                        }
-                                    }
-                                }
-                            } else if let data = data {
-                                attachments.append(AttachmentItem(type: .gif, gif: data))
-                                semaphore.signal()
-                            }
-                        }
-                    } else if res.itemProvider.hasItemConformingToTypeIdentifier("public.image") {
-                        res.itemProvider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
-                            if let data = data {
-                                attachments.append(AttachmentItem(type: .image, image: UIImage(data: data)))
-                                semaphore.signal()
-                            }
-                        }
-                    } else if res.itemProvider.hasItemConformingToTypeIdentifier("public.movie") {
-                        res.itemProvider.loadFileRepresentation(forTypeIdentifier: "public.movie") { url, error in
-                            if let url = url {
-                                let fileManager = FileManager.default
-                                let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-                                var nameFile = url.lastPathComponent
-                                if nameFile.contains("&uuid"){
-                                    nameFile = UUID().uuidString + ".mov"
-                                }
-                                let destinationURL = documentsDirectory.appendingPathComponent(nameFile)
-                                do {
-                                    if fileManager.fileExists(atPath: destinationURL.path) {
-                                        try fileManager.removeItem(at: destinationURL)
-                                    }
-                                    try fileManager.copyItem(at: url, to: destinationURL)
-                                    attachments.append(AttachmentItem(type: .video, videoURL: destinationURL))
-                                    semaphore.signal()
-                                } catch {
-                                    
-                                }
-                            }
-                        }
-                    }
-                    semaphore.wait()
+            // Fix: the loading itself moved to PickerAttachmentLoader - see the note there
+            // for what was wrong with doing it here (items loaded one after another behind a
+            // semaphore, failures that left the loader up for good, a full-size decode of
+            // every camera photo).
+            PickerAttachmentLoader.load(results: results, onProgress: { fraction in
+                // Most of the wait on a camera photo or video is iCloud handing the original
+                // back, so it is worth saying how far along that is.
+                Nexilis.loadingAlert.message = "\("Preparing...".localized()) \(Int(fraction * 100))%"
+            }, completion: { attachments in
+                guard let self = self else {
+                    Nexilis.hideLoader { }
+                    return
                 }
-                if attachments.count == countData {
-                    DispatchQueue.main.async {
-                        Nexilis.hideLoader() {
-                            let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
-                            if (self.textFieldSend.textColor != .lightGray) {
-                                previewImageVC.currentTextTextField = self.textFieldSend.text
-                                attachments[0].text = self.textFieldSend.text
-                            }
-                            previewImageVC.attachments = attachments
-                            previewImageVC.modalPresentationStyle = .custom
-                            previewImageVC.delegate = self
-                            attachments[0].isAck = self.isAck
-                            attachments[0].isConfidential = self.isConfidential
-                            previewImageVC.isCC = self.isContactCenter
-                            self.present(previewImageVC, animated: true, completion: nil)
-                        }
-                    }
+                var attachments = attachments
+                guard !attachments.isEmpty else {
+                    // Nothing came back at all - still take the loader down rather than
+                    // leaving it on screen.
+                    Nexilis.hideLoader { }
+                    return
                 }
-            }
+                Nexilis.hideLoader {
+                    let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
+                    if (self.textFieldSend.textColor != .lightGray) {
+                        previewImageVC.currentTextTextField = self.textFieldSend.text
+                        attachments[0].text = self.textFieldSend.text
+                    }
+                    attachments[0].isAck = self.isAck
+                    attachments[0].isConfidential = self.isConfidential
+                    previewImageVC.attachments = attachments
+                    previewImageVC.modalPresentationStyle = .custom
+                    previewImageVC.delegate = self
+                    previewImageVC.isCC = self.isContactCenter
+                    self.present(previewImageVC, animated: true, completion: nil)
+                }
+            })
         })
     }
-    
-    func loadAnimatedMedia(from provider: NSItemProvider, completion: @escaping (Data?, Bool) -> Void) {
-        // First: real GIF
-        if provider.hasItemConformingToTypeIdentifier("com.compuserve.gif") {
-            provider.loadFileRepresentation(forTypeIdentifier: "com.compuserve.gif") { url, error in
-                if let url = url, let data = try? Data(contentsOf: url) {
-                    completion(data, true) // true = isGIF
-                } else {
-                    // fallback
-                    self.loadQuickTimeMovie(from: provider, completion: completion)
-                }
-            }
-        } else {
-            // fallback directly
-            self.loadQuickTimeMovie(from: provider, completion: completion)
-        }
-    }
 
-    private func loadQuickTimeMovie(from provider: NSItemProvider, completion: @escaping (Data?, Bool) -> Void) {
-        if provider.hasItemConformingToTypeIdentifier("com.apple.quicktime-movie") {
-            provider.loadFileRepresentation(forTypeIdentifier: "com.apple.quicktime-movie") { url, error in
-                if let url = url, let data = try? Data(contentsOf: url) {
-                    completion(data, false) // false = it's MOV, not GIF
-                } else {
-                    completion(nil, false)
-                }
-            }
-        } else {
-            completion(nil, false)
-        }
-    }
     
     func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, file_id: String, viewController: UIViewController, specFile: String) {
         specFileString = specFile
@@ -5373,10 +5293,9 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     private func handleRichText(_ textView: UITextView) {
-        textView.preserveCursorPosition(withChanges: { _ in
-            textView.attributedText = textView.text.richText(isEditing: true, listMentionInTextField: self.listMentionInTextField)
-            return .preserveCursor
-        })
+        // See UITextView.applyRichText - it is what keeps this from blinking and jumping to
+        // the bottom of the box on every keystroke.
+        textView.applyRichText(textView.text.richText(isEditing: true, listMentionInTextField: self.listMentionInTextField))
     }
     
     func isGIFData(_ data: Data) -> Bool {
@@ -6356,7 +6275,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 self.constraintBottomTableViewWithTextfield.constant = self.constraintBottomTableViewWithTextfield.constant + 70
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: {
                     if (self.currentIndexpath != nil) {
-                        self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: true)
+                        self.tableChatView.safeScrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: true)
                     } else {
                         self.tableChatView.scrollToBottom()
                     }
@@ -10226,7 +10145,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     return
                 }
                 let indexPath = IndexPath(row: row!, section: section!)
-                self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
+                self.tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     if let cell = self.tableChatView.cellForRow(at: indexPath) {
                         let containerMessage = cell.contentView.subviews[0]
@@ -10686,7 +10605,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }, completion: nil)
         if (self.currentIndexpath != nil) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                self.tableChatView.scrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
+                self.tableChatView.safeScrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
             }
         } else {
             self.tableChatView.scrollToBottom()
@@ -10863,7 +10782,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     return
                 }
                 let indexPath = IndexPath(row: row!, section: section!)
-                self.tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
+                self.tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     if let cell = self.tableChatView.cellForRow(at: indexPath) {
                         let containerMessage = cell.contentView.subviews[0]
@@ -10948,7 +10867,23 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
 }
 
 extension UITableView {
-    
+
+    // Fix: scrolling to a row that is no longer there throws NSRangeException and takes the
+    // app down - "Attempted to scroll the table view to an out-of-bounds section (0) when
+    // there are only 0 sections". The chat is full of scroll requests that were worked out
+    // before a reload (a message deleted, a failed send removed, a jump to a search hit),
+    // and by the time they run the row they name can be gone. Checking against what the
+    // table actually has right now is the only thing that makes them safe.
+    func safeScrollToRow(at indexPath: IndexPath, at scrollPosition: UITableView.ScrollPosition, animated: Bool) {
+        guard indexPath.section >= 0,
+              indexPath.section < numberOfSections,
+              indexPath.row >= 0,
+              indexPath.row < numberOfRows(inSection: indexPath.section) else {
+            return
+        }
+        scrollToRow(at: indexPath, at: scrollPosition, animated: animated)
+    }
+
     func scrollToBottom(isAnimated:Bool = true){
         
         DispatchQueue.main.asyncAfter(deadline: .now() + (isAnimated ? 0 : 0.6)) { [weak self] in
@@ -10960,17 +10895,17 @@ extension UITableView {
             guard numberOfRows > 0 else { return }
             
             let indexPath = IndexPath(row: numberOfRows - 1, section: lastSection)
-            self.scrollToRow(at: indexPath, at: .bottom, animated: isAnimated)
+            self.safeScrollToRow(at: indexPath, at: .bottom, animated: isAnimated)
         }
     }
     
     func scrollToTop(isAnimated:Bool = true) {
         
         DispatchQueue.main.async {
-            let indexPath = IndexPath(row: 0, section: 0)
-            if indexPath.row != -1 {
-                self.scrollToRow(at: indexPath, at: .top, animated: isAnimated)
-            }
+            // Fix: the old `if indexPath.row != -1` was always true - it tested a constant -
+            // so an empty chat (every message deleted, for instance) went straight into
+            // scrolling to section 0 of a table with no sections, and crashed.
+            self.safeScrollToRow(at: IndexPath(row: 0, section: 0), at: .top, animated: isAnimated)
         }
     }
 }
