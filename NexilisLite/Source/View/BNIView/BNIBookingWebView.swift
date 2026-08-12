@@ -1094,45 +1094,140 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
 
 extension BNIBookingWebView: URLSessionDelegate {
     public func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        guard let serverTrust = challenge.protectionSpace.serverTrust else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
+        let result = CertificatePinningHelper.evaluate(challenge: challenge)
+        if let mismatchedHash = result.mismatchedHash {
+            blockedCertificate = mismatchedHash
         }
-        if let publicKeyHash = extractPublicKeyHash(from: serverTrust) {
-            let domain = challenge.protectionSpace.host
-            let storedCertificate = Utils.getCertificatePinningWebview()
-            if let jsonData = storedCertificate.data(using: .utf8),
-               let certJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
-                if publicKeyHash == certJson[domain] {
-                    completionHandler(.useCredential, URLCredential(trust: serverTrust))
-                } else {
-                    blockedCertificate = publicKeyHash
-                    completionHandler(.cancelAuthenticationChallenge, nil)
-                }
-            }
+        completionHandler(result.disposition, result.credential)
+    }
+}
+
+enum CertificatePinningHelper {
+
+    struct EvaluationResult {
+        let disposition: URLSession.AuthChallengeDisposition
+        let credential: URLCredential?
+        /// Set only when the connection was rejected because the computed hash did not
+        /// match any accepted pin for the domain - mirrors the old `blockedCertificate`
+        /// behavior used by the "trust this site" prompt in the in-app browser.
+        let mismatchedHash: String?
+    }
+
+    static func evaluate(challenge: URLAuthenticationChallenge) -> EvaluationResult {
+        guard let serverTrust = challenge.protectionSpace.serverTrust else {
+            return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: nil)
+        }
+
+        guard let publicKeyHash = extractPublicKeyHash(from: serverTrust) else {
+            return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: nil)
+        }
+
+        let domain = challenge.protectionSpace.host
+        let storedCertificate = Utils.getCertificatePinningWebview()
+        guard let jsonData = storedCertificate.data(using: .utf8) else {
+            // Fix: fail closed instead of never calling completionHandler at all.
+            return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: nil)
+        }
+
+        // Fix: accept either the new array-of-hashes format (rotation-safe) or the
+        // legacy single-hash-string format, so a device that still has the old format
+        // cached doesn't get hard-locked-out mid-migration.
+        let acceptedHashes: [String]
+        if let certJsonArray = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: [String]] {
+            acceptedHashes = certJsonArray[domain] ?? []
+        } else if let certJsonLegacy = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
+            acceptedHashes = certJsonLegacy[domain].map { [$0] } ?? []
         } else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
+            return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: nil)
+        }
+
+        if acceptedHashes.contains(publicKeyHash) {
+            return EvaluationResult(disposition: .useCredential, credential: URLCredential(trust: serverTrust), mismatchedHash: nil)
+        } else {
+            return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: publicKeyHash)
         }
     }
-    
-    func extractPublicKeyHash(from serverTrust: SecTrust) -> String? {
+
+    // MARK: - SPKI hashing
+
+    private static let rsa2048Asn1Header: [UInt8] = [
+        0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+        0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x0f, 0x00
+    ]
+    private static let rsa3072Asn1Header: [UInt8] = [
+        0x30, 0x82, 0x01, 0xa2, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+        0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x8f, 0x00
+    ]
+    private static let rsa4096Asn1Header: [UInt8] = [
+        0x30, 0x82, 0x02, 0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+        0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x02, 0x0f, 0x00
+    ]
+    private static let ecDsaSecp256r1Asn1Header: [UInt8] = [
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02,
+        0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00
+    ]
+    private static let ecDsaSecp384r1Asn1Header: [UInt8] = [
+        0x30, 0x76, 0x30, 0x10, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02,
+        0x01, 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22, 0x03, 0x62, 0x00
+    ]
+
+    private static func spkiHeader(keyType: String, sizeInBits: Int) -> [UInt8]? {
+        if keyType == (kSecAttrKeyTypeRSA as String) {
+            switch sizeInBits {
+            case 2048: return rsa2048Asn1Header
+            case 3072: return rsa3072Asn1Header
+            case 4096: return rsa4096Asn1Header
+            default: return nil
+            }
+        } else if keyType == (kSecAttrKeyTypeECSECPrimeRandom as String) {
+            switch sizeInBits {
+            case 256: return ecDsaSecp256r1Asn1Header
+            case 384: return ecDsaSecp384r1Asn1Header
+            default: return nil
+            }
+        }
+        return nil
+    }
+
+    // Fix: kSecAttrKeyType's value can come back as an NSNumber instead of a String
+    // depending on iOS version/key origin - `as? String` silently failing here would
+    // make every single challenge get rejected, indistinguishable from an actual pin
+    // mismatch.
+    private static func coerceToKeyTypeString(_ value: Any?) -> String? {
+        if let s = value as? String { return s }
+        if let n = value as? NSNumber { return n.stringValue }
+        if let v = value { return "\(v)" }
+        return nil
+    }
+
+    static func extractPublicKeyHash(from serverTrust: SecTrust) -> String? {
         guard let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else { return nil }
         guard let publicKey = SecCertificateCopyKey(certificate) else { return nil }
-        
+
         var error: Unmanaged<CFError>?
         guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
             return nil
         }
-        
-        // Compute SHA-256 hash
-        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        publicKeyData.withUnsafeBytes {
-            _ = CC_SHA256($0.baseAddress, CC_LONG(publicKeyData.count), &hash)
+
+        let attributes = SecKeyCopyAttributes(publicKey) as? [CFString: Any]
+        let keyType = coerceToKeyTypeString(attributes?[kSecAttrKeyType])
+        let sizeInBits = attributes?[kSecAttrKeySizeInBits] as? Int
+
+        guard let keyType = keyType, let sizeInBits = sizeInBits,
+              let header = spkiHeader(keyType: keyType, sizeInBits: sizeInBits) else {
+            // Fix: unknown/unsupported key type or size - fail closed instead of
+            // silently hashing the wrong (raw, non-SPKI) bytes and always mismatching.
+            return nil
         }
-        
-        let hashData = Data(hash)
-        let base64Hash = hashData.base64EncodedString()
-        
-        return base64Hash
+
+        var spki = Data(header)
+        spki.append(publicKeyData)
+
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        spki.withUnsafeBytes {
+            _ = CC_SHA256($0.baseAddress, CC_LONG(spki.count), &hash)
+        }
+
+        return Data(hash).base64EncodedString()
     }
 }

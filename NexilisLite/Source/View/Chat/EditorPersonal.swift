@@ -10129,45 +10129,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     }
     
     @objc func tapMessageText(_ sender: ObjectGesture) {
-        var stringURl = sender.message_id
-        if stringURl.lowercased().starts(with: "www.") {
-            stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-        }
-        let app: UIApplication = UIApplication.shared
-        var appURL: URL? = nil
-        if let url = URL(string: stringURl) {
-            if url.host?.contains("instagram.com") == true {
-                // Convert to Instagram deep link
-                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                   let path = components.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
-                    appURL = URL(string: "instagram://\(path)")
-                }
-            } else if url.host?.contains("x.com") == true || url.host?.contains("twitter.com") == true {
-                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                   let path = components.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
-                    appURL = URL(string: "twitter://\(path)")
-                }
-            } else if url.host?.contains("youtube.com") == true || url.host?.contains("youtu.be") == true {
-                appURL = URL(string: "youtube://\(url.absoluteString)")
-            }
-            if let appURL = appURL, app.canOpenURL(appURL) {
-                app.open(appURL, options: [:]) { success in
-                    if !success {
-                        if Nexilis.checkingAccess(key: "secure_browser") {
-                            APIS.openUrl(url: stringURl)
-                        } else {
-                            app.open(url)
-                        }
-                    }
-                }
-            } else {
-                if Nexilis.checkingAccess(key: "secure_browser") {
-                    APIS.openUrl(url: stringURl)
-                } else {
-                    app.open(url)
-                }
-            }
-        }
+        LinkOpener.open(urlString: sender.message_id)
     }
     
 //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
@@ -10833,6 +10795,61 @@ extension String {
     var nilIfEmpty: String? {
         let v = self.trimmingCharacters(in: .whitespacesAndNewlines)
         return v.isEmpty ? nil : v
+    }
+}
+
+enum LinkOpener {
+
+    // Fix: known consumer-app domains should always deep-link into their native app
+    // via Universal Links, even when "secure_browser" is on. Universal Links only
+    // fire for `UIApplication.open(url)` - routing these through the in-app WKWebView
+    // (`APIS.openUrl`) never triggers them, so the link would just render inside the
+    // in-app browser and never reach the native app, regardless of any other fix.
+    // `secure_browser` is a policy setting meant for arbitrary/untrusted links; these
+    // are well-known, trusted destinations, so bypassing it here is intentional.
+    private static let wellKnownAppDomains: [String] = [
+        "instagram.com",
+        "x.com", "twitter.com",
+        "youtube.com", "youtu.be",
+        "whatsapp.com", "wa.me",
+        "facebook.com", "fb.com", "fb.watch",
+        "tiktok.com",
+        "linkedin.com",
+        "t.me", "telegram.me", "telegram.org",
+        "open.spotify.com",
+        "maps.google.com", "goo.gl"
+    ]
+
+    private static func isWellKnownAppDomain(host: String?) -> Bool {
+        guard let host = host?.lowercased() else { return false }
+        return wellKnownAppDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// Opens a URL tapped inside a chat message. `urlString` is expected to be
+    /// exactly what was detected in the message text (e.g. `sender.message_id` from
+    /// the tap gesture) - may or may not have a scheme, may start with "www.".
+    static func open(urlString: String) {
+        var stringURl = urlString
+        // Fix: only strip/rewrite a "www." PREFIX, never lowercase the whole string -
+        // paths and query strings (Instagram shortcodes, YouTube video ids, etc.) are
+        // case-sensitive.
+        if stringURl.lowercased().hasPrefix("www.") {
+            stringURl = "https://" + String(stringURl.dropFirst(4))
+        }
+        guard let url = URL(string: stringURl) else { return }
+
+        let app = UIApplication.shared
+        if isWellKnownAppDomain(host: url.host) {
+            // Universal Link - iOS routes straight into the correct in-app screen
+            // (the specific post/video/chat) if the app is installed and supports it,
+            // and falls back to the browser automatically if not. No custom scheme
+            // guessing needed.
+            app.open(url)
+        } else if Nexilis.checkingAccess(key: "secure_browser") {
+            APIS.openUrl(url: stringURl)
+        } else {
+            app.open(url)
+        }
     }
 }
 

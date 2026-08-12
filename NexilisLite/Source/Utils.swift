@@ -398,6 +398,21 @@ public final class Utils {
         }
         return ""
     }
+
+    // Fix: the hardcoded default pin used to only ever get written once
+    // (`if getCertificatePinningWebview().isEmpty`). That meant any device that had
+    // already run the app even a single time kept whatever value was seeded back
+    // then FOREVER - a corrected/updated default in a later app version would never
+    // reach existing installs. This version counter lets `connect()` detect "the
+    // hardcoded default changed since what's on this device" and force a refresh,
+    // without needing to wipe the user's other stored settings.
+    public static func setCertificatePinningSeedVersion(_ version: Int) {
+        SecureUserDefaults.shared.set(version, forKey: "pb_certificate_pinning_seed_version")
+    }
+
+    public static func getCertificatePinningSeedVersion() -> Int {
+        return SecureUserDefaults.shared.value(forKey: "pb_certificate_pinning_seed_version") ?? 0
+    }
     
     public static func setWhitelistFileExt(value: String) {
         SecureUserDefaults.shared.set(value, forKey: "pb_whitelist_file_ext")
@@ -791,7 +806,7 @@ public final class Utils {
         task.resume()
     }
     
-    private static let sharedSession: URLSession = {
+    public static let sharedSession: URLSession = {
         let urlConfig = URLSessionConfiguration.default
         urlConfig.timeoutIntervalForRequest = 25
         urlConfig.timeoutIntervalForResource = 30
@@ -801,7 +816,23 @@ public final class Utils {
         return URLSession(configuration: urlConfig, delegate: PinnedURLSessionNexilisDelegate(), delegateQueue: nil)
     }()
     
-    public static func postDataWithCookiesAndUserAgent(from url: URL, parameter: [String: Any] = [:], parameters: [[String: Any]] = [], isFormData: Bool = false, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
+    // Separate session for silent-push-triggered calls (pull_notification / ack_message).
+    // These can arrive several at once when multiple pushes land back-to-back; queuing
+    // them one-by-one on `sharedSession` (limit 1) makes it much more likely a later
+    // one blows past the background-fetch time budget before ever starting. This session
+    // allows several to run concurrently, and fails fast instead of waiting on
+    // connectivity, so retry logic gets a chance to run again within the budget.
+    public static let pushPullSession: URLSession = {
+        let urlConfig = URLSessionConfiguration.default
+        urlConfig.timeoutIntervalForRequest = 12
+        urlConfig.timeoutIntervalForResource = 20
+        urlConfig.httpMaximumConnectionsPerHost = 4
+        urlConfig.waitsForConnectivity = false
+        urlConfig.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: urlConfig, delegate: PinnedURLSessionNexilisDelegate(), delegateQueue: nil)
+    }()
+    
+    public static func postDataWithCookiesAndUserAgent(from url: URL, parameter: [String: Any] = [:], parameters: [[String: Any]] = [], isFormData: Bool = false, session: URLSession = Utils.sharedSession, completion: @escaping (Data?, URLResponse?, Error?) -> ()) {
         let apiKey: String = SecureUserDefaults.shared.value(forKey: "apiKey") ?? ""
         var defaultParameter: [String : Any] = [
             "app_id": APIS.getAppNm(),
@@ -836,7 +867,7 @@ public final class Utils {
         }
         request.httpBody = jsonData
         //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
-        let task = self.sharedSession.dataTask(with: request, completionHandler: completion)
+        let task = session.dataTask(with: request, completionHandler: completion)
         task.resume()
     }
     

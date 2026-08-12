@@ -33,6 +33,56 @@ public class Database {
     public static var shared = Database()
     
     public var database: FMDatabaseQueue!
+    private let backgroundReopenLock = NSLock()
+    private var backgroundAutoCloseWorkItem: DispatchWorkItem?
+
+    // Fix: APIS.enterBackground() nils `database`/aesKey the instant the app backgrounds,
+    // to minimize how long decrypted key material sits in memory. That's good for
+    // security, but it silently broke saving messages that arrive via push while
+    // backgrounded: `database?.inTransaction` on a nil database is a no-op with no
+    // error, so the write just never happened.
+    // This re-derives the key (Keychain-backed, no user interaction needed - see
+    // FileEncryption.ensureKeyLoaded) and reopens the connection just long enough to
+    // safely persist incoming background messages, then auto-closes again after a
+    // short idle window so we're not permanently defeating the original intent.
+    func ensureOpenForBackgroundWrite() {
+        backgroundReopenLock.lock()
+        defer { backgroundReopenLock.unlock() }
+        if database == nil {
+            FileEncryption.shared.ensureKeyLoaded()
+            guard FileEncryption.shared.aesKey != nil else {
+                print("Cannot reopen DB for background write: no key material available")
+                return
+            }
+            setDBInstance()
+        }
+        // Fix: only schedule the auto-close when getSecureFolderOffline() == "0" - that's
+        // the same condition enterBackground() itself uses to decide whether to clear the
+        // DB/key at all. When it's "1", enterBackground() never clears them in the first
+        // place (DB is meant to stay open in background for that mode), so we must not
+        // force-close it here either, or we'd be defeating that mode's intended behavior.
+        if Utils.getSecureFolderOffline() == "0" {
+            scheduleBackgroundAutoClose()
+        }
+    }
+
+    private func scheduleBackgroundAutoClose() {
+        backgroundAutoCloseWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            // Fix: re-check both conditions here too (not just at the scheduling call
+            // site) in case this ever gets scheduled from elsewhere later.
+            if APIS.checkAppStateisBackground() && Utils.getSecureFolderOffline() == "0" {
+                self.database = nil
+                FileEncryption.shared.aesKey = nil
+                FileEncryption.shared.aesIV = nil
+            }
+        }
+        backgroundAutoCloseWorkItem = workItem
+        // Fix: 15s idle window covers a burst of several pushes arriving close together
+        // without keeping the key resident indefinitely while backgrounded.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: workItem)
+    }
     
     func setupDatabaseQueue(withPath databasePath: String) -> FMDatabaseQueue? {
         if !FileManager.default.fileExists(atPath: databasePath) {
@@ -85,6 +135,17 @@ public class Database {
                 }
                 fmdb.setKey(keyString)
             }
+            // Fix: default rollback-journal mode locks the whole DB file during a write,
+            // so an Editor SELECT and an incoming-push UPDATE/INSERT fully block each other.
+            // WAL lets readers proceed while a writer is committing, and busy_timeout makes
+            // any residual contention wait briefly instead of failing/blocking indefinitely.
+            if !fmdb.executeStatements("PRAGMA journal_mode = WAL") {
+                print("Failed to set pragma: PRAGMA journal_mode = WAL")
+            }
+            if !fmdb.executeStatements("PRAGMA synchronous = NORMAL") {
+                print("Failed to set pragma: PRAGMA synchronous = NORMAL")
+            }
+            fmdb.maxBusyRetryTimeInterval = 3.0
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "databaseOpened"), object: nil, userInfo: nil)
         })
     }
@@ -375,6 +436,17 @@ public class Database {
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_chat_id on MESSAGE (chat_id)", values: nil)
         
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_server_date on MESSAGE (server_date)", values: nil)
+
+        // Fix: EditorPersonal/EditorGroup filter on (f_pin/l_pin, message_scope_id, is_call_center)
+        // and sort by server_date, but there was no index covering that combination - every
+        // Editor open/pagination/COUNT(*) did a full table scan on MESSAGE. These composite
+        // indexes let SQLite use an index seek instead, which is what actually shortens how
+        // long each query holds up the main thread (on top of pulling less data per Solusi 2).
+        try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_fpin_scope_cc_date on MESSAGE (f_pin, message_scope_id, is_call_center, server_date)", values: nil)
+
+        try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_lpin_scope_cc_date on MESSAGE (l_pin, message_scope_id, is_call_center, server_date)", values: nil)
+
+        try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_callcenterid_date on MESSAGE (call_center_id, server_date)", values: nil)
         
         try fmdb.executeUpdate("CREATE INDEX IF NOT EXISTS index_m_account_type on MESSAGE (account_type)", values: nil)
         
@@ -822,5 +894,29 @@ public class Database {
             //print(error.localizedDescription)
         }
         return _result
+    }
+
+    /// Fix: `FMDatabaseQueue.inTransaction` is blocking. Calling it directly from
+    /// viewDidLoad/scroll-pagination on the main thread is what causes Editor to freeze,
+    /// especially while IncomingThread is mid-write for a push message.
+    /// Use this instead of `Database.shared.database?.inTransaction { ... }` for any
+    /// read that happens on the main thread (Editor load, pagination, search, etc).
+    /// The `work` closure runs on a background queue exactly like before (same `fmdb`,
+    /// same `rollback` pointer), `completion` is guaranteed to run on the main thread.
+    public func inTransactionAsync(
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        _ work: @escaping (_ fmdb: FMDatabase, _ rollback: UnsafeMutablePointer<ObjCBool>) -> Void,
+        completion: (() -> Void)? = nil
+    ) {
+        DispatchQueue.global(qos: qos).async {
+            Database.shared.database?.inTransaction { fmdb, rollback in
+                work(fmdb, rollback)
+            }
+            if let completion = completion {
+                DispatchQueue.main.async {
+                    completion()
+                }
+            }
+        }
     }
 }

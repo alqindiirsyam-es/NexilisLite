@@ -1270,12 +1270,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     }
     
     @objc func tapMessageText(_ sender: ObjectGesture) {
-        var stringURl = sender.message_id.lowercased()
-        if stringURl.starts(with: "www.") {
-            stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-        }
-        guard let url = URL(string: stringURl) else { return }
-        UIApplication.shared.open(url)
+        LinkOpener.open(urlString: sender.message_id)
     }
 
 }

@@ -8323,45 +8323,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     }
         
     @objc func tapMessageText(_ sender: ObjectGesture) {
-        var stringURl = sender.message_id
-        if stringURl.lowercased().starts(with: "www.") {
-            stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-        }
-        let app: UIApplication = UIApplication.shared
-        var appURL: URL? = nil
-        if let url = URL(string: stringURl) {
-            if url.host?.contains("instagram.com") == true {
-                // Convert to Instagram deep link
-                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                   let path = components.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
-                    appURL = URL(string: "instagram://\(path)")
-                }
-            } else if url.host?.contains("x.com") == true || url.host?.contains("twitter.com") == true {
-                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                   let path = components.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
-                    appURL = URL(string: "twitter://\(path)")
-                }
-            } else if url.host?.contains("youtube.com") == true || url.host?.contains("youtu.be") == true {
-                appURL = URL(string: "youtube://\(url.absoluteString)")
-            }
-            if let appURL = appURL, app.canOpenURL(appURL) {
-                app.open(appURL, options: [:]) { success in
-                    if !success {
-                        if Nexilis.checkingAccess(key: "secure_browser") {
-                            APIS.openUrl(url: stringURl)
-                        } else {
-                            app.open(url)
-                        }
-                    }
-                }
-            } else {
-                if Nexilis.checkingAccess(key: "secure_browser") {
-                    APIS.openUrl(url: stringURl)
-                } else {
-                    app.open(url)
-                }
-            }
-        }
+        LinkOpener.open(urlString: sender.message_id)
     }
     
     //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {

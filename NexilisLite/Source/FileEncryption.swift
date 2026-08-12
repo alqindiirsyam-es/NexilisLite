@@ -130,6 +130,23 @@ public class FileEncryption {
         }
     }
     
+    // Fix: reusable version of the on-demand key-loading already done inline in
+    // decryptFileFromServer/encryptFileToServer. Needed so Database.swift can safely
+    // reopen the DB for a background push write after enterBackground() cleared the key -
+    // this reads from Keychain-backed storage, no biometric/user interaction required.
+    public func ensureKeyLoaded() {
+        do {
+            if aesKey == nil && !Utils.getSecureFolderEncrypt().isEmpty {
+                aesKey = try getAESKey()
+            }
+            if aesIV == nil && !Utils.getSecureFolderEncryptIv().isEmpty {
+                aesIV = try getAESIV()
+            }
+        } catch {
+            print("Error retrieving AES key or IV: \(error)")
+        }
+    }
+    
     private func getAESKey() throws -> SymmetricKey {
         let keyData = Data(base64Encoded: Utils.getSecureFolderEncrypt(), options: .ignoreUnknownCharacters)!
         return SymmetricKey(data: keyData)

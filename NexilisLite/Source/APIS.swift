@@ -1622,11 +1622,35 @@ public class APIS: NSObject {
     public static var fpinCall: String?
     static var isHasFormCS: Bool = false
     static var listMessageFromAPN: [String] = []
-    public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any]) {
+    private static let listMessageFromAPNLock = NSLock()
+    public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any], completion: @escaping (UIBackgroundFetchResult) -> Void = { _ in }) {
+        print("DATA FROM APN: \(userInfo)")
+        // Take a background task assertion so iOS doesn't suspend us the instant
+        // completion() runs elsewhere; also acts as a hard safety-net deadline.
+        var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+        var didFinish = false
+        let finishLock = NSLock()
+        func finish(_ result: UIBackgroundFetchResult) {
+            finishLock.lock()
+            defer { finishLock.unlock() }
+            if didFinish { return }
+            didFinish = true
+            completion(result)
+            if backgroundTaskId != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                backgroundTaskId = .invalid
+            }
+        }
+        backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "showNotificationNexilis") {
+            // Expiration handler: OS is about to kill us regardless. Report .failed
+            // so we don't silently drop the message with no signal at all.
+            finish(.failed)
+        }
         DispatchQueue.main.async {
             if checkAppStateisBackground() {
                 if let data = userInfo["data"] as? [String: Any] {
                     ccActionFromAPN(data: data)
+                    finish(.newData)
                 } else {
                     DispatchQueue.global(qos: .background).async {
                         if let payload = userInfo["payload"] as? [String: Any] {
@@ -1636,26 +1660,79 @@ public class APIS: NSObject {
                                     if code == "CL01" {
                                         if let message = data["bodies"] as? [String: String] {
                                             let idAck = data["message_id"] as? String ?? ""
+                                            let messageId = message[CoreMessage_TMessageKey.MESSAGE_ID] ?? ""
                                             let messageToSave = TMessage()
                                             messageToSave.mBodies = message
+                                            // Fix: the DB "does this message_id already exist" check below is not
+                                            // atomic with the save that follows - a redelivered/duplicate CL01 push
+                                            // for the same message_id arriving a few ms apart (APNs redelivery,
+                                            // multiple device registrations, etc.) could pass this check on both
+                                            // deliveries before either had finished writing, causing two concurrent
+                                            // save attempts. The pull-based path already guards this with an
+                                            // in-flight id lock (listMessageFromAPN); reuse the same lock here so
+                                            // both push paths dedup consistently.
+                                            var alreadyInFlightCL01 = false
+                                            if !messageId.isEmpty {
+                                                listMessageFromAPNLock.lock()
+                                                if listMessageFromAPN.contains(messageId) {
+                                                    alreadyInFlightCL01 = true
+                                                } else {
+                                                    listMessageFromAPN.append(messageId)
+                                                }
+                                                listMessageFromAPNLock.unlock()
+                                            }
+                                            if alreadyInFlightCL01 {
+                                                finish(.noData)
+                                                return
+                                            }
+                                            func releaseCL01InFlight() {
+                                                guard !messageId.isEmpty else { return }
+                                                listMessageFromAPNLock.lock()
+                                                listMessageFromAPN.removeAll { $0 == messageId }
+                                                listMessageFromAPNLock.unlock()
+                                            }
                                             do {
                                                 var messageExist = false
+                                                // Fix: make sure DB is actually open before checking - otherwise
+                                                // this silently always reports "not exist" while backgrounded.
+                                                Database.shared.ensureOpenForBackgroundWrite()
                                                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message[CoreMessage_TMessageKey.MESSAGE_ID] ?? "")'"), cursor.next() {
+                                                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(messageId)'"), cursor.next() {
                                                         messageExist = true
                                                         cursor.close()
                                                     }
                                                 })
                                                 if messageExist {
                                                     ackAPN(id: idAck)
+                                                    releaseCL01InFlight()
+                                                    finish(.noData)
                                                     return
                                                 }
                                             } catch {
                                                 print("error saving message: \(error)")
                                             }
                                             APIS.addNotificationNexilis(messageToSave)
-                                            ackAPN(id: idAck)
-                                            Nexilis.saveMessage(message: messageToSave, withStatus: false, fromAPNS: true)
+                                            // Fix: ackAPN used to be called here, BEFORE saveMessage had
+                                            // actually written the row - if saveMessage silently bailed out
+                                            // (empty message_id/f_pin guard), rolled back on an insert error,
+                                            // or the DB connection had been cleared by enterBackground() while
+                                            // the app was minimized, the server would already consider the
+                                            // message delivered and never resend it, permanently losing it.
+                                            // Now: save (with DB-reopen + retry-with-backoff on failure via
+                                            // saveIncomingMessageWithRetry), verify, and only then ACK.
+                                            saveIncomingMessageWithRetry(message: messageToSave, messageId: messageId) { success in
+                                                if success {
+                                                    ackAPN(id: idAck)
+                                                } else {
+                                                    // Fix: do NOT ack after exhausting retries - leaving this
+                                                    // un-acked lets the server redeliver later instead of losing it.
+                                                    print("WARNING: giving up persisting message \(idAck) after retries - skipping ACK so server can redeliver")
+                                                }
+                                                releaseCL01InFlight()
+                                                finish(.newData)
+                                            }
+                                        } else {
+                                            finish(.newData)
                                         }
                                     } else if code == "CL03" {
                                         let callFromName = data["call-from-name"] as? String ?? ""
@@ -1688,6 +1765,7 @@ public class APIS: NSObject {
                                             print("Audio session error: \(error)")
                                         }
                                         Nexilis.playRingtoneCall()
+                                        finish(.newData)
                                     } else if code == "CL02" {
                                         print("data \(data)")
                                         let callFromName = data["call-cancel-name"] as? String ?? ""
@@ -1716,20 +1794,52 @@ public class APIS: NSObject {
                                             }
                                         }
                                         Nexilis.saveMessageCall(idCall: (User.getMyPin() ?? "") + CoreMessage_TMessageUtil.getTID(), textMessage: "Missed \(textCall) call".localized() + " at 0", fPin: callFrom, lPin: (User.getMyPin() ?? ""), timeCall: String(Date().currentTimeMillis()), attachment_type: MessageScope.MISSED_CALL)
+                                        finish(.newData)
+                                    } else {
+                                        finish(.noData)
                                     }
+                                } else {
+                                    finish(.noData)
                                 }
+                            } else {
+                                finish(.noData)
                             }
                         } else if let message_id = userInfo["message_id"] as? String {
                             DispatchQueue.main.async {
                                 let lastBadgeNumber = UIApplication.shared.applicationIconBadgeNumber
                                 UIApplication.shared.applicationIconBadgeNumber = lastBadgeNumber + 1
                             }
-                            if !listMessageFromAPN.contains(message_id) {
+                            var alreadyInFlight = false
+                            listMessageFromAPNLock.lock()
+                            if listMessageFromAPN.contains(message_id) {
+                                alreadyInFlight = true
+                            } else {
                                 listMessageFromAPN.append(message_id)
                             }
-//                            _ = Nexilis.justInit(isChecking: true)
-//                            PendingMessageStore.shared.save(message_id)
-                            getMessageById(id: message_id)
+                            listMessageFromAPNLock.unlock()
+                            if alreadyInFlight {
+                                // Duplicate/redelivered push for a message we're already
+                                // fetching (or just fetched) — don't fire another request.
+                                finish(.noData)
+                            } else {
+                                // Fix: persist the id (UserDefaults-backed, survives app
+                                // restarts/force-quit) BEFORE attempting the fetch, so if this
+                                // process gets killed mid-flight, enterForeground()'s
+                                // reconciliation can still pick it up and retry later - the
+                                // in-memory listMessageFromAPN dedup list alone doesn't survive
+                                // a kill.
+                                PendingMessageStore.shared.save(message_id)
+                                // retry: real retry count (was always 0 before, so it never fired),
+                                // and we now wait for the network call before signalling completion.
+                                getMessageById(id: message_id, retry: 2) { result in
+                                    listMessageFromAPNLock.lock()
+                                    listMessageFromAPN.removeAll { $0 == message_id }
+                                    listMessageFromAPNLock.unlock()
+                                    finish(result)
+                                }
+                            }
+                        } else {
+                            finish(.noData)
                         }
                     }
                 }
@@ -1897,53 +2007,153 @@ public class APIS: NSObject {
                 "pin": User.getMyPin() ?? "",
                 "message_id": id
             ]
-            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "ack_message")!, parameter: parameter, isFormData: true) { data, response, error in
+            Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "ack_message")!, parameter: parameter, isFormData: true, session: Utils.pushPullSession) { data, response, error in
             }
         }
     }
+
+    // Fix: shared "save then verify, retry with backoff on failure" used by both the
+    // CL01 push path and the pull_notification (getMessageById) path. This is what
+    // actually closes the message-loss gap when the app has been backgrounded/minimized
+    // for a while:
+    //  1. Database.shared.ensureOpenForBackgroundWrite() re-derives the encryption key
+    //     and reopens the DB connection if enterBackground() had cleared it (which was
+    //     silently turning every saveMessage() call into a no-op).
+    //  2. If the save still doesn't verify (e.g. a transient SQLITE_BUSY from the
+    //     incoming-push write queue being momentarily contended), it retries a few times
+    //     with a short backoff instead of giving up immediately.
+    // Always hops onto a background queue internally, so it's safe to call this from
+    // main-thread contexts too (e.g. getMessageById's network completion handler)
+    // without blocking the UI during the retry delays.
+    private static func saveIncomingMessageWithRetry(message: TMessage, messageId: String, maxAttempts: Int = 3, completion: @escaping (Bool) -> Void) {
+        guard !messageId.isEmpty else {
+            completion(false)
+            return
+        }
+        // Fix: persist the id (UserDefaults-backed, survives app restarts/force-quit)
+        // before the first attempt, so if the process gets killed mid-save,
+        // enterForeground()'s reconciliation can still retry it later. Covers the CL01
+        // path too (which previously never registered with PendingMessageStore at all).
+        PendingMessageStore.shared.save(messageId)
+        func attempt(_ attemptNumber: Int) {
+            DispatchQueue.global(qos: .utility).async {
+                Database.shared.ensureOpenForBackgroundWrite()
+                Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
+                var messageSaved = false
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(messageId)'"), cursor.next() {
+                        messageSaved = true
+                        cursor.close()
+                    }
+                })
+                if messageSaved {
+                    // Fix: only clear it from the pending store once we've actually
+                    // confirmed it's saved - not just attempted.
+                    PendingMessageStore.shared.remove(messageId)
+                    completion(true)
+                    return
+                }
+                print("WARNING: attempt \(attemptNumber)/\(maxAttempts) failed to persist message \(messageId) to DB")
+                if attemptNumber < maxAttempts {
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Double(attemptNumber) * 0.5) {
+                        attempt(attemptNumber + 1)
+                    }
+                } else {
+                    // Fix: deliberately NOT removing from PendingMessageStore here - it
+                    // stays recorded so the next time the app comes to foreground,
+                    // reconciliation gets another chance to fetch and save it.
+                    completion(false)
+                }
+            }
+        }
+        attempt(1)
+    }
     
-    private static func getMessageById(id: String, retry: Int = 0) {
+    private static func getMessageById(id: String, retry: Int = 0, completion: @escaping (UIBackgroundFetchResult) -> Void = { _ in }) {
         //HTTPS
         let parameter: [String : Any] = [
             "pin": User.getMyPin() ?? "",
             "message_id": id
         ]
-        Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true) { data, response, error in
-            if let error = error {
-                print("Error: \(error.localizedDescription)")
-                if retry > 0 {
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-                        self.getMessageById(id: id, retry: retry - 1)
-                    }
+        // Fix: single place that decides whether to retry the pull. Previously only a
+        // transport-level `error` (no connectivity, DNS failure, etc) triggered a retry -
+        // a non-2xx HTTP status, malformed JSON, or an empty "data" field from the server
+        // all fell through to completion(.failed) immediately, even with retry attempts
+        // still available and even though the network request itself succeeded.
+        func retryFetch(reason: String, attemptsLeft: Int) {
+            print("pull_notification failed for \(id) (\(attemptsLeft) retries left): \(reason)")
+            if attemptsLeft > 0 {
+                // Fix: small backoff that grows with each attempt, giving a flaky/
+                // reconnecting network (e.g. cellular handoff) a bit more time to
+                // recover instead of immediately retrying into the same failure.
+                let attemptNumber = retry - attemptsLeft + 1
+                let delay = Double(attemptNumber) * 1.5
+                DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+                    self.getMessageById(id: id, retry: attemptsLeft - 1, completion: completion)
                 }
+            } else {
+                completion(.failed)
+            }
+        }
+        Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true, session: Utils.pushPullSession) { data, response, error in
+            if let error = error {
+                retryFetch(reason: "transport error: \(error.localizedDescription)", attemptsLeft: retry)
                 return
             }
-            
+            // Fix: HTTP status was never checked before - a 4xx/5xx response (which still
+            // has `error == nil`, since the request itself completed) was silently treated
+            // as if the pull had succeeded.
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                retryFetch(reason: "HTTP \(httpResponse.statusCode)", attemptsLeft: retry)
+                return
+            }
             guard let data = data else {
-                print("data nil")
+                retryFetch(reason: "empty response body", attemptsLeft: retry)
                 return
             }
             DispatchQueue.main.async {
-                if !APIS.checkAppStateisBackground() {
-                    return
-                }
                 do {
-                    if let jsonObj = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
-                        let dataObj = jsonObj["data"] as? String ?? ""
-                        let message = TMessage(data: dataObj)
-                        
-                        // simpan message
-                        Nexilis.saveMessage(message: message, withStatus: false, fromAPNS: true)
-//                        PendingMessageStore.shared.remove(id)
-                        ackAPN(id: id)
+                    guard let jsonObj = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+                        retryFetch(reason: "invalid JSON", attemptsLeft: retry)
+                        return
+                    }
+                    let dataObj = jsonObj["data"] as? String ?? ""
+                    // Fix: an empty "data" field used to silently produce a message with
+                    // no message_id - saveIncomingMessageWithRetry can only retry the SAVE,
+                    // not the fetch, so this used to just drop the message with no retry
+                    // even though the server might return real data on the next attempt.
+                    guard !dataObj.isEmpty else {
+                        retryFetch(reason: "empty message payload from server", attemptsLeft: retry)
+                        return
+                    }
+                    let message = TMessage(data: dataObj)
+                    
+                    // simpan message
+                    let messageId = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID, default_value: "")
+                    guard !messageId.isEmpty else {
+                        retryFetch(reason: "parsed message has no message_id", attemptsLeft: retry)
+                        return
+                    }
+                    // Fix: same reasoning as the CL01 path - use the shared retry helper so a
+                    // cleared DB connection (app was backgrounded) or a transient save failure
+                    // gets retried instead of silently losing the message. This whole block
+                    // runs on the main thread (JSON parsing), but saveIncomingMessageWithRetry
+                    // always hops to a background queue internally so this won't block the UI.
+                    saveIncomingMessageWithRetry(message: message, messageId: messageId) { success in
+                        if success {
+                            ackAPN(id: id)
+                        } else {
+                            // Fix: do NOT ack after exhausting retries - leaving this un-acked
+                            // lets the server redeliver later instead of losing the message.
+                            print("WARNING: giving up persisting message \(id) after retries - skipping ACK so server can redeliver")
+                        }
                         DispatchQueue.main.async {
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                         }
-                    } else {
-                        throw NSError(domain: "Invalid JSON", code: -1)
+                        completion(.newData)
                     }
                 } catch {
-                    print("Parsing error: \(error)")
+                    retryFetch(reason: "JSON parse error: \(error)", attemptsLeft: retry)
                 }
             }
         }
@@ -2133,6 +2343,7 @@ public class APIS: NSObject {
     }
     
     public static func openNotificationNexilis(_ response: UNNotificationResponse) {
+        print("openNotificationNexilis: \(response)")
         DispatchQueue.main.async{
             if let userInfo = response.notification.request.content.userInfo as? [String: String] {
                 let id = userInfo["id"] ?? ""
@@ -2148,30 +2359,62 @@ public class APIS: NSObject {
                 let userInfo = response.notification.request.content.userInfo
                 DispatchQueue.main.async {
                     if let message_id = userInfo["message_id"] as? String {
-                        var f_pin = ""
-                        var l_pin = ""
-                        var message_scope_id = ""
-                        var pin = ""
-                        var chat_id = ""
-                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin, message_scope_id, chat_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
-                                f_pin = cursor.string(forColumnIndex: 0) ?? ""
-                                l_pin = cursor.string(forColumnIndex: 1) ?? ""
-                                message_scope_id = cursor.string(forColumnIndex: 2) ?? ""
-                                chat_id = cursor.string(forColumnIndex: 3) ?? ""
-                                pin = f_pin == User.getMyPin() ? l_pin : f_pin
-                                if message_scope_id == "4" {
-                                    pin = chat_id.isEmpty ? l_pin : chat_id
+                        // Fix: resolveAndOpen() reads the message's f_pin/l_pin/scope from the
+                        // local DB and navigates to the right chat. It used to be the only thing
+                        // that ran here - if showNotificationNexilis hadn't already saved this
+                        // message in the background (iOS can throttle/delay/skip silent pushes
+                        // entirely, or the app may not have been running when the push arrived),
+                        // this query came back empty and showEditorOrCallFromAPN got called with
+                        // an empty pin/type, which just returns immediately - opening nothing.
+                        func resolveAndOpen() {
+                            var f_pin = ""
+                            var l_pin = ""
+                            var message_scope_id = ""
+                            var pin = ""
+                            var chat_id = ""
+                            Database.shared.ensureOpenForBackgroundWrite()
+                            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin, message_scope_id, chat_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
+                                    f_pin = cursor.string(forColumnIndex: 0) ?? ""
+                                    l_pin = cursor.string(forColumnIndex: 1) ?? ""
+                                    message_scope_id = cursor.string(forColumnIndex: 2) ?? ""
+                                    chat_id = cursor.string(forColumnIndex: 3) ?? ""
+                                    pin = f_pin == User.getMyPin() ? l_pin : f_pin
+                                    if message_scope_id == "4" {
+                                        pin = chat_id.isEmpty ? l_pin : chat_id
+                                    }
+                                    cursor.close()
                                 }
+                            })
+                            if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
+                                if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
+                                    navigationC.popViewController(animated: false)
+                                }
+                            }
+                            showEditorOrCallFromAPN(pin, message_scope_id == "4" ? "1" : !message_scope_id.isEmpty ? "0" : "", "CL01")
+                        }
+                        // Fix: check the fast path first (message already saved - the common
+                        // case), and only fall back to an active network pull if it's genuinely
+                        // missing, so tapping a notification that was already processed normally
+                        // doesn't pay for an extra round trip.
+                        Database.shared.ensureOpenForBackgroundWrite()
+                        var alreadyExists = false
+                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
+                                alreadyExists = true
                                 cursor.close()
                             }
                         })
-                        if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
-                            if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
-                                navigationC.popViewController(animated: false)
+                        if alreadyExists {
+                            resolveAndOpen()
+                        } else {
+                            print("Message \(message_id) not found locally on notification tap - pulling from server before opening chat")
+                            APIS.getMessageById(id: message_id, retry: 2) { _ in
+                                DispatchQueue.main.async {
+                                    resolveAndOpen()
+                                }
                             }
                         }
-                        showEditorOrCallFromAPN(pin, message_scope_id == "4" ? "1" : !message_scope_id.isEmpty ? "0" : "", "CL01")
                     } else if let data = userInfo["data"] as? [String: Any] {
                         ccActionFromAPN(data: data, fromTapNotif: true)
                     }
@@ -2335,6 +2578,11 @@ public class APIS: NSObject {
 //            API.deinitConnection()
 //        }
         notifTimer.invalidate()
+        // Fix: stop the pending-message reconciliation loop too - it's only useful
+        // (and only reliably fires) while the app is actually in the foreground.
+        // enterForeground() restarts it on the next return to the app.
+        pendingReconcileTimer?.invalidate()
+        pendingReconcileTimer = nil
         stopNotif = true
         if Utils.getSecureFolderOffline() == "0" {
             Database.shared.database = nil
@@ -2347,6 +2595,41 @@ public class APIS: NSObject {
     public static var notifTimer = Timer()
     public static var stopNotif = false
     public static var afterEnterBackground = false
+    // Fix: enterForeground() used to drain PendingMessageStore exactly once, right at
+    // the moment the app becomes active. If that single burst (getMessageById's own
+    // retry:2 backoff) still failed - e.g. the network was reconnecting at that exact
+    // instant, or the server pull_notification endpoint hiccuped - the id just sat in
+    // PendingMessageStore untouched until the NEXT full background->foreground cycle.
+    // A user who opens the app and stays in it (no more backgrounding) could keep
+    // looking at a chat missing a message indefinitely, with nothing left "listening"
+    // for it. This repeating timer keeps re-attempting any still-pending ids on a
+    // fixed cadence for as long as the app stays in the foreground, so an unacked
+    // message keeps getting chased instead of only being retried on the next launch.
+    private static var pendingReconcileTimer: Timer?
+    private static func startPendingMessageReconciliationLoop() {
+        DispatchQueue.main.async {
+            pendingReconcileTimer?.invalidate()
+            pendingReconcileTimer = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { _ in
+                // Stop looping once the app leaves the foreground - a background app
+                // gets no reliable Timer execution anyway, and enterForeground() will
+                // restart this loop on the next return to foreground.
+                guard !checkAppStateisBackground() else {
+                    pendingReconcileTimer?.invalidate()
+                    pendingReconcileTimer = nil
+                    return
+                }
+                let pendingIds = PendingMessageStore.shared.load()
+                if pendingIds.isEmpty {
+                    pendingReconcileTimer?.invalidate()
+                    pendingReconcileTimer = nil
+                    return
+                }
+                for id in pendingIds {
+                    APIS.getMessageById(id: id, retry: 2)
+                }
+            }
+        }
+    }
     public static func enterForeground() {
         APIS.checkNotificationPermission(completion: { isAllowed in
             if !isAllowed {
@@ -2363,13 +2646,21 @@ public class APIS: NSObject {
             if !Utils.isHSAMode() && !Utils.isMiddleMode(){
                 _ = Nexilis.justInit(isChecking: true)
             }
-//            let pendingIds = PendingMessageStore.shared.load()
-//            // Jika ada ID → pull satu per satu
-//            for id in pendingIds {
-//                APIS.getMessageById(id: id)
-//                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-//            }
-//            PendingMessageStore.shared.removeAll()
+            // Fix: revives PendingMessageStore reconciliation (was fully commented out).
+            // Safety net for cases the push-based paths can't cover on their own - e.g.
+            // the app was force-quit by the user while a message was still in flight, so
+            // no background code ran at all until they manually reopened the app.
+            // getMessageById already handles retry, verification, and removes the id
+            // from PendingMessageStore once confirmed saved (see
+            // saveIncomingMessageWithRetry) - a still-failing pull just leaves that id
+            // here for the next foreground/launch to retry, nothing is force-cleared.
+            let pendingIds = PendingMessageStore.shared.load()
+            for id in pendingIds {
+                APIS.getMessageById(id: id, retry: 2)
+            }
+            // Fix: keep chasing any id that's still pending after the burst above,
+            // instead of going silent until the next background/foreground cycle.
+            startPendingMessageReconciliationLoop()
         }
         if let me = User.getMyPin() {
             DispatchQueue.global(qos: .userInitiated).async {

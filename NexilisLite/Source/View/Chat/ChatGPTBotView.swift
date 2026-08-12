@@ -2245,12 +2245,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
     }
     
     @objc func tapMessageText(_ sender: ObjectGesture) {
-        var stringURl = sender.message_id
-        if stringURl.lowercased().starts(with: "www.") {
-            stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-        }
-        guard let url = URL(string: stringURl) else { return }
-        UIApplication.shared.open(url)
+        LinkOpener.open(urlString: sender.message_id)
     }
     
 //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
