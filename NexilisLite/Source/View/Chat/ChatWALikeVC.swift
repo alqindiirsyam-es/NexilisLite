@@ -10,8 +10,10 @@ import UIKit
 import AVFAudio
 import QuickLook
 
-public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, QLPreviewControllerDataSource, UISearchBarDelegate {
+public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, QLPreviewControllerDataSource, UISearchBarDelegate, ChatListTab {
     private let tableView = UITableView(frame: .zero, style: .plain)
+    // Callers waiting to be told that the list has finished reloading (see ChatListTab).
+    private var pendingReloadCompletions: [() -> Void] = []
     private let searchController = UISearchController(searchResultsController: nil)
     
     var chats: [Chat] = []
@@ -116,10 +118,36 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         reloadAllData()
     }
     
-    private func reloadAllData() {
+    // MARK: - ChatListTab
+
+    /// Asked for by the framework when a notification is about to open an Editor on top of
+    /// this list: the message it is about has just been written to the database, so the rows
+    /// on screen are one message out of date until this runs.
+    public func reloadChatList(completion: @escaping () -> Void) {
+        reloadAllData(completion: completion)
+    }
+
+    // Called once the table has been reloaded with the fresh data. Kept as a list because
+    // reloadAllData() coalesces overlapping requests, and none of the waiters may be dropped
+    // when it does.
+    private func flushReloadCompletions() {
+        let completions = pendingReloadCompletions
+        pendingReloadCompletions.removeAll()
+        for completion in completions {
+            completion()
+        }
+    }
+
+    private func reloadAllData(completion: (() -> Void)? = nil) {
 //        print("reloadAllData")
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self = self else {
+                completion?()
+                return
+            }
+            if let completion = completion {
+                self.pendingReloadCompletions.append(completion)
+            }
             if self.timerReloadData == nil && !self.isGettingData {
                 self.refresh()
             } else {
@@ -232,9 +260,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     }
     
     public override func viewDidAppear(_ animated: Bool) {
-        if Nexilis.floatingButton.isHidden {
-            Nexilis.floatingButton.isHidden = false
-        }
+        FloatingButton.setHidden(false)
         refresh()
     }
     
@@ -244,6 +270,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 self.tableView.reloadData()
                 self.loadingData = false
                 self.isGettingData = false
+                self.flushReloadCompletions()
                 completion()
             }
         }
@@ -252,11 +279,15 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
     func getChats(completion: @escaping ()->()) {
         DispatchQueue.global().async {
             self.isGettingData = true
-            self.chatGroupMaps.removeAll()
-            self.listMaxArchived.removeAll()
+            // Built here, handed over on the main thread at the end. These are read while the
+            // table draws, and filling them in from this thread is a race with it.
+            var newChatGroupMaps: [String: [Chat]] = [:]
+            var newListMaxArchived: [String: [String]] = [:]
             let previousChat = self.chats
             let allChats = Chat.getData()
-            self.archivedChats = Chat.getData(isArchived: true)
+            // Only worth running the second (equally large) query when something is actually
+            // archived - which for most accounts is never.
+            let newArchivedChats = Chat.hasArchived() ? Chat.getData(isArchived: true) : []
             var tempChats: [Chat] = []
             var lowestPinned: [String: Int64] = [:]
 
@@ -264,16 +295,16 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 guard !singleChat.groupId.isEmpty else {
                     tempChats.append(singleChat)
                     if singleChat.pinned > 0 {
-                        self.listMaxArchived[singleChat.pin] = [""]
+                        newListMaxArchived[singleChat.pin] = [""]
                     }
                     continue
                 }
                 
                 let chatParentInPreviousChats = previousChat.first { $0.isParent && $0.groupId == singleChat.groupId }
                 
-                if var existingGroup = self.chatGroupMaps[singleChat.groupId] {
+                if var existingGroup = newChatGroupMaps[singleChat.groupId] {
                     existingGroup.insert(singleChat, at: 0)
-                    self.chatGroupMaps[singleChat.groupId] = existingGroup
+                    newChatGroupMaps[singleChat.groupId] = existingGroup
                     
                     if let parentChatIndex = tempChats.firstIndex(where: { $0.groupId == singleChat.groupId && $0.isParent }) {
                         if let counterParent = Int(tempChats[parentChatIndex].counter), let counterSingle = Int(singleChat.counter) {
@@ -283,10 +314,10 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                             lowestPinned[singleChat.groupId] = singleChat.pinned
                         }
                         if singleChat.pinned != 0 {
-                            if !self.listMaxArchived.keys.contains(singleChat.groupId) {
-                                self.listMaxArchived[singleChat.groupId] = [singleChat.pin]
+                            if !newListMaxArchived.keys.contains(singleChat.groupId) {
+                                newListMaxArchived[singleChat.groupId] = [singleChat.pin]
                             } else {
-                                self.listMaxArchived[singleChat.groupId]?.append(singleChat.pin)
+                                newListMaxArchived[singleChat.groupId]?.append(singleChat.pin)
                             }
                         }
                         if tempChats[parentChatIndex].pinned < singleChat.pinned {
@@ -317,13 +348,13 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                     if singleChat.pinned != 0 {
                         lowestPinned[singleChat.groupId] = singleChat.pinned
                     }
-                    self.chatGroupMaps[singleChat.groupId] = [singleChat]
+                    newChatGroupMaps[singleChat.groupId] = [singleChat]
                     let parentChat = Chat(profile: singleChat.profile, groupName: singleChat.groupName, counter: singleChat.counter, groupId: singleChat.groupId)
                     parentChat.isParent = true
                     
                     if parentChat.pinned != singleChat.pinned {
                         parentChat.pinned = singleChat.pinned
-                        self.listMaxArchived[singleChat.groupId] = [singleChat.pin]
+                        newListMaxArchived[singleChat.groupId] = [singleChat.pin]
                     }
                     
                     if let parentExist = chatParentInPreviousChats, parentExist.isSelected {
@@ -336,12 +367,17 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 }
             }
             tempChats.sort(by: { $0.pinned > $1.pinned })
-            if self.archivedChats.count > 0 {
+            if newArchivedChats.count > 0 {
                 tempChats.insert(Chat(pin: "Archived"), at: 0)
             }
-            self.chats = tempChats
-            self.tempChats = tempChats
-            completion()
+            DispatchQueue.main.async {
+                self.chats = tempChats
+                self.tempChats = tempChats
+                self.chatGroupMaps = newChatGroupMaps
+                self.listMaxArchived = newListMaxArchived
+                self.archivedChats = newArchivedChats
+                completion()
+            }
         }
     }
     

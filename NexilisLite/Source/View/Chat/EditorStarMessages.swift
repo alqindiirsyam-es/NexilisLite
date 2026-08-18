@@ -603,17 +603,13 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             // Must be mutable!
             let finalAttributed = NSMutableAttributedString(attributedString: text.richText())
 
-            let urlPattern = "(https?://|www\\.)\\S+"
-            guard let regex = try? NSRegularExpression(pattern: urlPattern) else { return }
-
             let fullString = finalAttributed.string
             let fullLength = (fullString as NSString).length
 
-            let matches = regex.matches(in: fullString, range: NSRange(location: 0, length: fullLength))
-
-            for match in matches {
-                let range = match.range
-
+            // Fix: shared with the formatting rules in richText() (String.urlRanges), so the
+            // text that gets made tappable is exactly the text those rules were told to leave
+            // alone - and so trailing sentence punctuation stays out of the opened URL.
+            for range in String.urlRanges(in: fullString) {
                 // Skip invalid ranges safely
                 if range.location == NSNotFound ||
                    range.location + range.length > fullLength ||
@@ -1748,7 +1744,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, attachment_speciality FROM MESSAGE where is_stared=1 order by server_date asc") {
+                // Fix: MESSAGE_STATUS used to be queried once per starred message inside the
+                // loop below. It is a subquery now, taking the newest status row exactly as
+                // that loop did (it kept the last one it read). A subquery rather than a join
+                // on purpose: a message can have several status rows, and a join would hand
+                // back the message once per row.
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT m.message_id, m.f_pin, m.l_pin, m.message_scope_id, m.server_date, ifnull((SELECT s.status FROM MESSAGE_STATUS s WHERE s.message_id = m.message_id ORDER BY s._id DESC LIMIT 1), m.status), m.message_text, m.audio_id, m.video_id, m.image_id, m.thumb_id, m.read_receipts, m.chat_id, m.file_id, m.attachment_flag, m.reff_id, m.lock, m.is_stared, m.blog_id, m.attachment_speciality FROM MESSAGE m where m.is_stared=1 order by m.server_date asc") {
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
                         row["message_id"] = cursorData.string(forColumnIndex: 0)
@@ -1771,12 +1772,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         row["is_stared"] = cursorData.string(forColumnIndex: 17)
                         row["blog_id"] = cursorData.string(forColumnIndex: 18)
                         row[TypeDataMessage.spec_file] = cursorData.string(forColumnIndex: 19)
-                        if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(row["message_id"] as! String)'") {
-                            while cursorStatus.next() {
-                                row["status"] = cursorStatus.string(forColumnIndex: 0)
-                            }
-                            cursorStatus.close()
-                        }
                         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -1809,6 +1804,25 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         })
     }
     
+    // Building a DateFormatter costs about as much as reading a message row, and this is
+    // called once per message. One formatter per format, built when first needed.
+    private static var dayNameFormatter: DateFormatter?
+    private static var dayDateFormatter: DateFormatter?
+
+    private static func chatDateFormatter(format: String, cached: inout DateFormatter?) -> DateFormatter {
+        if let cached = cached, cached.dateFormat == format {
+            return cached
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = format
+        let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
+        if lang == "id" {
+            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
+        }
+        cached = formatter
+        return formatter
+    }
+
     private func chatDate(stringDate: String, messageId: String) -> String {
         let date = Date(milliseconds: Int64(stringDate)!)
         let calendar = Calendar.current
@@ -1828,23 +1842,14 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 }
                 return "Yesterday".localized()
             } else if day < 7 {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "EEEE"
-                let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
-                if lang == "id" {
-                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
+                let formatter = EditorStarMessages.chatDateFormatter(format: "EEEE", cached: &EditorStarMessages.dayNameFormatter)
+                let stringFormat = formatter.string(from: date)
+                if !dataDates.contains(stringFormat){
+                    dataDates.append(stringFormat)
                 }
-                if !dataDates.contains(formatter.string(from: date)){
-                    dataDates.append(formatter.string(from: date))
-                }
-                return formatter.string(from: date)
+                return stringFormat
             } else {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "EE, dd MMM"
-                let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
-                if lang == "id" {
-                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                }
+                let formatter = EditorStarMessages.chatDateFormatter(format: "EE, dd MMM", cached: &EditorStarMessages.dayDateFormatter)
                 let stringFormat = formatter.string(from: date as Date)
                 if !dataDates.contains(stringFormat){
                     dataDates.append(stringFormat)

@@ -122,7 +122,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         super.viewDidLoad()
         navigationController?.navigationBar.topItem?.title = Utils.getGPTBotName()
         if Nexilis.fromMAB {
-            Nexilis.floatingButton.isHidden = true
+            FloatingButton.setHidden(true)
         }
         
         buttonSendChat.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
@@ -2365,7 +2365,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
 //            }
 //        }
 //    }
-//
+//    
 //    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
 //        if !decelerate {
 //            let indexPath = tableChatView.indexPathsForVisibleRows?.first

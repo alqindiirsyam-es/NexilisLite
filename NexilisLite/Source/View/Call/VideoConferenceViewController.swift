@@ -286,7 +286,7 @@ class VideoConferenceViewController: UIViewController {
         navigationController?.navigationBar.topItem?.backBarButtonItem = nil
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
-        Nexilis.floatingButton.isHidden = false
+        FloatingButton.setHidden(false)
         UIApplication.shared.isIdleTimerDisabled = false
     }
     
@@ -299,7 +299,7 @@ class VideoConferenceViewController: UIViewController {
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             NotificationCenter.default.removeObserver(self)
             UIApplication.shared.isIdleTimerDisabled = false
-            Nexilis.floatingButton.isHidden = false
+            FloatingButton.setHidden(false)
         }
     }
     

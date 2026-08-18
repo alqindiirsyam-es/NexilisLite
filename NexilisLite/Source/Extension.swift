@@ -1127,6 +1127,54 @@ extension String {
 
     // MARK: - Helper Functions
 
+    // Fix: single definition of "what counts as a link in a chat message", shared by the
+    // formatting rules below (which must leave links alone) and by the three Editors that
+    // attach the tappable .link attribute. They used to carry three separate copies of this
+    // pattern, with nothing keeping them in step with the formatting rules at all.
+    private static let messageURLRegex = try? NSRegularExpression(pattern: "(https?://|www\\.)\\S+", options: [.caseInsensitive])
+
+    /// Character ranges of the URLs inside `string`, with trailing sentence punctuation left
+    /// out - "lihat https://a.com/x." has to open `.../x`, not `.../x.`
+    public static func urlRanges(in string: String) -> [NSRange] {
+        guard let regex = messageURLRegex, !string.isEmpty else {
+            return []
+        }
+        let ns = string as NSString
+        return regex.matches(in: string, options: [], range: NSRange(location: 0, length: ns.length)).compactMap {
+            trimmedURLRange($0.range, in: ns)
+        }
+    }
+
+    private static func trimmedURLRange(_ range: NSRange, in ns: NSString) -> NSRange? {
+        guard range.location != NSNotFound, range.length > 0,
+              range.location + range.length <= ns.length else {
+            return nil
+        }
+        var trimmed = range
+        while trimmed.length > 0 {
+            let unit = ns.character(at: trimmed.location + trimmed.length - 1)
+            guard let scalar = Unicode.Scalar(unit) else {
+                break
+            }
+            let character = Character(scalar)
+            if ".,;:!?\"'".contains(character) {
+                trimmed.length -= 1
+            } else if character == ")" || character == "]" || character == "}" {
+                let opening: Character = character == ")" ? "(" : (character == "]" ? "[" : "{")
+                let inside = ns.substring(with: NSRange(location: trimmed.location, length: trimmed.length - 1))
+                // A closing bracket the URL itself opened belongs to it (Wikipedia-style
+                // paths); an unmatched one is the text around the link closing.
+                if inside.filter({ $0 == opening }).count > inside.filter({ $0 == character }).count {
+                    break
+                }
+                trimmed.length -= 1
+            } else {
+                break
+            }
+        }
+        return trimmed.length > 0 ? trimmed : nil
+    }
+
     private func applyTextFormatting(
         to text: NSMutableAttributedString,
         sign: String,
@@ -1139,10 +1187,24 @@ extension String {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return }
 
         let matches = regex.matches(in: text.string, options: [], range: NSRange(location: 0, length: text.length))
+        guard !matches.isEmpty else {
+            return
+        }
+        // Fix: _ * ~ ^ $ are all perfectly legal URL characters, and this formatting pass
+        // DELETES the ones it treats as markers. A Google Drive link like
+        // .../1EOk2bmhs...YO_f_/view?usp=sharing came out as .../1EOk2bmhs...YOf/view..., an
+        // id two characters short, so tapping it opened a "file tidak dapat dibuka" page -
+        // and the italic run it left behind in the middle of the link is what cut the tap
+        // highlight short as well. Links are excluded from formatting entirely now.
+        let linkRanges = String.urlRanges(in: text.string)
 
         for match in matches.reversed() {
             let fullRange = match.range
             let textRange = match.range(at: 1)
+
+            if linkRanges.contains(where: { NSIntersectionRange($0, fullRange).length > 0 }) {
+                continue
+            }
 
             // Special case: if applying bold or italic, check if the other style is already present
             if let font = attributes[.font] as? UIFont, let boldItalicFont {
@@ -1827,7 +1889,30 @@ extension UISearchBar
     {
         setSearchFieldBackgroundImage(resizeImage(image: image, targetHeight: 30), for: .normal)
     }
-    
+
+    /// Gives the search field an exact height and a corner that stays round at any width.
+    ///
+    /// setCustomBackgroundImage above hands UIKit a bitmap of the whole field and lets it
+    /// stretch it to fit. The rounded ends are stretched along with everything else: measured
+    /// on a 402pt-wide screen the corner came out 14.6pt tall but only 9.7pt across - an
+    /// ellipse, not a radius. The height came from that same bitmap (30pt), which is why the
+    /// field sat well short of the Cancel button next to it.
+    ///
+    /// The image drawn here is exactly as tall as the field is meant to be, so its height is
+    /// never scaled, and its cap insets keep both ends out of the stretch - only the 1pt strip
+    /// between them is repeated. The corner is then a circle whatever width the field takes.
+    public func setSearchFieldStyle(height: CGFloat = 36, backgroundColor: UIColor) {
+        let radius = height / 2
+        let size = CGSize(width: height + 1, height: height)
+        let image = UIGraphicsImageRenderer(size: size).image { _ in
+            backgroundColor.setFill()
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: radius).fill()
+        }
+        let stretchable = image.resizableImage(withCapInsets: UIEdgeInsets(top: 0, left: radius, bottom: 0, right: radius),
+                                               resizingMode: .stretch)
+        setSearchFieldBackgroundImage(stretchable, for: .normal)
+    }
+
     func resizeImage(image: UIImage, targetHeight: CGFloat) -> UIImage? {
         let scaleFactor = targetHeight / image.size.height
         let targetWidth = image.size.width * scaleFactor
@@ -2000,6 +2085,10 @@ extension UIViewController {
     @objc func swizzled_viewDidAppear(_ animated: Bool) {
         swizzled_viewDidAppear(animated)
 
+        // Whatever just came on screen decides whether the floating button belongs over it -
+        // see FloatingButton.refresh(). Done here so no screen has to remember to say so.
+        FloatingButton.refresh()
+
         if let nav = self as? UINavigationController,
            let topVC = nav.topViewController {
             DataCaptured.activityQueue.async {
@@ -2015,6 +2104,25 @@ extension UIViewController {
             DataCaptured.actVC = "\(type(of: self))"
             DataCaptured.sendLogMonitorActivity()
         }
+    }
+
+    static let swizzleViewDidDisappearImplementation: Void = {
+        let originalSelector = #selector(viewDidDisappear(_:))
+        let swizzledSelector = #selector(swizzled_viewDidDisappear(_:))
+        guard
+            let originalMethod = class_getInstanceMethod(UIViewController.self, originalSelector),
+            let swizzledMethod = class_getInstanceMethod(UIViewController.self, swizzledSelector)
+        else { return }
+        method_exchangeImplementations(originalMethod, swizzledMethod)
+    }()
+
+    /// The other half of the floating button's bookkeeping: a screen going away can uncover one
+    /// the button belongs over, and a dismissal that never gives the screen underneath a
+    /// viewDidAppear (an over-current-context modal, for one) would otherwise leave the button
+    /// hidden for good.
+    @objc func swizzled_viewDidDisappear(_ animated: Bool) {
+        swizzled_viewDidDisappear(animated)
+        FloatingButton.refresh()
     }
 }
 
@@ -2042,6 +2150,9 @@ extension UINavigationController {
             }
         }
         swizzled_pushViewController(viewController, animated: animated)
+        // Navigation is hooked here as well as in viewDidAppear because this one always runs -
+        // a screen cannot skip it by not calling super.
+        FloatingButton.refresh()
     }
 
     static let swizzlePopViewControllerImplementation: Void = {
@@ -2056,6 +2167,9 @@ extension UINavigationController {
 
     @objc func swizzled_popViewController(animated: Bool) -> UIViewController? {
         let poppedVC = swizzled_popViewController(animated: animated)
+        // Coming back out of a library screen is the case that was leaving the button hidden:
+        // neither the screen being popped nor the one uncovered calls super.
+        FloatingButton.refresh()
         if let topVC = self.topViewController {
             let vcName = "\(type(of: topVC))"
             DataCaptured.activityQueue.async {

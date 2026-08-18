@@ -309,18 +309,23 @@ class QmeraAudioViewController: UIViewController {
 //    }
     
     override func viewWillDisappear(_ animated: Bool) {
+        guard !isMinimizing else {
+            // Off screen, not over: everything below stays as it is until the call really ends.
+            return
+        }
         NotificationCenter.default.removeObserver(self)
         UIDevice.current.isProximityMonitoringEnabled = false
         UIApplication.shared.isIdleTimerDisabled = false
-        Nexilis.floatingButton.isHidden = false
+        FloatingButton.isSuppressed = false
         self.taskTimeout?.cancel()
         Nexilis.isOpenPageCall = false
     }
     
     deinit {
+        MiniCallBannerManager.shared.callDidEnd()
         UIDevice.current.isProximityMonitoringEnabled = false
         UIApplication.shared.isIdleTimerDisabled = false
-        Nexilis.floatingButton.isHidden = false
+        FloatingButton.isSuppressed = false
         NotificationCenter.default.removeObserver(self)
         self.taskTimeout?.cancel()
         Nexilis.isOpenPageCall = false
@@ -416,7 +421,9 @@ class QmeraAudioViewController: UIViewController {
         QmeraAudioViewController.volumeView = MPVolumeView(frame: .zero)
         QmeraAudioViewController.volumeView.isHidden = true
         
-        Nexilis.floatingButton.isHidden = true
+        // Held for the length of the call, not the length of this screen: minimised, the call
+        // is still running and the button still has no business floating over the app.
+        FloatingButton.isSuppressed = true
         
         let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
         effectView.frame = view.frame
@@ -629,6 +636,8 @@ class QmeraAudioViewController: UIViewController {
     }
     
     private func outgoingView() {
+        minimizeLogo.isHidden = false
+        view.bringSubviewToFront(minimizeLogo)
 //        Nexilis.setSpeakerphoneOn(isSpeaker)
         if ticketId.isEmpty {
             backToDefaultAudioSession()
@@ -664,6 +673,8 @@ class QmeraAudioViewController: UIViewController {
     
     private func ongoingView() {
         status.text = "Connecting..."
+        minimizeLogo.isHidden = false
+        view.bringSubviewToFront(minimizeLogo)
         
         stack.spacing = buttonSize / 2
         stack2.spacing = buttonSize / 2
@@ -924,8 +935,72 @@ class QmeraAudioViewController: UIViewController {
         present(CustomNavigationController(rootViewController: controller), animated: true, completion: nil)
     }
     
+    /// True only for the moment it takes to slide this screen away for the mini banner.
+    ///
+    /// It matters because viewWillDisappear tears the call down - observers off, proximity and
+    /// idle timer back to normal, isOpenPageCall cleared. That is right when the call is over
+    /// and wrong when it is merely out of sight: the call is still running, and this screen has
+    /// to come back to exactly the state it left in.
+    private var isMinimizing = false
+
+    /// What the mini banner calls this call.
+    var miniBannerTitle: String {
+        if let user = user, !user.fullName.trimmingCharacters(in: .whitespaces).isEmpty {
+            return user.fullName
+        }
+        return name.text ?? "Audio Call".localized()
+    }
+
+    /// What the call screen is showing right now - ringing, connecting, or the duration - so the
+    /// banner never says something different from the screen behind it.
+    var miniBannerStatus: String {
+        return status.text ?? ""
+    }
+
+    var isMutedNow: Bool {
+        return isMuted
+    }
+
     @objc func didMinimized(sender: Any?) {
-        
+        guard presentingViewController != nil else {
+            return
+        }
+        isMinimizing = true
+        MiniCallBannerManager.shared.show(for: self)
+        dismiss(animated: true, completion: { [weak self] in
+            // Back to normal straight away: the next time this screen goes away it really is
+            // the end of the call, and that one has to tear down.
+            self?.isMinimizing = false
+        })
+    }
+
+    /// Ends the call from the banner, with no call screen on show to ask anything on.
+    func endCallFromMiniBanner() {
+        let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
+        if !onGoingCC.isEmpty {
+            // The contact-centre ending asks a question first, and a question needs a screen.
+            MiniCallBannerManager.shared.restore()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.didPressEnd(sender: nil)
+            }
+            return
+        }
+        // The same bookkeeping didPressEnd does, without the confirmation - the red button on
+        // the banner is the confirmation.
+        if timer == nil || isOutgoing {
+            let longCall = timer == nil ? "0" : status.text ?? ""
+            Nexilis.saveMessageCall(idCall: idCall, textMessage: "Outgoing audio call".localized() + " at \(longCall)", fPin: User.getMyPin() ?? "", lPin: !data.isEmpty ? data : user != nil ? user!.pin : "", timeCall: timeStartCall, attachment_type: MessageScope.CALL)
+        } else {
+            Nexilis.saveMessageCall(idCall: idCall, textMessage: "Incoming audio call".localized() + " at \(status.text ?? "")", fPin: !data.isEmpty ? data : user != nil ? user!.pin : "", lPin: User.getMyPin() ?? "", timeCall: timeStartCall, attachment_type: MessageScope.CALL)
+        }
+        if callFCM, timer == nil, let pin = user?.pin {
+            DispatchQueue.global().async {
+                _ = Nexilis.writeSync(message: CoreMessage_TMessageBank.getCancelCall(fPin: pin, type: "1"), timeout: 30 * 1000)
+            }
+        }
+        timer?.invalidate()
+        timer = nil
+        didEnd(sender: nil)
     }
     
     @objc func didPressEnd(sender: Any?) {
@@ -974,6 +1049,10 @@ class QmeraAudioViewController: UIViewController {
     }
     
     @objc func didEnd(sender: Any?) {
+        // Whatever route the call ended by - this screen, the banner, the other side hanging up
+        // - it comes through here, so this is where the minimised state is put away.
+        isMinimizing = false
+        MiniCallBannerManager.shared.callDidEnd()
         if let sharedAudioPlayer = Nexilis.sharedAudioPlayer, sharedAudioPlayer.isPlaying {
             Nexilis.stopRingtoneCall()
             Nexilis.stopRingbacktoneCall()

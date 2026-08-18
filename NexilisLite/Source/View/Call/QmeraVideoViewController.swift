@@ -204,7 +204,7 @@ class QmeraVideoViewController: UIViewController {
         navigationController?.navigationBar.topItem?.backBarButtonItem = nil
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
-        Nexilis.floatingButton.isHidden = false
+        FloatingButton.setHidden(false)
         self.taskTimeout?.cancel()
         UIApplication.shared.isIdleTimerDisabled = false
         Nexilis.isOpenPageCall = false
@@ -219,7 +219,7 @@ class QmeraVideoViewController: UIViewController {
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             NotificationCenter.default.removeObserver(self)
             UIApplication.shared.isIdleTimerDisabled = false
-            Nexilis.floatingButton.isHidden = false
+            FloatingButton.setHidden(false)
             self.taskTimeout?.cancel()
             Nexilis.isOpenPageCall = false
         }
@@ -302,7 +302,7 @@ class QmeraVideoViewController: UIViewController {
         QmeraVideoViewController.volumeView = MPVolumeView(frame: .zero)
         QmeraVideoViewController.volumeView.isHidden = true
         Nexilis.setWhiteboardReceiver(receiver: self)
-        Nexilis.floatingButton.isHidden = true
+        FloatingButton.setHidden(true)
         self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
         navigationController?.changeAppearance(clear: true)
         UIApplication.shared.isIdleTimerDisabled = true

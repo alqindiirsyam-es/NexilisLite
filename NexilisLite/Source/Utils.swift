@@ -4924,6 +4924,8 @@ class QRScannerViewController: UIViewController {
     }
 }
 
+/// The strip that stands in for a call screen while the call is minimised: who it is with, how
+/// long it has been running, mute, and hang up. Tapping it goes back to the call.
 final class MiniCallBanner: UIView {
 
     private let muteButton = UIButton(type: .system)
@@ -4932,10 +4934,13 @@ final class MiniCallBanner: UIView {
     private let titleLabel = UILabel()
 
     private var timer: Timer?
-    private var startDate: Date?
+    private var name = ""
+    /// Asked once a second for what the call screen itself is showing, so the strip never says
+    /// something different from the screen behind it.
+    private var statusProvider: (() -> String)?
 
     static let height: CGFloat = 55
-    
+
     private var isMuted = false
 
     override init(frame: CGRect) {
@@ -4948,47 +4953,38 @@ final class MiniCallBanner: UIView {
         setupUI()
     }
 
+    deinit {
+        timer?.invalidate()
+    }
+
     private func setupUI() {
-        // WhatsApp green
         backgroundColor = .whatsappGreenColor
 
-        // rounded bottom corners only
-//        layer.cornerRadius = 10
-//        layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-//        layer.masksToBounds = true
-
-        // PHONE ICON
         iconView.image = UIImage(systemName: "phone.fill")
         iconView.tintColor = .white
         iconView.contentMode = .scaleAspectFit
 
-        // TITLE LABEL (Name + Duration)
         titleLabel.textColor = .white
         titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
         titleLabel.textAlignment = .center
 
-        // MUTE BUTTON
         muteButton.tintColor = .white
         muteButton.backgroundColor = UIColor(white: 0.2, alpha: 0.6)
         muteButton.setImage(UIImage(systemName: "mic.slash.fill"), for: .normal)
         muteButton.layer.cornerRadius = 20
         muteButton.clipsToBounds = true
 
-        // END CALL BUTTON
         endCallButton.tintColor = .white
         endCallButton.backgroundColor = UIColor.red
         endCallButton.setImage(UIImage(systemName: "phone.down.fill"), for: .normal)
         endCallButton.layer.cornerRadius = 20
         endCallButton.clipsToBounds = true
 
-        // ============================
-        // LAYOUT
-        // ============================
-
         let centerStack = UIStackView(arrangedSubviews: [iconView, titleLabel])
         centerStack.axis = .horizontal
         centerStack.spacing = 8
         centerStack.alignment = .center
+        centerStack.isUserInteractionEnabled = false
 
         addSubview(centerStack)
         addSubview(muteButton)
@@ -5000,65 +4996,40 @@ final class MiniCallBanner: UIView {
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
-
-            // Center call info
             centerStack.centerXAnchor.constraint(equalTo: centerXAnchor),
             centerStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            centerStack.leadingAnchor.constraint(greaterThanOrEqualTo: muteButton.trailingAnchor, constant: 8),
+            centerStack.trailingAnchor.constraint(lessThanOrEqualTo: endCallButton.leadingAnchor, constant: -8),
 
             iconView.widthAnchor.constraint(equalToConstant: 18),
             iconView.heightAnchor.constraint(equalToConstant: 18),
 
-            // Mute button left
             muteButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            muteButton.centerYAnchor.constraint(equalTo: centerStack.centerYAnchor),
+            muteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             muteButton.widthAnchor.constraint(equalToConstant: 40),
             muteButton.heightAnchor.constraint(equalToConstant: 40),
 
-            // End call button right
             endCallButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            endCallButton.centerYAnchor.constraint(equalTo: centerStack.centerYAnchor),
+            endCallButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             endCallButton.widthAnchor.constraint(equalToConstant: 40),
             endCallButton.heightAnchor.constraint(equalToConstant: 40)
         ])
     }
-    
-    func toggleMute() {
-        isMuted.toggle()
-
-        if isMuted {
-            muteButton.backgroundColor = .white
-            muteButton.tintColor = .red
-        } else {
-            muteButton.backgroundColor = UIColor(white: 0.2, alpha: 0.6)
-            muteButton.tintColor = .white
-        }
-    }
 
     // MARK: - Public API
 
-    func configure(name: String, start: Date) {
-        self.startDate = start
+    func configure(name: String, isMuted: Bool, status: @escaping () -> String) {
+        self.name = name
+        self.statusProvider = status
+        setMuted(isMuted)
+        updateTitle()
         startTimer()
-        updateTitle(name)
     }
 
-    private func updateTitle(_ name: String) {
-        let duration = formattedDuration()
-        titleLabel.text = "\(name) - \(duration)"
-    }
-
-    private func formattedDuration() -> String {
-        guard let start = startDate else { return "0:00" }
-        let t = Int(Date().timeIntervalSince(start))
-        return String(format: "%01d:%02d", t/60, t%60)
-    }
-
-    private func startTimer() {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let s = self else { return }
-            s.updateTitle(s.titleLabel.text?.components(separatedBy:" - ").first ?? "")
-        }
+    func setMuted(_ muted: Bool) {
+        isMuted = muted
+        muteButton.backgroundColor = muted ? .white : UIColor(white: 0.2, alpha: 0.6)
+        muteButton.tintColor = muted ? .red : .white
     }
 
     func onMute(_ target: Any?, action: Selector) {
@@ -5068,120 +5039,211 @@ final class MiniCallBanner: UIView {
     func onEnd(_ target: Any?, action: Selector) {
         endCallButton.addTarget(target, action: action, for: .touchUpInside)
     }
+
+    func onTap(_ target: Any?, action: Selector) {
+        addGestureRecognizer(UITapGestureRecognizer(target: target, action: action))
+    }
+
+    func stopUpdating() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func updateTitle() {
+        let status = statusProvider?() ?? ""
+        titleLabel.text = status.isEmpty ? name : "\(name) - \(status)"
+    }
+
+    private func startTimer() {
+        timer?.invalidate()
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateTitle()
+        }
+        timer.tolerance = 0.2
+        // Common mode, or the duration stops counting the moment anything is being scrolled.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
 }
 
+/// The window the banner lives in.
+///
+/// Fix: the banner used to be a subview of the key window, which put it under anything presented
+/// afterwards - a modal from the library, a picker from the host app - so a call minimised on one
+/// screen vanished on the next. A window of its own sits above all of that, and passes every
+/// touch outside the strip itself straight through to the app.
+final class MiniCallBannerWindow: UIWindow {
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hit = super.hitTest(point, with: event) else {
+            return nil
+        }
+        return hit === self || hit === rootViewController?.view ? nil : hit
+    }
+}
 
 final public class MiniCallBannerManager {
 
     public static let shared = MiniCallBannerManager()
 
     private var banner: MiniCallBanner?
-    private var height: CGFloat = 64
+    private var window: MiniCallBannerWindow?
+    /// The call screen that was minimised.
+    ///
+    /// Held strongly, and that is the whole point: a dismissed view controller is released by
+    /// UIKit the moment it goes, and this one's deinit ends the call. Holding it keeps the call
+    /// - its timers, its observers, its audio - alive and lets it be put back exactly as it was.
+    /// Released in callDidEnd(), which every ending goes through.
+    private var call: QmeraAudioViewController?
+
+    public var isShowing: Bool {
+        return banner != nil
+    }
 
     private init() {}
 
-    // MARK: - SHOW Banner
-    public func showBanner(contactName: String, startDate: Date = Date()) {
-        guard let window = UIApplication.shared.keyWindow else { return }
-        if banner != nil { return }
+    // MARK: - Showing
+
+    func show(for call: QmeraAudioViewController) {
+        guard banner == nil else {
+            return
+        }
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+            return
+        }
+        self.call = call
 
         let banner = MiniCallBanner()
-        banner.configure(name: contactName, start: startDate)
+        banner.configure(name: call.miniBannerTitle, isMuted: call.isMutedNow) { [weak call] in
+            return call?.miniBannerStatus ?? ""
+        }
+        banner.onMute(self, action: #selector(muteTapped))
+        banner.onEnd(self, action: #selector(endTapped))
+        banner.onTap(self, action: #selector(bannerTapped))
 
-        banner.onMute(self, action: #selector(self.muteTapped))
-        banner.onEnd(self, action: #selector(self.endTapped))
-
-        window.addSubview(banner)
+        let host = UIViewController()
+        host.view.backgroundColor = .clear
+        host.view.addSubview(banner)
         banner.translatesAutoresizingMaskIntoConstraints = false
 
-        // Create starting position ABOVE screen
-        let topConstraint = banner.topAnchor.constraint(equalTo: window.topAnchor, constant: -height)
+        let window = MiniCallBannerWindow(windowScene: scene)
+        window.backgroundColor = .clear
+        // Above everything the app itself can put up, and below the system's own alerts.
+        window.windowLevel = .statusBar + 1
+        window.rootViewController = host
+        window.isHidden = false
 
         NSLayoutConstraint.activate([
-            topConstraint,
-            banner.leadingAnchor.constraint(equalTo: window.leadingAnchor),
-            banner.trailingAnchor.constraint(equalTo: window.trailingAnchor),
-            banner.heightAnchor.constraint(equalToConstant: height)
+            banner.leadingAnchor.constraint(equalTo: host.view.leadingAnchor),
+            banner.trailingAnchor.constraint(equalTo: host.view.trailingAnchor),
+            banner.topAnchor.constraint(equalTo: host.view.safeAreaLayoutGuide.topAnchor),
+            banner.heightAnchor.constraint(equalToConstant: MiniCallBanner.height)
         ])
+        window.layoutIfNeeded()
 
-        window.layoutIfNeeded()  // Prepare animation
-
+        self.window = window
         self.banner = banner
 
-        // === Animate banner dropping down ===
-        topConstraint.constant = window.safeAreaInsets.top
-        UIView.animate(withDuration: 0.30,
-                       delay: 0,
-                       usingSpringWithDamping: 0.85,
-                       initialSpringVelocity: 0.4) {
-            window.layoutIfNeeded()
+        banner.transform = CGAffineTransform(translationX: 0, y: -(MiniCallBanner.height + window.safeAreaInsets.top))
+        UIView.animate(withDuration: 0.30, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0.4) {
+            banner.transform = .identity
         }
-
-        // === Animate pushing UI down ===
-        animatePushUI(+height)
-    }
-    
-    private func animatePushUI(_ offset: CGFloat) {
-        guard let window = UIApplication.shared.keyWindow else { return }
-
-        guard let root = window.rootViewController else { return }
-
-        UIView.animate(withDuration: 0.30) {
-            self.applyInsetRecursively(vc: root, offset: offset)
-        }
-    }
-    
-    private func applyInsetRecursively(vc: UIViewController, offset: CGFloat) {
-
-        // 1. Apply inset to this view controller
-        vc.additionalSafeAreaInsets.top += offset
-        vc.view.layoutIfNeeded()
-
-        // 2. If this VC is NavigationController → apply to visible view controller
-//        if let nav = vc as? UINavigationController,
-//           let visible = nav.visibleViewController {
-//            applyInsetRecursively(vc: visible, offset: offset)
-//        }
-
-        // 3. If this VC is TabBarController → apply to selected view controller
-//        if let tab = vc as? UITabBarController,
-//           let selected = tab.selectedViewController {
-//            applyInsetRecursively(vc: selected, offset: offset)
-//        }
-
-        // 4. If this VC presents another VC → apply to presented VC
-        if let presented = vc.presentedViewController {
-            applyInsetRecursively(vc: presented, offset: offset)
-        }
-
-        // 5. If child view controllers exist → apply to all
-//        for child in vc.children {
-//            applyInsetRecursively(vc: child, offset: offset)
-//        }
+        setContentPushed(true)
     }
 
-    // MARK: - HIDE Banner
-    func hideBanner() {
-        guard let banner, let window = UIApplication.shared.keyWindow else { return }
+    /// Puts the call screen back and takes the strip away.
+    public func restore() {
+        guard let call = call else {
+            dismissBanner()
+            return
+        }
+        guard call.presentingViewController == nil else {
+            // Already back on screen somehow; nothing to do but tidy up.
+            dismissBanner()
+            return
+        }
+        guard let presenter = UIApplication.shared.visibleViewController else {
+            return
+        }
+        dismissBanner()
+        // Presented with whatever style it was opened with in the first place - the call is put
+        // back exactly as it was, not re-styled on the way in.
+        presenter.present(call, animated: true, completion: nil)
+    }
 
+    /// Called when the call itself is over, however it ended.
+    public func callDidEnd() {
+        // Released next turn, not here: this is nearly always called from a method on that very
+        // screen, and dropping the last reference to it half way through one of its own methods
+        // is a use-after-free waiting to happen.
+        let ending = call
+        call = nil
+        dismissBanner()
+        DispatchQueue.main.async {
+            _ = ending
+        }
+    }
+
+    private func dismissBanner() {
+        guard let banner = banner, let window = window else {
+            return
+        }
+        self.banner = nil
+        self.window = nil
+        banner.stopUpdating()
+        setContentPushed(false)
         UIView.animate(withDuration: 0.25, animations: {
-            banner.transform = CGAffineTransform(translationX: 0, y: -self.height)
+            banner.transform = CGAffineTransform(translationX: 0, y: -(MiniCallBanner.height + window.safeAreaInsets.top))
         }, completion: { _ in
-            banner.removeFromSuperview()
-            self.banner = nil
+            window.isHidden = true
+            window.rootViewController = nil
         })
-
-        animatePushUI(-height)
     }
 
-    // MARK: - Button Actions
+    // MARK: - Making room
+
+    private var pushedInset: CGFloat = 0
+
+    /// Moves the app's own content down so the strip is not sitting on top of a navigation bar.
+    ///
+    /// Only the root controller is adjusted: everything inside it - tabs, navigation stacks,
+    /// the screens in them - inherits the inset, and the amount actually applied is remembered
+    /// so it can be taken back exactly, however many times this is called.
+    private func setContentPushed(_ pushed: Bool) {
+        guard let root = UIApplication.shared.keyWindow?.rootViewController else {
+            return
+        }
+        let wanted: CGFloat = pushed ? MiniCallBanner.height : 0
+        guard wanted != pushedInset else {
+            return
+        }
+        let delta = wanted - pushedInset
+        pushedInset = wanted
+        UIView.animate(withDuration: 0.30) {
+            root.additionalSafeAreaInsets.top += delta
+            root.view.layoutIfNeeded()
+        }
+    }
+
+    // MARK: - Buttons
+
     @objc private func muteTapped() {
-        banner?.toggleMute()
-        // integrate with your mute function
+        guard let call = call else {
+            return
+        }
+        call.didMute(sender: nil)
+        banner?.setMuted(call.isMutedNow)
     }
 
     @objc private func endTapped() {
-        hideBanner()
+        call?.endCallFromMiniBanner()
+    }
+
+    @objc private func bannerTapped() {
+        restore()
     }
 }
 
@@ -5242,5 +5304,89 @@ final class PendingMessageStore {
         var list = load()
         list.removeAll()
         UserDefaults.standard.set(list, forKey: key)
+    }
+}
+
+/// Remembers which local message a push actually turned out to be about.
+///
+/// Fix: the id an APN carries is not always the id the message ends up stored under - the
+/// server can answer a pull for one id with a message whose MESSAGE_ID is a different one.
+/// Everything downstream keyed off the APN id and so could never find that message again:
+/// it stayed in PendingMessageStore forever (every foreground pulled it again, the server
+/// answered "nothing left" every time), and tapping its notification looked the message up
+/// by the APN id, found nothing, and opened no chat at all.
+final class APNMessageAliasStore {
+
+    static let shared = APNMessageAliasStore()
+    private let key = "apn_message_id_aliases_nexilis"
+    // Only enough history to cover notifications still sitting in Notification Centre.
+    private let maxEntries = 200
+
+    func record(apnId: String, storedId: String) {
+        guard !apnId.isEmpty, !storedId.isEmpty, apnId != storedId else {
+            return
+        }
+        var map = load()
+        map[apnId] = storedId
+        if map.count > maxEntries {
+            // Nothing here is worth a real LRU; dropping arbitrary excess is fine because a
+            // missing alias only costs the lookup it would have saved.
+            for staleKey in map.keys.prefix(map.count - maxEntries) {
+                map.removeValue(forKey: staleKey)
+            }
+        }
+        UserDefaults.standard.set(map, forKey: key)
+    }
+
+    func storedId(forAPNId apnId: String) -> String? {
+        return load()[apnId]
+    }
+
+    private func load() -> [String: String] {
+        return UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+    }
+}
+
+/// Remembers a notification tap whose chat could not be opened yet.
+///
+/// Fix: tapping a notification for a message that is not on disk yet used to be a one-shot
+/// attempt - one pull, and if that pull failed (no connection yet on a cold launch, the
+/// session/cookie not restored, the server momentarily unavailable) the tap was simply lost:
+/// no chat opened and the list stayed as it was, until the user backgrounded the app and came
+/// back so the socket reconnect finally delivered the message. Recording the request here
+/// (UserDefaults, so it also survives the app being killed right after the tap) lets the chat
+/// be opened as soon as the message does land, whichever path brings it in.
+final class APNPendingOpenStore {
+
+    static let shared = APNPendingOpenStore()
+    private let idKey = "apn_pending_open_id_nexilis"
+    private let timeKey = "apn_pending_open_time_nexilis"
+    /// Opening a chat by itself, long after the tap, would be a surprise rather than a fix.
+    private let maxAge: TimeInterval = 10 * 60
+
+    func record(apnId: String) {
+        guard !apnId.isEmpty else {
+            return
+        }
+        UserDefaults.standard.set(apnId, forKey: idKey)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: timeKey)
+    }
+
+    /// The id still worth opening, or nil when there is none / it has gone stale.
+    func pendingId() -> String? {
+        guard let id = UserDefaults.standard.string(forKey: idKey), !id.isEmpty else {
+            return nil
+        }
+        let recordedAt = UserDefaults.standard.double(forKey: timeKey)
+        if recordedAt <= 0 || Date().timeIntervalSince1970 - recordedAt > maxAge {
+            clear()
+            return nil
+        }
+        return id
+    }
+
+    func clear() {
+        UserDefaults.standard.removeObject(forKey: idKey)
+        UserDefaults.standard.removeObject(forKey: timeKey)
     }
 }

@@ -790,3 +790,217 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
 public protocol SettingMABDelegate: AnyObject {
     func settingDelegate()
 }
+
+/// Implemented by a host-app screen that wants a say in whether the floating button shows over
+/// it - a screen that is sometimes a tab and sometimes pushed on its own, say. Screens that do
+/// not implement it get the default answer for their bundle (see `FloatingButton.refresh()`).
+public protocol FloatingButtonScreen: AnyObject {
+    var showsFloatingButton: Bool { get }
+}
+
+// MARK: - Where the button is allowed to show
+//
+// Fix: this used to be nineteen separate `Nexilis.floatingButton.isHidden = ...` statements
+// spread across the library and the host app - every screen that could ever cover the button
+// had to remember to hide it on the way in, and every screen it could come back over had to
+// remember to show it again. A screen that forgot (or a route nobody thought of - a push from
+// a notification, a modal dismissed a different way) left the button floating over a chat, or
+// left it gone for the rest of the session. It is one decision, so it is made in one place
+// now, from the screen that is actually on top.
+public extension FloatingButton {
+
+    /// When true the button only ever shows over the host app's own screens: anything the
+    /// library puts up - a chat editor, a call, a settings list - hides it, and it comes back
+    /// by itself once that screen is gone. Left false, every screen keeps deciding for itself,
+    /// which is what apps embedding this library have always relied on.
+    static var showsOnAppScreensOnly: Bool = false {
+        didSet {
+            guard showsOnAppScreensOnly != oldValue else {
+                return
+            }
+            if showsOnAppScreensOnly {
+                observeAppState()
+                startWatchdog()
+                refresh()
+            } else {
+                stopWatchdog()
+            }
+        }
+    }
+
+    /// Held down while something is going on that the button has no business floating over -
+    /// a call above all, which keeps running long after the screen that started it is gone.
+    /// Outranks every other rule, in either mode.
+    static var isSuppressed: Bool = false {
+        didSet {
+            guard isSuppressed != oldValue else {
+                return
+            }
+            if isSuppressed {
+                applyHidden(true)
+            } else if showsOnAppScreensOnly {
+                refresh()
+            }
+        }
+    }
+
+    /// The single place the button's visibility is set. Screens keep calling this; when
+    /// `showsOnAppScreensOnly` is on it defers to whatever screen is really on top rather than
+    /// taking the caller's word for it.
+    ///
+    /// Also the reason nothing needs to know whether the button exists yet: the property is
+    /// implicitly unwrapped, so every one of those old direct assignments was a crash waiting
+    /// for a screen that appeared before the button had been built.
+    static func setHidden(_ hidden: Bool) {
+        guard !isSuppressed else {
+            applyHidden(true)
+            return
+        }
+        guard !showsOnAppScreensOnly else {
+            refresh()
+            return
+        }
+        applyHidden(hidden)
+    }
+
+    /// Re-decides where the button belongs. Safe to call from anywhere, as often as wanted.
+    static func refresh() {
+        guard showsOnAppScreensOnly else {
+            return
+        }
+        // Now, for the callers whose hierarchy is already settled (a screen appearing, the
+        // button being added) so nothing flashes...
+        if Thread.isMainThread {
+            evaluate()
+        }
+        // ...and again next turn, for the ones where it is not: during a dismissal or a pop the
+        // screen on its way out is still in the hierarchy, so deciding only now would get its
+        // answer rather than the one underneath it.
+        DispatchQueue.main.async {
+            evaluate()
+        }
+    }
+
+    /// Works out whether the button belongs over the screen showing right now, and shows or
+    /// hides it to match.
+    ///
+    /// Fix: this cannot be driven by viewDidAppear alone. UIKit only reaches the library's hook
+    /// there if every screen calls super - and 67 of the screens in this project do not, this
+    /// app's chat list and the chat editors among them, which is exactly why the button stayed
+    /// hidden after coming back out of a chat. So it is answered from the hierarchy itself,
+    /// from several angles: the navigation swizzles (which always run, whatever a screen does),
+    /// every screen that asks for a change, and a watchdog for the routes neither covers.
+    private static func evaluate() {
+        guard showsOnAppScreensOnly, let button = Nexilis.floatingButton, button.superview != nil else {
+            return
+        }
+        if isSuppressed {
+            if !button.isHidden {
+                button.isHidden = true
+            }
+            return
+        }
+        guard let top = topScreen() else {
+            return
+        }
+        let shouldHide: Bool
+        if let screen = top as? FloatingButtonScreen {
+            shouldHide = !screen.showsFloatingButton
+        } else {
+            // The host app's own screens, and only those. Anything from this library - or a
+            // system screen covering everything, like a share sheet or a preview - is not the
+            // app's own screen and the button stays out of its way.
+            shouldHide = Bundle(for: type(of: top)) != Bundle.main
+        }
+        // Only when it actually changes: this runs on a timer as well, and assigning isHidden
+        // on every tick would be pointless work.
+        if button.isHidden != shouldHide {
+            button.isHidden = shouldHide
+        }
+    }
+
+    private static func applyHidden(_ hidden: Bool) {
+        guard let button = Nexilis.floatingButton else {
+            return
+        }
+        if Thread.isMainThread {
+            button.isHidden = hidden
+        } else {
+            DispatchQueue.main.async {
+                Nexilis.floatingButton?.isHidden = hidden
+            }
+        }
+    }
+
+    // MARK: - Watchdog
+    //
+    // The guarantee that the button can never be left stuck. Every notification-driven path can
+    // be missed - a screen that never calls super, a modal dismissed a way nobody hooked, a
+    // controller swapped out from under the window - and the cost of missing one is a button
+    // that is gone for the rest of the session. Re-deciding a few times a second costs a walk
+    // down a handful of view-controller pointers and one comparison; it runs only while this
+    // policy is on and only while the app is in front.
+
+    private static var watchdog: Timer?
+    private static var appStateObserved = false
+
+    private static func startWatchdog() {
+        DispatchQueue.main.async {
+            watchdog?.invalidate()
+            guard showsOnAppScreensOnly else {
+                return
+            }
+            let timer = Timer(timeInterval: 0.3, repeats: true) { _ in
+                evaluate()
+            }
+            // Generous tolerance so the system can coalesce these with whatever else it is
+            // waking up for, and common mode so a scroll in progress does not silence it.
+            timer.tolerance = 0.2
+            RunLoop.main.add(timer, forMode: .common)
+            watchdog = timer
+        }
+    }
+
+    private static func stopWatchdog() {
+        DispatchQueue.main.async {
+            watchdog?.invalidate()
+            watchdog = nil
+        }
+    }
+
+    private static func observeAppState() {
+        guard !appStateObserved else {
+            return
+        }
+        appStateObserved = true
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            startWatchdog()
+            evaluate()
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            stopWatchdog()
+        }
+    }
+
+    /// The screen the reader is actually looking at: through whatever is presented, then down
+    /// into tab bars and navigation stacks.
+    private static func topScreen() -> UIViewController? {
+        guard var controller = UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
+            return nil
+        }
+        // Containers only ever nest a handful deep; the count is here so a malformed hierarchy
+        // cannot spin this forever.
+        for _ in 0..<20 {
+            if let presented = controller.presentedViewController {
+                controller = presented
+            } else if let tab = controller as? UITabBarController, let selected = tab.selectedViewController {
+                controller = selected
+            } else if let navigation = controller as? UINavigationController, let top = navigation.topViewController {
+                controller = top
+            } else {
+                break
+            }
+        }
+        return controller
+    }
+}

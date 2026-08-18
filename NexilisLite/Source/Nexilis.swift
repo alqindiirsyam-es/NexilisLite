@@ -20,7 +20,7 @@ import WebKit
 import CommonCrypto
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.10"
+    public static var cpaasVersion = "5.1.11"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -562,6 +562,9 @@ public class Nexilis: NSObject {
         if let keyWindow = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) {
             keyWindow.addSubview(floatingButton)
         }
+        // A button added while a screen it does not belong on is already up must not appear on
+        // it - the screen has long since had its viewDidAppear.
+        FloatingButton.refresh()
         if fromMAB {
             if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let window = scene.windows.first,
@@ -1929,9 +1932,21 @@ public class Nexilis: NSObject {
                         //print(error)
                     }
                 }
-                if !withStatus && !fromAPNS && (!messageExist || last_edited != 0) {
+                if !withStatus && (!messageExist || last_edited != 0) {
                     DispatchQueue.main.async {
-                        if let delegate = Nexilis.shared.messageDelegate, Utils.getSetProfile() {
+                        // Fix: the chat list has to hear about a message however it got here.
+                        // The delegate below is the only thing that used to announce an arrival,
+                        // and it is deliberately silent for messages pulled in for a push
+                        // (fromAPNS) - which are precisely the ones the list is missing when the
+                        // app is opened from the launcher. It also needs a delegate to have been
+                        // registered, so anything that landed during the backlog burst before
+                        // the app's UI was up announced itself to nobody. Either way the row sat
+                        // there stale until something unrelated happened to refresh it.
+                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+                        // Unread went up; the icon should say so. Debounced, because a backlog
+                        // arrives one message at a time.
+                        APIS.refreshApplicationBadgeSoon()
+                        if !fromAPNS, let delegate = Nexilis.shared.messageDelegate, Utils.getSetProfile() {
                             message.mBodies[CoreMessage_TMessageKey.MESSAGE_TEXT] = message.getBody(key : CoreMessage_TMessageKey.MESSAGE_TEXT, default_value : "").toNormalString()
                             delegate.onReceive(message: message)
                         }
@@ -5373,9 +5388,6 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
         let storedCertificate = Utils.getCertificatePinningWebview()
         guard let jsonData = storedCertificate.data(using: .utf8) else {
             // Fix: fail closed - don't trust the connection if the pin can't be read.
-//            #if DEBUG
-//            print("[Pinning] FAIL: stored pin string is not valid UTF-8. raw=\(storedCertificate)")
-//            #endif
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
@@ -5391,23 +5403,13 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
         } else if let certJsonLegacy = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
             acceptedHashes = certJsonLegacy[domain].map { [$0] } ?? []
         } else {
-//            #if DEBUG
-//            print("[Pinning] FAIL: stored pin JSON did not parse as [String:[String]] or [String:String]. raw=\(storedCertificate)")
-//            #endif
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
 
-//        #if DEBUG
-//        print("[Pinning] domain=\(domain) computedHash=\(publicKeyHash) acceptedHashes=\(acceptedHashes) storedPinJSON=\(storedCertificate)")
-//        #endif
-
         if acceptedHashes.contains(publicKeyHash) {
             completionHandler(.useCredential, URLCredential(trust: serverTrust))
         } else {
-//            #if DEBUG
-//            print("[Pinning] FAIL: computedHash not found in acceptedHashes for domain \(domain)")
-//            #endif
             completionHandler(.cancelAuthenticationChallenge, nil)
         }
     }
@@ -5462,58 +5464,21 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
         return nil
     }
 
-    // Fix: kSecAttrKeyType's value in the attributes dictionary returned by
-    // SecKeyCopyAttributes is not reliably a CFString/Swift String - depending on iOS
-    // version/key origin it can come back as an NSNumber (the constants themselves,
-    // e.g. kSecAttrKeyTypeRSA, are declared as CFString but their *value* is the
-    // literal digits "42"/"73"/etc., and some code paths in Security.framework hand
-    // that back as a number instead of the string). `as? String` silently returning
-    // nil for a perfectly normal RSA/EC key is a known, easy-to-hit gotcha - and here
-    // it would make extractPublicKeyHash() return nil (auth challenge rejected) even
-    // though everything else (the pin, the hashing) is completely correct.
-    private func coerceToKeyTypeString(_ value: Any?) -> String? {
-        if let s = value as? String { return s }
-        if let n = value as? NSNumber { return n.stringValue }
-        if let cf = value {
-            return "\(cf)"
-        }
-        return nil
-    }
-
     func extractPublicKeyHash(from serverTrust: SecTrust) -> String? {
-        guard let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else {
-//            #if DEBUG
-//            print("[Pinning] FAIL: SecTrustGetCertificateAtIndex returned nil")
-//            #endif
-            return nil
-        }
-        guard let publicKey = SecCertificateCopyKey(certificate) else {
-//            #if DEBUG
-//            print("[Pinning] FAIL: SecCertificateCopyKey returned nil")
-//            #endif
-            return nil
-        }
+        guard let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else { return nil }
+        guard let publicKey = SecCertificateCopyKey(certificate) else { return nil }
 
         var error: Unmanaged<CFError>?
         guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-//            #if DEBUG
-//            print("[Pinning] FAIL: SecKeyCopyExternalRepresentation returned nil, error: \(String(describing: error))")
-//            #endif
             return nil
         }
 
-        let attributes = SecKeyCopyAttributes(publicKey) as? [CFString: Any]
-        let rawKeyType = attributes?[kSecAttrKeyType]
-        let keyType = coerceToKeyTypeString(rawKeyType)
-        let sizeInBits = attributes?[kSecAttrKeySizeInBits] as? Int
-
-        guard let keyType = keyType, let sizeInBits = sizeInBits,
+        guard let attributes = SecKeyCopyAttributes(publicKey) as? [CFString: Any],
+              let keyType = attributes[kSecAttrKeyType] as? String,
+              let sizeInBits = attributes[kSecAttrKeySizeInBits] as? Int,
               let header = spkiHeader(keyType: keyType, sizeInBits: sizeInBits) else {
             // Fix: unknown/unsupported key type or size - fail closed instead of
             // silently hashing the wrong (raw, non-SPKI) bytes and always mismatching.
-//            #if DEBUG
-//            print("[Pinning] FAIL: unsupported/undetected key type or size. rawKeyType=\(String(describing: rawKeyType)) coercedKeyType=\(String(describing: keyType)) sizeInBits=\(String(describing: sizeInBits)) rsaConst=\(kSecAttrKeyTypeRSA) ecConst=\(kSecAttrKeyTypeECSECPrimeRandom)")
-//            #endif
             return nil
         }
 
@@ -5529,9 +5494,6 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
 
         let hashData = Data(hash)
         let base64Hash = hashData.base64EncodedString()
-//        #if DEBUG
-//        print("[Pinning] computed SPKI hash = \(base64Hash) for keyType=\(keyType) size=\(sizeInBits)")
-//        #endif
 
         return base64Hash
     }

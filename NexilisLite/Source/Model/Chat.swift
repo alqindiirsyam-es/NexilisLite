@@ -369,6 +369,23 @@ public class Chat: Model {
 //        })
 //    }
     
+    /// Whether any conversation has been archived at all.
+    ///
+    /// Every branch of the archived query is filtered on `ms.archived <> 0`, so when nothing
+    /// is archived the whole five-way union is guaranteed to come back empty - and the chat
+    /// list ran it on every refresh only to find that out. This answers the same question
+    /// with one indexed lookup.
+    public static func hasArchived() -> Bool {
+        var result = false
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select 1 from MESSAGE_SUMMARY where archived <> 0 limit 1") {
+                result = cursor.next()
+                cursor.close()
+            }
+        })
+        return result
+    }
+
     public static func getData(isUnread: Bool = false, isImage: Bool = false, isDoc: Bool = false, isVideo: Bool = false, isGIF: Bool = false, isLink: Bool = false, isAudio: Bool = false, isArchived: Bool = false, withText: String = "") -> [Chat] {
         var chats: [Chat] = []
         Database.shared.database?.inTransaction({ (fmdb, rollback) in

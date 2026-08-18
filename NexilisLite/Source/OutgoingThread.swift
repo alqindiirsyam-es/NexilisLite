@@ -8,6 +8,7 @@
 
 import Foundation
 import FMDB
+import nuSDKService
 
 class OutgoingThread {
     
@@ -23,10 +24,48 @@ class OutgoingThread {
     
     private var queue = [TMessage]()
     
+    private let queueLock = NSLock()
+    /// The messages already lined up, so a retry and the reconnect sweep cannot queue the same
+    /// one twice.
+    private var queuedIds = Set<String>()
+    private let resendLock = NSLock()
+    private var isResending = false
+    /// How long to wait before trying a message again, per message. Doubles up to a minute.
+    private var resendBackoff: [String: TimeInterval] = [:]
+    
     init() {
         DispatchQueue.global().async { [self] in
             while Database.shared.database == nil {
                 Thread.sleep(forTimeInterval: 1.0)
+            }
+            resendPending()
+        }
+    }
+
+    /// Re-queues every message this device still has at status "1" - written locally, never
+    /// answered with "2" by the server.
+    ///
+    /// Fix: this used to run once, at startup, and nothing drove it again. A message written
+    /// while the link was down (or while the server was not answering) sat at "1" for the rest
+    /// of the session unless the reader found it and used Resend by hand. It is called now
+    /// whenever the link comes back - the socket reconnecting, the network path becoming
+    /// satisfied again, or the app returning to the foreground.
+    func resendPending() {
+        guard API.nGetCLXConnState() == 1 || CheckConnection.isConnectedToNetwork() else {
+            return
+        }
+        resendLock.lock()
+        if isResending {
+            resendLock.unlock()
+            return
+        }
+        isResending = true
+        resendLock.unlock()
+        DispatchQueue.global(qos: .utility).async { [self] in
+            defer {
+                resendLock.lock()
+                isResending = false
+                resendLock.unlock()
             }
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
@@ -42,9 +81,15 @@ class OutgoingThread {
                                     if let cursorStatus = Database.shared.getRecords(fmdb: fmdb, query: "SELECT status FROM MESSAGE_STATUS WHERE message_id='\(message_id)'") {
                                         var listStatus: [Int] = []
                                         while cursorStatus.next() {
-                                            listStatus.append(Int(cursorStatus.string(forColumnIndex: 0)!)!)
+                                            // Guarded: this sweep runs on every reconnect now,
+                                            // not once at startup, so a NULL or non-numeric
+                                            // status in the table would be a crash on a very
+                                            // ordinary event rather than a rare one.
+                                            if let value = cursorStatus.string(forColumnIndex: 0), let status = Int(value) {
+                                                listStatus.append(status)
+                                            }
                                         }
-                                        let status = "\(listStatus.min() ?? Int(statusM)!)"
+                                        let status = "\(listStatus.min() ?? Int(statusM) ?? 0)"
                                         if status == "1" {
                                             self.appendAndRunQueue(message: tMessage)
                                         } else {
@@ -78,14 +123,30 @@ class OutgoingThread {
     }
     
     func appendAndRunQueue(message: TMessage) {
+        // Fix: the queue is appended to from the caller's thread and drained on the worker's,
+        // and now also refilled from the reconnect sweep - which is three threads on one plain
+        // array. It is also where the same message must not be lined up twice, or a retry that
+        // crosses paths with the sweep sends it to the server two or three times over.
+        let messageId = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
+        queueLock.lock()
+        if !messageId.isEmpty {
+            if queuedIds.contains(messageId) {
+                queueLock.unlock()
+                return
+            }
+            queuedIds.insert(messageId)
+        }
         queue.append(message)
+        queueLock.unlock()
         semaphore.signal()
         addOugoing(message: message)
     }
     
     private func addQueue(_ message: TMessage, at: Int) {
         Thread.sleep(forTimeInterval: 1)
+        queueLock.lock()
         queue.insert(message, at: at)
+        queueLock.unlock()
         semaphore.signal()
     }
     
@@ -129,13 +190,17 @@ class OutgoingThread {
     }
     
     func getQueue() -> TMessage {
-        while queue.isEmpty || queue.count == 0 {
-            //print("QUEUE.wait")
-//            DispatchQueue.global(qos: .background).async {
-                self.semaphore.wait()
-//            }
+        while true {
+            queueLock.lock()
+            if !queue.isEmpty {
+                let message = queue.remove(at: 0)
+                queuedIds.remove(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID))
+                queueLock.unlock()
+                return message
+            }
+            queueLock.unlock()
+            semaphore.wait()
         }
-        return queue.remove(at: 0)
     }
     
     func run() {
@@ -240,6 +305,10 @@ class OutgoingThread {
                                         } catch {
                                             
                                         }
+                                    } else if self.linkIsUp() {
+                                        // Uploaded, sent, and simply not answered - not a
+                                        // failure to retry five times and then give up on.
+                                        self.markSentUnanswered(message: message)
                                     } else {
                                         self.retryUpload(message: message, fileName: fileName)
                                     }
@@ -283,6 +352,8 @@ class OutgoingThread {
                                 } catch {
                                     
                                 }
+                            } else if self.linkIsUp() {
+                                self.markSentUnanswered(message: message)
                             } else {
                                 self.retryUpload(message: message, fileName: fileName)
                             }
@@ -309,17 +380,124 @@ class OutgoingThread {
                         }
                     })
                 } else {
-//                    print("retry sendChat")
-                    OutgoingThread.default.addQueue(message: message)
+                    scheduleResend(message: message)
                 }
+            } else if linkIsUp() {
+                // The server never answered. It was written to a live link though, so as far as
+                // this device can tell it is on its way - see markSentUnanswered.
+                markSentUnanswered(message: message)
             } else {
-//                print("retry sendChat")
-                OutgoingThread.default.addQueue(message: message)
+                scheduleResend(message: message)
             }
         }
     }
+
+    /// Whether there is something to have sent over.
+    private func linkIsUp() -> Bool {
+        return API.nGetCLXConnState() == 1 && CheckConnection.isConnectedToNetwork()
+    }
+
+    /// Settles a message the server took but never acknowledged at "sent".
+    ///
+    /// Fix: status only ever left "1" when the server answered, and this server does not always
+    /// answer. A message written over a live link then sat on the clock for good - and on the
+    /// media path it was worse: the unanswered send counted as a failed attempt, so five of them
+    /// marked a message that had already been uploaded as failed. Nothing about the message
+    /// said it had not been sent; only the reply was missing. It is marked "2" - one tick, "the
+    /// server has it" - and taken off the outgoing queue. Only rows still on "1" are touched, so
+    /// a real status that arrives first or later always wins.
+    private func markSentUnanswered(message: TMessage) {
+        let messageId = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
+        guard !messageId.isEmpty else {
+            return
+        }
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            do {
+                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                    "status" : "2"
+                ], _where: "message_id = '\(messageId)' AND status = '1'")
+                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
+                    "status" : "2"
+                ], _where: "message_id = '\(messageId)' AND status = '1'")
+                self.delOutgoing(fmdb: fmdb, messageId: message.getStatus())
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
+        // Nothing arrives from the server on this path, so the tick has to be announced here or
+        // the bubble keeps its clock until the screen is rebuilt for some other reason.
+        let update = TMessage(data: message.pack())
+        update.mBodies[CoreMessage_TMessageKey.F_PIN] = User.getMyPin() ?? ""
+        update.mBodies[CoreMessage_TMessageKey.STATUS] = "2"
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil, userInfo: ["message": update])
+            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+        }
+    }
+
+    /// Tries a message again later, and only once there is something to try it over.
+    ///
+    /// Fix: a send that came back empty used to go straight back on the queue with
+    /// `addQueue(message:)`. Two things were wrong with that. It re-entered immediately, so a
+    /// server that was not answering meant a spin through writeSync as fast as the socket
+    /// timeout allowed, for as long as the app was open. And `addQueue` re-saves the message
+    /// before queueing it, so every one of those turns rewrote the row as well. This waits,
+    /// backs off, and does not even wake up until the link is back - which is what "retry
+    /// berjalan jika internet ada atau nGetCLXConnState() == 1" asks for.
+    private func scheduleResend(message: TMessage) {
+        let messageId = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
+        queueLock.lock()
+        let delay = min((resendBackoff[messageId] ?? 2.5) * 2, 60)
+        resendBackoff[messageId] = delay
+        queueLock.unlock()
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [self] in
+            guard isStillPending(messageId: messageId) else {
+                // Answered, deleted, or resent by hand in the meantime.
+                queueLock.lock()
+                resendBackoff.removeValue(forKey: messageId)
+                queueLock.unlock()
+                return
+            }
+            guard API.nGetCLXConnState() == 1 || CheckConnection.isConnectedToNetwork() else {
+                // Nothing to send it over yet. Waiting costs nothing; the reconnect sweep will
+                // also pick it up the moment the link is back.
+                scheduleResend(message: message)
+                return
+            }
+            appendAndRunQueue(message: message)
+        }
+    }
+
+    /// Whether a message is still waiting for the server's "2" - the only reason to send again.
+    private func isStillPending(messageId: String) -> Bool {
+        guard !messageId.isEmpty else {
+            return false
+        }
+        var pending = false
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select status from MESSAGE where message_id = '\(messageId)'"), cursor.next() {
+                pending = (cursor.string(forColumnIndex: 0) ?? "") == "1"
+                cursor.close()
+            }
+        })
+        return pending
+    }
     
     private func retryUpload(message: TMessage, fileName: String) {
+        // Fix: no connection is not a failed attempt. Counting it as one burned all five
+        // attempts inside half a minute of being offline and left the message marked failed
+        // ("0") even though it had never actually been refused - and the sixty-second window
+        // below expired the same way. Offline just waits.
+        guard API.nGetCLXConnState() == 1 || CheckConnection.isConnectedToNetwork() else {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) { [self] in
+                guard isStillPending(messageId: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)) else {
+                    return
+                }
+                retryUpload(message: message, fileName: fileName)
+            }
+            return
+        }
         //print("masuk Retry")
         var maxRetry = Utils.getMaxRetryUpload()
         var maxRetryTime = Utils.getMaxRetryTimeUpload()

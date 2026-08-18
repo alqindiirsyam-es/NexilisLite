@@ -38,9 +38,14 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         tableStatus.delegate = self
         tableStatus.separatorStyle = .none
         tableStatus.bounces = false
+        // Fix: the bubble row is laid out entirely with constraints and nothing ever told the
+        // table how tall it comes out, so it was drawn at whatever height the table assumed -
+        // which is where the squashed and overlapping bubbles came from.
+        tableStatus.rowHeight = UITableView.automaticDimension
+        tableStatus.estimatedRowHeight = 80
         
         getData()
-        dateMessage = chatDate(stringDate: data["server_date"] as! String)
+        dateMessage = chatDate(stringDate: data["server_date"] as? String ?? "")
         
         tableStatus.reloadData()
         DispatchQueue.global().async{
@@ -591,18 +596,31 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             containerMessage.clipsToBounds = true
             
             timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
+            // Fix: the timestamp only had a right edge, tied to the bubble - so a wide one grew
+            // leftwards straight off the cell. Giving it a left edge pushes the bubble across
+            // instead of letting the text disappear.
+            timeMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cell.contentView.leadingAnchor, constant: 8).isActive = true
             
             cell.contentView.addSubview(statusMessage)
             statusMessage.translatesAutoresizingMaskIntoConstraints = false
             statusMessage.bottomAnchor.constraint(equalTo: timeMessage.topAnchor).isActive = true
+            // Fix: time, tick and star stack upwards from the bottom edge with nothing holding
+            // them inside the cell. On a short message the stack is taller than the bubble, so
+            // the top of it was simply cut off. Now the row grows to fit it.
+            statusMessage.topAnchor.constraint(greaterThanOrEqualTo: cell.contentView.topAnchor, constant: 5).isActive = true
             statusMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
             statusMessage.widthAnchor.constraint(equalToConstant: 15).isActive = true
             statusMessage.heightAnchor.constraint(equalToConstant: 15).isActive = true
-            if (data["status"]! as! String == "1" || data["status"]! as! String == "2" ) {
+            // Fix: force-cast four times over. A message with no status column - or one stored
+            // as anything but a string - crashed this screen outright, and a swipe now opens it.
+            let messageStatus = data["status"] as? String ?? ""
+            if messageStatus == "1" {
+                statusMessage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
+            } else if messageStatus == "2" {
                 statusMessage.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
-            } else if (data["status"]! as! String == "3") {
+            } else if messageStatus == "3" {
                 statusMessage.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
-            } else if (data["status"]! as! String == "8") {
+            } else if messageStatus == "8" {
                 statusMessage.image = UIImage(named: "message_status_ack", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
             } else {
                 statusMessage.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.systemBlue)
@@ -613,6 +631,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 cell.contentView.addSubview(imageStared)
                 imageStared.translatesAutoresizingMaskIntoConstraints = false
                 imageStared.bottomAnchor.constraint(equalTo: statusMessage.topAnchor).isActive = true
+                imageStared.topAnchor.constraint(greaterThanOrEqualTo: cell.contentView.topAnchor, constant: 5).isActive = true
                 imageStared.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
                 imageStared.widthAnchor.constraint(equalToConstant: 15).isActive = true
                 imageStared.heightAnchor.constraint(equalToConstant: 15).isActive = true
@@ -1187,7 +1206,9 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     }
     
     private func chatDate(stringDate: String) -> String {
-        let date = Date(milliseconds: Int64(stringDate)!)
+        // Fix: force-unwrapped, on a value taken straight from the message row - a missing or
+        // non-numeric server_date crashed the screen before it could draw anything.
+        let date = Date(milliseconds: Int64(stringDate) ?? 0)
         let calendar = Calendar.current
         if (calendar.isDateInToday(date)) {
             return "Today".localized()
@@ -1195,7 +1216,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             let startOfNow = calendar.startOfDay(for: Date())
             let startOfTimeStamp = calendar.startOfDay(for: date)
             let components = calendar.dateComponents([.day], from: startOfNow, to: startOfTimeStamp)
-            let day = -(components.day!)
+            let day = -(components.day ?? 0)
             if day == 1 {
                 return "Yesterday".localized()
             } else if day < 7 {

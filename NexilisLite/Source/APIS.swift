@@ -15,6 +15,18 @@ import AVFoundation
 import AVKit
 import Intents
 
+/// The app's chat list screen, as far as this framework is concerned.
+///
+/// The framework cannot see the app target's view controllers, but it does need to tell the
+/// chat list to refresh itself before pushing an Editor on top of it - a list drawn before
+/// the pushed message was stored shows a stale row (or no row at all) behind the chat, and
+/// the unread counters it displays are the ones from before the message arrived.
+public protocol ChatListTab: UIViewController {
+    /// Reloads the list from the database and calls back on the main thread once the new
+    /// data is on screen.
+    func reloadChatList(completion: @escaping () -> Void)
+}
+
 public class APIS: NSObject {
     private static var isAlertPresented = false
     private static var transitioningDelegateRef: ZoomTransitioningDelegate?
@@ -24,7 +36,104 @@ public class APIS: NSObject {
 //        APIS.monitoredActivity()
     }
     
+    // MARK: - App icon badge
+    //
+    // Fix: the badge used to be nudged along with `applicationIconBadgeNumber += 1` from the
+    // push handlers. Three things were wrong with that. The increment sat inside a
+    // DispatchQueue.main block, and a push handler runs on an app that iOS is about to suspend
+    // again - the block often never got its turn, which is the "notif jelas masuk tapi badge
+    // tidak nambah" case. A redelivered push for a message already in hand counted twice. And
+    // nothing ever brought the number back down when those messages were read. The number of
+    // unread messages is already in the database, so that is what the badge is set from now.
+
+    private static var badgeRefreshScheduled = false
+    private static let lastBadgeKey = "last_application_badge_nexilis"
+
+    /// Reads the unread total and puts it on the app icon. Does the read on the calling thread,
+    /// so a push handler can be sure it has happened before it hands control back to iOS.
+    ///
+    /// - Parameter fallbackIncrement: for the callers that know a message just landed. The
+    ///   database is closed while the app is in the background (see enterBackground), and if it
+    ///   cannot be reopened - no key material yet, for instance - there is no count to read.
+    ///   Leaving the badge alone then would be the "badge tidak nambah" case all over again, so
+    ///   those callers put it up by one instead of leaving it where it was.
+    public static func refreshApplicationBadge(fallbackIncrement: Bool = false) {
+        // The database is not open by default in the background, and a query against a closed
+        // one reads nothing at all.
+        Database.shared.ensureOpenForBackgroundWrite()
+        if let total = readUnreadTotal() {
+            setApplicationBadge(Int(total))
+            return
+        }
+        guard fallbackIncrement else {
+            // Fix: a failed read used to be treated as "zero unread", which actively wiped the
+            // badge instead of raising it.
+            return
+        }
+        setApplicationBadge(lastKnownBadge + 1)
+    }
+
+    /// The same, but at most once every half second - for the paths that run once per arriving
+    /// message, where a backlog would otherwise mean one five-way SUM per message.
+    public static func refreshApplicationBadgeSoon() {
+        guard !badgeRefreshScheduled else {
+            return
+        }
+        badgeRefreshScheduled = true
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) {
+            badgeRefreshScheduled = false
+            refreshApplicationBadge()
+        }
+    }
+
+    /// What the badge was last set to. Kept here rather than read back from UIApplication,
+    /// which only answers on the main thread and only while the app is running.
+    private static var lastKnownBadge: Int {
+        return UserDefaults.standard.integer(forKey: lastBadgeKey)
+    }
+
+    /// What the badge should read now that one more message has arrived.
+    ///
+    /// Fix: reading the database alone is not enough here, because the CL01 push path puts the
+    /// notification up *before* it saves the message - so the count still says what it said a
+    /// moment ago, the badge gets set to the number it already had, and the arrival is invisible.
+    /// One more than the last number shown is the floor; the database's own count wins when it
+    /// is higher (it already counts this message on the socket path, and it catches up on
+    /// everything read or received elsewhere).
+    private static func badgeTargetForNewMessage() -> Int {
+        Database.shared.ensureOpenForBackgroundWrite()
+        let counted = Int(readUnreadTotal() ?? 0)
+        return max(counted, lastKnownBadge + 1)
+    }
+
+    private static func setApplicationBadge(_ value: Int) {
+        UserDefaults.standard.set(value, forKey: lastBadgeKey)
+        if #available(iOS 16.0, *) {
+            // Settable from any thread and without the app being active, unlike the old
+            // property - which is exactly what a background push handler needs.
+            UNUserNotificationCenter.current().setBadgeCount(value)
+            return
+        }
+        if Thread.isMainThread {
+            UIApplication.shared.applicationIconBadgeNumber = value
+        } else {
+            DispatchQueue.main.async {
+                UIApplication.shared.applicationIconBadgeNumber = value
+            }
+        }
+    }
+
     public static func getTotalCounter() -> Int32 {
+        guard let total = readUnreadTotal() else {
+            return 0
+        }
+        setApplicationBadge(Int(total))
+        return total
+    }
+
+    /// The number of unread messages, or nil when the database could not be read at all - which
+    /// is not the same thing as there being none.
+    private static func readUnreadTotal() -> Int32? {
         var counter: Int32?
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
@@ -83,10 +192,7 @@ public class APIS: NSObject {
                 print("Access database error: \(error.localizedDescription)")
             }
         })
-        DispatchQueue.main.async {
-            UIApplication.shared.applicationIconBadgeNumber = Int(counter ?? 0)
-        }
-        return counter ?? 0
+        return counter
     }
     
     private static func showChangeProfile() {
@@ -1624,7 +1730,6 @@ public class APIS: NSObject {
     static var listMessageFromAPN: [String] = []
     private static let listMessageFromAPNLock = NSLock()
     public static func showNotificationNexilis(_ userInfo: [AnyHashable : Any], completion: @escaping (UIBackgroundFetchResult) -> Void = { _ in }) {
-        print("DATA FROM APN: \(userInfo)")
         // Take a background task assertion so iOS doesn't suspend us the instant
         // completion() runs elsewhere; also acts as a hard safety-net deadline.
         var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
@@ -1645,6 +1750,17 @@ public class APIS: NSObject {
             // Expiration handler: OS is about to kill us regardless. Report .failed
             // so we don't silently drop the message with no signal at all.
             finish(.failed)
+        }
+        // Fix: FirebaseAuth sends itself a fake "prober" notification through the app
+        // delegate to check that notifications are being forwarded to it
+        // (AuthNotificationManager.checkNotificationForwarding). It carries no message and
+        // nothing here can do anything with it, but it used to go through the whole incoming
+        // -message pipeline - a background assertion, DB opens, retries - and hold the
+        // handler for it.
+        if let firebaseAuthPayload = userInfo["com.google.firebase.auth"] as? [String: Any],
+           firebaseAuthPayload["warning"] != nil {
+            finish(.noData)
+            return
         }
         DispatchQueue.main.async {
             if checkAppStateisBackground() {
@@ -1805,10 +1921,10 @@ public class APIS: NSObject {
                                 finish(.noData)
                             }
                         } else if let message_id = userInfo["message_id"] as? String {
-                            DispatchQueue.main.async {
-                                let lastBadgeNumber = UIApplication.shared.applicationIconBadgeNumber
-                                UIApplication.shared.applicationIconBadgeNumber = lastBadgeNumber + 1
-                            }
+                            // No badge bump here: this fires for redeliveries too, and it fired
+                            // before the message was even saved. The badge is set from the
+                            // database once the message is actually in it (see
+                            // saveIncomingMessageWithRetry).
                             var alreadyInFlight = false
                             listMessageFromAPNLock.lock()
                             if listMessageFromAPN.contains(message_id) {
@@ -1831,7 +1947,7 @@ public class APIS: NSObject {
                                 PendingMessageStore.shared.save(message_id)
                                 // retry: real retry count (was always 0 before, so it never fired),
                                 // and we now wait for the network call before signalling completion.
-                                getMessageById(id: message_id, retry: 2) { result in
+                                getMessageById(id: message_id, retry: 2) { result, _ in
                                     listMessageFromAPNLock.lock()
                                     listMessageFromAPN.removeAll { $0 == message_id }
                                     listMessageFromAPNLock.unlock()
@@ -1847,6 +1963,17 @@ public class APIS: NSObject {
                 if let data = userInfo["data"] as? [String: Any] {
                     ccActionFromAPN(data: data)
                 }
+                // Fix: this branch - the app being in the foreground - never called the
+                // completion handler at all. Every push while the app was open therefore
+                // left the handler outstanding until the background-task assertion above
+                // expired ~30s later and fired finish(.failed) for it. iOS throttles
+                // background delivery for an app that keeps not answering, and on the
+                // Firebase-swizzled path the handler is what balances a dispatch group, so
+                // leaving it outstanding for half a minute is exactly the window in which a
+                // late second call to it turns into an unbalanced dispatch_group_leave.
+                // There is nothing to fetch when the app is already open and connected, so
+                // the answer is simply .noData, straight away.
+                finish(.noData)
             }
         }
     }
@@ -2050,6 +2177,12 @@ public class APIS: NSObject {
                     // Fix: only clear it from the pending store once we've actually
                     // confirmed it's saved - not just attempted.
                     PendingMessageStore.shared.remove(messageId)
+                    // A notification tap may have been waiting for exactly this message
+                    // (it wasn't on disk when the user tapped it); now it can be honoured.
+                    satisfyPendingNotificationOpen(resolvedIdHint: messageId)
+                    // Still on this queue, before the push handler hands control back to iOS:
+                    // the count on the icon is now the count in the database.
+                    refreshApplicationBadge(fallbackIncrement: true)
                     completion(true)
                     return
                 }
@@ -2069,7 +2202,10 @@ public class APIS: NSObject {
         attempt(1)
     }
     
-    private static func getMessageById(id: String, retry: Int = 0, completion: @escaping (UIBackgroundFetchResult) -> Void = { _ in }) {
+    // `resolvedId` is the MESSAGE_ID the server actually answered with, which is not always
+    // the id that was asked for - see APNMessageAliasStore. Callers that need to find the
+    // message afterwards (the notification tap) must use it rather than the id they passed in.
+    private static func getMessageById(id: String, retry: Int = 0, completion: @escaping (UIBackgroundFetchResult, String?) -> Void = { _, _ in }) {
         //HTTPS
         let parameter: [String : Any] = [
             "pin": User.getMyPin() ?? "",
@@ -2080,7 +2216,7 @@ public class APIS: NSObject {
         // a non-2xx HTTP status, malformed JSON, or an empty "data" field from the server
         // all fell through to completion(.failed) immediately, even with retry attempts
         // still available and even though the network request itself succeeded.
-        func retryFetch(reason: String, attemptsLeft: Int) {
+        func retryFetch(reason: String, attemptsLeft: Int, serverHasNothing: Bool = false) {
             print("pull_notification failed for \(id) (\(attemptsLeft) retries left): \(reason)")
             if attemptsLeft > 0 {
                 // Fix: small backoff that grows with each attempt, giving a flaky/
@@ -2092,7 +2228,15 @@ public class APIS: NSObject {
                     self.getMessageById(id: id, retry: attemptsLeft - 1, completion: completion)
                 }
             } else {
-                completion(.failed)
+                if serverHasNothing {
+                    // Fix: the server answered, and its answer was "there is no message for
+                    // this id" - it had already been delivered and acked earlier. Retrying
+                    // that on every launch is what produced the endless "pull_notification
+                    // failed ... empty message payload" loop: the id could never leave
+                    // PendingMessageStore because the pull could never succeed again.
+                    PendingMessageStore.shared.remove(id)
+                }
+                completion(.failed, nil)
             }
         }
         Utils.postDataWithCookiesAndUserAgent(from: URL(string: Utils.getDomainOpr() + "pull_notification")!, parameter: parameter, isFormData: true, session: Utils.pushPullSession) { data, response, error in
@@ -2123,7 +2267,7 @@ public class APIS: NSObject {
                     // not the fetch, so this used to just drop the message with no retry
                     // even though the server might return real data on the next attempt.
                     guard !dataObj.isEmpty else {
-                        retryFetch(reason: "empty message payload from server", attemptsLeft: retry)
+                        retryFetch(reason: "empty message payload from server", attemptsLeft: retry, serverHasNothing: true)
                         return
                     }
                     let message = TMessage(data: dataObj)
@@ -2141,6 +2285,13 @@ public class APIS: NSObject {
                     // always hops to a background queue internally so this won't block the UI.
                     saveIncomingMessageWithRetry(message: message, messageId: messageId) { success in
                         if success {
+                            // Fix: the id that was asked for has to be released as well. It is
+                            // not always the id the message was saved under, and everything
+                            // downstream (PendingMessageStore, the notification tap) keys off
+                            // the one the push carried - leaving it behind meant this exact
+                            // message was pulled again on every single foreground, forever.
+                            APNMessageAliasStore.shared.record(apnId: id, storedId: messageId)
+                            PendingMessageStore.shared.remove(id)
                             ackAPN(id: id)
                         } else {
                             // Fix: do NOT ack after exhausting retries - leaving this un-acked
@@ -2150,7 +2301,7 @@ public class APIS: NSObject {
                         DispatchQueue.main.async {
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                         }
-                        completion(.newData)
+                        completion(.newData, messageId)
                     }
                 } catch {
                     retryFetch(reason: "JSON parse error: \(error)", attemptsLeft: retry)
@@ -2270,15 +2421,20 @@ public class APIS: NSObject {
         }
         content.userInfo = ["id" : threadIdentifier, "type" : type]
         content.sound = UNNotificationSound(named: UNNotificationSoundName("\(nameSound).mp3"))
+        // Fix: the badge travels with the notification. Set this way iOS applies it when the
+        // banner is delivered, so it no longer depends on this process still being awake to run
+        // some later block - which is what made the badge "sometimes" not move at all.
+        let badge = badgeTargetForNewMessage()
+        content.badge = NSNumber(value: badge)
         let request = UNNotificationRequest(identifier: messageId, content: content, trigger: nil)
         center.add(request) { error in
             if let error = error {
                 print("Error scheduling notification: \(error.localizedDescription)")
             }
         }
-        DispatchQueue.main.async {
-            UIApplication.shared.applicationIconBadgeNumber += 1
-        }
+        // And straight away as well, for the case where the banner is suppressed (the reader is
+        // already in the app) but the count still went up.
+        setApplicationBadge(badge)
     }
     
     private static func copySoundToLocalPath(_ nameSound: String, _ fromPref: Bool) {
@@ -2342,8 +2498,200 @@ public class APIS: NSObject {
         }
     }
     
+    /// The screen the user is actually looking at, digging through the tab bar and the
+    /// navigation stack rather than stopping at the container that holds them.
+    private static func topmostViewController() -> UIViewController? {
+        var controller = UIApplication.shared.visibleViewController
+        // Containers only ever nest a handful deep; the counter is here so a malformed
+        // hierarchy cannot spin this forever.
+        for _ in 0..<10 {
+            if let tab = controller as? UITabBarController, let selected = tab.selectedViewController {
+                controller = selected
+            } else if let navigation = controller as? UINavigationController, let top = navigation.topViewController {
+                controller = top
+            } else {
+                break
+            }
+        }
+        return controller
+    }
+
+    /// Opens a chat from a notification, refreshing the chat list first when that is the
+    /// screen the Editor is about to cover.
+    ///
+    /// The message that the notification is about has usually just been written to the
+    /// database (either by the silent push or by the pull on tap), which is after the list
+    /// last read from it. Reloading first means the row is already correct when the user
+    /// comes back out of the Editor, instead of the list catching up visibly afterwards.
+    private static func reloadChatListThenOpen(_ open: @escaping () -> Void) {
+        guard let chatList = topmostViewController() as? ChatListTab, chatList.isViewLoaded else {
+            open()
+            return
+        }
+        var hasOpened = false
+        // Everything here runs on the main thread, so a plain flag is enough to make sure
+        // the chat is opened once - by whichever of the reload and the deadline lands first.
+        func openOnce() {
+            if hasOpened {
+                return
+            }
+            hasOpened = true
+            open()
+        }
+        chatList.reloadChatList {
+            openOnce()
+        }
+        // A reload that stalls (no connection, a query that never calls back) must never be
+        // able to swallow the tap: the chat opens regardless shortly after.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            openOnce()
+        }
+    }
+
+    /// Opens the chat a locally stored message belongs to.
+    ///
+    /// Returns false when the chat cannot be opened - the message is not on disk (yet), or the
+    /// app is in the background so nothing can be presented - so the caller can keep the
+    /// request pending instead of dropping it. Reading the message's f_pin/l_pin/scope from the
+    /// database is the only way to know which Editor a push belongs to; when the row isn't
+    /// there, showEditorOrCallFromAPN would be handed an empty pin and type and open nothing at
+    /// all, which is exactly the "tapping the notification does not go to the Editor" case.
+    @discardableResult
+    private static func openChatForLocalMessage(_ localMessageId: String) -> Bool {
+        guard !localMessageId.isEmpty, !checkAppStateisBackground() else {
+            return false
+        }
+        var f_pin = ""
+        var l_pin = ""
+        var message_scope_id = ""
+        var pin = ""
+        var chat_id = ""
+        Database.shared.ensureOpenForBackgroundWrite()
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin, message_scope_id, chat_id from MESSAGE where message_id = '\(localMessageId)'"), cursor.next() {
+                f_pin = cursor.string(forColumnIndex: 0) ?? ""
+                l_pin = cursor.string(forColumnIndex: 1) ?? ""
+                message_scope_id = cursor.string(forColumnIndex: 2) ?? ""
+                chat_id = cursor.string(forColumnIndex: 3) ?? ""
+                pin = f_pin == User.getMyPin() ? l_pin : f_pin
+                if message_scope_id == "4" {
+                    pin = chat_id.isEmpty ? l_pin : chat_id
+                }
+                cursor.close()
+            }
+        })
+        let type = message_scope_id == "4" ? "1" : !message_scope_id.isEmpty ? "0" : ""
+        if type.isEmpty || pin.isEmpty {
+            return false
+        }
+        if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
+            if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
+                navigationC.popViewController(animated: false)
+            }
+        }
+        // The message this notification is about was written to the database moments ago, so
+        // the chat list behind the Editor is one message behind. Refresh it before covering it.
+        reloadChatListThenOpen {
+            showEditorOrCallFromAPN(pin, type, "CL01")
+        }
+        return true
+    }
+
+    /// Opens the chat for a notification tap that could not be honoured when it happened,
+    /// as soon as the message it was about is on disk. Safe to call from anywhere a message
+    /// may just have been saved; it does nothing when there is no tap waiting.
+    @discardableResult
+    public static func satisfyPendingNotificationOpen(resolvedIdHint: String? = nil) -> Bool {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                _ = satisfyPendingNotificationOpen(resolvedIdHint: resolvedIdHint)
+            }
+            return false
+        }
+        guard let apnId = APNPendingOpenStore.shared.pendingId() else {
+            stopPendingOpenWatchdog()
+            return false
+        }
+        // The message can be on disk under the id the push carried, under the id the server
+        // answered with, or under the alias a previous pull recorded - try all of them.
+        var candidates: [String] = []
+        if let hint = resolvedIdHint, !hint.isEmpty {
+            candidates.append(hint)
+        }
+        if let alias = APNMessageAliasStore.shared.storedId(forAPNId: apnId), !candidates.contains(alias) {
+            candidates.append(alias)
+        }
+        if !candidates.contains(apnId) {
+            candidates.append(apnId)
+        }
+        for candidate in candidates where openChatForLocalMessage(candidate) {
+            APNPendingOpenStore.shared.clear()
+            stopPendingOpenWatchdog()
+            return true
+        }
+        return false
+    }
+
+    // Keeps checking for the tapped message for a short while after the tap. The message can
+    // arrive from the pull, from the reconciliation loop, or from the socket once it
+    // reconnects - only the first of those can report back directly, so the other two are
+    // covered by simply looking again.
+    private static var pendingOpenWatchdog: Timer?
+    private static var pendingOpenAttemptsLeft = 0
+    private static func startPendingOpenWatchdog() {
+        DispatchQueue.main.async {
+            // ~75s: long enough for a cold launch to finish connecting and for the 12s
+            // reconciliation loop to get a few attempts in, short enough that a chat never
+            // opens itself long after the user has moved on.
+            pendingOpenAttemptsLeft = 30
+            guard pendingOpenWatchdog == nil else {
+                return
+            }
+            pendingOpenWatchdog = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { _ in
+                pendingOpenAttemptsLeft -= 1
+                if pendingOpenAttemptsLeft <= 0 || APNPendingOpenStore.shared.pendingId() == nil {
+                    stopPendingOpenWatchdog()
+                    return
+                }
+                // A backgrounded app can't present anything; the store keeps the request and
+                // enterForeground() picks it up again.
+                if checkAppStateisBackground() {
+                    stopPendingOpenWatchdog()
+                    return
+                }
+                _ = satisfyPendingNotificationOpen()
+            }
+        }
+    }
+
+    private static func stopPendingOpenWatchdog() {
+        pendingOpenWatchdog?.invalidate()
+        pendingOpenWatchdog = nil
+        pendingOpenAttemptsLeft = 0
+    }
+
+    /// Runs `work` once the session the HTTPS pulls need has been restored.
+    ///
+    /// Fix: a notification tapped on a cold launch runs before login state is back, so the pull
+    /// went out with an empty pin and could only fail - burning every retry it had within a few
+    /// seconds of launch, before the app was ever able to answer. Waiting a moment costs
+    /// nothing and turns those retries into attempts that can actually succeed.
+    private static func whenSessionReady(attemptsLeft: Int = 12, _ work: @escaping () -> Void) {
+        if !(User.getMyPin() ?? "").isEmpty && !Utils.getDomainOpr().isEmpty {
+            work()
+            return
+        }
+        guard attemptsLeft > 0 else {
+            // Out of patience - try anyway rather than never asking at all.
+            work()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            whenSessionReady(attemptsLeft: attemptsLeft - 1, work)
+        }
+    }
+
     public static func openNotificationNexilis(_ response: UNNotificationResponse) {
-        print("openNotificationNexilis: \(response)")
         DispatchQueue.main.async{
             if let userInfo = response.notification.request.content.userInfo as? [String: String] {
                 let id = userInfo["id"] ?? ""
@@ -2354,64 +2702,70 @@ public class APIS: NSObject {
                         navigationC.popViewController(animated: true)
                     }
                 }
-                showEditorOrCallFromAPN(id, type, callType)
+                // Only chats wait for the list: an incoming call has to be answered now, and
+                // there is no list row behind it to get out of date anyway.
+                if type == "0" || type == "1" {
+                    reloadChatListThenOpen {
+                        showEditorOrCallFromAPN(id, type, callType)
+                    }
+                } else {
+                    showEditorOrCallFromAPN(id, type, callType)
+                }
             } else {
                 let userInfo = response.notification.request.content.userInfo
                 DispatchQueue.main.async {
                     if let message_id = userInfo["message_id"] as? String {
-                        // Fix: resolveAndOpen() reads the message's f_pin/l_pin/scope from the
-                        // local DB and navigates to the right chat. It used to be the only thing
-                        // that ran here - if showNotificationNexilis hadn't already saved this
-                        // message in the background (iOS can throttle/delay/skip silent pushes
-                        // entirely, or the app may not have been running when the push arrived),
-                        // this query came back empty and showEditorOrCallFromAPN got called with
-                        // an empty pin/type, which just returns immediately - opening nothing.
-                        func resolveAndOpen() {
-                            var f_pin = ""
-                            var l_pin = ""
-                            var message_scope_id = ""
-                            var pin = ""
-                            var chat_id = ""
-                            Database.shared.ensureOpenForBackgroundWrite()
-                            Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin, message_scope_id, chat_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
-                                    f_pin = cursor.string(forColumnIndex: 0) ?? ""
-                                    l_pin = cursor.string(forColumnIndex: 1) ?? ""
-                                    message_scope_id = cursor.string(forColumnIndex: 2) ?? ""
-                                    chat_id = cursor.string(forColumnIndex: 3) ?? ""
-                                    pin = f_pin == User.getMyPin() ? l_pin : f_pin
-                                    if message_scope_id == "4" {
-                                        pin = chat_id.isEmpty ? l_pin : chat_id
-                                    }
-                                    cursor.close()
-                                }
-                            })
-                            if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
-                                if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
-                                    navigationC.popViewController(animated: false)
-                                }
-                            }
-                            showEditorOrCallFromAPN(pin, message_scope_id == "4" ? "1" : !message_scope_id.isEmpty ? "0" : "", "CL01")
-                        }
                         // Fix: check the fast path first (message already saved - the common
                         // case), and only fall back to an active network pull if it's genuinely
                         // missing, so tapping a notification that was already processed normally
                         // doesn't pay for an extra round trip.
+                        // The push's id first, then whatever a previous pull for it resolved
+                        // to - a message pulled earlier is on disk under that one.
+                        let localMessageId = APNMessageAliasStore.shared.storedId(forAPNId: message_id) ?? message_id
                         Database.shared.ensureOpenForBackgroundWrite()
                         var alreadyExists = false
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(message_id)'"), cursor.next() {
+                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(localMessageId)'"), cursor.next() {
                                 alreadyExists = true
                                 cursor.close()
                             }
                         })
                         if alreadyExists {
-                            resolveAndOpen()
+                            if !openChatForLocalMessage(localMessageId) {
+                                // The row is there but the chat couldn't be presented yet (the
+                                // app is still coming up). Keep the tap and let the watchdog
+                                // open it once it can, rather than dropping it here.
+                                APNPendingOpenStore.shared.record(apnId: message_id)
+                                startPendingOpenWatchdog()
+                                reloadChatListThenOpen { }
+                            }
                         } else {
-                            print("Message \(message_id) not found locally on notification tap - pulling from server before opening chat")
-                            APIS.getMessageById(id: message_id, retry: 2) { _ in
-                                DispatchQueue.main.async {
-                                    resolveAndOpen()
+                            print("Message \(localMessageId) not found locally on notification tap - pulling from server before opening chat")
+                            // Fix: the tap used to be a single shot - one pull, and if that pull
+                            // failed the tap was lost entirely: no chat opened, and (because the
+                            // id was never registered as pending) nothing kept chasing the
+                            // message either, so the list only caught up once the user
+                            // backgrounded the app and the socket reconnect delivered it. On a
+                            // cold launch that pull is very likely to fail: it can run before the
+                            // session the request needs has been restored. Now the request is
+                            // remembered, the id joins the reconciliation queue, and a watchdog
+                            // opens the chat as soon as the message lands - whichever path
+                            // (this pull, the reconciliation loop, or the socket) brings it in.
+                            APNPendingOpenStore.shared.record(apnId: message_id)
+                            PendingMessageStore.shared.save(message_id)
+                            startPendingMessageReconciliationLoop()
+                            startPendingOpenWatchdog()
+                            // The list is behind by this message either way, so refresh it now
+                            // rather than leaving the user looking at a stale row while the pull
+                            // runs.
+                            reloadChatListThenOpen { }
+                            whenSessionReady {
+                                APIS.getMessageById(id: message_id, retry: 4) { _, resolvedId in
+                                    DispatchQueue.main.async {
+                                        // Whatever the server said this message really is, that
+                                        // is the row to open the chat from.
+                                        satisfyPendingNotificationOpen(resolvedIdHint: resolvedId ?? localMessageId)
+                                    }
                                 }
                             }
                         }
@@ -2618,18 +2972,49 @@ public class APIS: NSObject {
                     pendingReconcileTimer = nil
                     return
                 }
-                let pendingIds = PendingMessageStore.shared.load()
-                if pendingIds.isEmpty {
+                if PendingMessageStore.shared.load().isEmpty {
                     pendingReconcileTimer?.invalidate()
                     pendingReconcileTimer = nil
                     return
                 }
-                for id in pendingIds {
-                    APIS.getMessageById(id: id, retry: 2)
-                }
+                pullPendingMessages()
             }
         }
     }
+    // Fix: pending ids used to be fired straight at the network, on every foreground and on
+    // every tick of the reconciliation timer. An id whose message is already on disk - very
+    // much including one saved under a different id (see APNMessageAliasStore) - can never be
+    // satisfied by another pull: the server handed it over once and answers "no message for
+    // this id" from then on, which is the endless "pull_notification failed ... empty message
+    // payload from server" in the logs. Asking the database first is what stops it.
+    private static func pullPendingMessages() {
+        let pendingIds = PendingMessageStore.shared.load()
+        guard !pendingIds.isEmpty else {
+            return
+        }
+        DispatchQueue.global(qos: .utility).async {
+            Database.shared.ensureOpenForBackgroundWrite()
+            for id in pendingIds {
+                let localId = APNMessageAliasStore.shared.storedId(forAPNId: id) ?? id
+                var exists = false
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(localId)'"), cursor.next() {
+                        exists = true
+                        cursor.close()
+                    }
+                })
+                if exists {
+                    PendingMessageStore.shared.remove(id)
+                    // The message arrived by some other route (the socket, most often) after a
+                    // notification for it was tapped - the waiting tap can be honoured now.
+                    satisfyPendingNotificationOpen(resolvedIdHint: localId)
+                    continue
+                }
+                APIS.getMessageById(id: id, retry: 2)
+            }
+        }
+    }
+
     public static func enterForeground() {
         APIS.checkNotificationPermission(completion: { isAllowed in
             if !isAllowed {
@@ -2654,13 +3039,25 @@ public class APIS: NSObject {
             // from PendingMessageStore once confirmed saved (see
             // saveIncomingMessageWithRetry) - a still-failing pull just leaves that id
             // here for the next foreground/launch to retry, nothing is force-cleared.
-            let pendingIds = PendingMessageStore.shared.load()
-            for id in pendingIds {
-                APIS.getMessageById(id: id, retry: 2)
-            }
+            pullPendingMessages()
+            // Whatever happened while the app was away - messages arriving, or being read on
+            // another device - the icon should agree with the database again.
+            refreshApplicationBadgeSoon()
+            // Anything the reader sent while the app was in the background and the link was
+            // down is still at status "1"; this is the first chance to finish sending it.
+            OutgoingThread.default.resendPending()
             // Fix: keep chasing any id that's still pending after the burst above,
             // instead of going silent until the next background/foreground cycle.
             startPendingMessageReconciliationLoop()
+            // A notification tapped while the app couldn't act on it yet (message not on
+            // disk, or the app still launching) left its request recorded. Give it another
+            // chance now that the app is up: if the message has since arrived, this opens
+            // the chat; if it hasn't, the watchdog keeps looking for a short while.
+            if APNPendingOpenStore.shared.pendingId() != nil {
+                if !satisfyPendingNotificationOpen() {
+                    startPendingOpenWatchdog()
+                }
+            }
         }
         if let me = User.getMyPin() {
             DispatchQueue.global(qos: .userInitiated).async {
@@ -3485,6 +3882,7 @@ public class APIS: NSObject {
     
     public static func monitoredActivity() {
         UIViewController.swizzleViewDidAppearImplementation
+        UIViewController.swizzleViewDidDisappearImplementation
         UINavigationController.swizzlePushViewControllerImplementation
         UINavigationController.swizzlePopViewControllerImplementation
         _ = DataCaptured()

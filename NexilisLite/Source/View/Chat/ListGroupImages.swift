@@ -219,7 +219,10 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
             let statusInImage = UIImageView()
             containerTimeStatus.addSubview(statusInImage)
             statusInImage.anchor(right: containerTimeStatus.rightAnchor, centerY: containerTimeStatus.centerYAnchor, width: 20, height: 20)
-            if listGroupingImages[indexPath.row].status == "1" || listGroupingImages[indexPath.row].status == "2"  {
+            if listGroupingImages[indexPath.row].status == "1" {
+                statusInImage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.white, renderingMode: .alwaysOriginal)
+
+            } else if listGroupingImages[indexPath.row].status == "2"  {
                 statusInImage.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.white)
             } else if listGroupingImages[indexPath.row].status == "3" {
                 statusInImage.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.white)

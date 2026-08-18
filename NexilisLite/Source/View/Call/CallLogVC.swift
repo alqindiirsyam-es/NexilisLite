@@ -109,9 +109,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
     }
     
     public override func viewDidAppear(_ animated: Bool) {
-        if Nexilis.floatingButton.isHidden {
-            Nexilis.floatingButton.isHidden = false
-        }
+        FloatingButton.setHidden(false)
     }
     
     private func refresh() {

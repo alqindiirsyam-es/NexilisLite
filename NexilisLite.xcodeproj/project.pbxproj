@@ -49,6 +49,7 @@
 		CD1E721D2A0BA86100BF871F /* WorkingAreaPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E716B2A0BA86100BF871F /* WorkingAreaPicker.swift */; };
 		CD1E721E2A0BA86100BF871F /* BNIBookingWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E716C2A0BA86100BF871F /* BNIBookingWebView.swift */; };
 		CD1E721F2A0BA86100BF871F /* EditorStarMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E716E2A0BA86100BF871F /* EditorStarMessages.swift */; };
+		CD1E72212A0BA86100BF87AA /* ChatTagSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71702A0BA86100BF87AA /* ChatTagSearch.swift */; };
 		CD1E72212A0BA86100BF871F /* EditorPersonal.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71702A0BA86100BF871F /* EditorPersonal.swift */; };
 		CD1E72222A0BA86100BF871F /* FormEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71712A0BA86100BF871F /* FormEditor.swift */; };
 		CD1E72232A0BA86100BF871F /* EditorGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1E71722A0BA86100BF871F /* EditorGroup.swift */; };
@@ -340,6 +341,7 @@
 		CD1E716B2A0BA86100BF871F /* WorkingAreaPicker.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = WorkingAreaPicker.swift; sourceTree = "<group>"; };
 		CD1E716C2A0BA86100BF871F /* BNIBookingWebView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BNIBookingWebView.swift; sourceTree = "<group>"; };
 		CD1E716E2A0BA86100BF871F /* EditorStarMessages.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EditorStarMessages.swift; sourceTree = "<group>"; };
+		CD1E71702A0BA86100BF87AA /* ChatTagSearch.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ChatTagSearch.swift; sourceTree = "<group>"; };
 		CD1E71702A0BA86100BF871F /* EditorPersonal.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EditorPersonal.swift; sourceTree = "<group>"; };
 		CD1E71712A0BA86100BF871F /* FormEditor.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FormEditor.swift; sourceTree = "<group>"; };
 		CD1E71722A0BA86100BF871F /* EditorGroup.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EditorGroup.swift; sourceTree = "<group>"; };
@@ -761,6 +763,7 @@
 				CD1E71722A0BA86100BF871F /* EditorGroup.swift */,
 				CD1E71702A0BA86100BF871F /* EditorPersonal.swift */,
 				CD1E716E2A0BA86100BF871F /* EditorStarMessages.swift */,
+				CD1E71702A0BA86100BF87AA /* ChatTagSearch.swift */,
 				CD1E71712A0BA86100BF871F /* FormEditor.swift */,
 				CD5A73AD2A77642D000541A5 /* ListGroupImages.swift */,
 				CD5A73AC2A77642D000541A5 /* MessageInfo.swift */,
@@ -1503,6 +1506,7 @@
 				CD1E720C2A0BA86100BF871F /* Whiteboard.swift in Sources */,
 				CD1E72312A0BA86100BF871F /* QmeraAudioViewController.swift in Sources */,
 				CD1E721F2A0BA86100BF871F /* EditorStarMessages.swift in Sources */,
+				CD1E72212A0BA86100BF87AA /* ChatTagSearch.swift in Sources */,
 				CD1E72442A0BA86100BF871F /* ChangePasswordViewController.swift in Sources */,
 				CD1E72072A0BA86100BF871F /* WhiteboardCanvas.swift in Sources */,
 				CD1E721E2A0BA86100BF871F /* BNIBookingWebView.swift in Sources */,

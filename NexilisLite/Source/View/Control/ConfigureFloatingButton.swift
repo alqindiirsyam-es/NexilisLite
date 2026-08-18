@@ -121,7 +121,7 @@ public class ConfigureFloatingButton: UIViewController {
             Nexilis.floatingButton = FloatingButton()
             Nexilis.addFB()
             if Nexilis.fromMAB {
-                Nexilis.floatingButton.isHidden = true
+                FloatingButton.setHidden(true)
             }
         }
         close()

@@ -24,6 +24,11 @@ class Callback : CallBack {
         }
         InquiryThread.default.set(wait: nCLMConStat == 0)
         OutgoingThread.default.set(wait: nCLMConStat == 0)
+        if nCLMConStat != 0 {
+            // The link is up: anything still sitting at status "1" never got its "2" and is
+            // worth another try now.
+            OutgoingThread.default.resendPending()
+        }
     }
     
     func gpsStateChanged(nState: Int!) {
@@ -270,5 +275,8 @@ class NetworkMonitor {
                 Nexilis.getFeatureAccess()
             }
         }
+        // Network path satisfied again - the socket may reconnect a moment later, but the
+        // messages waiting to go out should not have to wait for that to be noticed.
+        OutgoingThread.default.resendPending()
     }
 }

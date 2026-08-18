@@ -57,6 +57,69 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     var complaintId = ""
     var counter = 0
     var markerCounter: String?
+
+    // MARK: - Paging
+    //
+    // Opening a group used to read every message it ever had (the query said LIMIT -1) on the
+    // main thread, then ask the table to scroll to the last row - which forces a height
+    // measurement of every row above it. In a busy group that is seconds of frozen UI, which
+    // is why the table used to be faded in from alpha 0 after a delay: the freeze was hidden
+    // rather than fixed. Now only the newest slice is read, and older messages arrive when the
+    // user scrolls up to them.
+    private static let initialMessagePageSize: Int64 = 50
+    // Deliberately generous. Putting older messages in costs a contentOffset assignment, and
+    // that assignment ends whatever deceleration the scroll is running on - so the cure is to
+    // reach the end of the loaded messages as rarely as possible, not to make the trip there
+    // cheaper.
+    private static let olderMessagePageSize: Int64 = 100
+    /// Database offset of the oldest message currently loaded.
+    private var loadedOffset: Int64 = 0
+    /// How many database rows the loaded window covers. Not the same as dataMessages.count -
+    /// grouped image collages take several rows out of the list.
+    private var loadedCount: Int64 = 0
+    private var isLoadingOlderMessages = false
+    private var isLoadingNewerMessages = false
+    /// When a page of older messages last came back with nothing in it. Deleted messages can
+    /// shift offsets enough for that to happen, and without a pause the triggers below would
+    /// ask again on the very next frame.
+    private var lastEmptyOlderPage: Date?
+    /// Message ids matching the current in-chat search, newest first.
+    ///
+    /// Read from the database rather than by sifting through what is loaded, so searching
+    /// reaches the whole conversation without the screen having to hold it. Jumping to a hit
+    /// pulls in what it needs, exactly like tapping a quoted message does.
+    private var searchMatchIds: [String] = []
+    /// Whether the loaded window reaches the newest message of the conversation.
+    ///
+    /// Normally it does: the chat opens at the end and only grows upwards. Jumping to a much
+    /// older message moves the window off the end, and until the reader comes back the screen
+    /// must not treat what it shows as the end of the chat - a message arriving then would be
+    /// drawn directly underneath one from months ago.
+    private var isWindowAtNewest = true
+    /// How many messages a jump reads around its target.
+    private static let jumpWindowSize: Int64 = 60
+    /// A target closer than this to the window is reached by reading everything in between,
+    /// which keeps the window in one piece. Further away, reading the gap would mean
+    /// thousands of messages, so the window is moved instead.
+    private static let maxBridgedMessages: Int64 = 200
+    /// Set while the first page is being put on screen, so the scroll driven work (new-message
+    /// checks, the scroll-to-bottom button) stays quiet until the chat is settled. This is what
+    /// the old `tableChatView.alpha != 1` checks were really asking.
+    private var isInitialLoading = true
+    /// The chat opens at its newest message; this makes sure that is true of the first frame
+    /// the table lays out, not just of the moment after it.
+    private var pendingInitialScrollToBottom = false
+    /// The first unread message, while the chat is still being placed at it.
+    private var pendingUnreadMarkerScroll: String?
+    private var remainingUnreadMarkerScrollPasses = 0
+    /// Enough layout passes for the estimated row heights above the marker to be replaced by
+    /// measured ones, and few enough that a conversation that will not settle gives up rather
+    /// than re-scrolling under the reader's finger.
+    private static let unreadMarkerScrollPasses = 8
+    /// Measured row heights, keyed by message id, so the table estimates with real numbers
+    /// instead of guessing - which is what keeps the scroll position steady when older
+    /// messages are inserted above.
+    private var measuredRowHeights: [String: CGFloat] = [:]
     var buttonScrollToBottom = UIButton()
     let indicatorCounterBSTB = UIView()
     let labelCounter = UILabel()
@@ -226,6 +289,22 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
     }
     
+    public override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The rows have real heights only once the table has laid out. Placing the chat at
+        // its newest message here means it is drawn in the right place the first time, with
+        // no visible jump - which is what the old fade from alpha 0 was covering up.
+        if pendingInitialScrollToBottom, tableChatView.numberOfSections > 0 {
+            pendingInitialScrollToBottom = false
+            let lastSection = tableChatView.numberOfSections - 1
+            let lastRow = tableChatView.numberOfRows(inSection: lastSection) - 1
+            if lastRow >= 0 {
+                tableChatView.safeScrollToRow(at: IndexPath(row: lastRow, section: lastSection), at: .bottom, animated: false)
+            }
+        }
+        applyPendingUnreadMarkerScroll()
+    }
+
     public override func viewDidAppear(_ animated: Bool) {
         let navBarAppearance = UINavigationBarAppearance()
         navBarAppearance.configureWithOpaqueBackground()
@@ -244,6 +323,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         navigationController?.navigationBar.prefersLargeTitles = false
         navigationController?.navigationItem.largeTitleDisplayMode = .never
         updateProfile()
+        // The first page only covers the screen; topping it up now means the reader's first
+        // flick upwards does not immediately run out of messages.
+        DispatchQueue.main.async { [weak self] in
+            self?.prefetchOlderMessagesIfIdle()
+        }
 //        let indexPath = tableChatView.indexPathsForVisibleRows?.first
 //        if indexPath != nil && currentIndexpath != nil {
 //            let headerRect = tableChatView.rectForHeader(inSection: indexPath!.section)
@@ -267,7 +351,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             wallpaperView.isHidden = true
         }
         if Nexilis.fromMAB {
-            Nexilis.floatingButton.isHidden = true
+            FloatingButton.setHidden(true)
         }
         
         viewButton.layer.shadowColor = self.traitCollection.userInterfaceStyle == .dark ? UIColor.white.cgColor : UIColor.gray.cgColor
@@ -376,7 +460,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         tableMention.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
         
         tableChatView.rowHeight = UITableView.automaticDimension
-        tableChatView.estimatedRowHeight = UITableView.automaticDimension
+        // A concrete estimate rather than automaticDimension: with the automatic one the
+        // table measures rows to work out where it is, which is exactly the cost that made
+        // scrolling to the bottom expensive. estimatedHeightForRowAt refines this per row
+        // once a row has actually been on screen.
+        tableChatView.estimatedRowHeight = 72
     }
     
     public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -502,6 +590,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             dataGroup.removeAll()
             dataTopic.removeAll()
             dataMessages.removeAll()
+            // Nothing is loaded any more, so neither is any window over it.
+            loadedOffset = 0
+            loadedCount = 0
+            measuredRowHeights.removeAll()
             tableChatView.reloadData()
             currentIndexpath = nil
             reffId = nil
@@ -545,21 +637,48 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
         
         changeAppBar()
-        getData()
+        // The unread count decides how deep the first page has to go, so it is read before
+        // the messages rather than after them.
         getCounter()
-        if counter > 0 && dataMessages.count >= counter {
-            markerCounter = dataMessages[dataMessages.count - counter]["message_id"] as? String
+        loadInitialMessages()
+        markerCounter = unreadMarkerMessageId(unread: counter)
+        // A message swallowed by an image collage is not a row of its own, so the collage it
+        // belongs to is the row that carries the marker.
+        if let marker = markerCounter, !dataMessages.contains(where: { $0["message_id"] as? String == marker }),
+           let parent = groupImages.first(where: { $0.value.contains(where: { $0.messageId == marker }) })?.key {
+            markerCounter = parent
         }
         if counter > 0 {
             counter = 0
             updateCounter(counter: counter)
         }
-        
-        tableChatView.alpha = 0
+
         tableChatView.delegate = self
+        // Pull a row right to reply to it, left for its info - see ChatBubbleSwipe.
+        bubbleSwipe = ChatBubbleSwipe(tableView: tableChatView, canPerform: { [weak self] indexPath, direction in
+            return self?.canSwipeBubble(at: indexPath, direction: direction) ?? false
+        }, perform: { [weak self] indexPath, direction in
+            self?.performBubbleSwipe(at: indexPath, direction: direction)
+        })
+        // A leftward pull drags the info screen in from the right edge rather than opening it
+        // once the pull is over - see InteractiveSidePush.
+        bubbleSwipe?.infoDestination = { [weak self] indexPath in
+            guard let self = self,
+                  let navigation = self.navigationController,
+                  let message = self.message(at: indexPath) else {
+                return nil
+            }
+            let messageInfoVC = MessageInfo()
+            messageInfoVC.data = message
+            messageInfoVC.dataGroup = self.dataGroup
+            messageInfoVC.isPersonal = false
+            return (messageInfoVC, navigation)
+        }
         tableChatView.dataSource = self
         tableChatView.reloadData()
         if !referenceMessageId.isEmpty {
+            // The message being jumped to can be older than the page that was just read.
+            ensureMessageLoaded(messageId: referenceMessageId)
             if dataMessages.firstIndex(where: {$0["message_id"] as? String == referenceMessageId} ) != nil {
                 DispatchQueue.main.async {
                     if self.referenceChatDate.isEmpty {
@@ -583,17 +702,19 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             let fullOffset = contentHeight - visibleHeight
             let offsetY = tableChatView.contentOffset.y
             let isNearBottom = (fullOffset - offsetY < 50)
-            if dataMessages.firstIndex(where: {$0["message_id"] as? String == markerCounter} ) != nil {
-                DispatchQueue.main.async {
-                    let data = self.dataMessages.filter({ $0["message_id"] as? String == self.markerCounter })
-                    if data.count > 0 {
-                        let section = self.dataDates.firstIndex(of: data[0]["chat_date"]  as? String ?? "")
-                        let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == data[0]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.markerCounter})
-                        self.tableChatView.safeScrollToRow(at: IndexPath(row: row!, section: section!), at: .bottom, animated: false)
-                    }
-                }
+            if let marker = markerCounter, indexPath(forMessageId: marker) != nil {
+                // Placed here and repeated from viewDidLayoutSubviews - see
+                // applyPendingUnreadMarkerScroll() for why one scroll from here was never
+                // going to land in the right place.
+                pendingUnreadMarkerScroll = marker
+                remainingUnreadMarkerScrollPasses = EditorGroup.unreadMarkerScrollPasses
+                applyPendingUnreadMarkerScroll()
             } else {
-                tableChatView.scrollToTop()
+                // The marker's message is not a row of its own after all (deleted, or hidden
+                // inside a collage). Opening at the newest message beats opening at the top of
+                // whatever happens to be loaded.
+                pendingInitialScrollToBottom = true
+                tableChatView.scrollToBottom(isAnimated: false, delay: 0)
             }
             if !isNearBottom && !buttonScrollToBottom.isDescendant(of: view) {
                 DispatchQueue.main.async { [self] in
@@ -729,19 +850,23 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                     }
                 }
             }
-            tableChatView.scrollToBottom(isAnimated: false)
+            // No delay: with one page loaded there is nothing left to wait for. The same
+            // scroll is repeated once the table has actually laid out (see
+            // viewDidLayoutSubviews), so the very first frame the user sees is already at the
+            // bottom of the conversation instead of arriving there afterwards.
+            pendingInitialScrollToBottom = true
+            tableChatView.scrollToBottom(isAnimated: false, delay: 0)
         }
         tableChatView.keyboardDismissMode = .interactive
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tapGesture.cancelsTouchesInView = false
         tableChatView.addGestureRecognizer(tapGesture)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
-            if self.tableChatView.alpha != 1.0 {
-                UIView.animate(withDuration: 0.5, animations: {
-                    self.tableChatView.alpha = 1.0
-                })
-            }
-        })
+        // The table used to be faded in from alpha 0 after 0.6s + 0.5s of animation, which is
+        // where the blank screen on opening a chat came from. It was there to hide the load;
+        // there is no load left to hide.
+        DispatchQueue.main.async { [weak self] in
+            self?.isInitialLoading = false
+        }
         for data in listTimerCredential {
             if data.value > 0 {
                 var second = data.value
@@ -784,7 +909,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 })
             }
         }
-        let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+        let dataMessagesPin = self.pinnedMessagesForBanner()
         pinAllMessages(dataMessages: dataMessagesPin)
     }
     
@@ -850,18 +975,74 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         })
     }
     
-    private func getData(offset: Int64 = 0) {
+    /// What picks this conversation's messages out of MESSAGE. One place, so the row query,
+    /// the counts and the "where does this message sit" lookups can never drift apart.
+    private func messageWhereClause() -> String {
+        if isHistoryCC {
+            return "call_center_id='\(complaintId)'"
+        }
+        if (dataTopic["chat_id"] as? String ?? "") != "" {
+            return "chat_id='\(dataTopic["chat_id"] as? String ?? "")'"
+        }
+        return "chat_id='' AND l_pin='\(dataGroup["group_id"] as? String ?? "")'"
+    }
+
+    /// How many messages this conversation has in the database.
+    private func countMessages() -> Int64 {
+        var total: Int64 = 0
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT COUNT(*) FROM MESSAGE where \(self.messageWhereClause())"), cursor.next() {
+                total = cursor.longLongInt(forColumnIndex: 0)
+                cursor.close()
+            }
+        })
+        return total
+    }
+
+    /// Position of a message within this conversation, counting from the oldest, or nil when
+    /// it is not in this conversation at all.
+    private func messagePosition(messageId: String) -> Int64? {
+        guard !messageId.isEmpty else {
+            return nil
+        }
+        var position: Int64?
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            // Read the date first: a message this conversation does not have must come back
+            // as nil, not as position zero, or it would look like the oldest message there is.
+            var serverDate = ""
+            if let dateCursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT server_date FROM MESSAGE where message_id='\(messageId)'"), dateCursor.next() {
+                serverDate = dateCursor.string(forColumnIndex: 0) ?? ""
+                dateCursor.close()
+            }
+            guard !serverDate.isEmpty else {
+                return
+            }
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT COUNT(*) FROM MESSAGE where \(self.messageWhereClause()) AND server_date < \(serverDate)"), cursor.next() {
+                position = cursor.longLongInt(forColumnIndex: 0)
+                cursor.close()
+            }
+        })
+        return position
+    }
+
+    /// Reads a slice of the conversation.
+    ///
+    /// - Parameters:
+    ///   - limit: how many rows, or -1 for "everything from `offset` on".
+    ///   - prepend: older messages go in front of what is already loaded; new ones behind it.
+    ///   - marksFirstAsUnread: the first row read becomes the "unread from here" marker.
+    private func getData(offset: Int64 = 0, limit: Int64 = -1, prepend: Bool = false, marksFirstAsUnread: Bool = false) {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"]  as? String ?? "")' order by server_date asc LIMIT -1 OFFSET \(offset)"
-                if isHistoryCC {
-                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc LIMIT -1 OFFSET \(offset)"
-                } else if (dataTopic["chat_id"]  as? String ?? "" != "") {
-                    query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='\(dataTopic["chat_id"]  as? String ?? "")' order by server_date asc LIMIT -1 OFFSET \(offset)"
-                }
+                let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where \(self.messageWhereClause()) order by server_date asc LIMIT \(limit) OFFSET \(offset)"
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     var tempImages: [ImageGrouping] = []
                     var idxOff = 0
+                    // Read into a slice of its own, then splice it in at the end: older
+                    // messages have to go in front of what is on screen, and the image
+                    // grouping below has to look at this batch rather than the whole chat.
+                    var loaded: [[String: Any?]] = []
+                    let previousRow: [String: Any?]? = prepend ? nil : self.dataMessages.last
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
                         row["message_id"] = cursorData.string(forColumnIndex: 0)
@@ -969,13 +1150,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                         }
                         row["chat_date"] = chatDate(stringDate: row["server_date"]  as? String ?? "")
                         
-                        if (dataMessages.count == 0 || dataMessages.last!["f_pin"]  as? String ?? "" == row["f_pin"]  as? String ?? "") && tempImages.count <= 30 && row["image_id"] != nil && !(row["image_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["message_text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["reff_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["read_receipts"] as? String ?? "") != "8" {
+                        let lastRow = loaded.last ?? previousRow
+                        if (lastRow == nil || lastRow!["f_pin"]  as? String ?? "" == row["f_pin"]  as? String ?? "") && tempImages.count <= 30 && row["image_id"] != nil && !(row["image_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["message_text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["reff_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["read_receipts"] as? String ?? "") != "8" {
                             if tempImages.count != 0 && getSecondsDifferenceFromTwoDates(start: Date.init(milliseconds: Int64(tempImages.last!.time)!), end: Date.init(milliseconds: Int64(row["server_date"]  as? String ?? "")!))/60 >= 11 {
                                 if tempImages.count >= 4 {
                                     groupImages[tempImages[0].messageId] = tempImages
-                                    if let idxTemp = dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
+                                    if let idxTemp = loaded.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
                                         for _ in 1..<tempImages.count {
-                                            dataMessages.remove(at: idxTemp + 1)
+                                            loaded.remove(at: idxTemp + 1)
                                         }
                                     }
                                 }
@@ -984,19 +1166,19 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                             tempImages.append(ImageGrouping(messageId: row["message_id"]  as? String ?? "", thumbId: row["thumb_id"]  as? String ?? "", imageId: row["image_id"]  as? String ?? "", status: row["status"]  as? String ?? "", time: row["server_date"]  as? String ?? "", lPin: row["l_pin"]  as? String ?? "", dataMessage: row, dataPerson: [:], dataGroup: dataGroup, dataTopic: dataTopic))
                         } else if tempImages.count >= 4 {
                             groupImages[tempImages[0].messageId] = tempImages
-                            if let idxTemp = dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
+                            if let idxTemp = loaded.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
                                 for _ in 1..<tempImages.count {
-                                    dataMessages.remove(at: idxTemp + 1)
+                                    loaded.remove(at: idxTemp + 1)
                                 }
                             }
                             tempImages.removeAll()
                         } else if tempImages.count != 0 {
                             tempImages.removeAll()
                         }
-                        if offset > 0 && idxOff == 0 {
+                        if marksFirstAsUnread && idxOff == 0 {
                             self.markerCounter = row["message_id"] as? String
                         }
-                        dataMessages.append(row)
+                        loaded.append(row)
                         idxOff+=1
                     }
     //                if isHistoryCC {
@@ -1007,13 +1189,29 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                             tempImages.removeSubrange(30..<tempImages.count)
                         }
                         groupImages[tempImages[0].messageId] = tempImages
-                        if let idxTemp = dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
+                        if let idxTemp = loaded.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
                             for _ in 1..<tempImages.count {
-                                dataMessages.remove(at: idxTemp + 1)
+                                loaded.remove(at: idxTemp + 1)
                             }
                         }
                     }
                     cursorData.close()
+                    // A message deleted from the middle of the conversation shifts every
+                    // offset after it, so a page read later can overlap what is already on
+                    // screen. Cheap insurance against showing the same message twice.
+                    if !self.dataMessages.isEmpty {
+                        let known = Set(self.dataMessages.compactMap { $0["message_id"] as? String })
+                        loaded.removeAll { known.contains($0["message_id"] as? String ?? "") }
+                    }
+                    if prepend {
+                        self.dataMessages.insert(contentsOf: loaded, at: 0)
+                    } else {
+                        self.dataMessages.append(contentsOf: loaded)
+                    }
+                    // chatDate() appends the day headers as it meets them, which is the right
+                    // order only while messages arrive newest-last. Rebuilding from the list
+                    // itself is correct whichever end the batch went on.
+                    self.rebuildDataDates()
                 }
             } catch {
                 rollback.pointee = true
@@ -1022,6 +1220,443 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         })
     }
     
+    /// The day headers, in the order the messages themselves are in.
+    private func rebuildDataDates() {
+        var seen = Set<String>()
+        dataDates = dataMessages.compactMap { $0["chat_date"] as? String }.filter { seen.insert($0).inserted }
+    }
+
+    /// Reads the newest page of the conversation - enough to fill the screen, and never less
+    /// than everything still unread, because the unread marker and the read receipts sent on
+    /// open both need those messages in hand.
+    private func loadInitialMessages() {
+        let total = countMessages()
+        let pageSize = max(EditorGroup.initialMessagePageSize, Int64(counter) + 10)
+        loadedOffset = max(0, total - pageSize)
+        loadedCount = total - loadedOffset
+        isWindowAtNewest = true
+        getData(offset: loadedOffset, limit: loadedCount)
+    }
+
+    /// The oldest message the reader has not seen yet: the one `unread` places from the
+    /// newest.
+    ///
+    /// Read from the database rather than counted back through dataMessages. That list has
+    /// grouped image collages taken out of it, so counting back through it lands on the wrong
+    /// message - and when the unread block contains a collage the count comes up short and no
+    /// marker is placed at all.
+    private func unreadMarkerMessageId(unread: Int) -> String? {
+        guard unread > 0 else {
+            return nil
+        }
+        let position = countMessages() - Int64(unread)
+        guard position >= 0 else {
+            return nil
+        }
+        var messageId: String?
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id FROM MESSAGE where \(self.messageWhereClause()) order by server_date asc LIMIT 1 OFFSET \(position)"), cursor.next() {
+                messageId = cursor.string(forColumnIndex: 0)
+                cursor.close()
+            }
+        })
+        return messageId
+    }
+
+    /// Whether there are older messages left in the database.
+    private var hasOlderMessages: Bool {
+        return loadedOffset > 0
+    }
+
+    /// Re-derives where the loaded window sits from the messages actually in hand.
+    ///
+    /// Offsets into the conversation move whenever a message is deleted, and the deletion can
+    /// happen anywhere - from this screen, from another device. Asking the database where the
+    /// oldest and newest loaded messages are now costs two counts and makes every page that
+    /// follows line up, instead of tracking every place a message can disappear.
+    private func refreshWindowBounds() {
+        guard let oldest = dataMessages.first(where: { !(($0["message_id"] as? String) ?? "").isEmpty })?["message_id"] as? String,
+              let newest = dataMessages.last(where: { !(($0["message_id"] as? String) ?? "").isEmpty })?["message_id"] as? String,
+              let oldestPosition = messagePosition(messageId: oldest),
+              let newestPosition = messagePosition(messageId: newest) else {
+            return
+        }
+        // A window that is not contiguous in the database - a message sent while the reader
+        // was looking at an older part sits at the end of the list but at the end of the
+        // conversation in the database - would come back as a nonsense span. Better to keep
+        // the bounds already held than to trust that.
+        guard newestPosition + 1 - oldestPosition <= Int64(dataMessages.count) + 200 else {
+            return
+        }
+        loadedOffset = oldestPosition
+        loadedCount = max(0, newestPosition + 1 - oldestPosition)
+    }
+
+    /// Pulls in the next page of older messages and puts the reader back where they were.
+    ///
+    /// The rows are inserted above what is on screen, so without pinning the view to a known
+    /// message the content would jump by the height of everything just added.
+    private func loadOlderMessages() {
+        guard hasOlderMessages, !isLoadingOlderMessages else {
+            return
+        }
+        if let lastEmptyOlderPage = lastEmptyOlderPage, Date().timeIntervalSince(lastEmptyOlderPage) < 0.5 {
+            return
+        }
+        isLoadingOlderMessages = true
+        defer { isLoadingOlderMessages = false }
+        refreshWindowBounds()
+        guard hasOlderMessages else {
+            return
+        }
+        let rowsBeforeLoad = dataMessages.count
+
+        let anchorIndexPath = tableChatView.indexPathsForVisibleRows?.first
+        var anchorMessageId: String?
+        var anchorDistanceFromTop: CGFloat = 0
+        if let anchorIndexPath = anchorIndexPath {
+            anchorMessageId = message(at: anchorIndexPath)?["message_id"] as? String
+            anchorDistanceFromTop = tableChatView.rectForRow(at: anchorIndexPath).minY - tableChatView.contentOffset.y
+        }
+
+        let newOffset = max(0, loadedOffset - EditorGroup.olderMessagePageSize)
+        let batch = loadedOffset - newOffset
+        getData(offset: newOffset, limit: batch, prepend: true)
+        loadedOffset = newOffset
+        loadedCount += batch
+
+        lastEmptyOlderPage = dataMessages.count == rowsBeforeLoad ? Date() : nil
+
+        UIView.performWithoutAnimation {
+            tableChatView.reloadData()
+            tableChatView.layoutIfNeeded()
+        }
+        if let anchorMessageId = anchorMessageId, let restored = indexPath(forMessageId: anchorMessageId) {
+            let target = tableChatView.rectForRow(at: restored).minY - anchorDistanceFromTop
+            tableChatView.setContentOffset(CGPoint(x: 0, y: target), animated: false)
+        }
+    }
+
+    /// Throws away what is loaded and reads a page around a position instead. Used when a
+    /// jump lands so far from the window that reading the gap would cost more than the whole
+    /// screen is worth.
+    private func replaceWindow(around position: Int64) {
+        let total = countMessages()
+        let newOffset = max(0, min(position - EditorGroup.jumpWindowSize / 2, max(0, total - EditorGroup.jumpWindowSize)))
+        let limit = max(0, min(EditorGroup.jumpWindowSize, total - newOffset))
+        dataMessages.removeAll()
+        dataDates.removeAll()
+        groupImages.removeAll()
+        measuredRowHeights.removeAll()
+        // Rows the reader was last on are gone with the window; anything still holding that
+        // index would be reading into a list that no longer has it.
+        currentIndexpath = nil
+        loadedOffset = newOffset
+        loadedCount = limit
+        getData(offset: newOffset, limit: limit)
+        isWindowAtNewest = newOffset + limit >= total
+        tableChatView.reloadData()
+    }
+
+    /// Takes the reader back to the end of the conversation.
+    private func jumpToNewestPage() {
+        let total = countMessages()
+        let newOffset = max(0, total - EditorGroup.initialMessagePageSize)
+        dataMessages.removeAll()
+        dataDates.removeAll()
+        groupImages.removeAll()
+        measuredRowHeights.removeAll()
+        // Rows the reader was last on are gone with the window; anything still holding that
+        // index would be reading into a list that no longer has it.
+        currentIndexpath = nil
+        loadedOffset = newOffset
+        loadedCount = total - newOffset
+        getData(offset: newOffset, limit: loadedCount)
+        isWindowAtNewest = true
+        tableChatView.reloadData()
+        // Back at the end means everything counted while away has now been seen.
+        if counter != 0 {
+            counter = 0
+            updateCounter(counter: counter)
+        }
+        removeScrollToBottomButton()
+    }
+
+    /// Reads the next page of newer messages onto the end of the window. Only ever needed
+    /// after a jump has moved the window off the end of the conversation.
+    ///
+    /// Appending below does not move what is on screen, so unlike reading older messages
+    /// there is no scroll position to put back - and no contentOffset to assign, which is
+    /// what makes this direction smooth.
+    private func loadNewerMessages() {
+        guard !isWindowAtNewest, !isLoadingNewerMessages else {
+            return
+        }
+        isLoadingNewerMessages = true
+        defer { isLoadingNewerMessages = false }
+        let total = countMessages()
+        let nextOffset = loadedOffset + loadedCount
+        guard nextOffset < total else {
+            isWindowAtNewest = true
+            return
+        }
+        let batch = min(EditorGroup.olderMessagePageSize, total - nextOffset)
+        let rowsBefore = dataMessages.count
+        getData(offset: nextOffset, limit: batch)
+        loadedCount += batch
+        isWindowAtNewest = loadedOffset + loadedCount >= total
+        // A page that brought nothing back would leave the trigger below satisfied and ask
+        // again immediately. Treating it as the end stops that dead; onCheckNewMessages puts
+        // back anything that really was missing.
+        if dataMessages.count == rowsBefore {
+            isWindowAtNewest = true
+        }
+        tableChatView.reloadData()
+    }
+
+    /// The messages matching `text`, newest first.
+    ///
+    /// The filter mirrors what the list used to do in memory: notification rows and messages
+    /// deleted for everyone are not results. Apostrophes are escaped - a search for "don't"
+    /// used to be pasted straight into the SQL.
+    private func searchMatches(for text: String) -> [String] {
+        let needle = text.replacingOccurrences(of: "'", with: "''")
+        guard !needle.isEmpty else {
+            return []
+        }
+        var ids: [String] = []
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            let query = """
+                        SELECT message_id FROM MESSAGE where \(self.messageWhereClause())
+                        AND message_text LIKE '%\(needle)%'
+                        AND message_id NOT LIKE '%NTFPIN\\_%' ESCAPE '\\'
+                        AND ifnull(lock, '') <> '1'
+                        order by server_date desc
+                        """
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) {
+                while cursor.next() {
+                    if let id = cursor.string(forColumnIndex: 0), !id.isEmpty {
+                        ids.append(id)
+                    }
+                }
+                cursor.close()
+            }
+        })
+        return ids
+    }
+
+    /// Reads the next page of older messages while nothing is moving.
+    ///
+    /// This is where paging is supposed to happen. Reading them mid-scroll means assigning
+    /// contentOffset to keep the reader in place, and UIScrollView treats that assignment as
+    /// "someone else is driving now" and drops the deceleration - the scroll stops dead. While
+    /// the list is standing still there is no deceleration to lose, so the same work is
+    /// invisible. Called when a scroll settles, which keeps the buffer above the reader
+    /// refilled between flings.
+    private func prefetchOlderMessagesIfIdle() {
+        guard !isInitialLoading, hasOlderMessages else {
+            return
+        }
+        guard !tableChatView.isDragging, !tableChatView.isDecelerating else {
+            return
+        }
+        // Only worth doing when the end of what is loaded is within a few screens; further
+        // away there is nothing to gain by reading more.
+        guard tableChatView.contentOffset.y < tableChatView.frame.height * 3 else {
+            return
+        }
+        loadOlderMessages()
+    }
+
+    /// Makes sure a particular message is in memory, pulling in everything between it and
+    /// what is already loaded. Jumping to a search hit, a reply or a pinned message all land
+    /// here - before paging they could count on the whole chat being loaded.
+    @discardableResult
+    private func ensureMessageLoaded(messageId: String) -> Bool {
+        if dataMessages.contains(where: { $0["message_id"] as? String == messageId }) {
+            return true
+        }
+        guard let position = messagePosition(messageId: messageId) else {
+            return false
+        }
+        if position >= loadedOffset, position < loadedOffset + loadedCount {
+            // Inside the window but not a row of its own - an image swallowed by a collage.
+            return false
+        }
+        if position < loadedOffset, loadedOffset - position <= EditorGroup.maxBridgedMessages {
+            let newOffset = max(0, position - 10)
+            let batch = loadedOffset - newOffset
+            getData(offset: newOffset, limit: batch, prepend: true)
+            loadedOffset = newOffset
+            loadedCount += batch
+            tableChatView.reloadData()
+        } else {
+            // Too far to bridge - and it can also be newer than the window, if an earlier
+            // jump left the window off the end.
+            replaceWindow(around: position)
+        }
+        return dataMessages.contains(where: { $0["message_id"] as? String == messageId })
+    }
+
+    /// The message a row is showing. Walks rather than filters: this is called for every row
+    /// the table estimates, and building a throwaway array each time is the expensive part.
+    private var bubbleSwipe: ChatBubbleSwipe?
+
+    /// Whether this row can be pulled, in that direction, right now. Mirrors what the long-press
+    /// menu offers: no replying to a message that failed, was deleted, or is a form or a
+    /// confidential one, and info only for messages this device sent.
+    private func canSwipeBubble(at indexPath: IndexPath, direction: ChatBubbleSwipe.Direction) -> Bool {
+        guard !copySession, !forwardSession, !deleteSession, !summarizeSession, !isHistoryCC, !removed else {
+            return false
+        }
+        guard let message = message(at: indexPath) else {
+            return false
+        }
+        let status = message[TypeDataMessage.status] as? String ?? ""
+        let lock = message["lock"] as? String ?? ""
+        let scope = message[TypeDataMessage.message_scope_id] as? String ?? ""
+        guard status != "0", lock != "1", lock != "2",
+              scope != MessageScope.CALL, scope != MessageScope.MISSED_CALL else {
+            return false
+        }
+        switch direction {
+        case .reply:
+            return scope != "18" && (message["credential"] as? String ?? "") != "1"
+        case .info:
+            return (message["f_pin"] as? String ?? "") == User.getMyPin()
+        }
+    }
+
+    private func performBubbleSwipe(at indexPath: IndexPath, direction: ChatBubbleSwipe.Direction) {
+        switch direction {
+        case .reply:
+            handleReply(indexPath: indexPath)
+        case .info:
+            guard let message = message(at: indexPath) else {
+                return
+            }
+            let messageInfoVC = MessageInfo()
+            messageInfoVC.data = message
+            messageInfoVC.dataGroup = dataGroup
+            messageInfoVC.isPersonal = false
+            navigationController?.pushViewController(messageInfoVC, animated: true)
+        }
+    }
+
+    private func message(at indexPath: IndexPath) -> [String: Any?]? {
+        guard indexPath.section >= 0, indexPath.section < dataDates.count, indexPath.row >= 0 else {
+            return nil
+        }
+        let date = dataDates[indexPath.section]
+        var row = 0
+        for message in dataMessages where message["chat_date"] as? String ?? "" == date {
+            if row == indexPath.row {
+                return message
+            }
+            row += 1
+        }
+        return nil
+    }
+
+    /// Where a message sits in the table right now.
+    private func indexPath(forMessageId messageId: String) -> IndexPath? {
+        guard let message = dataMessages.first(where: { $0["message_id"] as? String == messageId }),
+              let section = dataDates.firstIndex(of: message["chat_date"] as? String ?? ""),
+              let row = dataMessages.filter({ $0["chat_date"] as? String ?? "" == dataDates[section] })
+                  .firstIndex(where: { $0["message_id"] as? String == messageId }) else {
+            return nil
+        }
+        return IndexPath(row: row, section: section)
+    }
+
+    /// Opens the chat at the "Unread Messages" marker: the marker sits at the top of the
+    /// screen and the first message the reader has not seen starts directly under it.
+    ///
+    /// Fix: this used to be a single `scrollToRow(at: .bottom)` fired from a
+    /// `DispatchQueue.main.async` right after `reloadData()`, and both halves of that were
+    /// wrong. `.bottom` puts the marker row's *bottom* edge at the bottom of the screen, so a
+    /// long first unread message was shown by its tail with the marker itself scrolled off
+    /// above - the "lands in the middle of the message" case. And running before the table had
+    /// laid out meant the offset was worked out from estimated row heights (72pt for every row
+    /// never displayed), so where it actually ended up depended on how wrong those estimates
+    /// happened to be - the "sometimes it is not there" case. Running again on every layout
+    /// pass fixes both: by the time the rows around the marker have been built, their heights
+    /// are measured ones, and each pass corrects what the previous pass got wrong until the
+    /// row is exactly where it belongs.
+    private func applyPendingUnreadMarkerScroll() {
+        guard let marker = pendingUnreadMarkerScroll else {
+            return
+        }
+        guard tableChatView.numberOfSections > 0, tableChatView.bounds.height > 0,
+              let indexPath = indexPath(forMessageId: marker),
+              indexPath.section < tableChatView.numberOfSections,
+              indexPath.row < tableChatView.numberOfRows(inSection: indexPath.section) else {
+            // Nothing to aim at yet - the table may not have any rows this pass. Keep the
+            // request; the pass budget still runs down so this cannot hang around forever.
+            remainingUnreadMarkerScrollPasses -= 1
+            if remainingUnreadMarkerScrollPasses <= 0 {
+                pendingUnreadMarkerScroll = nil
+            }
+            return
+        }
+        remainingUnreadMarkerScrollPasses -= 1
+        let rowRect = tableChatView.rectForRow(at: indexPath)
+        let topInset = tableChatView.adjustedContentInset.top
+        // A plain table pins the date header over the top of the visible area, so the row has
+        // to start below it - otherwise the header covers the marker it was scrolled to.
+        let headerHeight = tableChatView.rectForHeader(inSection: indexPath.section).height
+        let lowest = -topInset
+        let highest = max(lowest, tableChatView.contentSize.height + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
+        let desired = min(max(rowRect.minY - topInset - headerHeight, lowest), highest)
+        if abs(tableChatView.contentOffset.y - desired) > 0.5 {
+            tableChatView.setContentOffset(CGPoint(x: tableChatView.contentOffset.x, y: desired), animated: false)
+        } else {
+            // Already exactly there, and the heights it was worked out from are the measured
+            // ones by now - nothing left to correct.
+            remainingUnreadMarkerScrollPasses = 0
+        }
+        if remainingUnreadMarkerScrollPasses <= 0 {
+            pendingUnreadMarkerScroll = nil
+        }
+    }
+
+    /// Every pinned message, including ones older than the loaded window - the banner shows
+    /// what the conversation has pinned, not what happens to be in memory.
+    private func pinnedMessagesForBanner() -> [[String: Any?]] {
+        var pinned = dataMessages.filter { $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0" }
+        guard hasOlderMessages else {
+            return pinned
+        }
+        var known = Set(pinned.compactMap { $0[TypeDataMessage.message_id] as? String })
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            let query = "SELECT message_id, f_pin, message_text, server_date, is_pinned, file_id, image_id, video_id, audio_id, gif_id FROM MESSAGE where \(self.messageWhereClause()) AND is_pinned <> '0' AND is_pinned IS NOT NULL order by server_date asc"
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) {
+                while cursor.next() {
+                    let messageId = cursor.string(forColumnIndex: 0) ?? ""
+                    if messageId.isEmpty || known.contains(messageId) {
+                        continue
+                    }
+                    known.insert(messageId)
+                    var row: [String: Any?] = [:]
+                    row["message_id"] = messageId
+                    row["f_pin"] = cursor.string(forColumnIndex: 1)
+                    row["message_text"] = cursor.string(forColumnIndex: 2)
+                    row["server_date"] = cursor.string(forColumnIndex: 3)
+                    row[TypeDataMessage.is_pinned] = cursor.string(forColumnIndex: 4)
+                    row["file_id"] = cursor.string(forColumnIndex: 5)
+                    row["image_id"] = cursor.string(forColumnIndex: 6)
+                    row["video_id"] = cursor.string(forColumnIndex: 7)
+                    row["audio_id"] = cursor.string(forColumnIndex: 8)
+                    row[TypeDataMessage.gif_id] = cursor.string(forColumnIndex: 9)
+                    row["isSelected"] = false
+                    pinned.append(row)
+                }
+                cursor.close()
+            }
+        })
+        return pinned
+    }
+
     func getSecondsDifferenceFromTwoDates(start: Date, end: Date) -> Int {
         let diff = Int(end.timeIntervalSince1970 - start.timeIntervalSince1970)
 
@@ -1050,6 +1685,25 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         return status
     }
     
+    // Building a DateFormatter costs about as much as reading a message row, and this is
+    // called once per message. One formatter per format, built when first needed.
+    private static var dayNameFormatter: DateFormatter?
+    private static var dayDateFormatter: DateFormatter?
+
+    private static func chatDateFormatter(format: String, cached: inout DateFormatter?) -> DateFormatter {
+        if let cached = cached, cached.dateFormat == format {
+            return cached
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = format
+        let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
+        if lang == "id" {
+            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
+        }
+        cached = formatter
+        return formatter
+    }
+
     private func chatDate(stringDate: String) -> String {
         let date = Date(milliseconds: Int64(stringDate) ?? 0)
         let calendar = Calendar.current
@@ -1069,23 +1723,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 }
                 return "Yesterday".localized()
             } else if day < 7 {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "EEEE"
-                let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
-                if lang == "id" {
-                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
+                let formatter = EditorGroup.chatDateFormatter(format: "EEEE", cached: &EditorGroup.dayNameFormatter)
+                let stringFormat = formatter.string(from: date)
+                if !dataDates.contains(stringFormat){
+                    dataDates.append(stringFormat)
                 }
-                if !dataDates.contains(formatter.string(from: date)){
-                    dataDates.append(formatter.string(from: date))
-                }
-                return formatter.string(from: date)
+                return stringFormat
             } else {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "EE, dd MMM"
-                let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
-                if lang == "id" {
-                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                }
+                let formatter = EditorGroup.chatDateFormatter(format: "EE, dd MMM", cached: &EditorGroup.dayDateFormatter)
                 let stringFormat = formatter.string(from: date as Date)
                 if !dataDates.contains(stringFormat){
                     dataDates.append(stringFormat)
@@ -1144,7 +1789,15 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
 //            searchBar.setMagnifyingGlassColorTo(color: .white)
             searchBar.setImage(UIImage(), for: .search, state: .normal)
             searchBar.setPositionAdjustment(UIOffset(horizontal: 10, vertical: 0), for: .search)
-            searchBar.setCustomBackgroundImage(image: UIImage(named: self.traitCollection.userInterfaceStyle == .dark ? "nx_search_bar_dark" : "nx_search_bar", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!)
+            // 36pt is the height iOS gives a search field, and it lines the bottom of the
+            // field up with the Cancel button next to it - the old 30pt bitmap left it sitting
+            // noticeably short. The colour is the one that bitmap was painted with, so nothing
+            // about the look changes; only its size and the shape of its corners.
+            //
+            // Both themes get the light fill on purpose: the text in this field is black, and
+            // the dark asset this used to draw is very nearly transparent, which left black
+            // text on a near-black bar.
+            searchBar.setSearchFieldStyle(height: 36, backgroundColor: UIColor(red: 248.0 / 255.0, green: 252.0 / 255.0, blue: 254.0 / 255.0, alpha: 1.0))
             navigationItem.titleView = searchBar
             self.definesPresentationContext = true
         }
@@ -1320,25 +1973,25 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     }
     
     @objc func  onCheckNewMessages(notification: NSNotification) {
-        var query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='' AND l_pin='\(dataGroup["group_id"]  as? String ?? "")' order by server_date asc"
-        if isHistoryCC {
-            query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared FROM MESSAGE where call_center_id='\(complaintId)' order by server_date asc"
-        } else if (dataTopic["chat_id"]  as? String ?? "" != "") {
-            query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where chat_id='\(dataTopic["chat_id"]  as? String ?? "")' order by server_date asc"
-        }
-        var countMessagesNow: Int64 = 0
         DispatchQueue.main.async { [self] in
-            Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                do {
-                    if let cursorCount = Database.shared.getRecords(fmdb: fmdb, query: query), cursorCount.next() {
-                        countMessagesNow = Int64(cursorCount.int(forColumnIndex: 0))
-                        cursorCount.close()
-                    }
-                }catch{}
-            })
-            if dataMessages.count < countMessagesNow {
-                self.counter = Int(countMessagesNow) - dataMessages.count
-                getData(offset: Int64(self.dataMessages.count))
+            // Fix: this used to compare dataMessages.count against `int(forColumnIndex: 0)` of
+            // a query that selects message_id, not a count - so the number it compared against
+            // was whatever that text parsed to. It now asks the database how many messages the
+            // conversation has, and works out what is missing from the loaded window rather
+            // than from the row count (image collages take rows out of that list).
+            // Only meaningful while the window ends at the newest message; when a jump has
+            // moved it away, new messages are picked up on the way back down.
+            guard isWindowAtNewest else {
+                return
+            }
+            let countMessagesNow = countMessages()
+            refreshWindowBounds()
+            let loadedThrough = loadedOffset + loadedCount
+            if loadedThrough < countMessagesNow {
+                let missing = countMessagesNow - loadedThrough
+                self.counter = Int(missing)
+                getData(offset: loadedThrough, limit: missing, marksFirstAsUnread: true)
+                loadedCount += missing
                 tableChatView.reloadData()
                 if !self.indicatorCounterBSTB.isDescendant(of: self.view) && !self.buttonScrollToBottom.isDescendant(of: self.view) {
                     let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
@@ -1381,7 +2034,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                         self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                     }
                 }
-                let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                let dataMessagesPin = self.pinnedMessagesForBanner()
                 self.pinAllMessages(dataMessages: dataMessagesPin)
                 
                 if !messageIdNotif.isEmpty {
@@ -1450,6 +2103,22 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 return
             }
             
+            // A message arriving while the reader is looking at an older part of the chat
+            // must not be spliced onto the end of a window that does not reach the newest
+            // message. It is in the database; the scroll-to-bottom button is the way to it.
+            guard self.isWindowAtNewest else {
+                self.counter += 1
+                if !self.buttonScrollToBottom.isDescendant(of: self.view) {
+                    self.addButtonScrollToBottom()
+                }
+                if !self.indicatorCounterBSTB.isDescendant(of: self.view) {
+                    self.addCounterAtButttonScrollToBottom()
+                } else {
+                    self.labelCounter.text = "\(self.counter)"
+                }
+                return
+            }
+
             // Build new row
             var row: [String: Any?] = [:]
             row["message_id"] = messageId
@@ -1495,8 +2164,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
 //            self.counter += 1
             self.counter = 0
             self.updateCounter(counter: self.counter)
+            // One more of the conversation's messages is now in the loaded window.
+            self.loadedCount += 1
             self.dataMessages.append(row)
-            
+
             let todayMessages = self.dataMessages.filter({
                 $0["chat_date"] as? String ?? "" == "Today".localized()
             })
@@ -2044,6 +2715,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
+            let previousBottomAttachment = self.constraintBottomAttachment.constant
             if self.constraintBottomAttachment.constant != keyboardHeight || self.constraintViewTextField.constant != keyboardHeight - 60 {
                 if self.viewSticker.isDescendant(of: self.view) {
                     self.constraintBottomAttachment.constant = 0.0
@@ -2056,17 +2728,22 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                     self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
                 }
                 self.keyboardHeightForMention = keyboardHeight
+                // How much of the list the keyboard is about to take that it was not taking
+                // already - a keyboard that only changes height (a predictive bar appearing,
+                // say) must not move the conversation by its whole height.
+                let listShrinkage = keyboardHeight - previousBottomAttachment
                 if isSearching {
                     self.constraintBottomContainerMultpileSelectSession.constant = -keyboardHeight
                 }
                 UIView.animate(withDuration: TimeInterval(duration), animations: {
                     self.view.layoutIfNeeded()
+                    // Fix: this used to scroll to the last remembered row, or all the way to the
+                    // newest message, every time the keyboard came up - so tapping the input
+                    // while reading something further up threw the reader back to the bottom.
+                    // Shifting the content by exactly what the keyboard took leaves them looking
+                    // at what they were looking at.
+                    self.keepScrollPosition(whenInputGrewBy: listShrinkage)
                 })
-                if (self.currentIndexpath != nil) {
-                    self.tableChatView.safeScrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
-                } else {
-                    self.tableChatView.scrollToBottom()
-                }
             }
         }  else if isEditingMessage {
             let info:NSDictionary = notification.userInfo! as NSDictionary
@@ -2089,6 +2766,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             let info:NSDictionary = notification.userInfo! as NSDictionary
             let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
+            let keyboardWasTaking = self.constraintBottomAttachment.constant
             self.constraintViewTextField.constant = 0
             self.constraintBottomAttachment.constant = 0
             self.constraintBottomContainerMultpileSelectSession.constant = 0
@@ -2098,6 +2776,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             keyboardHeightForMention = nil
             UIView.animate(withDuration: TimeInterval(duration), animations: {
                 self.view.layoutIfNeeded()
+                self.keepScrollPosition(whenInputGrewBy: -keyboardWasTaking)
             })
         }
     }
@@ -2320,6 +2999,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             tableChatView.insertSections(IndexSet(integer: dataDates.count - 1), with: .fade)
         }
         row["chat_date"] = "Today".localized()
+        // One more of the conversation's messages is now in the loaded window.
+        loadedCount += 1
         dataMessages.append(row)
         tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .fade)
         tableChatView.layoutIfNeeded()
@@ -2415,6 +3096,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             }
         })
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+        // This chat's unread just changed; the icon counts every chat's, so it changed too.
+        APIS.refreshApplicationBadgeSoon()
     }
     
     private func disableEditor() {
@@ -2439,14 +3122,44 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         labelDisable.text = "Call Center Session has ended".localized()
     }
     
+    /// Keeps what is on screen exactly where it is when the input area grows or shrinks.
+    ///
+    /// Fix: the reply bar takes 50-odd points off the bottom of the list, and the list used to
+    /// be scrolled somewhere else entirely to compensate - to the last remembered row, or all
+    /// the way to the newest message. That is the jump: replying to something part-way up the
+    /// conversation threw the reader back down to the bottom. A chat is read from the bottom, so
+    /// moving the content up by exactly what the bar took leaves the same messages on screen -
+    /// which is what WhatsApp does and what "tetap di state scroll terakhir" means.
+    /// Call it once the new layout is in place - it reads the height the list ends up with.
+    private func keepScrollPosition(whenInputGrewBy delta: CGFloat) {
+        guard let scrollView = tableChatView, delta != 0, scrollView.bounds.height > 0 else {
+            return
+        }
+        let lowest = -scrollView.adjustedContentInset.top
+        let highest = max(lowest, scrollView.contentSize.height + scrollView.adjustedContentInset.bottom - scrollView.bounds.height)
+        let target = min(max(scrollView.contentOffset.y + delta, lowest), highest)
+        guard abs(target - scrollView.contentOffset.y) > 0.5 else {
+            return
+        }
+        scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: target), animated: false)
+    }
+
+    private var scrollToBottomBottomConstraint: NSLayoutConstraint?
+
     private func addButtonScrollToBottom() {
-        if tableChatView.alpha != 1 || isSearching {
+        if isInitialLoading {
             return
         }
         self.view.addSubview(buttonScrollToBottom)
         buttonScrollToBottom.translatesAutoresizingMaskIntoConstraints = false
+        // Called twice without a removal in between, the old one would still be active and the
+        // two would fight over where the button goes.
+        scrollToBottomBottomConstraint?.isActive = false
+        let placement = scrollToBottomPlacement()
+        let bottom = buttonScrollToBottom.bottomAnchor.constraint(equalTo: placement.anchor, constant: placement.spacing)
+        scrollToBottomBottomConstraint = bottom
         NSLayoutConstraint.activate([
-            buttonScrollToBottom.bottomAnchor.constraint(equalTo: buttonSendChat.topAnchor, constant: -30),
+            bottom,
             buttonScrollToBottom.trailingAnchor.constraint(equalTo: self.view.trailingAnchor, constant: -5),
             buttonScrollToBottom.widthAnchor.constraint(equalToConstant: 35.0),
             buttonScrollToBottom.heightAnchor.constraint(equalToConstant: 35.0)
@@ -2461,8 +3174,49 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         buttonScrollToBottom.addTarget(self, action: #selector(scrollTobottomAction), for: .touchUpInside)
     }
     
+    /// Whatever sits under the button at the moment, and how far above it the button goes.
+    ///
+    /// Searching swaps the input bar for the 50pt bar with the match arrows, and composing a
+    /// reply puts the preview of the quoted message above the text field - the button has to
+    /// hang off whichever one is actually on screen, or it ends up floating over the arrows or
+    /// sitting on top of the reply preview.
+    private func scrollToBottomPlacement(ignoringReplyPreview: Bool = false) -> (anchor: NSLayoutYAxisAnchor, spacing: CGFloat) {
+        if containerMultpileSelectSession.isDescendant(of: self.view) {
+            return (containerMultpileSelectSession.topAnchor, -10)
+        }
+        if !ignoringReplyPreview, containerPreviewReply.isDescendant(of: viewTextfield) {
+            return (containerPreviewReply.topAnchor, -10)
+        }
+        return (buttonSendChat.topAnchor, -30)
+    }
+
+    /// Points the button at whatever is under it now.
+    ///
+    /// Fix: this used to take the button out of the view and put it back. A view that has just
+    /// been added has no position until the next layout pass, so it appeared wherever it had
+    /// been left and then flew to its place - the bounce from the bottom of the screen when the
+    /// reply preview was closed. Swapping the one constraint that holds it moves it from where
+    /// it already is. Left un-animated on purpose: called from inside the animation that is
+    /// moving the bar underneath, it travels with that bar instead of racing it.
+    private func refreshScrollToBottomButtonPlacement(animated: Bool = false, ignoringReplyPreview: Bool = false) {
+        guard buttonScrollToBottom.isDescendant(of: self.view) else {
+            return
+        }
+        let placement = scrollToBottomPlacement(ignoringReplyPreview: ignoringReplyPreview)
+        scrollToBottomBottomConstraint?.isActive = false
+        let bottom = buttonScrollToBottom.bottomAnchor.constraint(equalTo: placement.anchor, constant: placement.spacing)
+        bottom.isActive = true
+        scrollToBottomBottomConstraint = bottom
+        guard animated else {
+            return
+        }
+        UIView.animate(withDuration: 0.25, delay: 0, options: .curveEaseInOut, animations: {
+            self.view.layoutIfNeeded()
+        })
+    }
+
     private func addCounterAtButttonScrollToBottom() {
-        if tableChatView.alpha != 1 || isSearching || counter == 0 {
+        if isInitialLoading || counter == 0 {
             return
         }
         self.view.addSubview(indicatorCounterBSTB)
@@ -2496,6 +3250,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.prepare()
         generator.impactOccurred()
+        // "Take me to the end" means the end of the conversation, not the end of whatever
+        // happens to be loaded.
+        if !isWindowAtNewest {
+            jumpToNewestPage()
+        }
         tableChatView.scrollToBottom()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [self] in
             removeScrollToBottomButton()
@@ -3827,6 +4586,13 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     public func textViewDidBeginEditing(_ textView: UITextView) {
+        // Anything the reader writes belongs at the end of the conversation, so the window has
+        // to be back there before it is sent - otherwise the new message would be drawn at the
+        // bottom of a window that stops months ago.
+        if textView == textFieldSend, !isWindowAtNewest {
+            jumpToNewestPage()
+            tableChatView.scrollToBottom(isAnimated: false, delay: 0)
+        }
         if textView.textColor == UIColor.lightGray {
             textView.text = nil
             textView.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black
@@ -4128,7 +4894,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 if self.isSearching {
                     self.cancelAction()
                 }
-                var checkDataPinned = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                var checkDataPinned = self.pinnedMessagesForBanner()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: {
                     if checkDataPinned.count == 3 {
                         let alert = UIAlertController(title: "Replace oldest pin?".localized(),
@@ -4166,7 +4932,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                             if res1 {
                                 self.proceedPinUnpinMessage(checkDataPinned: dataMessages[indexPath!.row], isPinned: true) { res2 in
                                     if res2 {
-                                        let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                                        let dataMessagesPin = self.pinnedMessagesForBanner()
                                         DispatchQueue.main.async {
                                             self.pinAllMessages(dataMessages: dataMessagesPin)
                                         }
@@ -4177,7 +4943,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     } else {
                         self.proceedPinUnpinMessage(checkDataPinned: dataMessages[indexPath!.row], isPinned: true) { res in
                             if res {
-                                let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                                let dataMessagesPin = self.pinnedMessagesForBanner()
                                 DispatchQueue.main.async {
                                     self.pinAllMessages(dataMessages: dataMessagesPin)
                                 }
@@ -4197,7 +4963,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: {
                     self.proceedPinUnpinMessage(checkDataPinned: dataMessages[indexPath!.row], isPinned: false) { res in
                         if res {
-                            let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+                            let dataMessagesPin = self.pinnedMessagesForBanner()
                             DispatchQueue.main.async {
                                 self.pinAllMessages(dataMessages: dataMessagesPin)
                             }
@@ -4651,6 +5417,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     }
     
     private func appendNewMessage(messageId: String) {
+        // The window is not at the end of the conversation, so there is nothing to append to.
+        guard isWindowAtNewest else {
+            return
+        }
         var row: [String: Any?] = [:]
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned from MESSAGE where message_id = '\(messageId)'"), cursorData.next() {
@@ -4693,6 +5463,9 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.dataDates.append("Today".localized())
                 self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
             }
+            // The window now covers one more of the conversation's messages, which is what
+            // keeps the offsets used for paging lined up with the database.
+            self.loadedCount += 1
             self.dataMessages.append(row)
             self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
             self.tableChatView.layoutIfNeeded()
@@ -4991,6 +5764,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.summarizeSession = false
             } else if self.isSearching {
                 self.countMatchesSearch = 0
+                self.searchMatchIds = []
+                self.lastScrollIdxSearch = 0
                 self.isSearching = false
             }
             if self.viewTextfield.isHidden {
@@ -5026,6 +5801,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             self.setRightButtonItem()
             self.changeAppBar()
             self.containerMultpileSelectSession.removeFromSuperview()
+            self.refreshScrollToBottomButtonPlacement()
             self.checkNewMessage(tableView: self.tableChatView)
         }
     }
@@ -5047,6 +5823,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         ])
         containerMultpileSelectSession.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
         addSubviewMultipleSession()
+        refreshScrollToBottomButtonPlacement()
     }
     
     private func addSubviewMultipleSession() {
@@ -5541,7 +6318,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     self.timerCredential.removeValue(forKey: dataMessages[i]["message_id"]  as? String ?? "")
                 }
             }
-            let dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+            let dataMessagesPin = self.pinnedMessagesForBanner()
             self.pinAllMessages(dataMessages: dataMessagesPin)
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
             cancelAction()
@@ -5550,16 +6327,24 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     
     @objc func deleteReplyView() {
         if self.containerPreviewReply.isDescendant(of: self.viewTextfield) {
+            // Off the preview before the preview goes. A constraint pointing at a view that has
+            // left the hierarchy is simply dropped, and a button with nothing holding it
+            // vertically lands wherever the layout puts it and then flies back - the bounce up
+            // from the bottom of the screen.
+            self.refreshScrollToBottomButtonPlacement(ignoringReplyPreview: true)
             self.containerPreviewReply.subviews.forEach { $0.removeFromSuperview() }
             self.containerPreviewReply.removeConstraints(self.containerPreviewReply.constraints)
             self.containerPreviewReply.removeFromSuperview()
             
             self.reffId = nil
+            let replyBarHeight = 50 + (self.offset() * 3)
             UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
-                self.constraintTopTextField.constant = self.constraintTopTextField.constant - 50 - (self.offset()*3)
+                self.constraintTopTextField.constant = self.constraintTopTextField.constant - replyBarHeight
                 if self.contraintBottomMention.constant > 0 {
                     self.contraintBottomMention.constant = self.contraintBottomMention.constant - 50
                 }
+                self.view.layoutIfNeeded()
+                self.keepScrollPosition(whenInputGrewBy: -replyBarHeight)
             }, completion: nil)
         }
     }
@@ -5857,28 +6642,82 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     //        checkNewMessage(tableView: tableView)
     //    }
     
-    public func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
-            if self.tableChatView.alpha != 1.0 {
-                UIView.animate(withDuration: 0.5, animations: {
-                    self.tableChatView.alpha = 1.0
-                })
-            }
-        })
+    public func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        guard tableView == tableChatView else {
+            return
+        }
+        // Remember what each row actually measured, so the table estimates the rows it has
+        // not built yet from real numbers. That is what keeps the content from shifting under
+        // the reader when a page of older messages is inserted above.
+        if let messageId = message(at: indexPath)?["message_id"] as? String, cell.frame.height > 0 {
+            measuredRowHeights[messageId] = cell.frame.height
+        }
     }
-    
+
+    public func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        guard tableView == tableChatView else {
+            return UITableView.automaticDimension
+        }
+        if let messageId = message(at: indexPath)?["message_id"] as? String, let height = measuredRowHeights[messageId] {
+            return height
+        }
+        return 72
+    }
+
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        let scrolledSinceLastFrame = abs(scrollView.contentOffset.y - lastY)
         lastY = scrollView.contentOffset.y
+        // The reader has taken the list over - a later layout pass must not pull it back to
+        // the unread marker under their finger.
+        if scrollView == tableChatView, scrollView.isDragging, pendingUnreadMarkerScroll != nil {
+            pendingUnreadMarkerScroll = nil
+        }
+        // Last resort: the reader has run out of loaded messages mid-flight. Reading more here
+        // costs the deceleration, but a list that stops dead at a false end costs more.
+        if scrollView == tableChatView, !isInitialLoading, scrollView.contentOffset.y < 400, hasOlderMessages {
+            loadOlderMessages()
+        }
+        // The tail of a fling, where the momentum left is too small for the eye to miss. Two
+        // quick flicks in a row never let the scroll settle, so this is the only chance to
+        // refill the buffer between them - and taking 3pt/frame away is not a stop anyone
+        // sees.
+        else if scrollView == tableChatView, !isInitialLoading, hasOlderMessages,
+                scrollView.isDecelerating, !scrollView.isDragging,
+                scrolledSinceLastFrame < 4,
+                scrollView.contentOffset.y < scrollView.frame.height * 3 {
+            loadOlderMessages()
+        }
+        // And the other end, for a window a jump has moved off the newest message.
+        if scrollView == tableChatView, !isInitialLoading, !isWindowAtNewest {
+            let distanceFromBottom = scrollView.contentSize.height - scrollView.frame.height - scrollView.contentOffset.y
+            if distanceFromBottom < 400 {
+                loadNewerMessages()
+            }
+        }
         let now = Date()
         guard now.timeIntervalSince(lastScrollCheckTime) > 0.3 else { return }
         lastScrollCheckTime = now
-        
+
         DispatchQueue.main.async {
-            if self.tableChatView.alpha != 1 {
+            if self.isInitialLoading {
                 return
             }
             self.checkNewMessage(tableView: self.tableChatView)
         }
+    }
+
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        guard scrollView == tableChatView else {
+            return
+        }
+        prefetchOlderMessagesIfIdle()
+    }
+
+    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard scrollView == tableChatView, !decelerate else {
+            return
+        }
+        prefetchOlderMessagesIfIdle()
     }
     
     public func numberOfSections(in tableView: UITableView) -> Int {
@@ -6394,10 +7233,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 if status == "0" {
                     statusMessage.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
                 }
-//                else if status == "1" {
-//                    statusMessage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
-//                }
-                else if status == "1" || status == "2" {
+                // Still waiting for the server to answer with "2": the message is written here
+                // but nowhere else yet, and the clock says so.
+                else if status == "1" {
+                    statusMessage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
+
+                }
+                else if status == "2" {
                     statusMessage.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
                 } else if (status == "3") {
                     statusMessage.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
@@ -6811,17 +7653,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             // Must be mutable!
             let finalAttributed = NSMutableAttributedString(attributedString: text.richText(group_id: self.dataGroup["group_id"]  as? String ?? ""))
 
-            let urlPattern = "(https?://|www\\.)\\S+"
-            guard let regex = try? NSRegularExpression(pattern: urlPattern) else { return }
-
             let fullString = finalAttributed.string
             let fullLength = (fullString as NSString).length
 
-            let matches = regex.matches(in: fullString, range: NSRange(location: 0, length: fullLength))
-
-            for match in matches {
-                let range = match.range
-
+            // Fix: shared with the formatting rules in richText() (String.urlRanges), so the
+            // text that gets made tappable is exactly the text those rules were told to leave
+            // alone - and so trailing sentence punctuation stays out of the opened URL.
+            for range in String.urlRanges(in: fullString) {
                 // Skip invalid ranges safely
                 if range.location == NSNotFound ||
                    range.location + range.length > fullLength ||
@@ -7133,12 +7971,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         containerTimeStatus.addSubview(statusInImage)
                         statusInImage.anchor(right: containerTimeStatus.rightAnchor, centerY: containerTimeStatus.centerYAnchor, width: 15, height: 15)
                         if listImages[i].status == "0" {
-                            statusMessage.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
+                            // Fix: this used to write to statusMessage - the parent row's own
+                            // icon - so a failed image inside a collage marked the wrong thing.
+                            statusInImage.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
                         }
-//                        else if listImages[i].status == "1" {
-//                            statusMessage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
-//                        }
-                        else if listImages[i].status == "1" || listImages[i].status == "2"  {
+                        else if listImages[i].status == "1" {
+                            statusInImage.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.white, renderingMode: .alwaysOriginal)
+
+                        }
+                        else if listImages[i].status == "2"  {
                             statusInImage.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.white)
                         } else if listImages[i].status == "3" {
                             statusInImage.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.white)
@@ -8588,6 +9429,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         } else {
             DispatchQueue.main.async {
+                // This is the jump to a quoted or pinned message. The message being jumped to
+                // is by nature an older one and may sit above the loaded window - without
+                // this the lookup below simply finds nothing and the tap does nothing at all.
+                self.ensureMessageLoaded(messageId: sender.message_id)
                 let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == sender.message_id})
                 if idx == nil {
                     return
@@ -8826,14 +9671,20 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     }
     
     @objc func viewPinTapped() {
-        var dataMessagesPin = self.dataMessages.filter({ $0[TypeDataMessage.is_pinned] as? String ?? "0" != "0"})
+        var dataMessagesPin = self.pinnedMessagesForBanner()
         dataMessagesPin.sort {
             let firstPinned = Int64($0[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
             let secondPinned = Int64($1[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
             return firstPinned < secondPinned
         }
+        guard nextPinShowed < dataMessagesPin.count else {
+            return
+        }
         let obj = ObjectGesture()
         obj.message_id = dataMessagesPin[nextPinShowed][TypeDataMessage.message_id] as? String ?? ""
+        // The pinned message can be older than what is loaded; contentMessageTapped works out
+        // its row from dataMessages, so it has to be in there first.
+        ensureMessageLoaded(messageId: obj.message_id)
         contentMessageTapped(obj)
         
         if dataMessagesPin.count > 0 {
@@ -8896,7 +9747,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     }
     
     private func handleReply(indexPath: IndexPath, dataMessagesImage: [String: Any?] = [:], reffId: String = "") {
-        var dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        // Guarded because the draft-restore path calls this with section 0 whether or not the
+        // conversation has any messages to show.
+        var dataMessages: [[String: Any?]] = []
+        if indexPath.section < dataDates.count {
+            dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        }
         if reffId.isEmpty {
             self.deleteReplyView()
             if dataMessagesImage.count != 0 {
@@ -8906,6 +9762,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
             self.reffId = dataMessages[indexPath.row]["message_id"] as? String
         } else {
+            // Restoring a saved draft that was replying to something: the message being
+            // quoted can be older than the page that is loaded, and without it the reply
+            // preview would quietly disappear from the draft.
+            ensureMessageLoaded(messageId: reffId)
             dataMessages = self.dataMessages.filter({ $0["message_id"]  as? String ?? "" == reffId })
             self.reffId = reffId
         }
@@ -8913,19 +9773,18 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             self.deleteReplyView()
             return
         }
+        let replyBarHeight = 50 + (self.offset() * 3)
         UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
-            self.constraintTopTextField.constant = self.constraintTopTextField.constant + 50 + (self.offset()*3)
+            self.constraintTopTextField.constant = self.constraintTopTextField.constant + replyBarHeight
             if self.contraintBottomMention.constant > 0 {
                 self.contraintBottomMention.constant = self.contraintBottomMention.constant + self.heightTextFieldSend.constant
             }
+            // Laid out first so the list already has its new height, then held in place - both
+            // inside the same animation, so the content and the bar move together rather than
+            // the list snapping first.
+            self.view.layoutIfNeeded()
+            self.keepScrollPosition(whenInputGrewBy: replyBarHeight)
         }, completion: nil)
-        if (self.currentIndexpath != nil) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                self.tableChatView.safeScrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
-            }
-        } else {
-            self.tableChatView.scrollToBottom()
-        }
         
         self.viewTextfield.addSubview(self.containerPreviewReply)
         self.containerPreviewReply.translatesAutoresizingMaskIntoConstraints = false
@@ -8939,6 +9798,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         self.bottomAnchorPreviewReply.isActive = true
         self.containerPreviewReply.trailingAnchor.constraint(equalTo: self.viewTextfield.trailingAnchor).isActive = true
         self.containerPreviewReply.backgroundColor = .secondaryColor
+        // The preview is now the bottom-most thing the button must clear.
+        self.refreshScrollToBottomButtonPlacement(animated: true)
         
         let leftReply = UIView()
         self.containerPreviewReply.addSubview(leftReply)
@@ -9073,76 +9934,79 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if textSearch.count < 2 {
             return
         }
-        var lastIndex = 0
-        let messageTextForSearch: [[String: Any?]] = self.dataMessages.reversed()
-        for idx in 0..<messageTextForSearch.count {
-            if (messageTextForSearch[idx]["message_text"]  as? String ?? "").lowercased().contains(textSearch) && !(messageTextForSearch[idx][TypeDataMessage.message_id] as? String ?? "").contains("NTFPIN_") && (messageTextForSearch[idx]["lock"] as? String ?? "") != "1" {
-                lastIndex += 1
-                if lastIndex < indexScroll {
-                    continue
-                }
-                lastScrollIdxSearch = lastIndex
-                let section = self.dataDates.firstIndex(of: messageTextForSearch[idx]["chat_date"]  as? String ?? "")
-                if section == nil {
-                    return
-                }
-                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == messageTextForSearch[idx]["message_id"]  as? String ?? ""})
-                if row == nil {
-                    return
-                }
-                let indexPath = IndexPath(row: row!, section: section!)
-                self.tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    if let cell = self.tableChatView.cellForRow(at: indexPath) {
-                        let containerMessage = cell.contentView.subviews[1]
-                        let idMe = User.getMyPin() as String?
-                        if (messageTextForSearch[idx]["f_pin"] as? String == idMe) {
-                            containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .blueBubbleColor
-                                }
-                            }
+        titleSearchMatches.isHidden = false
+        guard indexScroll >= 1, indexScroll <= searchMatchIds.count else {
+            if searchMatchIds.isEmpty {
+                titleSearchMatches.text = "Not found".localized()
+                buttonUp.isEnabled = false
+                buttonUp.tintColor = .gray
+                buttonDown.isEnabled = false
+                buttonDown.tintColor = .gray
+            }
+            return
+        }
+        let messageId = searchMatchIds[indexScroll - 1]
+        // A hit outside the loaded window is fetched the same way a quoted message is. When it
+        // had to be fetched the list underneath has just been rebuilt, so the jump is made
+        // without animation - animating from a position that no longer means anything is what
+        // looked like the screen jumping about.
+        let wasLoaded = dataMessages.contains(where: { $0["message_id"] as? String == messageId })
+        if !wasLoaded {
+            ensureMessageLoaded(messageId: messageId)
+        }
+        guard let indexPath = indexPath(forMessageId: messageId),
+              let message = dataMessages.first(where: { $0["message_id"] as? String == messageId }) else {
+            return
+        }
+        lastScrollIdxSearch = indexScroll
+        tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: wasLoaded)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if let cell = self.tableChatView.cellForRow(at: indexPath), cell.contentView.subviews.count > 1 {
+                let containerMessage = cell.contentView.subviews[1]
+                let idMe = User.getMyPin() as String?
+                if (message["f_pin"] as? String == idMe) {
+                    containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        if (message["attachment_flag"] as? String == "11") {
+                            containerMessage.backgroundColor = .clear
                         } else {
-                            containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (messageTextForSearch[idx]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .whiteBubbleColor
-                                }
-                            }
+                            containerMessage.backgroundColor = .blueBubbleColor
+                        }
+                    }
+                } else {
+                    containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        if (message["attachment_flag"] as? String == "11") {
+                            containerMessage.backgroundColor = .clear
+                        } else {
+                            containerMessage.backgroundColor = .whiteBubbleColor
                         }
                     }
                 }
-                titleSearchMatches.isHidden = false
-                if countMatchesSearch != 0 {
-                    if countMatchesSearch > 1 {
-                        titleSearchMatches.text = "\(lastScrollIdxSearch) " + "of".localized() + " \(countMatchesSearch) " + "matches".localized()
-                    } else {
-                        titleSearchMatches.text = "\(countMatchesSearch) " + "matches".localized()
-                    }
-                } else {
-                    titleSearchMatches.text = "Not found".localized()
-                }
-                if lastScrollIdxSearch == countMatchesSearch || countMatchesSearch == 0 {
-                    buttonUp.isEnabled = false
-                    buttonUp.tintColor = .gray
-                } else {
-                    buttonUp.isEnabled = true
-                    buttonUp.tintColor = .mainColor
-                }
-                if countMatchesSearch == 0 || lastScrollIdxSearch == 1 || countMatchesSearch == 1 {
-                    buttonDown.isEnabled = false
-                    buttonDown.tintColor = .gray
-                } else {
-                    buttonDown.isEnabled = true
-                    buttonDown.tintColor = .mainColor
-                }
-                break
             }
+        }
+        if countMatchesSearch != 0 {
+            if countMatchesSearch > 1 {
+                titleSearchMatches.text = "\(lastScrollIdxSearch) " + "of".localized() + " \(countMatchesSearch) " + "matches".localized()
+            } else {
+                titleSearchMatches.text = "\(countMatchesSearch) " + "matches".localized()
+            }
+        } else {
+            titleSearchMatches.text = "Not found".localized()
+        }
+        if lastScrollIdxSearch == countMatchesSearch || countMatchesSearch == 0 {
+            buttonUp.isEnabled = false
+            buttonUp.tintColor = .gray
+        } else {
+            buttonUp.isEnabled = true
+            buttonUp.tintColor = .mainColor
+        }
+        if countMatchesSearch == 0 || lastScrollIdxSearch == 1 || countMatchesSearch == 1 {
+            buttonDown.isEnabled = false
+            buttonDown.tintColor = .gray
+        } else {
+            buttonDown.isEnabled = true
+            buttonDown.tintColor = .mainColor
         }
     }
     
@@ -9183,7 +10047,13 @@ extension EditorGroup: UISearchBarDelegate {
             timerSearch = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {[self] _ in
                 textSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
                 titleSearchMatches.isHidden = true
-                countMatchesSearch = Chat.getCountSearchMessage(key: textSearch, pin: isHistoryCC ? complaintId : (self.dataGroup["group_id"] as? String) ?? "", chatId: (self.dataTopic["chat_id"] as? String) ?? "", scope: 4, isCC: isHistoryCC ? 1 : 0)
+                // The hits come from the database, so nothing has to be loaded to search and
+                // the reader stays exactly where they were reading. The count is the length of
+                // that list, which means the "x of N" can never disagree with what the arrows
+                // can actually reach.
+                searchMatchIds = searchMatches(for: textSearch)
+                countMatchesSearch = searchMatchIds.count
+                lastScrollIdxSearch = 0
                 tableChatView.reloadData()
                 scrollToFirstSearchMessage()
             })
@@ -9981,7 +10851,7 @@ extension EditorGroup {
 // - while the transfer itself carried on. Drawing it from cellForRow instead makes it a
 // function of the transfer's state, so whatever cell is showing that message draws the ring,
 // at the progress the transfer has actually reached.
-enum ChatTransferRing {
+public enum ChatTransferRing {
 
     // The progress layer is named so it can be found again on whatever cell is showing the
     // message when an update arrives, without having to guess at subview indexes.
@@ -10042,7 +10912,7 @@ enum ChatTransferRing {
         return chip
     }
 
-    static func add(to container: UIView, fileName: String, progress: Double) {
+    public static func add(to container: UIView, fileName: String, progress: Double) {
         let ring = UIView()
         ring.backgroundColor = .clear
         container.addSubview(ring)
@@ -10095,8 +10965,14 @@ enum ChatTransferRing {
 
     /// Updates the size caption on whichever cell is showing the transfer. Harmless when
     /// that cell has no caption, or is not on screen at all.
-    static func updateSizeText(forFileNamed name: String, in cell: UITableViewCell) {
-        guard let label = cell.contentView.viewWithTag(sizeLabelTag) as? UILabel else {
+    public static func updateSizeText(forFileNamed name: String, in cell: UITableViewCell) {
+        updateSizeText(forFileNamed: name, in: cell.contentView)
+    }
+
+    /// The same, for anything that is not a table cell - a collection view cell, or the box
+    /// inside a row.
+    public static func updateSizeText(forFileNamed name: String, in view: UIView) {
+        guard let label = view.viewWithTag(sizeLabelTag) as? UILabel else {
             return
         }
         label.text = sizeText(forFileNamed: name)
@@ -10106,8 +10982,14 @@ enum ChatTransferRing {
     // Moves the ring drawn into `cell`, if that cell has one. Returns false when it has not,
     // so the caller can fall back to whatever else knows how to draw progress there.
     @discardableResult
-    static func setProgress(_ progress: Double, in cell: UITableViewCell) -> Bool {
-        guard let loading = progressLayer(in: cell.contentView.layer) else {
+    public static func setProgress(_ progress: Double, in cell: UITableViewCell) -> Bool {
+        return setProgress(progress, in: cell.contentView)
+    }
+
+    /// The same, for anything that is not a table cell.
+    @discardableResult
+    public static func setProgress(_ progress: Double, in view: UIView) -> Bool {
+        guard let loading = progressLayer(in: view.layer) else {
             return false
         }
         // No implicit animation: these arrive about once per percent and the default
@@ -10129,5 +11011,392 @@ enum ChatTransferRing {
             }
         }
         return nil
+    }
+}
+
+/// WhatsApp-style horizontal drag on a chat row: pull it right to reply to that message, pull
+/// it left to open its info. The row follows the finger, springs back when it is let go, and
+/// the action only fires if the pull went far enough.
+///
+/// Driven by one pan gesture on the table rather than a recogniser per cell: these editors
+/// rebuild their cells from scratch on every reload, so anything attached to a cell has to be
+/// re-attached constantly and can be left behind on a recycled one. It also stays out of the
+/// table's way - it only begins for a clearly horizontal drag, so vertical scrolling is
+/// untouched.
+public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
+
+    public enum Direction {
+        /// Pulled to the right.
+        case reply
+        /// Pulled to the left.
+        case info
+    }
+
+    private weak var tableView: UITableView?
+    private let canPerform: (IndexPath, Direction) -> Bool
+    private let perform: (IndexPath, Direction) -> Void
+
+    private weak var activeCell: UITableViewCell?
+    private var activeIndexPath: IndexPath?
+    private var activeDirection: Direction = .reply
+    private var iconView: UIImageView?
+    private var didPassThreshold = false
+    /// Where the finger was when the pan was recognised. A pan only recognises after about ten
+    /// points of movement, so measuring from the touch's origin makes the row jump that far the
+    /// instant it starts moving; measuring from here it starts exactly under the finger.
+    private var beganTranslation: CGFloat = 0
+    private var feedback: UIImpactFeedbackGenerator?
+    private let push = InteractiveSidePush()
+
+    /// Where a leftward pull leads. Given one, the pull opens that screen the way WhatsApp does
+    /// - dragging it in from the right edge, and letting it fall back if the pull is abandoned -
+    /// rather than moving the row and pushing at the end.
+    public var infoDestination: ((IndexPath) -> (viewController: UIViewController, navigation: UINavigationController)?)?
+
+    /// How far the row can be pulled, and how far it has to be pulled for the action to fire.
+    private static let maxPull: CGFloat = 78
+    private static let threshold: CGFloat = 56
+    /// How much of the left edge is left to the system's back-swipe.
+    private static let backSwipeEdge: CGFloat = 40
+    /// Measured off WhatsApp's own badge.
+    private static let badgeSize: CGFloat = 29
+    /// How far across the screen the info drag has to get - or how fast it has to be flicked -
+    /// before letting go opens the screen rather than putting it back.
+    private static let pushCommitProgress: CGFloat = 0.33
+    private static let pushCommitVelocity: CGFloat = 700
+
+    public init(tableView: UITableView,
+                canPerform: @escaping (IndexPath, Direction) -> Bool,
+                perform: @escaping (IndexPath, Direction) -> Void) {
+        self.tableView = tableView
+        self.canPerform = canPerform
+        self.perform = perform
+        super.init()
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.delegate = self
+        tableView.addGestureRecognizer(pan)
+    }
+
+    @objc private func handlePan(_ sender: UIPanGestureRecognizer) {
+        guard let tableView = tableView else {
+            return
+        }
+        switch sender.state {
+        case .began:
+            let point = sender.location(in: tableView)
+            guard let indexPath = tableView.indexPathForRow(at: point),
+                  let cell = tableView.cellForRow(at: indexPath) else {
+                return
+            }
+            // The direction is decided once, from the way the drag started, and held for the
+            // rest of it - a row that follows the finger back and forth between two different
+            // actions is not something anyone can aim.
+            let direction: Direction = sender.velocity(in: tableView).x >= 0 ? .reply : .info
+            guard canPerform(indexPath, direction) else {
+                return
+            }
+            activeIndexPath = indexPath
+            activeCell = cell
+            activeDirection = direction
+            didPassThreshold = false
+            beganTranslation = sender.translation(in: direction == .info ? (tableView.window ?? tableView) : tableView).x
+            // Warmed up here so the tap of confirmation lands with the threshold, not after it.
+            feedback = UIImpactFeedbackGenerator(style: .medium)
+            feedback?.prepare()
+            // The row is being pulled sideways now; letting the list scroll underneath at the
+            // same time is what makes this feel loose rather than deliberate.
+            tableView.isScrollEnabled = false
+            if direction == .info,
+               let destination = infoDestination?(indexPath) {
+                // The screen starts coming in with the first movement, not at the end of it.
+                push.begin(pushing: destination.viewController, in: destination.navigation)
+                return
+            }
+            addIcon(to: cell, direction: direction)
+
+        case .changed:
+            guard let cell = activeCell else {
+                return
+            }
+            if push.isRunning {
+                // Measured against the window: the table is inside the screen being pushed
+                // aside, so a translation read in its own coordinates would be measured against
+                // a moving ruler.
+                let space = tableView.window ?? tableView
+                let travelled = max(0, beganTranslation - sender.translation(in: space).x)
+                push.update(travelled / max(space.bounds.width, 1))
+                return
+            }
+            let raw = sender.translation(in: tableView).x - beganTranslation
+            // Only the direction this drag started in counts; pulling back the other way just
+            // returns the row to where it was.
+            let travelled = activeDirection == .reply ? max(0, raw) : max(0, -raw)
+            // Past the limit the row keeps moving, but barely - the same resistance a scroll
+            // view gives at its edge, so the pull feels bounded without feeling stuck.
+            let pulled = travelled <= ChatBubbleSwipe.maxPull
+                ? travelled
+                : ChatBubbleSwipe.maxPull + (travelled - ChatBubbleSwipe.maxPull) * 0.15
+            offset(cell: cell, by: activeDirection == .reply ? pulled : -pulled)
+            updateIcon(progress: min(pulled / ChatBubbleSwipe.threshold, 1))
+            if pulled >= ChatBubbleSwipe.threshold {
+                if !didPassThreshold {
+                    didPassThreshold = true
+                    // The same confirmation WhatsApp gives: by the time the finger lifts the
+                    // reader already knows the action took.
+                    feedback?.impactOccurred()
+                    feedback?.prepare()
+                }
+            } else {
+                didPassThreshold = false
+            }
+
+        case .ended:
+            if push.isRunning {
+                let space = tableView.window ?? tableView
+                let travelled = max(0, beganTranslation - sender.translation(in: space).x)
+                let progress = travelled / max(space.bounds.width, 1)
+                // Far enough across, or thrown hard enough that stopping short would be a
+                // surprise - the same two ways the system's own back-swipe commits.
+                if progress >= ChatBubbleSwipe.pushCommitProgress || -sender.velocity(in: space).x >= ChatBubbleSwipe.pushCommitVelocity {
+                    push.finish()
+                } else {
+                    push.cancel()
+                }
+                finish()
+                return
+            }
+            let shouldPerform = didPassThreshold
+            let indexPath = activeIndexPath
+            let direction = activeDirection
+            finish()
+            if shouldPerform, let indexPath = indexPath {
+                perform(indexPath, direction)
+            }
+
+        default:
+            if push.isRunning {
+                push.cancel()
+            }
+            finish()
+        }
+    }
+
+    /// Moves what the row draws, sideways.
+    ///
+    /// Fix: this used to transform `cell.contentView`. A table view sets that view's *frame* on
+    /// every layout pass, and setting a frame on a view that carries a transform recomputes its
+    /// bounds and centre to satisfy that frame - which quietly cancels the translation, so the
+    /// bubble never appeared to move. Auto Layout positions ordinary subviews by their centre
+    /// and bounds instead, and leaves a transform alone, so moving them is what actually shows.
+    private func offset(cell: UITableViewCell, by dx: CGFloat) {
+        let transform = dx == 0 ? CGAffineTransform.identity : CGAffineTransform(translationX: dx, y: 0)
+        for view in cell.contentView.subviews {
+            view.transform = transform
+        }
+    }
+
+    /// The round badge WhatsApp shows behind the row while it is being pulled: a filled circle
+    /// with a white arrow in it, not a bare glyph.
+    private func addIcon(to cell: UITableViewCell, direction: Direction) {
+        iconView?.removeFromSuperview()
+        let isDark = cell.traitCollection.userInterfaceStyle == .dark
+        let badge = UIImageView()
+        badge.backgroundColor = UIColor(white: isDark ? 0.26 : 0.60, alpha: 0.95)
+        badge.layer.cornerRadius = ChatBubbleSwipe.badgeSize / 2
+        badge.clipsToBounds = true
+        badge.contentMode = .center
+        badge.image = UIImage(systemName: direction == .reply ? "arrowshape.turn.up.left.fill" : "info.circle.fill",
+                              withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold))?
+            .withTintColor(.white, renderingMode: .alwaysOriginal)
+        badge.alpha = 0
+        // On the cell rather than its content view: the content view's subviews are what move,
+        // and they are transparent around the bubble, so the badge sits in the space the bubble
+        // leaves behind as it is pulled across.
+        cell.insertSubview(badge, at: 0)
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            badge.widthAnchor.constraint(equalToConstant: ChatBubbleSwipe.badgeSize),
+            badge.heightAnchor.constraint(equalToConstant: ChatBubbleSwipe.badgeSize),
+            direction == .reply
+                ? badge.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 14)
+                : badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -14)
+        ])
+        iconView = badge
+    }
+
+    private func updateIcon(progress: CGFloat) {
+        guard let icon = iconView else {
+            return
+        }
+        icon.alpha = progress
+        let scale = 0.6 + 0.4 * progress
+        // Drifts in behind the row rather than sitting still, so the two move together.
+        let drift = (activeDirection == .reply ? -1 : 1) * 10 * (1 - progress)
+        icon.transform = CGAffineTransform(translationX: drift, y: 0).scaledBy(x: scale, y: scale)
+    }
+
+    private func finish() {
+        tableView?.isScrollEnabled = true
+        feedback = nil
+        let cell = activeCell
+        let icon = iconView
+        activeCell = nil
+        activeIndexPath = nil
+        iconView = nil
+        didPassThreshold = false
+        UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.5, options: [.allowUserInteraction], animations: {
+            if let cell = cell {
+                self.offset(cell: cell, by: 0)
+            }
+            icon?.alpha = 0
+        }, completion: { _ in
+            icon?.removeFromSuperview()
+        })
+        // Insurance: a cell recycled mid-drag would otherwise be reused still holding the
+        // translation of the row that was being pulled - a row sitting visibly off to one side.
+        for visible in tableView?.visibleCells ?? [] {
+            offset(cell: visible, by: 0)
+        }
+    }
+
+    // MARK: - UIGestureRecognizerDelegate
+
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer, let tableView = tableView else {
+            return false
+        }
+        let velocity = pan.velocity(in: tableView)
+        // Sideways, or this is a scroll and none of our business.
+        guard abs(velocity.x) > abs(velocity.y) else {
+            return false
+        }
+        let location = pan.location(in: tableView)
+        let direction: Direction = velocity.x >= 0 ? .reply : .info
+        // Fix: the left edge belongs to the navigation controller's back-swipe. Incoming
+        // bubbles sit close to that edge, so a pull on one used to start the pop transition
+        // instead of a reply - two gestures reading the same drag. Starting further in is a
+        // reply; starting on the edge is still "go back", the way it is everywhere else.
+        if direction == .reply, location.x < ChatBubbleSwipe.backSwipeEdge {
+            return false
+        }
+        guard let indexPath = tableView.indexPathForRow(at: location) else {
+            return false
+        }
+        return canPerform(indexPath, direction)
+    }
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Only the table's own scrolling. Sharing the drag with anything else - the back-swipe
+        // above all - is how one gesture ends up doing two things at once.
+        return otherGestureRecognizer === tableView?.panGestureRecognizer
+    }
+}
+
+
+/// A push that follows the finger, the way WhatsApp opens message info from a chat: the next
+/// screen slides in from the right as the row is pulled left, and slides back out again if the
+/// pull is abandoned before it commits.
+///
+/// The navigation controller's own delegate is borrowed only while a drag is in flight and put
+/// back afterwards, so nothing else in the app has to know this exists.
+public final class InteractiveSidePush: NSObject, UINavigationControllerDelegate, UIViewControllerAnimatedTransitioning {
+
+    private weak var navigation: UINavigationController?
+    private var interaction: UIPercentDrivenInteractiveTransition?
+    private weak var previousDelegate: UINavigationControllerDelegate?
+
+    public var isRunning: Bool {
+        return interaction != nil
+    }
+
+    public func begin(pushing viewController: UIViewController, in navigationController: UINavigationController) {
+        guard interaction == nil else {
+            return
+        }
+        navigation = navigationController
+        previousDelegate = navigationController.delegate
+        navigationController.delegate = self
+        let driver = UIPercentDrivenInteractiveTransition()
+        driver.completionCurve = .easeOut
+        interaction = driver
+        navigationController.pushViewController(viewController, animated: true)
+    }
+
+    public func update(_ progress: CGFloat) {
+        interaction?.update(min(max(progress, 0), 1))
+    }
+
+    public func finish() {
+        interaction?.finish()
+        release()
+    }
+
+    public func cancel() {
+        interaction?.cancel()
+        release()
+    }
+
+    private func release() {
+        interaction = nil
+        navigation?.delegate = previousDelegate
+        previousDelegate = nil
+    }
+
+    // MARK: - UINavigationControllerDelegate
+
+    public func navigationController(_ navigationController: UINavigationController,
+                                     animationControllerFor operation: UINavigationController.Operation,
+                                     from fromVC: UIViewController,
+                                     to toVC: UIViewController) -> UIViewControllerAnimatedTransitioning? {
+        // Only the push this object started; everything else keeps the system's own animation.
+        return operation == .push && interaction != nil ? self : nil
+    }
+
+    public func navigationController(_ navigationController: UINavigationController,
+                                     interactionControllerFor animationController: UIViewControllerAnimatedTransitioning) -> UIViewControllerInteractiveTransitioning? {
+        return interaction
+    }
+
+    // MARK: - UIViewControllerAnimatedTransitioning
+
+    public func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
+        return 0.32
+    }
+
+    public func animateTransition(using transitionContext: UIViewControllerContextTransitioning) {
+        guard let fromView = transitionContext.view(forKey: .from) ?? transitionContext.viewController(forKey: .from)?.view,
+              let toView = transitionContext.view(forKey: .to) ?? transitionContext.viewController(forKey: .to)?.view else {
+            transitionContext.completeTransition(false)
+            return
+        }
+        let container = transitionContext.containerView
+        let width = container.bounds.width
+        toView.frame = container.bounds
+        toView.transform = CGAffineTransform(translationX: width, y: 0)
+        container.addSubview(toView)
+
+        // The same parallax the system's push uses: the screen being left behind drifts a third
+        // of the way, under a slight dim, so the two read as a stack rather than a swap.
+        let dim = UIView(frame: container.bounds)
+        dim.backgroundColor = .black
+        dim.alpha = 0
+        container.insertSubview(dim, belowSubview: toView)
+
+        // Linear: an interactive transition is scrubbed by the finger, and any other curve makes
+        // the screen lag behind or run ahead of it.
+        UIView.animate(withDuration: transitionDuration(using: transitionContext), delay: 0, options: [.curveLinear], animations: {
+            toView.transform = .identity
+            fromView.transform = CGAffineTransform(translationX: -width / 3, y: 0)
+            dim.alpha = 0.1
+        }, completion: { _ in
+            let cancelled = transitionContext.transitionWasCancelled
+            fromView.transform = .identity
+            dim.removeFromSuperview()
+            if cancelled {
+                toView.removeFromSuperview()
+            }
+            transitionContext.completeTransition(!cancelled)
+        })
     }
 }

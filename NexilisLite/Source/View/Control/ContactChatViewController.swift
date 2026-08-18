@@ -35,6 +35,12 @@ class ContactChatViewController: UITableViewController {
     var groupMap: [String:Int] = [:]
     
     var searchController: UISearchController!
+
+    // Search by what a message carries - photos, documents, links and so on - alongside the
+    // plain text search. The chips sit under the segmented control and the results cover the
+    // table while a filter is on. All of it belongs to the component; see ChatTagSearch.
+    private let tagSearch = ChatTagSearch()
+    private var tagSearchHeader: UIStackView!
     
     var segment: UISegmentedControl!
     
@@ -45,18 +51,130 @@ class ContactChatViewController: UITableViewController {
     }
     
     var isFiltering: Bool {
-        return !isSearchBarEmpty
+        // The unread filter fills fillteredData too, and it can be on with an empty search
+        // box - so "filtering" is not only about the words typed.
+        return !isSearchBarEmpty || tagSearch.selectedTag == ChatTagSearch.unreadTag
     }
     
     var noData = false
     
     var loadingData = true
     var isGettingData = false
+    // Whether the recursive walk over GROUPZ is in flight. The chats and contacts do not wait
+    // for it, so without this a refresh arriving meanwhile would start a second walk on top.
+    private var isGettingGroups = false
+    // When the open-group list was last fetched from the server, for the throttle below.
+    private var lastOpenGroupsFetch: Date?
+    // Callers waiting to be told that the list has finished reloading (see ChatListTab).
+    private var pendingReloadCompletions: [() -> Void] = []
     var timerReloadData: Timer?
     
     var noUCList = false
     
+    /// Puts the segmented control and the tag chips in a bar that stays put, and the tag
+    /// results underneath it.
+    ///
+    /// The bar used to be the table's header view, which meant the results - drawn over the
+    /// table - covered the chips as soon as a filter was picked, leaving no way to change it
+    /// or turn it off. Pinned to the scroll view's frame guide it stays where it is, both
+    /// while the list scrolls and while the results are up.
+    private func setUpTagSearch() {
+        tagSearch.delegate = self
+        tagSearch.presenter = self
+        tagSearch.onTagChanged = { [weak self] tag in
+            guard let self = self else { return }
+            // While a filter is on the component draws the results; the table underneath is
+            // left alone so it is still there when the filter is turned off again.
+            self.tableView.isScrollEnabled = !self.tagSearch.isShowingResults
+            // The results are drawn on a transparent background, so this list has to stop
+            // drawing rows of its own underneath them.
+            self.tableView.reloadData()
+        }
+
+        tagSearchHeader = UIStackView(arrangedSubviews: [segment, tagSearch.chipsView])
+        tagSearchHeader.axis = .vertical
+        tagSearchHeader.spacing = 8
+        tagSearchHeader.isLayoutMarginsRelativeArrangement = true
+        tagSearchHeader.layoutMargins = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        tagSearchHeader.backgroundColor = traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        tagSearch.chipsView.heightAnchor.constraint(equalToConstant: 40).isActive = true
+
+        // This is a UITableViewController, so `view` IS the table view. The scroll view's
+        // frame guide is the part of it that stays still while the content moves.
+        tableView.addSubview(tagSearchHeader)
+        tagSearchHeader.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            tagSearchHeader.leadingAnchor.constraint(equalTo: tableView.frameLayoutGuide.leadingAnchor),
+            tagSearchHeader.trailingAnchor.constraint(equalTo: tableView.frameLayoutGuide.trailingAnchor),
+            tagSearchHeader.topAnchor.constraint(equalTo: tableView.frameLayoutGuide.topAnchor)
+        ])
+
+        tableView.addSubview(tagSearch.resultsView)
+        tagSearch.resultsView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            tagSearch.resultsView.leadingAnchor.constraint(equalTo: tableView.frameLayoutGuide.leadingAnchor),
+            tagSearch.resultsView.trailingAnchor.constraint(equalTo: tableView.frameLayoutGuide.trailingAnchor),
+            tagSearch.resultsView.topAnchor.constraint(equalTo: tagSearchHeader.bottomAnchor),
+            tagSearch.resultsView.bottomAnchor.constraint(equalTo: tableView.frameLayoutGuide.bottomAnchor)
+        ])
+        // Transparent so the screen's own background carries on behind the filter results,
+        // instead of a flat panel dropping over it whenever a filter is picked.
+        tagSearch.resultsView.backgroundColor = .clear
+
+        tableView.tableHeaderView = nil
+        updateTagSearchAvailability()
+    }
+
+    /// The bar floats over the list, so the list is inset by however tall it currently is.
+    private func sizeTagSearchHeader() {
+        guard let header = tagSearchHeader else {
+            return
+        }
+        header.layoutIfNeeded()
+        let height = header.frame.height > 0 ? header.frame.height : header.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height
+        if abs(tableView.contentInset.top - height) > 0.5 {
+            let wasAtTop = tableView.contentOffset.y <= -tableView.contentInset.top + 1
+            tableView.contentInset.top = height
+            tableView.verticalScrollIndicatorInsets.top = height
+            if wasAtTop {
+                tableView.contentOffset.y = -height
+            }
+        }
+        tableView.bringSubviewToFront(header)
+    }
+
+    public override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        sizeTagSearchHeader()
+    }
+
+    /// The chips filter conversations by what they carry, which only means anything for the
+    /// Chats segment - there is nothing to filter by attachment among contacts or forums. On
+    /// that segment they stay put whether or not a search is running, so a filter can be
+    /// picked without opening the search first.
+    private func updateTagSearchAvailability() {
+        let shouldShow = segment.numberOfSegments == 3 && segment.selectedSegmentIndex == 0
+        // Any filter, not only the ones the component draws: the unread filter leaves its
+        // conversations in fillteredData, and the contacts segment reads that same array as
+        // users - which would be a crash, not a wrong row.
+        if !shouldShow, tagSearch.selectedTag != 0 {
+            // reset() reports back through onTagChanged, which is what puts scrolling right.
+            tagSearch.reset()
+        }
+        if tagSearch.chipsView.isHidden != !shouldShow {
+            tagSearch.chipsView.isHidden = !shouldShow
+        }
+        sizeTagSearchHeader()
+    }
+
     func filterContentForSearchText(_ searchText: String) {
+        // With a filter on, the results are the filter's answer - drawn by the component for
+        // the attachment filters, handed to this list for the unread one. Either way the plain
+        // text search below must not overwrite them.
+        tagSearch.setSearchText(searchText)
+        if tagSearch.selectedTag != 0 {
+            return
+        }
         func filterContact() {
             Utils.inTabChats = false
             fillteredData = self.contacts.filter { $0.fullName.lowercased().contains(searchText.lowercased()) }
@@ -176,6 +294,10 @@ class ContactChatViewController: UITableViewController {
         searchController.searchBar.autocapitalizationType = .none
         searchController.searchBar.delegate = self
         searchController.obscuresBackgroundDuringPresentation = false
+        // Left at its default of true, UIKit hides the navigation bar while the search is up -
+        // and pushing a screen from a search result leaves it hidden for good, which is how
+        // the Cancel button and the title went missing after coming back from the Editor.
+        searchController.hidesNavigationBarDuringPresentation = false
 //        searchController.searchBar.setMagnifyingGlassColorTo(color: .white)
 //        searchController.searchBar.updateHeight(height: 36, radius: 18)
         searchController.searchBar.setImage(UIImage(), for: .search, state: .normal)
@@ -211,7 +333,7 @@ class ContactChatViewController: UITableViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(onDisconnected(notification:)), name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onDatabaseOpened(notification:)), name: NSNotification.Name(rawValue: "databaseOpened"), object: nil)
         
-        tableView.tableHeaderView = segment
+        setUpTagSearch()
         tableView.tableFooterView = UIView()
         
         pullBuddy()
@@ -249,29 +371,35 @@ class ContactChatViewController: UITableViewController {
             self.navigationController?.navigationBar.setNeedsLayout()
         }
         getData()
-        DispatchQueue.global().async {
-            self.getOpenGroups(listGroups: self.groups, completion: { g in
-                DispatchQueue.main.async {
-                    self.groups.removeAll(where: { $0.isOpen == "1" && $0.groupType == "NOTJOINED" })
-                    for og in g {
-                        if self.groups.first(where: { $0.id == og.id }) == nil {
-                            self.groups.append(og)
-                        }
-                    }
-                    self.groups.sort { (a, b) -> Bool in
-                        if Int(a.official) == 1 {
-                            return true
-                        } else if Int(b.official) == 1 {
-                            return false
-                        } else {
-                            return Int(a.official) ?? 0 > Int(b.official) ?? 0
-                        }
-                    }
+        // Fetching the open groups is a blocking round trip to the server (up to four
+        // attempts) that ends in a full table reload, and this runs every time the screen
+        // appears. Once a minute is plenty for a list that barely changes.
+        let now = Date()
+        let isOpenGroupsFresh = lastOpenGroupsFetch.map { now.timeIntervalSince($0) < 60 } ?? false
+        if !isOpenGroupsFresh {
+            lastOpenGroupsFetch = now
+            DispatchQueue.global().async {
+                self.getOpenGroups(listGroups: self.groups, completion: { g in
                     DispatchQueue.main.async {
+                        self.groups.removeAll(where: { $0.isOpen == "1" && $0.groupType == "NOTJOINED" })
+                        for og in g {
+                            if self.groups.first(where: { $0.id == og.id }) == nil {
+                                self.groups.append(og)
+                            }
+                        }
+                        self.groups.sort { (a, b) -> Bool in
+                            if Int(a.official) == 1 {
+                                return true
+                            } else if Int(b.official) == 1 {
+                                return false
+                            } else {
+                                return Int(a.official) ?? 0 > Int(b.official) ?? 0
+                            }
+                        }
                         self.tableView.reloadData()
                     }
-                }
-            })
+                })
+            }
         }
         APIS.setDataForShareExtension()
     }
@@ -298,10 +426,16 @@ class ContactChatViewController: UITableViewController {
 //        tableView.reloadData()
 //    }
     
-    private func reloadAllData() {
+    private func reloadAllData(completion: (() -> Void)? = nil) {
 //        print("reloadAllData")
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self = self else {
+                completion?()
+                return
+            }
+            if let completion = completion {
+                self.pendingReloadCompletions.append(completion)
+            }
             if self.timerReloadData == nil && !self.isGettingData {
                 self.getData()
             } else {
@@ -368,6 +502,7 @@ class ContactChatViewController: UITableViewController {
     }
     
     @objc func segmentChanged(sender: Any) {
+        updateTagSearchAvailability()
         switch segment.selectedSegmentIndex {
         case 0:
             if segment.numberOfSegments == 3 {
@@ -439,7 +574,24 @@ class ContactChatViewController: UITableViewController {
         }
         getChats {
             self.getContacts {
+                // The groups only feed the Forums segment, and reading them means a recursive
+                // walk over GROUPZ. Wait for it when that segment is what is on screen (or
+                // when there is nothing there yet to draw), otherwise put the chats and
+                // contacts up as soon as they are ready and let the walk catch up behind them.
+                let groupsSegmentIndex = self.segment.numberOfSegments == 3 ? 2 : 1
+                let waitsForGroups = self.segment.selectedSegmentIndex == groupsSegmentIndex || self.groups.isEmpty
+                if !waitsForGroups {
+                    self.finishGettingData()
+                    if self.isGettingGroups {
+                        // The walk already running will publish for both of us.
+                        return
+                    }
+                }
+                self.isGettingGroups = true
                 self.getGroups { g1 in
+                    DispatchQueue.main.async {
+                        self.isGettingGroups = false
+                    }
                     self.groupMap.removeAll()
                     self.groups = g1
                     self.groups.sort { (a, b) -> Bool in
@@ -451,12 +603,36 @@ class ContactChatViewController: UITableViewController {
                             return Int(a.official) ?? 0 > Int(b.official) ?? 0
                         }
                     }
-                    DispatchQueue.main.async {
-                        self.tableView.reloadData()
-                        self.isGettingData = false
+                    if waitsForGroups {
+                        self.finishGettingData()
+                    } else {
+                        DispatchQueue.main.async {
+                            self.tableView.reloadData()
+                        }
                     }
                 }
             }
+        }
+    }
+
+    // Puts whatever was just read on screen and releases anyone waiting on the reload.
+    private func finishGettingData() {
+        DispatchQueue.main.async {
+            self.tableView.reloadData()
+            self.loadingData = false
+            self.isGettingData = false
+            self.flushReloadCompletions()
+        }
+    }
+
+    // Called once the table has been reloaded with the fresh data, from whichever run of
+    // getData() got there - a request that arrived while another was already running is
+    // answered by that one rather than starting a second pass over the database.
+    private func flushReloadCompletions() {
+        let completions = pendingReloadCompletions
+        pendingReloadCompletions.removeAll()
+        for completion in completions {
+            completion()
         }
     }
     
@@ -466,11 +642,15 @@ class ContactChatViewController: UITableViewController {
 //                Thread.sleep(forTimeInterval: 0.1)
 //            }
             self.isGettingData = true
-            self.chatGroupMaps.removeAll()
-            self.listMaxArchived.removeAll()
+            // Built here, handed over on the main thread at the end. These are read while the
+            // table draws, and filling them in from this thread is a race with it.
+            var newChatGroupMaps: [String: [Chat]] = [:]
+            var newListMaxArchived: [String: [String]] = [:]
             let previousChat = self.chats
             let allChats = Chat.getData()
-            self.archivedChats = Chat.getData(isArchived: true)
+            // Only worth running the second (equally large) query when something is actually
+            // archived - which for most accounts is never.
+            let newArchivedChats = Chat.hasArchived() ? Chat.getData(isArchived: true) : []
             var tempChats: [Chat] = []
             var lowestPinned: [String: Int64] = [:]
 
@@ -478,16 +658,16 @@ class ContactChatViewController: UITableViewController {
                 guard !singleChat.groupId.isEmpty else {
                     tempChats.append(singleChat)
                     if singleChat.pinned > 0 {
-                        self.listMaxArchived[singleChat.pin] = [""]
+                        newListMaxArchived[singleChat.pin] = [""]
                     }
                     continue
                 }
                 
                 let chatParentInPreviousChats = previousChat.first { $0.isParent && $0.groupId == singleChat.groupId }
                 
-                if var existingGroup = self.chatGroupMaps[singleChat.groupId] {
+                if var existingGroup = newChatGroupMaps[singleChat.groupId] {
                     existingGroup.insert(singleChat, at: 0)
-                    self.chatGroupMaps[singleChat.groupId] = existingGroup
+                    newChatGroupMaps[singleChat.groupId] = existingGroup
                     
                     if let parentChatIndex = tempChats.firstIndex(where: { $0.groupId == singleChat.groupId && $0.isParent }) {
                         if let counterParent = Int(tempChats[parentChatIndex].counter), let counterSingle = Int(singleChat.counter) {
@@ -497,10 +677,10 @@ class ContactChatViewController: UITableViewController {
                             lowestPinned[singleChat.groupId] = singleChat.pinned
                         }
                         if singleChat.pinned != 0 {
-                            if !self.listMaxArchived.keys.contains(singleChat.groupId) {
-                                self.listMaxArchived[singleChat.groupId] = [singleChat.pin]
+                            if !newListMaxArchived.keys.contains(singleChat.groupId) {
+                                newListMaxArchived[singleChat.groupId] = [singleChat.pin]
                             } else {
-                                self.listMaxArchived[singleChat.groupId]?.append(singleChat.pin)
+                                newListMaxArchived[singleChat.groupId]?.append(singleChat.pin)
                             }
                         }
                         if tempChats[parentChatIndex].pinned < singleChat.pinned {
@@ -531,13 +711,13 @@ class ContactChatViewController: UITableViewController {
                     if singleChat.pinned != 0 {
                         lowestPinned[singleChat.groupId] = singleChat.pinned
                     }
-                    self.chatGroupMaps[singleChat.groupId] = [singleChat]
+                    newChatGroupMaps[singleChat.groupId] = [singleChat]
                     let parentChat = Chat(profile: singleChat.profile, groupName: singleChat.groupName, counter: singleChat.counter, groupId: singleChat.groupId)
                     parentChat.isParent = true
                     
                     if parentChat.pinned != singleChat.pinned {
                         parentChat.pinned = singleChat.pinned
-                        self.listMaxArchived[singleChat.groupId] = [singleChat.pin]
+                        newListMaxArchived[singleChat.groupId] = [singleChat.pin]
                     }
                     
                     if let parentExist = chatParentInPreviousChats, parentExist.isSelected {
@@ -553,11 +733,16 @@ class ContactChatViewController: UITableViewController {
                 tempChats.removeAll(where: { $0.pin == "-997" })
             }
             tempChats.sort(by: { $0.pinned > $1.pinned })
-            if self.archivedChats.count > 0 {
+            if newArchivedChats.count > 0 {
                 tempChats.insert(Chat(pin: "Archived"), at: 0)
             }
-            self.chats = tempChats
-            completion()
+            DispatchQueue.main.async {
+                self.chats = tempChats
+                self.chatGroupMaps = newChatGroupMaps
+                self.listMaxArchived = newListMaxArchived
+                self.archivedChats = newArchivedChats
+                completion()
+            }
         }
     }
     
@@ -601,7 +786,12 @@ class ContactChatViewController: UITableViewController {
         }
     }
     
-    private func getGroupRecursive(fmdb: FMDatabase, id: String = "", parent: String = "") -> [Group] {
+    // `parentsNeedingRefresh` collects the groups the server should be asked about. They are
+    // gathered here and sent afterwards rather than from inside the walk: Nexilis.write()
+    // blocks on the socket (up to its 15s timeout) and this runs inside a database
+    // transaction, so a request per row held the whole database queue - and with it every
+    // other screen's queries - for as long as the network felt like taking.
+    private func getGroupRecursive(fmdb: FMDatabase, id: String = "", parent: String = "", parentsNeedingRefresh: inout Set<String>) -> [Group] {
         var data: [Group] = []
         var query = "select g.group_id, g.f_name, g.image_id, g.quote, g.created_by, g.created_date, g.parent, g.group_type, g.is_open, g.official, g.is_education, g.level, g.chat_modifier from GROUPZ g where "
         if id.isEmpty {
@@ -653,8 +843,10 @@ class ContactChatViewController: UITableViewController {
                     topicCursor.close()
                 }
                 
+                // One request per parent, not one per row: every row of this level asked the
+                // server the exact same question.
                 if !parent.isEmpty {
-                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getRequestGroupWithoutMemberFromParent(fPin: User.getMyPin() ?? "", groupId: parent))
+                    parentsNeedingRefresh.insert(parent)
                 }
                 
                 if !group.id.isEmpty {
@@ -670,7 +862,7 @@ class ContactChatViewController: UITableViewController {
 //                    } else if group.official != "1"{
 //                        group.childs.append(contentsOf: getGroupRecursive(fmdb: fmdb, parent: group.id))
 //                    }
-                    group.childs.append(contentsOf: getGroupRecursive(fmdb: fmdb, parent: group.id))
+                    group.childs.append(contentsOf: getGroupRecursive(fmdb: fmdb, parent: group.id, parentsNeedingRefresh: &parentsNeedingRefresh))
 //                    group.childs = group.childs.sorted(by: { $0.name < $1.name })
 //                    let dataLounge = group.childs.filter({$0.name == "Lounge".localized()})
 //                    group.childs = group.childs.filter({ $0.name != "Lounge".localized() })
@@ -725,14 +917,30 @@ class ContactChatViewController: UITableViewController {
     
     private func getGroups(id: String = "", parent: String = "", completion: @escaping ([Group]) -> ()) {
         DispatchQueue.global().async {
+            var groups: [Group] = []
+            var parentsNeedingRefresh: Set<String> = []
             Database.shared.database?.inTransaction({ fmdb, rollback in
-                do {
-                    completion(self.getGroupRecursive(fmdb: fmdb, id: id, parent: parent))
-                } catch {
-                    rollback.pointee = true
-                    print("Access database error: \(error.localizedDescription)")
-                }
+                groups = self.getGroupRecursive(fmdb: fmdb, id: id, parent: parent, parentsNeedingRefresh: &parentsNeedingRefresh)
             })
+            self.requestGroupsWithoutMember(for: parentsNeedingRefresh)
+            // Outside the transaction: whatever the caller does next - and it reloads a table
+            // view - no longer runs with the database queue held.
+            // It is also called when there is no database yet, because a completion that is
+            // never called leaves isGettingData stuck at true and kills every later refresh.
+            completion(groups)
+        }
+    }
+
+    /// Asks the server for the groups under each parent, off the database queue and off
+    /// whatever thread is waiting for the list.
+    private func requestGroupsWithoutMember(for parents: Set<String>) {
+        guard !parents.isEmpty, let me = User.getMyPin() else {
+            return
+        }
+        DispatchQueue.global(qos: .utility).async {
+            for parent in parents {
+                _ = Nexilis.write(message: CoreMessage_TMessageBank.getRequestGroupWithoutMemberFromParent(fPin: me, groupId: parent))
+            }
         }
     }
     
@@ -847,12 +1055,16 @@ extension ContactChatViewController {
                     let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
                     editorPersonalVC.hidesBottomBarWhenPushed = true
                     editorPersonalVC.unique_l_pin = data.pin
+                    // A row that came out of a search or a filter stands for one message, so
+                    // the Editor opens at it rather than at the end of the conversation.
+                    editorPersonalVC.referenceMessageId = (isFiltering && !fillteredData.isEmpty) ? data.messageId : ""
                     navigationController?.show(editorPersonalVC, sender: nil)
                 } else {
                     groupMap.removeAll()
                     let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorGroupVC") as! EditorGroup
                     editorGroupVC.hidesBottomBarWhenPushed = true
                     editorGroupVC.unique_l_pin = data.pin
+                    editorGroupVC.referenceMessageId = (isFiltering && !fillteredData.isEmpty) ? data.messageId : ""
                     navigationController?.show(editorGroupVC, sender: nil)
                 }
             case 1:
@@ -1132,6 +1344,11 @@ extension ContactChatViewController {
 extension ContactChatViewController {
     
     override func numberOfSections(in tableView: UITableView) -> Int {
+        // The filter's own results cover this list completely while they are up. They are
+        // transparent, so anything drawn here would show straight through them.
+        if tagSearch.isShowingResults {
+            return 0
+        }
         if isFiltering {
             if ((segment.numberOfSegments == 3 && segment.selectedSegmentIndex == 2) || (segment.numberOfSegments < 3 && segment.selectedSegmentIndex == 1)) {
                 return fillteredData.count
@@ -1147,6 +1364,9 @@ extension ContactChatViewController {
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         var value = 0
+        if tagSearch.isShowingResults {
+            return 0
+        }
         if isFiltering {
             func filterGroup(groups: [Group]) {
                 let group = groups[section]
@@ -1661,10 +1881,11 @@ extension ContactChatViewController {
                                     if status == "0" {
                                         imageStatus.image = UIImage(systemName: "xmark.circle")!.withTintColor(UIColor.red, renderingMode: .alwaysOriginal)
                                     }
-//                                    else if status == "1" {
-//                                        imageStatus.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
-//                                    }
-                                    else if status == "1" || status == "2" {
+                                    else if status == "1" {
+                                        imageStatus.image = UIImage(systemName: "clock.arrow.circlepath")!.withTintColor(UIColor.lightGray, renderingMode: .alwaysOriginal)
+
+                                    }
+                                    else if status == "2" {
                                         imageStatus.image = UIImage(named: "checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
                                     } else if (status == "3") {
                                         imageStatus.image = UIImage(named: "double-checklist", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(UIColor.lightGray)
@@ -2034,10 +2255,90 @@ extension ContactChatViewController {
 }
 
 
+extension ContactChatViewController: ChatTagSearchDelegate {
+
+    /// The unread filter hands its conversations over to be drawn by this list, so they look
+    /// exactly like the rows around them.
+    func chatTagSearch(_ search: ChatTagSearch, showConversations chats: [Chat]) {
+        fillteredData = chats
+        tableView.reloadData()
+    }
+
+    /// Opens what was tapped in the filter results, the same way the chat list itself does:
+    /// the conversation it belongs to, positioned at that very message.
+    func chatTagSearch(_ search: ChatTagSearch, didSelect chat: Chat) {
+        // A result found by attachment carries the conversation in `pin`, but for a message I
+        // sent that column can come back empty - the sender is then the other side of it.
+        // Returning quietly here is what "the tap does nothing" looks like.
+        if chat.pin.isEmpty {
+            chat.pin = chat.fpin
+        }
+        if chat.pin.isEmpty {
+            return
+        }
+        // The search is left exactly as it is - the words typed, the filter chosen, the
+        // results found - and only the keyboard is put away. Closing it here raced with the
+        // push: the dismissal swallowed it, so the tap did nothing but reset the search.
+        // The navigation bar survives this because it is no longer hidden while searching.
+        searchController.searchBar.resignFirstResponder()
+        openFromTagResult(chat)
+    }
+
+    private func openFromTagResult(_ chat: Chat) {
+        // A chooser is picking a conversation to hand back, not opening one.
+        if let chooser = isChooser {
+            if chat.pin == "-999" {
+                return
+            }
+            var exblock = User.getDataCanNil(pin: chat.pin)?.ex_block
+            exblock = exblock == nil ? "0" : exblock!.isEmpty ? "0" : exblock!
+            if exblock != "0" {
+                self.view.makeToast(exblock == "1" ? "You blocked this user".localized() : "You have been blocked by this user".localized(), duration: 3)
+                return
+            }
+            chooser(chat.messageScope, chat.pin)
+            dismiss(animated: true, completion: nil)
+            return
+        }
+        if chat.pin == "-997" {
+            let smartChatVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "chatGptVC") as! ChatGPTBotView
+            smartChatVC.hidesBottomBarWhenPushed = true
+            smartChatVC.fromNotification = false
+            navigationController?.show(smartChatVC, sender: nil)
+            return
+        }
+        if chat.messageScope == MessageScope.WHISPER || chat.messageScope == MessageScope.CALL || chat.messageScope == MessageScope.MISSED_CALL {
+            let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+            editorPersonalVC.hidesBottomBarWhenPushed = true
+            // A result found by filter can be my own message in that conversation, in which
+            // case the conversation is the other side of it.
+            editorPersonalVC.unique_l_pin = chat.pin == User.getMyPin() ? chat.fpin : chat.pin
+            // This is what takes the Editor to the message that was tapped instead of to the
+            // bottom of the conversation.
+            editorPersonalVC.referenceMessageId = chat.messageId
+            navigationController?.show(editorPersonalVC, sender: nil)
+            return
+        }
+        groupMap.removeAll()
+        let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorGroupVC") as! EditorGroup
+        editorGroupVC.hidesBottomBarWhenPushed = true
+        editorGroupVC.unique_l_pin = chat.pin
+        editorGroupVC.referenceMessageId = chat.messageId
+        navigationController?.show(editorGroupVC, sender: nil)
+    }
+}
+
 extension ContactChatViewController: UISearchControllerDelegate, UISearchBarDelegate, UISearchResultsUpdating {
     
     func updateSearchResults(for searchController: UISearchController) {
         filterContentForSearchText(searchController.searchBar.text!.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    func didDismissSearchController(_ searchController: UISearchController) {
+        // Only the words are gone. The chip the reader picked is still on screen and still
+        // highlighted, so the filter stays until they turn it off there.
+        tagSearch.setSearchText("")
+        tableView.isScrollEnabled = !tagSearch.isShowingResults
     }
     
     func set(image: UIImage, with text: String, size: CGFloat, y: CGFloat, colorText: UIColor = UIColor.black) -> NSAttributedString {
