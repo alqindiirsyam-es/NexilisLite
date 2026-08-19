@@ -3464,6 +3464,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     @objc func audioVideoCall(sender: UIBarButtonItem) {
         if sender.tag == 0 {
+            if APIS.blockedByCallInProgress() {
+                return
+            }
             if !Nexilis.checkingAccess(key: "audio_call") {
                 self.view.makeToast("Feature disabled..".localized(), duration: 3)
                 return
@@ -3494,6 +3497,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 present(controller, animated: true, completion: nil)
             }
         } else {
+            if APIS.blockedByCallInProgress() {
+                return
+            }
             if !Nexilis.checkingAccess(key: "video_call") {
                 self.view.makeToast("Feature disabled..".localized(), duration: 3)
                 return
@@ -7938,6 +7944,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if let attachmentFlag = message["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
             if attachmentFlag == "27" || attachmentFlag == "26" {
                 if attachmentFlag == "27" {
+                    if APIS.blockedByCallInProgress() {
+                        return
+                    }
                     if !Nexilis.checkingAccess(key: "live_streaming") {
                         if Nexilis.checkingAccessAlert(key: "live_streaming") != "|" && !Nexilis.checkingAccessAlert(key: "live_streaming").isEmpty {
                             let title = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[0]

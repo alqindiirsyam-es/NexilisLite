@@ -4939,7 +4939,17 @@ final class MiniCallBanner: UIView {
     /// something different from the screen behind it.
     private var statusProvider: (() -> String)?
 
-    static let height: CGFloat = 55
+    // Measured off WhatsApp's own call bar: 60pt tall, 40pt round buttons 16pt in from each
+    // edge, and the bar itself a near-black rather than a colour.
+    static let height: CGFloat = 60
+    /// How far the bar carries on below its visible edge, painting the two wedges that make the
+    /// page underneath look like it has rounded top corners. See buildCornerMask().
+    static let cornerOverhang: CGFloat = 10
+    private static let barColor = UIColor(red: 36.0 / 255.0, green: 38.0 / 255.0, blue: 37.0 / 255.0, alpha: 1.0)
+    private static let muteColor = UIColor(white: 51.0 / 255.0, alpha: 1.0)
+    private static let endColor = UIColor(red: 213.0 / 255.0, green: 46.0 / 255.0, blue: 63.0 / 255.0, alpha: 1.0)
+    private static let buttonSize: CGFloat = 40
+    private static let sideMargin: CGFloat = 16
 
     private var isMuted = false
 
@@ -4958,31 +4968,32 @@ final class MiniCallBanner: UIView {
     }
 
     private func setupUI() {
-        backgroundColor = .whatsappGreenColor
+        backgroundColor = MiniCallBanner.barColor
 
-        iconView.image = UIImage(systemName: "phone.fill")
-        iconView.tintColor = .white
+        // Green is WhatsApp's; this app's own colour says the same thing here.
+        iconView.image = UIImage(systemName: "phone.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        iconView.tintColor = .mainColor
         iconView.contentMode = .scaleAspectFit
 
-        titleLabel.textColor = .white
-        titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
+        titleLabel.textColor = .mainColor
+        titleLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
         titleLabel.textAlignment = .center
 
         muteButton.tintColor = .white
-        muteButton.backgroundColor = UIColor(white: 0.2, alpha: 0.6)
-        muteButton.setImage(UIImage(systemName: "mic.slash.fill"), for: .normal)
-        muteButton.layer.cornerRadius = 20
+        muteButton.backgroundColor = MiniCallBanner.muteColor
+        muteButton.setImage(UIImage(systemName: "mic.slash.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)), for: .normal)
+        muteButton.layer.cornerRadius = MiniCallBanner.buttonSize / 2
         muteButton.clipsToBounds = true
 
         endCallButton.tintColor = .white
-        endCallButton.backgroundColor = UIColor.red
-        endCallButton.setImage(UIImage(systemName: "phone.down.fill"), for: .normal)
-        endCallButton.layer.cornerRadius = 20
+        endCallButton.backgroundColor = MiniCallBanner.endColor
+        endCallButton.setImage(UIImage(systemName: "phone.down.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)), for: .normal)
+        endCallButton.layer.cornerRadius = MiniCallBanner.buttonSize / 2
         endCallButton.clipsToBounds = true
 
         let centerStack = UIStackView(arrangedSubviews: [iconView, titleLabel])
         centerStack.axis = .horizontal
-        centerStack.spacing = 8
+        centerStack.spacing = 6
         centerStack.alignment = .center
         centerStack.isUserInteractionEnabled = false
 
@@ -4997,23 +5008,58 @@ final class MiniCallBanner: UIView {
 
         NSLayoutConstraint.activate([
             centerStack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            centerStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            centerStack.centerYAnchor.constraint(equalTo: topAnchor, constant: MiniCallBanner.height / 2),
             centerStack.leadingAnchor.constraint(greaterThanOrEqualTo: muteButton.trailingAnchor, constant: 8),
             centerStack.trailingAnchor.constraint(lessThanOrEqualTo: endCallButton.leadingAnchor, constant: -8),
 
-            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.widthAnchor.constraint(equalToConstant: 22),
             iconView.heightAnchor.constraint(equalToConstant: 18),
 
-            muteButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            muteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            muteButton.widthAnchor.constraint(equalToConstant: 40),
-            muteButton.heightAnchor.constraint(equalToConstant: 40),
+            muteButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: MiniCallBanner.sideMargin),
+            muteButton.centerYAnchor.constraint(equalTo: topAnchor, constant: MiniCallBanner.height / 2),
+            muteButton.widthAnchor.constraint(equalToConstant: MiniCallBanner.buttonSize),
+            muteButton.heightAnchor.constraint(equalToConstant: MiniCallBanner.buttonSize),
 
-            endCallButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            endCallButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            endCallButton.widthAnchor.constraint(equalToConstant: 40),
-            endCallButton.heightAnchor.constraint(equalToConstant: 40)
+            endCallButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -MiniCallBanner.sideMargin),
+            endCallButton.centerYAnchor.constraint(equalTo: topAnchor, constant: MiniCallBanner.height / 2),
+            endCallButton.widthAnchor.constraint(equalToConstant: MiniCallBanner.buttonSize),
+            endCallButton.heightAnchor.constraint(equalToConstant: MiniCallBanner.buttonSize)
         ])
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        buildCornerMask()
+    }
+
+    /// The curve belongs to the page, not to this bar.
+    ///
+    /// In WhatsApp the corners you see are the top corners of the screen underneath: the bar is
+    /// a plain rectangle that carries on a little way behind it, and what shows in the two
+    /// corners is that bar. Rounding this view's own bottom corners gives the opposite - the
+    /// page's square corners poking out past a curved bar. So the bar is drawn a few points
+    /// taller than it looks, and everything below its visible edge is masked away except the two
+    /// wedges outside where the page's rounded corners would be.
+    private func buildCornerMask() {
+        let radius = MiniCallBanner.cornerOverhang
+        let shape = UIBezierPath(rect: bounds)
+        // The page below, with the top corners it appears to have. Taken well past the bottom
+        // edge so only its top corners are ever rounded.
+        let page = UIBezierPath(roundedRect: CGRect(x: 0, y: MiniCallBanner.height, width: bounds.width, height: max(bounds.height - MiniCallBanner.height, radius) + radius * 2),
+                                byRoundingCorners: [.topLeft, .topRight],
+                                cornerRadii: CGSize(width: radius, height: radius))
+        shape.append(page)
+        let mask = CAShapeLayer()
+        mask.path = shape.cgPath
+        // Even-odd, so the page's shape is punched out of the bar rather than added to it.
+        mask.fillRule = .evenOdd
+        layer.mask = mask
+    }
+
+    /// Only the bar itself takes touches - the overhang is two thin wedges of paint at the very
+    /// corners, and the page underneath should keep everything else.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        return point.y >= 0 && point.y <= MiniCallBanner.height && point.x >= 0 && point.x <= bounds.width
     }
 
     // MARK: - Public API
@@ -5028,8 +5074,8 @@ final class MiniCallBanner: UIView {
 
     func setMuted(_ muted: Bool) {
         isMuted = muted
-        muteButton.backgroundColor = muted ? .white : UIColor(white: 0.2, alpha: 0.6)
-        muteButton.tintColor = muted ? .red : .white
+        muteButton.backgroundColor = muted ? .white : MiniCallBanner.muteColor
+        muteButton.tintColor = muted ? MiniCallBanner.endColor : .white
     }
 
     func onMute(_ target: Any?, action: Selector) {
@@ -5040,8 +5086,22 @@ final class MiniCallBanner: UIView {
         endCallButton.addTarget(target, action: action, for: .touchUpInside)
     }
 
+    /// Fix: a tap on the strip used to be a gesture recogniser on the view. A button is the
+    /// dependable way to be tapped - it cannot be beaten to the touch by another recogniser
+    /// somewhere above it, and it shows the reader that the strip is something to press. It is
+    /// added underneath the mute and hang-up buttons, so those still get their own taps.
     func onTap(_ target: Any?, action: Selector) {
-        addGestureRecognizer(UITapGestureRecognizer(target: target, action: action))
+        let tapTarget = UIButton(type: .custom)
+        tapTarget.backgroundColor = .clear
+        tapTarget.addTarget(target, action: action, for: .touchUpInside)
+        insertSubview(tapTarget, at: 0)
+        tapTarget.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            tapTarget.topAnchor.constraint(equalTo: topAnchor),
+            tapTarget.leadingAnchor.constraint(equalTo: leadingAnchor),
+            tapTarget.trailingAnchor.constraint(equalTo: trailingAnchor),
+            tapTarget.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
     }
 
     func stopUpdating() {
@@ -5082,6 +5142,225 @@ final class MiniCallBannerWindow: UIWindow {
     }
 }
 
+/// The window a minimised video call floats in.
+///
+/// Same reasoning as the audio banner's window: over every page of the app, library or host,
+/// and every touch outside the bubble itself belongs to whatever is underneath.
+final class MiniVideoCallWindow: UIWindow {
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hit = super.hitTest(point, with: event) else {
+            return nil
+        }
+        return hit === self || hit === rootViewController?.view ? nil : hit
+    }
+}
+
+/// A video call carried on in a corner of the screen, the way WhatsApp does it: the call itself
+/// keeps running, shrunk into a bubble that can be dragged around and tapped to go back to.
+final public class MiniVideoCallManager {
+
+    public static let shared = MiniVideoCallManager()
+
+    private var window: MiniVideoCallWindow?
+    private var bubble: UIView?
+    /// What was presented for this call - a navigation controller on some routes, the call
+    /// screen itself on others. Held strongly: a dismissed view controller is released by UIKit
+    /// the moment it goes, and this one's deinit ends the call.
+    private var callContainer: UIViewController?
+    private weak var call: QmeraVideoViewController?
+
+    private static let size = CGSize(width: 110, height: 160)
+    private static let margin: CGFloat = 12
+
+    public var isShowing: Bool {
+        return bubble != nil
+    }
+
+    private init() {}
+
+    // MARK: - Showing
+
+    func show(for call: QmeraVideoViewController?, container: UIViewController) {
+        guard bubble == nil, let call = call else {
+            return
+        }
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+            return
+        }
+        self.call = call
+        self.callContainer = container
+
+        let host = UIViewController()
+        host.view.backgroundColor = .clear
+
+        let bubble = UIView()
+        bubble.backgroundColor = .black
+        bubble.layer.cornerRadius = 12
+        // The call is scaled down inside this, and anything outside the bubble is cut away.
+        bubble.clipsToBounds = true
+        bubble.layer.shadowColor = UIColor.black.cgColor
+        bubble.layer.shadowOpacity = 0.3
+        bubble.layer.shadowRadius = 8
+        bubble.layer.shadowOffset = CGSize(width: 0, height: 2)
+        host.view.addSubview(bubble)
+
+        let window = MiniVideoCallWindow(windowScene: scene)
+        window.backgroundColor = .clear
+        window.windowLevel = .statusBar + 1
+        window.rootViewController = host
+        window.isHidden = false
+
+        let screen = window.bounds.size
+        bubble.frame = CGRect(x: screen.width - MiniVideoCallManager.size.width - MiniVideoCallManager.margin,
+                              y: window.safeAreaInsets.top + MiniVideoCallManager.margin,
+                              width: MiniVideoCallManager.size.width,
+                              height: MiniVideoCallManager.size.height)
+
+        // The whole call screen is carried across, scaled down - not just the video view. The
+        // frames are drawn by the SDK straight into image views inside it, so leaving that
+        // hierarchy exactly as it is means the call carries on rendering with nothing rewired.
+        container.willMove(toParent: host)
+        host.addChild(container)
+        bubble.addSubview(container.view)
+        container.view.transform = .identity
+        container.view.frame = CGRect(origin: .zero, size: screen)
+        // Filled rather than fitted: a bubble the shape of a phone screen would otherwise be
+        // mostly empty, and what matters is seeing the call.
+        let scale = max(MiniVideoCallManager.size.width / screen.width,
+                        MiniVideoCallManager.size.height / screen.height)
+        container.view.transform = CGAffineTransform(scaleX: scale, y: scale)
+        container.view.center = CGPoint(x: bubble.bounds.midX, y: bubble.bounds.midY)
+        container.view.isUserInteractionEnabled = false
+        container.didMove(toParent: host)
+
+        bubble.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(bubbleTapped)))
+        bubble.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(bubbleDragged(_:))))
+
+        self.window = window
+        self.bubble = bubble
+
+        bubble.alpha = 0
+        bubble.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+        UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.4) {
+            bubble.alpha = 1
+            bubble.transform = .identity
+        }
+    }
+
+    /// Puts the call screen back, full size.
+    public func restore() {
+        guard let container = callContainer else {
+            dismissBubble()
+            return
+        }
+        guard let presenter = presentationHost() else {
+            return
+        }
+        container.willMove(toParent: nil)
+        container.view.removeFromSuperview()
+        container.removeFromParent()
+        container.view.transform = .identity
+        container.view.isUserInteractionEnabled = true
+        dismissBubble()
+        // A call that was pushed onto a stack rather than presented has no presentation style of
+        // its own - left alone it would come back as a half-height sheet. Only the styles that
+        // do not cover the screen are replaced; a call opened full screen stays as it was.
+        switch container.modalPresentationStyle {
+        case .fullScreen, .overFullScreen, .overCurrentContext, .currentContext:
+            break
+        default:
+            container.modalPresentationStyle = .overFullScreen
+        }
+        presenter.present(container, animated: true, completion: nil)
+    }
+
+    /// Called when the call itself is over, however it ended.
+    public func callDidEnd() {
+        let ending = callContainer
+        callContainer = nil
+        call = nil
+        dismissBubble()
+        // Released next turn: this is nearly always called from the call's own code.
+        DispatchQueue.main.async {
+            _ = ending
+        }
+    }
+
+    private func dismissBubble() {
+        guard let bubble = bubble, let window = window else {
+            return
+        }
+        self.bubble = nil
+        self.window = nil
+        UIView.animate(withDuration: 0.2, animations: {
+            bubble.alpha = 0
+            bubble.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+        }, completion: { _ in
+            window.isHidden = true
+            window.rootViewController = nil
+        })
+    }
+
+    private func presentationHost() -> UIViewController? {
+        let appWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { !($0 is MiniVideoCallWindow) && !($0 is MiniCallBannerWindow) && !$0.isHidden && $0.rootViewController != nil })
+        guard var top = appWindow?.rootViewController else {
+            return window?.rootViewController
+        }
+        for _ in 0..<20 {
+            if let presented = top.presentedViewController {
+                top = presented
+            } else if let tab = top as? UITabBarController, let selected = tab.selectedViewController {
+                top = selected
+            } else if let navigation = top as? UINavigationController, let visible = navigation.visibleViewController {
+                top = visible
+            } else {
+                break
+            }
+        }
+        return top
+    }
+
+    // MARK: - Gestures
+
+    @objc private func bubbleTapped() {
+        restore()
+    }
+
+    @objc private func bubbleDragged(_ sender: UIPanGestureRecognizer) {
+        guard let bubble = bubble, let window = window else {
+            return
+        }
+        switch sender.state {
+        case .changed:
+            let translation = sender.translation(in: window)
+            bubble.center = CGPoint(x: bubble.center.x + translation.x, y: bubble.center.y + translation.y)
+            sender.setTranslation(.zero, in: window)
+        case .ended, .cancelled:
+            // Settles against whichever side it was let go nearest, and never off the screen.
+            let insets = window.safeAreaInsets
+            let half = MiniVideoCallManager.size.width / 2
+            let targetX = bubble.center.x < window.bounds.midX
+                ? half + MiniVideoCallManager.margin
+                : window.bounds.width - half - MiniVideoCallManager.margin
+            let minY = insets.top + MiniVideoCallManager.size.height / 2 + MiniVideoCallManager.margin
+            let maxY = window.bounds.height - insets.bottom - MiniVideoCallManager.size.height / 2 - MiniVideoCallManager.margin
+            let targetY = min(max(bubble.center.y, minY), max(minY, maxY))
+            UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.5) {
+                bubble.center = CGPoint(x: targetX, y: targetY)
+            }
+        default:
+            break
+        }
+    }
+}
+
 final public class MiniCallBannerManager {
 
     public static let shared = MiniCallBannerManager()
@@ -5105,7 +5384,14 @@ final public class MiniCallBannerManager {
     // MARK: - Showing
 
     func show(for call: QmeraAudioViewController) {
-        guard banner == nil else {
+        // The call is remembered before anything else. A strip left over from an earlier call
+        // used to make this return early, and then the strip on screen belonged to a call this
+        // object no longer had - tapping it could only take itself away.
+        self.call = call
+        if let banner = banner {
+            banner.configure(name: call.miniBannerTitle, isMuted: call.isMutedNow) { [weak call] in
+                return call?.miniBannerStatus ?? ""
+            }
             return
         }
         guard let scene = UIApplication.shared.connectedScenes
@@ -5114,8 +5400,6 @@ final public class MiniCallBannerManager {
             ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
             return
         }
-        self.call = call
-
         let banner = MiniCallBanner()
         banner.configure(name: call.miniBannerTitle, isMuted: call.isMutedNow) { [weak call] in
             return call?.miniBannerStatus ?? ""
@@ -5140,21 +5424,28 @@ final public class MiniCallBannerManager {
             banner.leadingAnchor.constraint(equalTo: host.view.leadingAnchor),
             banner.trailingAnchor.constraint(equalTo: host.view.trailingAnchor),
             banner.topAnchor.constraint(equalTo: host.view.safeAreaLayoutGuide.topAnchor),
-            banner.heightAnchor.constraint(equalToConstant: MiniCallBanner.height)
+            banner.heightAnchor.constraint(equalToConstant: MiniCallBanner.height + MiniCallBanner.cornerOverhang)
         ])
         window.layoutIfNeeded()
 
         self.window = window
         self.banner = banner
 
-        banner.transform = CGAffineTransform(translationX: 0, y: -(MiniCallBanner.height + window.safeAreaInsets.top))
+        banner.transform = CGAffineTransform(translationX: 0, y: -(MiniCallBanner.height + MiniCallBanner.cornerOverhang + window.safeAreaInsets.top))
         UIView.animate(withDuration: 0.30, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0.4) {
             banner.transform = .identity
         }
-        setContentPushed(true)
+        refreshInsetsIfShowing()
+        startInsetWatch()
     }
 
     /// Puts the call screen back and takes the strip away.
+    ///
+    /// Fix: this used to ask UIApplication for its "visible" view controller, which is found by
+    /// looking for the key window - and there is more than one window on screen now, so that
+    /// answer could be the banner's own window (whose root presents nothing anyone can see) or
+    /// nothing at all, in which case the tap did nothing. The app's own window is found
+    /// explicitly here, and the screen it is presented on top of is walked down from its root.
     public func restore() {
         guard let call = call else {
             dismissBanner()
@@ -5165,13 +5456,37 @@ final public class MiniCallBannerManager {
             dismissBanner()
             return
         }
-        guard let presenter = UIApplication.shared.visibleViewController else {
+        guard let presenter = presentationHost() else {
             return
         }
-        dismissBanner()
-        // Presented with whatever style it was opened with in the first place - the call is put
-        // back exactly as it was, not re-styled on the way in.
+        // Full screen on the way back, whatever it was opened with: over-current-context hands
+        // the size of the presentation to whichever ancestor happens to define a context, and
+        // the one it was opened from is long gone.
+        call.modalPresentationStyle = .overFullScreen
         presenter.present(call, animated: true, completion: nil)
+        dismissBanner()
+    }
+
+    /// The screen the call should be put back on top of: the deepest thing on show in the app's
+    /// own window, skipping the banner's window entirely.
+    private func presentationHost() -> UIViewController? {
+        guard var top = appWindow()?.rootViewController else {
+            // Nothing of the app is up - the banner's own window can host it rather than
+            // leaving the reader with a strip that does nothing.
+            return window?.rootViewController
+        }
+        for _ in 0..<20 {
+            if let presented = top.presentedViewController {
+                top = presented
+            } else if let tab = top as? UITabBarController, let selected = tab.selectedViewController {
+                top = selected
+            } else if let navigation = top as? UINavigationController, let visible = navigation.visibleViewController {
+                top = visible
+            } else {
+                break
+            }
+        }
+        return top
     }
 
     /// Called when the call itself is over, however it ended.
@@ -5194,9 +5509,10 @@ final public class MiniCallBannerManager {
         self.banner = nil
         self.window = nil
         banner.stopUpdating()
-        setContentPushed(false)
+        stopInsetWatch()
+        clearInsets()
         UIView.animate(withDuration: 0.25, animations: {
-            banner.transform = CGAffineTransform(translationX: 0, y: -(MiniCallBanner.height + window.safeAreaInsets.top))
+            banner.transform = CGAffineTransform(translationX: 0, y: -(MiniCallBanner.height + MiniCallBanner.cornerOverhang + window.safeAreaInsets.top))
         }, completion: { _ in
             window.isHidden = true
             window.rootViewController = nil
@@ -5205,27 +5521,88 @@ final public class MiniCallBannerManager {
 
     // MARK: - Making room
 
-    private var pushedInset: CGFloat = 0
-
-    /// Moves the app's own content down so the strip is not sitting on top of a navigation bar.
+    /// Every screen that has been moved down for the strip, and by exactly one strip's height
+    /// each.
     ///
-    /// Only the root controller is adjusted: everything inside it - tabs, navigation stacks,
-    /// the screens in them - inherits the inset, and the amount actually applied is remembered
-    /// so it can be taken back exactly, however many times this is called.
-    private func setContentPushed(_ pushed: Bool) {
-        guard let root = UIApplication.shared.keyWindow?.rootViewController else {
+    /// Fix: this used to be a single running total applied to "the root view controller" -
+    /// whichever one that was at the time. Two things went wrong with that. A screen presented
+    /// on top of the root is not inside it and inherits nothing, so on any library page put up
+    /// modally the strip sat over the navigation bar. And when the amount was taken back off a
+    /// different controller than the one it was added to, the difference stayed - which is the
+    /// top of the screen creeping further down every time a call was minimised again. Keeping
+    /// the actual controllers means what was added is what gets removed, from the same places.
+    private let insetControllers = NSHashTable<UIViewController>.weakObjects()
+    private var insetTimer: Timer?
+
+    /// Moves down anything on screen that has not been moved down yet: the window's root, and
+    /// every screen presented on top of it. Their own children - tabs, navigation stacks, the
+    /// screens inside them - inherit it, so only the outermost of each is touched.
+    public func refreshInsetsIfShowing() {
+        guard isShowing else {
             return
         }
-        let wanted: CGFloat = pushed ? MiniCallBanner.height : 0
-        guard wanted != pushedInset else {
+        guard let root = appWindow()?.rootViewController else {
             return
         }
-        let delta = wanted - pushedInset
-        pushedInset = wanted
-        UIView.animate(withDuration: 0.30) {
-            root.additionalSafeAreaInsets.top += delta
-            root.view.layoutIfNeeded()
+        var chain: [UIViewController] = []
+        var next: UIViewController? = root
+        // Presentation only ever nests a few deep; the count is here so a broken hierarchy
+        // cannot spin this forever.
+        for _ in 0..<20 {
+            guard let current = next else {
+                break
+            }
+            chain.append(current)
+            next = current.presentedViewController
         }
+        // Alerts and action sheets place themselves; moving their safe area only moves them
+        // somewhere they were never meant to be.
+        for controller in chain where controller !== call
+            && !(controller is UIAlertController)
+            && !insetControllers.contains(controller) {
+            insetControllers.add(controller)
+            UIView.animate(withDuration: 0.25) {
+                controller.additionalSafeAreaInsets.top += MiniCallBanner.height
+                controller.view.layoutIfNeeded()
+            }
+        }
+    }
+
+    private func clearInsets() {
+        for controller in insetControllers.allObjects {
+            let restored = max(0, controller.additionalSafeAreaInsets.top - MiniCallBanner.height)
+            UIView.animate(withDuration: 0.25) {
+                controller.additionalSafeAreaInsets.top = restored
+                controller.view.layoutIfNeeded()
+            }
+        }
+        insetControllers.removeAllObjects()
+    }
+
+    /// Screens come and go while a call is minimised, and most of the ones in this project never
+    /// call super in viewDidAppear - so there is no notification to rely on. Looking every half
+    /// second costs a walk down a handful of controllers and covers every route.
+    private func startInsetWatch() {
+        insetTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.refreshInsetsIfShowing()
+        }
+        timer.tolerance = 0.2
+        RunLoop.main.add(timer, forMode: .common)
+        insetTimer = timer
+    }
+
+    private func stopInsetWatch() {
+        insetTimer?.invalidate()
+        insetTimer = nil
+    }
+
+    /// The app's own window, never the banner's.
+    private func appWindow() -> UIWindow? {
+        return UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { !($0 is MiniCallBannerWindow) && !$0.isHidden && $0.rootViewController != nil })
     }
 
     // MARK: - Buttons

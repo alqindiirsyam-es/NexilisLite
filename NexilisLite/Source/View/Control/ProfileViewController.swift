@@ -491,6 +491,9 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
     }
     
     @objc func call(sender: Any) {
+        if APIS.blockedByCallInProgress() {
+            return
+        }
         if !Nexilis.checkingAccess(key: "audio_call") {
             self.view.makeToast("Feature disabled..".localized(), duration: 3)
             return
@@ -524,6 +527,9 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
     }
     
     @objc func video(sender: Any) {
+        if APIS.blockedByCallInProgress() {
+            return
+        }
         if !Nexilis.checkingAccess(key: "video_call") {
             self.view.makeToast("Feature disabled..".localized(), duration: 3)
             return

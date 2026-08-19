@@ -30,7 +30,87 @@ class QmeraVideoViewController: UIViewController {
     
     var dataPerson: [[String: String?]] = []
     var fPin = ""
+
+    /// True only for the moment it takes to shrink this call into the corner.
+    private var isMinimizing = false
+
+    /// Fix: this screen reaches the user three different ways, and minimising has to work from
+    /// all of them.
+    ///
+    /// * presented on its own (the video-call button in APIS)
+    /// * presented inside a navigation controller (incoming calls, contact centre)
+    /// * **pushed** onto whatever stack the caller was already in - `self.show(videoVC,…)` from
+    ///   the chat editor and the profile screen, which is how the person placing the call gets
+    ///   here. That last one has no presenting controller at all, which is why the caller's own
+    ///   call could not be minimised: the check simply failed and the button did nothing.
+    @objc func didMinimized(sender: Any?) {
+        let presented: UIViewController = navigationController ?? self
+        if presented.presentingViewController != nil {
+            isMinimizing = true
+            presented.dismiss(animated: true, completion: { [weak self] in
+                // Moved only once the dismissal is over. Dismissing a view controller takes its
+                // view out of whatever superview it happens to be in - so putting it in the
+                // bubble first meant UIKit pulled it straight back out, leaving it empty.
+                MiniVideoCallManager.shared.show(for: self, container: presented)
+                self?.isMinimizing = false
+            })
+            return
+        }
+        guard let navigation = navigationController, navigation.viewControllers.contains(self) else {
+            return
+        }
+        // Pushed: minimising is a pop, and this screen itself is what goes into the corner.
+        isMinimizing = true
+        // Held for the length of the pop. A popped controller is released as the transition
+        // ends, and this one's deinit ends the call - the manager takes over the hold from the
+        // completion below.
+        let call = self
+        navigation.popViewController(animated: true)
+        let finish = {
+            MiniVideoCallManager.shared.show(for: call, container: call)
+            call.isMinimizing = false
+        }
+        if let coordinator = navigation.transitionCoordinator {
+            coordinator.animate(alongsideTransition: nil, completion: { _ in
+                finish()
+            })
+        } else {
+            DispatchQueue.main.async {
+                finish()
+            }
+        }
+    }
+
+    /// Registers this outgoing video call with the system - the green in-call indicator, a place
+    /// in the phone's Recents, and the busy state other calls see. iOS has no native screen for
+    /// an outgoing call; this is the rest of what it does for one.
+    ///
+    /// The callee can be held in `fPin` or in `dataPerson`, and the call can be an ordinary one
+    /// or a contact-centre one; none of that changes the fact that a call is being placed.
+    private func reportOutgoingCallToSystem() {
+        guard isInisiator else {
+            return
+        }
+        var pin = fPin
+        if pin.isEmpty, let first = dataPerson.first, let personPin = first["f_pin"] as? String {
+            pin = personPin
+        }
+        guard !pin.isEmpty else {
+            return
+        }
+        var callerName = pin
+        if let user = User.getDataCanNil(pin: pin), !user.fullName.trimmingCharacters(in: .whitespaces).isEmpty {
+            callerName = user.fullName
+        }
+        let uuid = UUID()
+        callKitUUID = uuid
+        APIS.uuidCall = uuid
+        CallManager.shared.startOutgoingCall(uuid: uuid, calleeName: callerName, calleeId: pin, isVideo: true)
+    }
     var wbRoomId = ""
+
+    /// This screen's own call as the system knows it - see the note in QmeraAudioViewController.
+    private var callKitUUID: UUID?
     var isInisiator = true
 //    var isSpeaker = false
     var isMuted = false
@@ -96,6 +176,17 @@ class QmeraVideoViewController: UIViewController {
     let profileImage = UIImageView()
     let labelIncomingOutgoing = UILabel()
     let buttonDecline = UIButton()
+
+    let minimizeLogo: UIButton = {
+        let button = UIButton()
+        button.setImage(UIImage(systemName: "arrow.down.right.and.arrow.up.left")?.withTintColor(.white, renderingMode: .alwaysOriginal), for: .normal)
+        button.imageView?.contentMode = .scaleAspectFit
+        button.setBackgroundColor(.gray.withAlphaComponent(0.4), for: .normal)
+        button.contentVerticalAlignment = .fill
+        button.contentHorizontalAlignment = .fill
+        button.imageEdgeInsets = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+        return button
+    }()
     let buttonAccept = UIButton()
     let zoomView = UIImageView()
     let cameraView = UIImageView()
@@ -204,13 +295,19 @@ class QmeraVideoViewController: UIViewController {
         navigationController?.navigationBar.topItem?.backBarButtonItem = nil
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         NotificationCenter.default.removeObserver(self)
-        FloatingButton.setHidden(false)
+        FloatingButton.isSuppressed = false
+        MiniVideoCallManager.shared.callDidEnd()
         self.taskTimeout?.cancel()
         UIApplication.shared.isIdleTimerDisabled = false
         Nexilis.isOpenPageCall = false
+        APIS.callSessionEnded(video: self)
     }
     
     override func viewWillDisappear(_ animated: Bool) {
+        if isMinimizing {
+            // Off screen, not over.
+            return
+        }
         if self.isMovingFromParent {
             navigationController?.changeAppearance(clear: false)
             let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
@@ -219,9 +316,10 @@ class QmeraVideoViewController: UIViewController {
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
             NotificationCenter.default.removeObserver(self)
             UIApplication.shared.isIdleTimerDisabled = false
-            FloatingButton.setHidden(false)
+            FloatingButton.isSuppressed = false
             self.taskTimeout?.cancel()
             Nexilis.isOpenPageCall = false
+            APIS.callSessionEnded(video: self)
         }
     }
     
@@ -302,7 +400,12 @@ class QmeraVideoViewController: UIViewController {
         QmeraVideoViewController.volumeView = MPVolumeView(frame: .zero)
         QmeraVideoViewController.volumeView.isHidden = true
         Nexilis.setWhiteboardReceiver(receiver: self)
-        FloatingButton.setHidden(true)
+        // Held for the length of the call, not the length of this screen: shrunk into the
+        // corner, the call is still running.
+        FloatingButton.isSuppressed = true
+        // Registered here rather than on the outgoing path alone, so a call that was received
+        // counts just as much when something else asks for the camera.
+        APIS.callSessionBegan(video: self)
         self.navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.black]
         navigationController?.changeAppearance(clear: true)
         UIApplication.shared.isIdleTimerDisabled = true
@@ -320,11 +423,18 @@ class QmeraVideoViewController: UIViewController {
         }
         
         addZoomView()
+        view.addSubview(minimizeLogo)
+        minimizeLogo.anchor(top: view.safeAreaLayoutGuide.topAnchor, left: view.leftAnchor, paddingTop: 10, paddingLeft: 20, width: 40, height: 40)
+        minimizeLogo.makeRoundedView(radius: 20)
+        minimizeLogo.addTarget(self, action: #selector(didMinimized(sender:)), for: .touchUpInside)
         addCameraView()
         addImageMuteOnCamera()
         addListRemoteView()
         addBackgroundIncoming()
         addProfileNameCalling()
+        // Added early so its constraints hang off the zoom view's layout, brought to the front
+        // here so the participant tiles and backgrounds added since do not sit over it.
+        view.bringSubviewToFront(minimizeLogo)
         Calling()
         addToolbar()
         addTimerVC()
@@ -601,6 +711,7 @@ class QmeraVideoViewController: UIViewController {
         if isInisiator {
             labelIncomingOutgoing.text = "Calling".localized() + "..."
             Nexilis.isOpenPageCall = true
+            reportOutgoingCallToSystem()
             if ticketId.isEmpty {
                 backToDefaultAudioSession()
                 Nexilis.playRingbacktoneCall()
@@ -943,6 +1054,10 @@ class QmeraVideoViewController: UIViewController {
                 self.buttonMuted.isHidden = false
                 self.buttonCameraOff.isHidden = false
                 let connectDate = Date()
+                // Picked up: from here the system counts the duration itself.
+                if self.isInisiator, let uuid = self.callKitUUID {
+                    CallManager.shared.reportOutgoingCallConnected(uuid: uuid)
+                }
                 self.vcTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                     let format = Utils.callDurationFormatter.string(from: Date().timeIntervalSince(connectDate))
                     self.labelTimerVC.text = format
@@ -1254,6 +1369,11 @@ class QmeraVideoViewController: UIViewController {
     }
     
     func endAllCall() {
+        // Whatever route the call ended by, this is where the corner it may have been shrunk
+        // into goes away with it.
+        isMinimizing = false
+        MiniVideoCallManager.shared.callDidEnd()
+        FloatingButton.isSuppressed = false
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         if !onGoingCC.isEmpty {
             let requester = onGoingCC.components(separatedBy: ",")[0]

@@ -264,6 +264,9 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         tableView.deselectRow(at: indexPath, animated: true)
         let call = calls[indexPath.row]
         if call.isVideo {
+            if APIS.blockedByCallInProgress() {
+                return
+            }
             if !Nexilis.checkingAccess(key: "video_call") {
                 self.view.makeToast("Feature disabled..".localized(), duration: 3)
                 return
@@ -295,6 +298,9 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                 self.show(videoVC, sender: nil)
             }
         } else {
+            if APIS.blockedByCallInProgress() {
+                return
+            }
             if !Nexilis.checkingAccess(key: "audio_call") {
                 self.view.makeToast("Feature disabled..".localized(), duration: 3)
                 return

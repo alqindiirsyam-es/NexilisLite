@@ -17,7 +17,7 @@ Pod::Spec.new do |spec|
   spec.homepage     = "https://nexilis.io/"
   spec.license      = "MIT"
   spec.author       = { "Yayan D Wicaksono" => "ya2n.wicaksono@gmail.com" }
-  spec.ios.deployment_target = "14.0"
+  spec.ios.deployment_target = "15.0"
 #  spec.source       = { :http => 'https://nexilis.io/UCPaaSiOS/releases/download/NexilisLite/v2.2.2/NexilisLite.zip' }
   spec.source       = { :path => '.' }
   spec.source_files = 'NexilisLite/Source/**/*'

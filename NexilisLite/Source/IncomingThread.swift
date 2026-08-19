@@ -341,16 +341,16 @@ class IncomingThread {
     }
     
     private func sendOnlineUser(message: TMessage) -> Void {
-        DispatchQueue.main.async {
-            if !APIS.checkAppStateisBackground() {
-                let fPIn = message.getPIN()
-                if let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID] {
-                    if fPIn != User.getMyPin() {
-                        _ = Nexilis.responseString(packetId: packetId, message: "01", timeout: 3000)
-                    }
-                }
-            }
-        }
+//        DispatchQueue.main.async {
+//            if !APIS.checkAppStateisBackground() {
+//                let fPIn = message.getPIN()
+//                if let packetId = message.mBodies[CoreMessage_TMessageKey.PACKET_ID] {
+//                    if fPIn != User.getMyPin() {
+//                        _ = Nexilis.responseString(packetId: packetId, message: "01", timeout: 3000)
+//                    }
+//                }
+//            }
+//        }
     }
     
     private func notifyCalling(message: TMessage) -> Void {

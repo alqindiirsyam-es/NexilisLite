@@ -164,6 +164,9 @@ public class QmeraCreateStreamingViewController: UITableViewController {
     }
     
     @objc func didTapRight(sender: Any?) {
+        if APIS.blockedByCallInProgress() {
+            return
+        }
         let controller = QmeraStreamingViewController()
         controller.isLive = !isJoin
         if isJoin {

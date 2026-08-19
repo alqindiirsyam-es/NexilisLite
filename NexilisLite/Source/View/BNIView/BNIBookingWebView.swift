@@ -867,6 +867,11 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
     }
     
     func runVoice() {
+        // Voice search takes the microphone and reconfigures the shared audio session, which
+        // is the very thing a running call is holding.
+        if APIS.blockedByCallInProgress() {
+            return
+        }
         if !audioEngine.isRunning {
             let goAudioCall = Nexilis.checkMicPermission()
             if !goAudioCall{

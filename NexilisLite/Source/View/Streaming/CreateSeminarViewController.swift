@@ -179,6 +179,9 @@ public class CreateSeminarViewController: UITableViewController {
     }
     
     @objc func didTapRight(sender: Any?) {
+        if APIS.blockedByCallInProgress() {
+            return
+        }
         if !data.isEmpty {
             let timeStart = data["time"] as? Int64 ?? 0
             if Date().currentTimeMillis() < timeStart {

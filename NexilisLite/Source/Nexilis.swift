@@ -20,7 +20,7 @@ import WebKit
 import CommonCrypto
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.11"
+    public static var cpaasVersion = "5.1.12"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""

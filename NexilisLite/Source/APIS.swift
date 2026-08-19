@@ -222,7 +222,66 @@ public class APIS: NSObject {
         }
     }
     
+    // MARK: - Calls in progress
+
+    /// The call screens that are alive right now - on screen, or shrunk into a corner.
+    ///
+    /// Weak on purpose: a screen that has gone leaves nothing behind even if some path forgot to
+    /// say so, and a flag that gets stuck at "a call is running" would lock the reader out of
+    /// calling anyone for the rest of the session. While a call is minimised the managers hold
+    /// the screen, so these stay valid exactly as long as the call does.
+    private static weak var activeAudioCall: QmeraAudioViewController?
+    private static weak var activeVideoCall: QmeraVideoViewController?
+
+    static func callSessionBegan(audio: QmeraAudioViewController?) {
+        activeAudioCall = audio
+    }
+
+    static func callSessionBegan(video: QmeraVideoViewController?) {
+        activeVideoCall = video
+    }
+
+    static func callSessionEnded(audio: QmeraAudioViewController) {
+        if activeAudioCall === audio {
+            activeAudioCall = nil
+        }
+    }
+
+    static func callSessionEnded(video: QmeraVideoViewController) {
+        if activeVideoCall === video {
+            activeVideoCall = nil
+        }
+    }
+
+    /// Whether a call is running right now, on screen or minimised.
+    public static var isCallInProgress: Bool {
+        return activeAudioCall != nil || activeVideoCall != nil
+    }
+
+    /// Says so, and answers whether the thing that was asked for has to be dropped.
+    ///
+    /// Everything that takes the microphone, the camera or the call engine goes through here:
+    /// starting another call, live streaming, a conference, the contact centre. They cannot run
+    /// alongside a call - the call is what would break - so they are turned away with a word
+    /// rather than left to fail in the middle.
+    @discardableResult
+    static func blockedByCallInProgress() -> Bool {
+        guard isCallInProgress else {
+            return false
+        }
+        DispatchQueue.main.async {
+            let message = activeVideoCall != nil
+                ? "A video call is in progress".localized()
+                : "An audio call is in progress".localized()
+            UIApplication.shared.visibleViewController?.view.makeToast(message, duration: 3)
+        }
+        return true
+    }
+
     public static func openContactCenter(media: Int? = nil, category: Int? = nil) {
+        if blockedByCallInProgress() {
+            return
+        }
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -298,6 +357,9 @@ public class APIS: NSObject {
     }
     
     public static func openContactCenterWithContext(context: String) {
+        if blockedByCallInProgress() {
+            return
+        }
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -431,6 +493,9 @@ public class APIS: NSObject {
     }
     
     public static func openCall() {
+        if blockedByCallInProgress() {
+            return
+        }
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -447,6 +512,9 @@ public class APIS: NSObject {
     }
     
     public static func openStreaming() {
+        if blockedByCallInProgress() {
+            return
+        }
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -472,6 +540,9 @@ public class APIS: NSObject {
     }
     
     public static func openConference() {
+        if blockedByCallInProgress() {
+            return
+        }
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -497,6 +568,9 @@ public class APIS: NSObject {
     }
     
     public static func openAudioCall() {
+        if blockedByCallInProgress() {
+            return
+        }
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -550,6 +624,9 @@ public class APIS: NSObject {
     }
     
     public static func openVideoCall() {
+        if blockedByCallInProgress() {
+            return
+        }
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -1340,6 +1417,9 @@ public class APIS: NSObject {
     }
     
     public static func openWhiteboard() {
+        if blockedByCallInProgress() {
+            return
+        }
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()
@@ -1430,6 +1510,9 @@ public class APIS: NSObject {
     }
     
     public static func openWhiteboardAndScreenSharing() {
+        if blockedByCallInProgress() {
+            return
+        }
         let isChangeProfile = Utils.getSetProfile()
         if !isChangeProfile {
             APIS.showChangeProfile()

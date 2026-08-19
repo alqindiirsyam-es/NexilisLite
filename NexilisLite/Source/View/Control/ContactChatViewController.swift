@@ -67,6 +67,14 @@ class ContactChatViewController: UITableViewController {
     private var lastOpenGroupsFetch: Date?
     // Callers waiting to be told that the list has finished reloading (see ChatListTab).
     private var pendingReloadCompletions: [() -> Void] = []
+    // Numbers the reads of the chat list so a slow one cannot land on top of a newer one.
+    // Two reads overlap whenever the list is asked to refresh while one is already running,
+    // and the database queue decides which finishes first - which on a slow device is often
+    // the older one, putting counters back to what they were before the Editor cleared them.
+    private var chatsLoadGeneration = 0
+    // A refresh that arrived while one was already running. Kept rather than dropped, so the
+    // change that asked for it is never the one that goes unseen.
+    private var needsAnotherLoad = false
     var timerReloadData: Timer?
     
     var noUCList = false
@@ -322,6 +330,7 @@ class ContactChatViewController: UITableViewController {
         segment.selectedSegmentIndex = 0
         segment.addTarget(self, action: #selector(segmentChanged(sender:)), for: .valueChanged)
         segment.setTitleTextAttributes([NSAttributedString.Key.font: UIFont.boldSystemFont(ofSize: 12.0 + String.offset() * 0.5)], for: .normal)
+        refreshSelectedSegmentMirror()
         Utils.inTabChats = true
         
         NotificationCenter.default.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
@@ -370,7 +379,7 @@ class ContactChatViewController: UITableViewController {
             self.navigationController?.navigationBar.topItem?.title = "Start Conversation".localized()
             self.navigationController?.navigationBar.setNeedsLayout()
         }
-        getData()
+        reloadAllData()
         // Fetching the open groups is a blocking round trip to the server (up to four
         // attempts) that ends in a full table reload, and this runs every time the screen
         // appears. Once a minute is plenty for a list that barely changes.
@@ -436,19 +445,21 @@ class ContactChatViewController: UITableViewController {
             if let completion = completion {
                 self.pendingReloadCompletions.append(completion)
             }
-            if self.timerReloadData == nil && !self.isGettingData {
-                self.getData()
-            } else {
-                self.timerReloadData?.invalidate()
-                self.timerReloadData = nil
+            // The badges do not have to wait for the whole list to be read again.
+            self.refreshUnreadCounters()
+            self.timerReloadData?.invalidate()
+            self.timerReloadData = nil
+            guard !self.isGettingData else {
+                // The read in flight may have started before the change that asked for this
+                // one, so its result is not an answer. Ask again once it is out of the way -
+                // the old retry gave up whenever it found the read still running.
                 self.timerReloadData = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-                    if self != nil && !self!.isGettingData {
-                        guard let self = self else { return }
-                        self.getData()
-                        self.timerReloadData = nil
-                    }
+                    self?.timerReloadData = nil
+                    self?.reloadAllData()
                 }
+                return
             }
+            self.getData()
         }
     }
     
@@ -501,7 +512,23 @@ class ContactChatViewController: UITableViewController {
         navigationController?.dismiss(animated: true, completion: nil)
     }
     
+    /// Which segment is on screen, mirrored off the control itself.
+    ///
+    /// Fix: the loading closures in getData() run on the database queue, and reading a
+    /// UISegmentedControl from anywhere but the main thread is exactly what the Main Thread
+    /// Checker flags - `numberOfSegments must be used from main thread only`. This is written
+    /// only from the main thread, where the segment can actually change, and is safe to read
+    /// from wherever the data work happens to be running.
+    private var isGroupsSegmentSelected = false
+
+    /// Keeps the mirror above in step. Main thread only, like everything it reads.
+    private func refreshSelectedSegmentMirror() {
+        let groupsSegmentIndex = segment.numberOfSegments == 3 ? 2 : 1
+        isGroupsSegmentSelected = segment.selectedSegmentIndex == groupsSegmentIndex
+    }
+
     @objc func segmentChanged(sender: Any) {
+        refreshSelectedSegmentMirror()
         updateTagSearchAvailability()
         switch segment.selectedSegmentIndex {
         case 0:
@@ -570,16 +597,22 @@ class ContactChatViewController: UITableViewController {
     
     func getData() {
         if self.isGettingData {
+            // Dropping it here was the one refresh nobody came back for: viewDidAppear asks
+            // through this path, and a request lost while the previous read was still running
+            // left the rows as they were until the app was launched again.
+            self.needsAnotherLoad = true
             return
         }
+        // Claimed here, on the main thread, rather than inside the read's background block -
+        // until it was set, two refreshes arriving in the same breath both got through.
+        self.isGettingData = true
         getChats {
             self.getContacts {
                 // The groups only feed the Forums segment, and reading them means a recursive
                 // walk over GROUPZ. Wait for it when that segment is what is on screen (or
                 // when there is nothing there yet to draw), otherwise put the chats and
                 // contacts up as soon as they are ready and let the walk catch up behind them.
-                let groupsSegmentIndex = self.segment.numberOfSegments == 3 ? 2 : 1
-                let waitsForGroups = self.segment.selectedSegmentIndex == groupsSegmentIndex || self.groups.isEmpty
+                let waitsForGroups = self.isGroupsSegmentSelected || self.groups.isEmpty
                 if !waitsForGroups {
                     self.finishGettingData()
                     if self.isGettingGroups {
@@ -622,7 +655,71 @@ class ContactChatViewController: UITableViewController {
             self.loadingData = false
             self.isGettingData = false
             self.flushReloadCompletions()
+            // Whatever the rows were built from, the badges are what the reader notices, so
+            // they are settled against the database one more time here.
+            self.refreshUnreadCounters()
+            if self.needsAnotherLoad {
+                self.needsAnotherLoad = false
+                self.getData()
+            }
         }
+    }
+
+    /// Reads the unread counts on their own and puts them on the rows already on screen.
+    ///
+    /// The full refresh rebuilds every row from a union over five tables and a walk over the
+    /// groups; on a slow device that takes seconds, and it is the part that gets overtaken.
+    /// The counts are one small query over MESSAGE_SUMMARY, so a conversation that has just
+    /// been read stops looking unread straight away, whatever the heavy refresh is doing.
+    private func refreshUnreadCounters() {
+        DispatchQueue.global().async { [weak self] in
+            guard self != nil else { return }
+            var counters: [String: String] = [:]
+            Database.shared.database?.inTransaction({ fmdb, _ in
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select l_pin, counter from MESSAGE_SUMMARY") {
+                    while cursor.next() {
+                        counters[cursor.string(forColumnIndex: 0) ?? ""] = "\(cursor.int(forColumnIndex: 1))"
+                    }
+                    cursor.close()
+                }
+            })
+            DispatchQueue.main.async { [weak self] in
+                self?.applyUnreadCounters(counters)
+            }
+        }
+    }
+
+    /// A parent row carries the sum of its group's conversations, expanded or not, so it is
+    /// added up from chatGroupMaps rather than from the rows that happen to be on screen.
+    private func applyUnreadCounters(_ counters: [String: String]) {
+        var changed = false
+        for children in chatGroupMaps.values {
+            for chat in children {
+                let fresh = counters[chat.pin] ?? "0"
+                if chat.counter != fresh {
+                    chat.counter = fresh
+                    changed = true
+                }
+            }
+        }
+        for chat in chats {
+            if chat.pin == "Archived" {
+                continue
+            }
+            let fresh: String
+            if chat.isParent {
+                let total = (chatGroupMaps[chat.groupId] ?? []).reduce(0) { $0 + (Int(counters[$1.pin] ?? "0") ?? 0) }
+                fresh = "\(total)"
+            } else {
+                fresh = counters[chat.pin] ?? "0"
+            }
+            if chat.counter != fresh {
+                chat.counter = fresh
+                changed = true
+            }
+        }
+        guard changed else { return }
+        tableView.reloadData()
     }
 
     // Called once the table has been reloaded with the fresh data, from whichever run of
@@ -637,11 +734,10 @@ class ContactChatViewController: UITableViewController {
     }
     
     func getChats(completion: @escaping ()->()) {
+        // Main thread: every caller is a tap, a notification or the loader, all of them there.
+        chatsLoadGeneration += 1
+        let generation = chatsLoadGeneration
         DispatchQueue.global().async {
-//            while self.isGettingData {
-//                Thread.sleep(forTimeInterval: 0.1)
-//            }
-            self.isGettingData = true
             // Built here, handed over on the main thread at the end. These are read while the
             // table draws, and filling them in from this thread is a race with it.
             var newChatGroupMaps: [String: [Chat]] = [:]
@@ -737,6 +833,13 @@ class ContactChatViewController: UITableViewController {
                 tempChats.insert(Chat(pin: "Archived"), at: 0)
             }
             DispatchQueue.main.async {
+                // Only the newest read may be published. An older one finishing later would
+                // otherwise write back the counters it read before they were cleared, and
+                // nothing would ask again - the rows stayed wrong for the rest of the session.
+                guard generation == self.chatsLoadGeneration else {
+                    completion()
+                    return
+                }
                 self.chats = tempChats
                 self.chatGroupMaps = newChatGroupMaps
                 self.listMaxArchived = newListMaxArchived

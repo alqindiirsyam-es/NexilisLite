@@ -31,9 +31,28 @@ public class Database {
     }
     
     public static var shared = Database()
+
+    /// Open *and* with the app's tables in it.
+    ///
+    /// Fix: `database != nil` was being used as "the database is usable", and it is not the same
+    /// thing. openDatabase() opens the connection first and creates the tables second, so
+    /// between those two steps every thread waiting on `database != nil` woke up and queried
+    /// tables that did not exist yet - which is the burst of "no such table: OUTGOING" and
+    /// "no such table: INQUIRY" the moment a login succeeds. Worse than the noise: the startup
+    /// sweep for unsent messages ran against nothing and quietly found none.
+    public var isReady: Bool {
+        return database != nil && schemaVerified
+    }
+
+    static var databasePath: String {
+        return NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] + "/encrypted_db_es.db"
+    }
     
     public var database: FMDatabaseQueue!
     private let backgroundReopenLock = NSLock()
+    /// Whether the connection currently open has been checked for the app's tables. Reset every
+    /// time a connection is opened, so each new one is checked once and no more.
+    private var schemaVerified = false
     private var backgroundAutoCloseWorkItem: DispatchWorkItem?
 
     // Fix: APIS.enterBackground() nils `database`/aesKey the instant the app backgrounds,
@@ -49,6 +68,15 @@ public class Database {
         backgroundReopenLock.lock()
         defer { backgroundReopenLock.unlock() }
         if database == nil {
+            // Fix: this only ever RE-opens. setDBInstance goes on to create the file when it is
+            // not there, and on a fresh install it is not - so being called before the app had
+            // been through its first run left an empty database behind, keyed with whatever
+            // material happened to exist at that moment rather than the material the app settles
+            // on afterwards. Everything from then on failed with "no such table". No file means
+            // the app has not set itself up yet, and that is openDatabase()'s job, not this one's.
+            guard FileManager.default.fileExists(atPath: Database.databasePath) else {
+                return
+            }
             FileEncryption.shared.ensureKeyLoaded()
             guard FileEncryption.shared.aesKey != nil else {
                 print("Cannot reopen DB for background write: no key material available")
@@ -56,6 +84,10 @@ public class Database {
             }
             setDBInstance()
         }
+        // Outside the open above on purpose: a database that was already open when this was
+        // called can be the schema-less one too - opened from Database.init() because the file
+        // exists, which it does as soon as anything has created it. Checked once per connection.
+        ensureSchema()
         // Fix: only schedule the auto-close when getSecureFolderOffline() == "0" - that's
         // the same condition enterBackground() itself uses to decide whether to clear the
         // DB/key at all. When it's "1", enterBackground() never clears them in the first
@@ -64,6 +96,58 @@ public class Database {
         if Utils.getSecureFolderOffline() == "0" {
             scheduleBackgroundAutoClose()
         }
+    }
+
+    /// Makes sure the connection just opened actually has the app's tables in it.
+    ///
+    /// Fix: setDBInstance() opens the database file - and setupDatabaseQueue creates an empty
+    /// one if it is not there yet - but only openDatabase() ever creates the tables. So opening
+    /// "for a background write" before the app had opened the database for the first time left a
+    /// connection with no schema at all, and because `database` was no longer nil nothing ever
+    /// put it right: every query from then on failed with "no such table: MESSAGE_SUMMARY",
+    /// "no such table: OUTGOING", and so on - including the ones the outgoing and inquiry
+    /// threads fire the moment they see `database != nil`. Everything in createDatabase is
+    /// CREATE TABLE IF NOT EXISTS, so filling in a missing schema costs nothing when it is
+    /// already there.
+    private func ensureSchema() {
+        guard database != nil, !schemaVerified else {
+            return
+        }
+        if hasCoreTables() {
+            schemaVerified = true
+            return
+        }
+        print("Reopened DB has no schema - creating it")
+        // openDatabase() rather than createDatabase() alone: it also runs the column
+        // migrations, which a database created by an older version still needs.
+        _ = openDatabase()
+        if hasCoreTables() {
+            schemaVerified = true
+            return
+        }
+        // Still nothing after being asked to create it. That means the file cannot be written
+        // with the key material this session has - an empty database left behind by an earlier
+        // run that opened it too early, keyed with something else. There is nothing in it to
+        // lose (it has no tables at all), so it is thrown away and built again properly.
+        print("DB has no schema and cannot be created - rebuilding the file")
+        database = nil
+        let path = Database.databasePath
+        for suffix in ["", "-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: path + suffix)
+        }
+        _ = openDatabase()
+        schemaVerified = hasCoreTables()
+    }
+
+    private func hasCoreTables() -> Bool {
+        var found = false
+        database?.inDatabase({ fmdb in
+            if let cursor = try? fmdb.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'MESSAGE_SUMMARY'", values: nil) {
+                found = cursor.next()
+                cursor.close()
+            }
+        })
+        return found
     }
 
     private func scheduleBackgroundAutoClose() {
@@ -107,6 +191,7 @@ public class Database {
     
     func setDBInstance() {
         let databasePath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] + "/encrypted_db_es.db"
+        schemaVerified = false
         database = setupDatabaseQueue(withPath: databasePath)
         database?.inDatabase({(fmdb) in
             let p = Utils.getPassEncDB()
@@ -146,8 +231,11 @@ public class Database {
                 print("Failed to set pragma: PRAGMA synchronous = NORMAL")
             }
             fmdb.maxBusyRetryTimeInterval = 3.0
-            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "databaseOpened"), object: nil, userInfo: nil)
         })
+        // Checked, never created, here: openDatabase() calls this before it creates anything,
+        // and creating from here would call back into it.
+        schemaVerified = hasCoreTables()
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "databaseOpened"), object: nil, userInfo: nil)
     }
 
     
@@ -186,8 +274,15 @@ public class Database {
                 result = 1
 //                    print("Create Done")
             } catch {
+                // Fix: swallowed silently. This is the one place the whole schema is built, and
+                // when it failed the app carried on against a database with no tables in it -
+                // every query answering "no such table" with nothing saying why.
+                rollback.pointee = true
+                print("Failed to create the database schema: \(error.localizedDescription)")
             }
         })
+        // The tables are in now - anything waiting for the database to be usable can go.
+        schemaVerified = hasCoreTables()
         return result
     }
     

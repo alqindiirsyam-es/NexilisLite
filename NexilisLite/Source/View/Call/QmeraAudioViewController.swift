@@ -43,12 +43,21 @@ class QmeraAudioViewController: UIViewController {
         didSet {
             getUserData { user in
                 self.user = user
+                // The call may already have been reported under the bare pin; now it has a name.
+                if let uuid = self.callKitUUID, let user = user {
+                    CallManager.shared.updateCall(uuid: uuid, callerName: user.fullName)
+                }
             }
         }
     }
     
     var user: User?
-    
+
+    /// This screen's own call as the system knows it. Kept here rather than read back from
+    /// APIS.uuidCall, which is one shared slot: an incoming-call push arriving during a call
+    /// overwrites it, and anything aimed at it afterwards lands on the wrong call or on none.
+    private var callKitUUID: UUID?
+
     var isAddCall = ""
         
     private var users: [User] = [] {
@@ -319,6 +328,7 @@ class QmeraAudioViewController: UIViewController {
         FloatingButton.isSuppressed = false
         self.taskTimeout?.cancel()
         Nexilis.isOpenPageCall = false
+        APIS.callSessionEnded(audio: self)
     }
     
     deinit {
@@ -329,6 +339,7 @@ class QmeraAudioViewController: UIViewController {
         NotificationCenter.default.removeObserver(self)
         self.taskTimeout?.cancel()
         Nexilis.isOpenPageCall = false
+        APIS.callSessionEnded(audio: self)
     }
     
     func showCallBanner() {
@@ -415,6 +426,41 @@ class QmeraAudioViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onShowAC"), object: nil, userInfo: nil)
     }
+
+    /// Registers this outgoing call with the system, however this screen was opened.
+    ///
+    /// There is no native screen for an outgoing call - iOS has none - but this is what gives it
+    /// the green in-call indicator, a place in the phone's Recents, the busy state other calls
+    /// see, and CallKit's handling of the audio session: the same treatment as any other call on
+    /// the phone.
+    ///
+    /// Deliberately not fussy about how it was set up. The callee can arrive as a `User` or as a
+    /// bare pin in `data` (which resolves to a user asynchronously, often after this runs), and
+    /// the call can be an ordinary one or a contact-centre one - none of that changes the fact
+    /// that a call is being placed, so none of it is allowed to skip the report.
+    private func reportOutgoingCallToSystem(isVideo: Bool = false) {
+        guard isOutgoing else {
+            return
+        }
+        let pin = user?.pin ?? data
+        guard !pin.isEmpty else {
+            return
+        }
+        // The name is what the system puts on the call - on the card in the app switcher, on
+        // the lock screen and in Recents. The screen may only have been handed a pin, so the
+        // book is asked before falling back to showing the pin itself.
+        var calleeName = user?.fullName.trimmingCharacters(in: .whitespaces) ?? ""
+        if calleeName.isEmpty, let known = User.getDataCanNil(pin: pin) {
+            calleeName = known.fullName.trimmingCharacters(in: .whitespaces)
+        }
+        if calleeName.isEmpty {
+            calleeName = pin
+        }
+        let uuid = UUID()
+        callKitUUID = uuid
+        APIS.uuidCall = uuid
+        CallManager.shared.startOutgoingCall(uuid: uuid, calleeName: calleeName, calleeId: pin, isVideo: isVideo)
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -424,6 +470,9 @@ class QmeraAudioViewController: UIViewController {
         // Held for the length of the call, not the length of this screen: minimised, the call
         // is still running and the button still has no business floating over the app.
         FloatingButton.isSuppressed = true
+        // Registered here rather than on the outgoing path alone, so a call that was received
+        // counts just as much when something else asks for the microphone.
+        APIS.callSessionBegan(audio: self)
         
         let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
         effectView.frame = view.frame
@@ -445,6 +494,7 @@ class QmeraAudioViewController: UIViewController {
         
         if isOutgoing {
             outgoingView()
+            reportOutgoingCallToSystem()
         } else if isOnGoing || autoAcceptAPN {
             ongoingView()
         } else {
@@ -672,6 +722,12 @@ class QmeraAudioViewController: UIViewController {
     }
     
     private func ongoingView() {
+        // Every route to a call in progress passes through here, so this is where the system is
+        // told - the branch that used to carry it alone left the call showing "connecting..."
+        // on the system's own card for as long as it lasted.
+        if let uuid = callKitUUID {
+            CallManager.shared.reportOutgoingCallConnected(uuid: uuid)
+        }
         status.text = "Connecting..."
         minimizeLogo.isHidden = false
         view.bringSubviewToFront(minimizeLogo)
@@ -1300,6 +1356,10 @@ class QmeraAudioViewController: UIViewController {
                         }
                         self.ongoingView()
                         let connectDate = Date()
+                        // Picked up: from here the system counts the duration itself.
+                        if let uuid = self.callKitUUID {
+                            CallManager.shared.reportOutgoingCallConnected(uuid: uuid)
+                        }
                         self.timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                             let format = Utils.callDurationFormatter.string(from: Date().timeIntervalSince(connectDate))
                             self.status.text = format

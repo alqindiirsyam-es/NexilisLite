@@ -35,7 +35,8 @@ class OutgoingThread {
     
     init() {
         DispatchQueue.global().async { [self] in
-            while Database.shared.database == nil {
+            // Usable, not merely open: the connection exists a moment before the tables do.
+            while !Database.shared.isReady {
                 Thread.sleep(forTimeInterval: 1.0)
             }
             resendPending()

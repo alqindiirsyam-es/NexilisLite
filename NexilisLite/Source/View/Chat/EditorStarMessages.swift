@@ -2461,6 +2461,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         let message = dataMessages[indexPath.row]
         if let attachmentFlag = message["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
             if attachmentFlag == "27" {
+                if APIS.blockedByCallInProgress() {
+                    return
+                }
                 if !Nexilis.checkingAccess(key: "live_streaming") {
                     if Nexilis.checkingAccessAlert(key: "live_streaming") != "|" && !Nexilis.checkingAccessAlert(key: "live_streaming").isEmpty {
                         let title = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[0]

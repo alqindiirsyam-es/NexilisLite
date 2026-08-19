@@ -139,6 +139,9 @@ public class CreateConferenceCallController: UITableViewController {
     }
     
     @objc func didTapRight(sender: Any?) {
+        if APIS.blockedByCallInProgress() {
+            return
+        }
         let controller = SeminarViewController()
         controller.isLive = !isJoin
         if isJoin {
