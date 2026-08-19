@@ -21,11 +21,11 @@ In Xcode: **File → Add Package Dependencies… → Add Local…** and pick the
 ### From a git URL
 
 SwiftPM requires `Package.swift` to sit at the **root of a repository**, and here
-it lives in a subfolder of `NexilisLibraryiOS`. To publish over a URL, push the
-`NexilisLite` folder to a repository of its own (see *Publishing* below), then:
+it lives in a subfolder of `NexilisLibraryiOS`, so the package is mirrored to a
+repository of its own (see *Publishing* below):
 
 ```swift
-.package(url: "https://<your-host>/NexilisLite.git", from: "5.0.22")
+.package(url: "https://github.com/alqindiirsyam-es/NexilisLite.git", from: "5.0.22")
 ```
 
 ### Target dependency
@@ -130,20 +130,9 @@ Resource lookup is already handled: `Bundle.resourceBundle(for:)` in
 
 ## Publishing to a standalone repository
 
-**Publish `nuSDKService` first.** This package depends on it by relative path
-(`../nuSDKService`), which only resolves inside this repository — a split-out
-copy would not build. Follow `../nuSDKService/README.md`, then swap the line in
-`Package.swift`:
-
-```swift
-// local, in-repo
-.package(path: "../nuSDKService")
-
-// published
-.package(url: "https://<your-host>/nuSDKService.git", from: "5.0.2")
-```
-
-Then split and push this package:
+This package is published at
+**https://github.com/alqindiirsyam-es/NexilisLite** and already depends on the
+published `nuSDKService` by URL, so a split-out copy builds as-is.
 
 ```bash
 cd /path/to/NexilisLibraryiOS
@@ -151,11 +140,11 @@ cd /path/to/NexilisLibraryiOS
 # One-time: split the NexilisLite folder into its own history
 git subtree split --prefix=NexilisLite -b spm-nexilislite
 
-git push https://<your-host>/NexilisLite.git spm-nexilislite:main
+git push https://github.com/alqindiirsyam-es/NexilisLite.git spm-nexilislite:main
 
 # Tag the version. SwiftPM accepts either "5.0.22" or "v5.0.22" — pick one
 # convention and stick to it.
-git clone https://<your-host>/NexilisLite.git /tmp/NexilisLite
+git clone https://github.com/alqindiirsyam-es/NexilisLite.git /tmp/NexilisLite
 cd /tmp/NexilisLite && git tag 5.0.22 && git push origin 5.0.22
 ```
 

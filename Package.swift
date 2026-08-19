@@ -40,9 +40,9 @@ let package = Package(
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", from: "11.14.0"),
         // Provides the SQLCipher-enabled sqlite3 that FMDB is compiled against.
         .package(url: "https://github.com/sqlcipher/SQLCipher.swift.git", from: "4.11.0"),
-        // Shared with StreamShield. Switch to a URL + version when publishing —
-        // see README-SPM.md.
-        .package(path: "../nuSDKService")
+        // Shared with StreamShield so an app can depend on both without the
+        // two colliding on a duplicate nuSDKService target.
+        .package(url: "https://github.com/alqindiirsyam-es/nuSDKService.git", from: "5.0.2")
     ],
     targets: [
         // MARK: - Vendored dependencies (no upstream SPM support)
