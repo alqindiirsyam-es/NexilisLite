@@ -8,7 +8,11 @@
 import UIKit
 import FMDB
 import NotificationBannerSwift
+#if SWIFT_PACKAGE
+import Toast
+#else
 import Toast_Swift
+#endif
 
 class ContactChatViewController: UITableViewController {
     

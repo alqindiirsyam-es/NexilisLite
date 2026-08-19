@@ -1388,15 +1388,35 @@ extension UILabel {
 extension Bundle {
 
     public static func resourceBundle(for frameworkClass: AnyClass) -> Bundle {
+#if SWIFT_PACKAGE
+        // Under SwiftPM the `Resource` directory is compiled into the target's
+        // own resource bundle, which `Bundle.module` resolves for us.
+        return Bundle.module
+#else
         let frameworkBundle = Bundle(for: frameworkClass)
         guard let resourceBundleURL = frameworkBundle.url(forResource: "NexilisLite", withExtension: "bundle"),
               let resourceBundle = Bundle(url: resourceBundleURL) else {
             return frameworkBundle
         }
         return resourceBundle
+#endif
     }
     
     public static func resourcesMediaBundle(for frameworkClass: AnyClass) -> Bundle {
+#if SWIFT_PACKAGE
+        // `NexilisLiteResources.bundle` is an optional media bundle supplied by
+        // the host app. Depending on whether the package is linked statically or
+        // dynamically it lands either in the app bundle or next to the library,
+        // so check both before falling back to the package's own resources.
+        let frameworkBundle = Bundle(for: frameworkClass)
+        for candidate in [frameworkBundle, Bundle.main] {
+            if let resourceBundleURL = candidate.url(forResource: "NexilisLiteResources", withExtension: "bundle"),
+               let resourceBundle = Bundle(url: resourceBundleURL) {
+                return resourceBundle
+            }
+        }
+        return Bundle.module
+#else
         let frameworkBundle = Bundle(for: frameworkClass)
 
         guard let resourceBundleURL = frameworkBundle.url(forResource: "NexilisLiteResources", withExtension: "bundle"),
@@ -1405,6 +1425,7 @@ extension Bundle {
         }
 
         return resourceBundle
+#endif
     }
     
 }
