@@ -6,6 +6,10 @@
 //  Swift Package Manager manifest. Mirrors NexilisLite.podspec so the library
 //  can be consumed either via CocoaPods or via SPM.
 //
+//  nuSDKService lives in its own package (../nuSDKService) because StreamShield
+//  needs it too, and SwiftPM requires target names to be unique across the
+//  package graph. See that package's Package.swift for the details.
+//
 //  NOTE: nuSDKService is shipped as a device-only (ios-arm64) binary framework.
 //  Building for the iOS Simulator is therefore not supported — same limitation
 //  the podspec expresses with EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64.
@@ -35,18 +39,12 @@ let package = Package(
         .package(url: "https://github.com/Daltron/NotificationBanner.git", from: "4.0.0"),
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", from: "11.14.0"),
         // Provides the SQLCipher-enabled sqlite3 that FMDB is compiled against.
-        .package(url: "https://github.com/sqlcipher/SQLCipher.swift.git", from: "4.11.0")
+        .package(url: "https://github.com/sqlcipher/SQLCipher.swift.git", from: "4.11.0"),
+        // Shared with StreamShield. Switch to a URL + version when publishing —
+        // see README-SPM.md.
+        .package(path: "../nuSDKService")
     ],
     targets: [
-        // MARK: - Binary dependency
-
-        // Wrapped from the nuSDKService CocoaPod (https://nexilis.io/UCPaaSiOS/nusDKService/v5.0.2/nuSDKService.zip).
-        // Regenerate with Scripts/make-nusdkservice-xcframework.sh when bumping the version.
-        .binaryTarget(
-            name: "nuSDKService",
-            path: "Frameworks/nuSDKService.xcframework"
-        ),
-
         // MARK: - Vendored dependencies (no upstream SPM support)
 
         // FMDB 2.7.12, byte-for-byte the sources CocoaPods installs for the
@@ -82,7 +80,7 @@ let package = Package(
         .target(
             name: "NexilisLite",
             dependencies: [
-                "nuSDKService",
+                .product(name: "nuSDKService", package: "nuSDKService"),
                 "FMDB",
                 "Popover",
                 "Alamofire",

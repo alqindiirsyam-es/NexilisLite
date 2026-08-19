@@ -65,20 +65,19 @@ NexilisLite/
 ├── NexilisLite/
 │   ├── Source/                         library sources  — shared by both
 │   └── Resource/                       images, sounds, fonts, .lproj, storyboard
-├── Frameworks/
-│   └── nuSDKService.xcframework        binary target (generated, committed)
-├── SPMSupport/                         deps with no upstream SPM support
-│   ├── FMDB/                           FMDB 2.7.12 + SQLCipher shim
-│   └── Popover/                        Popover 1.3.0
-└── Scripts/
-    └── make-nusdkservice-xcframework.sh
+└── SPMSupport/                         deps with no upstream SPM support
+    ├── FMDB/                           FMDB 2.7.12 + SQLCipher shim
+    └── Popover/                        Popover 1.3.0
 ```
 
-### Why `Frameworks/` and `SPMSupport/` exist
+`nuSDKService` lives in its own package at `../nuSDKService`, shared with
+StreamShield — see that package's `README.md` for why.
+
+### Why `SPMSupport/` exists
 
 | Pod | SPM status | What we do |
 |---|---|---|
-| `nuSDKService` | ships a bare `.framework` | SPM binary targets only accept `.xcframework`, so we repackage it — see the script below |
+| `nuSDKService` | ships a bare `.framework` | repackaged as an xcframework in its own shared package, `../nuSDKService` |
 | `FMDB/SQLCipher` | no released SPM support | vendored (MIT), compiled with `-DSQLITE_HAS_CODEC` against [`sqlcipher/SQLCipher.swift`](https://github.com/sqlcipher/SQLCipher.swift) |
 | `Popover` | upstream has no `Package.swift` | vendored (MIT), unmodified |
 
@@ -102,14 +101,8 @@ databases behave the same under either build system.
 
 ### Bumping nuSDKService
 
-```bash
-Scripts/make-nusdkservice-xcframework.sh 5.0.3
-```
-
-Downloads the release zip, repackages it as an xcframework, and writes
-`Frameworks/nuSDKService.xcframework`. Commit the result and bump the version in
-both `NexilisLite.podspec` and the `Podfile`. (The script falls back to the local
-CocoaPods cache if the download endpoint is unreachable.)
+Handled in the shared package — see `../nuSDKService/README.md`. Remember to
+bump the version in `NexilisLite.podspec` and the `Podfile` to match.
 
 ### Bumping any other dependency
 
@@ -137,6 +130,21 @@ Resource lookup is already handled: `Bundle.resourceBundle(for:)` in
 
 ## Publishing to a standalone repository
 
+**Publish `nuSDKService` first.** This package depends on it by relative path
+(`../nuSDKService`), which only resolves inside this repository — a split-out
+copy would not build. Follow `../nuSDKService/README.md`, then swap the line in
+`Package.swift`:
+
+```swift
+// local, in-repo
+.package(path: "../nuSDKService")
+
+// published
+.package(url: "https://<your-host>/nuSDKService.git", from: "5.0.2")
+```
+
+Then split and push this package:
+
 ```bash
 cd /path/to/NexilisLibraryiOS
 
@@ -155,6 +163,9 @@ Keep the tag in step with `spec.version` in the podspec so CocoaPods and SPM
 consumers get the same code for a given version number.
 
 To publish updates later, re-run `git subtree split` and push again.
+
+StreamShield needs the same treatment and shares the same `nuSDKService`
+package — see `../StreamShield/README-SPM.md`.
 
 ---
 
