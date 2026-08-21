@@ -315,10 +315,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             }
                             
                             let date = Date(milliseconds: Int64(dataStatusAck[indexPath.row]["time_ack"] as! String) ?? 100)
-                            let formatter = DateFormatter()
-                            formatter.dateFormat = "HH:mm"
-                            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                            let time = formatter.string(from: date as Date)
+                            let time = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                             
                             let viewTimeStatus = UIView()
                             viewTimeStatus.frame = CGRect(x: 0, y: 0, width: 80, height: cell.frame.height)
@@ -346,10 +343,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             content.text = dataProfile["name"]!
                             
                             let date = Date(milliseconds: Int64(dataStatusRead[indexPath.row]["time_read"] as! String) ?? 100)
-                            let formatter = DateFormatter()
-                            formatter.dateFormat = "HH:mm"
-                            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                            let time = formatter.string(from: date as Date)
+                            let time = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                             
                             let viewTimeStatus = UIView()
                             viewTimeStatus.frame = CGRect(x: 0, y: 0, width: 80, height: cell.frame.height)
@@ -378,10 +372,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         content.text = dataProfile["name"]!
                         
                         let date = Date(milliseconds: Int64(dataStatusRead[indexPath.row]["time_read"] as! String) ?? 100)
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "HH:mm"
-                        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                        let time = formatter.string(from: date as Date)
+                        let time = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                         
                         let viewTimeStatus = UIView()
                         viewTimeStatus.frame = CGRect(x: 0, y: 0, width: 80, height: cell.frame.height)
@@ -409,10 +400,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         content.text = dataProfile["name"]!
                         
                         let date = Date(milliseconds: Int64(dataStatusDelivered[indexPath.row]["time_delivered"] as! String) ?? 100)
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "HH:mm"
-                        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                        let time = formatter.string(from: date as Date)
+                        let time = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                         
                         let viewTimeStatus = UIView()
                         viewTimeStatus.frame = CGRect(x: 0, y: 0, width: 80, height: cell.frame.height)
@@ -454,10 +442,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             cell.accessoryView = noStatus
                         } else {
                             let date = Date(milliseconds: Int64(dataStatus[0]["time_ack"] as! String) ?? 100)
-                            let formatter = DateFormatter()
-                            formatter.dateFormat = "HH:mm"
-                            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                            let time = formatter.string(from: date as Date)
+                            let time = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                             
                             let viewTimeStatus = UIView()
                             viewTimeStatus.frame = CGRect(x: 0, y: 0, width: 80, height: cell.frame.height)
@@ -481,10 +466,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             cell.accessoryView = noStatus
                         } else {
                             let date = Date(milliseconds: Int64(dataStatus[0]["time_read"] as! String) ?? 100)
-                            let formatter = DateFormatter()
-                            formatter.dateFormat = "HH:mm"
-                            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                            let time = formatter.string(from: date as Date)
+                            let time = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                             
                             let viewTimeStatus = UIView()
                             viewTimeStatus.frame = CGRect(x: 0, y: 0, width: 80, height: cell.frame.height)
@@ -509,10 +491,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         cell.accessoryView = noStatus
                     } else {
                         let date = Date(milliseconds: Int64(dataStatus[0]["time_read"] as! String) ?? 100)
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "HH:mm"
-                        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                        let time = formatter.string(from: date as Date)
+                        let time = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                         
                         let viewTimeStatus = UIView()
                         viewTimeStatus.frame = CGRect(x: 0, y: 0, width: 80, height: cell.frame.height)
@@ -535,10 +514,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     cell.accessoryView = noStatus
                 } else {
                     let date = Date(milliseconds: Int64(dataStatus[0]["time_delivered"] as! String) ?? 100)
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "HH:mm"
-                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                    let time = formatter.string(from: date as Date)
+                    let time = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                     
                     let viewTimeStatus = UIView()
                     viewTimeStatus.frame = CGRect(x: 0, y: 0, width: 80, height: cell.frame.height)
@@ -793,10 +769,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             let stringDate = (data["server_date"] as? String) ?? ""
             if !stringDate.isEmpty {
                 let date = Date(milliseconds: Int64(stringDate) ?? 100)
-                let formatter = DateFormatter()
-                formatter.dateFormat = "HH:mm"
-                formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                timeMessage.text = formatter.string(from: date as Date)
+                timeMessage.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                 timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
                 timeMessage.textColor = .lightGray
             }
@@ -805,8 +778,11 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             let containerViewFile = UIView()
             
             if (!thumbChat.isEmpty) {
-                let getHeightImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).height
-                let getWidthImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).width
+                // One measurement, not two: the width and the height come from the same look
+                // at the file.
+                let thumbSize = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)
+                let getHeightImage: CGFloat = thumbSize.height
+                let getWidthImage: CGFloat = thumbSize.width
                 topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 40 : getHeightImage)
                 
                 containerMessage.addSubview(imageThumb)

@@ -79,6 +79,31 @@ class ContactChatViewController: UITableViewController {
     // A refresh that arrived while one was already running. Kept rather than dropped, so the
     // change that asked for it is never the one that goes unseen.
     private var needsAnotherLoad = false
+    // When the read in flight was started. A read can sit for many seconds before it even
+    // begins: the shared global queue on a slow device fills with calls blocked on the socket,
+    // and nothing dispatched there runs until they time out. Without knowing how long it has
+    // been, the list has no way to tell a read that is working from one that is stuck.
+    private var loadStartedAt: Date?
+    // The badge read runs here rather than on the shared global queue, for the same reason -
+    // it is one small query, and it must not queue behind whatever else the app is waiting on.
+    private let unreadCounterQueue = DispatchQueue(label: "ContactChat.unreadCounters", qos: .userInitiated)
+    // The list's own reads. Serial on purpose: the database behind them is a serial queue
+    // anyway, so running them side by side buys nothing and only takes threads.
+    private let listQueue = DispatchQueue(label: "ContactChat.listData", qos: .userInitiated)
+    // Everything that talks to the server. Nexilis.write blocks until the socket answers or
+    // its 15-second timeout runs out, and this screen alone can have several of those in the
+    // air at once. Left on the shared global pool they take its threads with them, and on a
+    // two-core phone that pool runs out - which is how a refresh dispatched afterwards came to
+    // wait thirteen seconds before it so much as started. One thread, one at a time, here.
+    private let networkQueue = DispatchQueue(label: "ContactChat.network", qos: .utility)
+    // How long a read is given before it is treated as stuck rather than slow.
+    private static let stuckLoadTimeout: TimeInterval = 8
+    // How long after a rebuild the next one waits. Messages arrive in bursts, and each one
+    // used to rebuild the whole list; the badges are put right immediately either way, so the
+    // rows can wait for the burst to settle rather than being rebuilt once per message.
+    private static let reloadCoalescingWindow: TimeInterval = 0.3
+    // When the last rebuild landed.
+    private var lastFullReloadAt: Date?
     var timerReloadData: Timer?
     
     var noUCList = false
@@ -391,7 +416,7 @@ class ContactChatViewController: UITableViewController {
         let isOpenGroupsFresh = lastOpenGroupsFetch.map { now.timeIntervalSince($0) < 60 } ?? false
         if !isOpenGroupsFresh {
             lastOpenGroupsFetch = now
-            DispatchQueue.global().async {
+            networkQueue.async {
                 self.getOpenGroups(listGroups: self.groups, completion: { g in
                     DispatchQueue.main.async {
                         self.groups.removeAll(where: { $0.isOpen == "1" && $0.groupType == "NOTJOINED" })
@@ -449,7 +474,8 @@ class ContactChatViewController: UITableViewController {
             if let completion = completion {
                 self.pendingReloadCompletions.append(completion)
             }
-            // The badges do not have to wait for the whole list to be read again.
+            // First, and before any decision to wait: this is one small query, and it is what
+            // the reader is actually looking at.
             self.refreshUnreadCounters()
             self.timerReloadData?.invalidate()
             self.timerReloadData = nil
@@ -458,6 +484,14 @@ class ContactChatViewController: UITableViewController {
                 // one, so its result is not an answer. Ask again once it is out of the way -
                 // the old retry gave up whenever it found the read still running.
                 self.timerReloadData = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+                    self?.timerReloadData = nil
+                    self?.reloadAllData()
+                }
+                return
+            }
+            let sinceLastReload = self.lastFullReloadAt.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+            if sinceLastReload < ContactChatViewController.reloadCoalescingWindow {
+                self.timerReloadData = Timer.scheduledTimer(withTimeInterval: ContactChatViewController.reloadCoalescingWindow - sinceLastReload, repeats: false) { [weak self] _ in
                     self?.timerReloadData = nil
                     self?.reloadAllData()
                 }
@@ -542,7 +576,7 @@ class ContactChatViewController: UITableViewController {
         case 1:
             Utils.inTabChats = false
             if segment.numberOfSegments < 3 {
-                DispatchQueue.global().async {
+                networkQueue.async {
                     self.getOpenGroups(listGroups: self.groups, completion: { g in
                         DispatchQueue.main.async {
                             for og in g {
@@ -605,11 +639,18 @@ class ContactChatViewController: UITableViewController {
             // through this path, and a request lost while the previous read was still running
             // left the rows as they were until the app was launched again.
             self.needsAnotherLoad = true
-            return
+            // Unless the read it is waiting for has been going long enough that it is plainly
+            // stuck rather than slow, in which case waiting for it is waiting for nothing.
+            let started = self.loadStartedAt ?? Date()
+            guard Date().timeIntervalSince(started) > ContactChatViewController.stuckLoadTimeout else {
+                return
+            }
+            self.needsAnotherLoad = false
         }
         // Claimed here, on the main thread, rather than inside the read's background block -
         // until it was set, two refreshes arriving in the same breath both got through.
         self.isGettingData = true
+        self.loadStartedAt = Date()
         getChats {
             self.getContacts {
                 // The groups only feed the Forums segment, and reading them means a recursive
@@ -658,6 +699,8 @@ class ContactChatViewController: UITableViewController {
             self.tableView.reloadData()
             self.loadingData = false
             self.isGettingData = false
+            self.loadStartedAt = nil
+            self.lastFullReloadAt = Date()
             self.flushReloadCompletions()
             // Whatever the rows were built from, the badges are what the reader notices, so
             // they are settled against the database one more time here.
@@ -676,7 +719,7 @@ class ContactChatViewController: UITableViewController {
     /// The counts are one small query over MESSAGE_SUMMARY, so a conversation that has just
     /// been read stops looking unread straight away, whatever the heavy refresh is doing.
     private func refreshUnreadCounters() {
-        DispatchQueue.global().async { [weak self] in
+        unreadCounterQueue.async { [weak self] in
             guard self != nil else { return }
             var counters: [String: String] = [:]
             Database.shared.database?.inTransaction({ fmdb, _ in
@@ -741,7 +784,7 @@ class ContactChatViewController: UITableViewController {
         // Main thread: every caller is a tap, a notification or the loader, all of them there.
         chatsLoadGeneration += 1
         let generation = chatsLoadGeneration
-        DispatchQueue.global().async {
+        listQueue.async {
             // Built here, handed over on the main thread at the end. These are read while the
             // table draws, and filling them in from this thread is a race with it.
             var newChatGroupMaps: [String: [Chat]] = [:]
@@ -855,7 +898,7 @@ class ContactChatViewController: UITableViewController {
     
     private func getContacts(completion: @escaping ()->()) {
         self.contacts.removeAll()
-        DispatchQueue.global().async {
+        listQueue.async {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     if self.isChooser == nil {
@@ -893,21 +936,21 @@ class ContactChatViewController: UITableViewController {
         }
     }
     
-    // `parentsNeedingRefresh` collects the groups the server should be asked about. They are
-    // gathered here and sent afterwards rather than from inside the walk: Nexilis.write()
-    // blocks on the socket (up to its 15s timeout) and this runs inside a database
-    // transaction, so a request per row held the whole database queue - and with it every
-    // other screen's queries - for as long as the network felt like taking.
+    /// Reads every group and every topic once, then puts the tree together in memory.
+    ///
+    /// Fix: this used to run a query for one level of groups, then - for every row it found -
+    /// another query for that group's topics and another to recurse into its children. On a
+    /// tree of any size that is hundreds of queries for one refresh, and the list is rebuilt on
+    /// every message that arrives. The database is encrypted, so every one of those queries is
+    /// paid for in full: each page it touches is decrypted on the way out. Two queries now do
+    /// the same work, and the shape and order of what comes back are unchanged - the ordering
+    /// is still done by the database, and rows keep their relative order when they are bucketed
+    /// by parent.
     private func getGroupRecursive(fmdb: FMDatabase, id: String = "", parent: String = "", parentsNeedingRefresh: inout Set<String>) -> [Group] {
-        var data: [Group] = []
-        var query = "select g.group_id, g.f_name, g.image_id, g.quote, g.created_by, g.created_date, g.parent, g.group_type, g.is_open, g.official, g.is_education, g.level, g.chat_modifier from GROUPZ g where "
-        if id.isEmpty {
-            query += "g.parent = '\(parent)'"
-        } else {
-            query += "g.group_id = '\(id)'"
-        }
-        query += "order by 12 asc, 13 asc, 2 asc"
-        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) {
+        let groupsQuery = "select g.group_id, g.f_name, g.image_id, g.quote, g.created_by, g.created_date, g.parent, g.group_type, g.is_open, g.official, g.is_education, g.level, g.chat_modifier from GROUPZ g order by 12 asc, 13 asc, 2 asc"
+        var groupsById: [String: Group] = [:]
+        var childrenOf: [String: [Group]] = [:]
+        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: groupsQuery) {
             while cursor.next() {
                 let group = Group(
                     id: cursor.string(forColumnIndex: 0) ?? "",
@@ -924,62 +967,74 @@ class ContactChatViewController: UITableViewController {
                     isEducation: cursor.string(forColumnIndex: 10) ?? "",
                     level: cursor.string(forColumnIndex: 11) ?? "",
                     chatModifier: cursor.string(forColumnIndex: 12) ?? "")
-                
-                if group.chatId.isEmpty {
-                    let lounge = Group(id: group.id, name: "Lounge".localized(), profile: "", quote: group.quote, by: group.by, date: group.date, parent: group.id, chatId: group.chatId, groupType: group.groupType, isOpen: group.isOpen, official: group.official, isEducation: group.isEducation, isLounge: true, level: group.level != "-1" ? group.level : "2")
-                    group.childs.append(lounge)
-                }
-                
-                if let topicCursor = Database.shared.getRecords(fmdb: fmdb, query: "select chat_id, title, thumb from DISCUSSION_FORUM where group_id = '\(group.id)'") {
-                    while topicCursor.next() {
-                        let topic = Group(id: group.id,
-                                          name: topicCursor.string(forColumnIndex: 1) ?? "",
-                                          profile: topicCursor.string(forColumnIndex: 2) ?? "",
+                groupsById[group.id] = group
+                childrenOf[group.parent, default: []].append(group)
+            }
+            cursor.close()
+        }
+
+        var topicsOf: [String: [(chatId: String, title: String, thumb: String)]] = [:]
+        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select group_id, chat_id, title, thumb from DISCUSSION_FORUM") {
+            while cursor.next() {
+                let groupId = cursor.string(forColumnIndex: 0) ?? ""
+                topicsOf[groupId, default: []].append((cursor.string(forColumnIndex: 1) ?? "",
+                                                       cursor.string(forColumnIndex: 2) ?? "",
+                                                       cursor.string(forColumnIndex: 3) ?? ""))
+            }
+            cursor.close()
+        }
+
+        // A group listed as its own ancestor would walk forever; the old version would have
+        // hung on it just the same, so this only makes that impossible rather than unlikely.
+        var visited: Set<String> = []
+        // The groups the server should be asked about. Collected while walking, not from the
+        // whole table: a subtree the walk never reaches was never asked about before either,
+        // and asking about it now would be a request that did not used to be sent.
+        var walkedParents: Set<String> = []
+        func build(_ group: Group) -> Group {
+            guard !visited.contains(group.id) else {
+                return group
+            }
+            visited.insert(group.id)
+            if !group.id.isEmpty, childrenOf[group.id]?.isEmpty == false {
+                walkedParents.insert(group.id)
+            }
+            if group.chatId.isEmpty {
+                let lounge = Group(id: group.id, name: "Lounge".localized(), profile: "", quote: group.quote, by: group.by, date: group.date, parent: group.id, chatId: group.chatId, groupType: group.groupType, isOpen: group.isOpen, official: group.official, isEducation: group.isEducation, isLounge: true, level: group.level != "-1" ? group.level : "2")
+                group.childs.append(lounge)
+            }
+            for topic in topicsOf[group.id] ?? [] {
+                group.childs.append(Group(id: group.id,
+                                          name: topic.title,
+                                          profile: topic.thumb,
                                           quote: group.quote,
                                           by: group.by,
                                           date: group.date,
                                           parent: group.id,
-                                          chatId: topicCursor.string(forColumnIndex: 0) ?? "",
+                                          chatId: topic.chatId,
                                           groupType: group.groupType,
                                           isOpen: group.isOpen,
                                           official: group.official,
                                           isEducation: group.isEducation,
-                                          level: group.level != "-1" ? group.level : "2")
-                        group.childs.append(topic)
-                    }
-                    topicCursor.close()
-                }
-                
-                // One request per parent, not one per row: every row of this level asked the
-                // server the exact same question.
-                if !parent.isEmpty {
-                    parentsNeedingRefresh.insert(parent)
-                }
-                
-                if !group.id.isEmpty {
-//                    if group.official == "1" {
-//                        let idMe = User.getMyPin() as String?
-//                        if let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT user_type FROM BUDDY where f_pin='\(idMe!)'"), cursorUser.next() {
-////                            if cursorUser.string(forColumnIndex: 0) == "23" || cursorUser.string(forColumnIndex: 0) == "24" {
-////                                group.childs.append(contentsOf: getGroupRecursive(fmdb: fmdb, parent: group.id))
-////                            }
-//                            group.childs.append(contentsOf: getGroupRecursive(fmdb: fmdb, parent: group.id))
-//                            cursorUser.close()
-//                        }
-//                    } else if group.official != "1"{
-//                        group.childs.append(contentsOf: getGroupRecursive(fmdb: fmdb, parent: group.id))
-//                    }
-                    group.childs.append(contentsOf: getGroupRecursive(fmdb: fmdb, parent: group.id, parentsNeedingRefresh: &parentsNeedingRefresh))
-//                    group.childs = group.childs.sorted(by: { $0.name < $1.name })
-//                    let dataLounge = group.childs.filter({$0.name == "Lounge".localized()})
-//                    group.childs = group.childs.filter({ $0.name != "Lounge".localized() })
-//                    group.childs.insert(contentsOf: dataLounge, at: 0)
-                }
-                data.append(group)
+                                          level: group.level != "-1" ? group.level : "2"))
             }
-            cursor.close()
+            if !group.id.isEmpty {
+                for child in childrenOf[group.id] ?? [] {
+                    group.childs.append(build(child))
+                }
+            }
+            return group
         }
-        return data
+
+        let roots: [Group]
+        if id.isEmpty {
+            roots = childrenOf[parent] ?? []
+        } else {
+            roots = groupsById[id].map { [$0] } ?? []
+        }
+        let tree = roots.map { build($0) }
+        parentsNeedingRefresh.formUnion(walkedParents)
+        return tree
     }
     
     private func getOpenGroups(listGroups: [Group], completion: @escaping ([Group]) -> (), retry: Int = 3) {
@@ -1023,7 +1078,7 @@ class ContactChatViewController: UITableViewController {
     }
     
     private func getGroups(id: String = "", parent: String = "", completion: @escaping ([Group]) -> ()) {
-        DispatchQueue.global().async {
+        listQueue.async {
             var groups: [Group] = []
             var parentsNeedingRefresh: Set<String> = []
             Database.shared.database?.inTransaction({ fmdb, rollback in
@@ -1044,7 +1099,7 @@ class ContactChatViewController: UITableViewController {
         guard !parents.isEmpty, let me = User.getMyPin() else {
             return
         }
-        DispatchQueue.global(qos: .utility).async {
+        networkQueue.async {
             for parent in parents {
                 _ = Nexilis.write(message: CoreMessage_TMessageBank.getRequestGroupWithoutMemberFromParent(fPin: me, groupId: parent))
             }
@@ -1053,14 +1108,14 @@ class ContactChatViewController: UITableViewController {
     
     private func pullBuddy() {
         if let me = User.getMyPin() {
-            DispatchQueue.global().async {
+            networkQueue.async {
                 let _ = Nexilis.write(message: CoreMessage_TMessageBank.getBatchBuddiesInfos(p_f_pin: me, last_update: 0))
             }
         }
     }
     
     private func joinOpenGroup(groupId: String, flagMember: String = "0", completion: @escaping (Bool) -> ()) {
-        DispatchQueue.global().async {
+        networkQueue.async {
             var result: Bool = false
             let idMe = User.getMyPin() as String?
             if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddGroupMember(p_group_id: groupId, p_member_pin: idMe!, p_position: "0")), response.isOk() {
@@ -1547,6 +1602,201 @@ extension ContactChatViewController {
         return value
     }
     
+
+
+    /// The conversation screen a row opens, built but not yet shown.
+    ///
+    /// The same screen serves as the preview behind the long-press menu and as the thing that is
+    /// pushed when the preview is tapped - so what the reader sees under their finger is the
+    /// conversation itself, and opening it is that same screen coming forward rather than a
+    /// second one being built.
+    private func conversationController(for data: Chat, preview: Bool) -> UIViewController? {
+        guard !data.pin.isEmpty else {
+            return nil
+        }
+        if data.pin == "-997" {
+            let smartChatVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "chatGptVC") as! ChatGPTBotView
+            smartChatVC.hidesBottomBarWhenPushed = true
+            smartChatVC.fromNotification = false
+            return smartChatVC
+        }
+        let referenceMessageId = (isFiltering && !fillteredData.isEmpty) ? data.messageId : ""
+        if data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL {
+            let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+            editorPersonalVC.hidesBottomBarWhenPushed = true
+            editorPersonalVC.isPreview = preview
+            editorPersonalVC.unique_l_pin = data.pin
+            editorPersonalVC.referenceMessageId = referenceMessageId
+            return editorPersonalVC
+        }
+        let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorGroupVC") as! EditorGroup
+        editorGroupVC.hidesBottomBarWhenPushed = true
+        editorGroupVC.isPreview = preview
+        editorGroupVC.unique_l_pin = data.pin
+        editorGroupVC.referenceMessageId = referenceMessageId
+        return editorGroupVC
+    }
+
+    /// Brings the previewed conversation forward for real.
+    private func openPreviewedConversation(_ controller: UIViewController) {
+        // Held back while it was only being looked at; now it has been opened.
+        (controller as? EditorGroup)?.didOpenFromPreview()
+        (controller as? EditorPersonal)?.didOpenFromPreview()
+        navigationController?.show(controller, sender: nil)
+    }
+
+    override func tableView(_ tableView: UITableView, willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionCommitAnimating) {
+        // .pop is the preview growing into the screen, which is what a tap on it should look
+        // like - the menu's own animation carries it the whole way.
+        animator.preferredCommitStyle = .pop
+        animator.addCompletion { [weak self] in
+            guard let controller = animator.previewViewController else {
+                return
+            }
+            self?.openPreviewedConversation(controller)
+        }
+    }
+
+    // MARK: - Row actions
+    //
+    // Long-pressing a conversation lifts the row and offers what can be done with it, the way
+    // WhatsApp does. The two things it offers are the same two the swipes do, so both go through
+    // the methods below rather than each carrying its own copy of them.
+
+    /// The conversation a row stands for, when the row is one that can be acted on at all: a real
+    /// conversation in the Chats segment, not a group header and not the Archived row.
+    private func actionableConversation(at indexPath: IndexPath) -> Chat? {
+        guard segment.numberOfSegments == 3, segment.selectedSegmentIndex == 0 else {
+            return nil
+        }
+        let data: Chat
+        if isFiltering {
+            guard indexPath.section == 0, indexPath.row < fillteredData.count,
+                  let chat = fillteredData[indexPath.row] as? Chat else {
+                return nil
+            }
+            data = chat
+        } else {
+            guard indexPath.section == 0, indexPath.row < chats.count else {
+                return nil
+            }
+            data = chats[indexPath.row]
+        }
+        guard !data.isParent else {
+            return nil
+        }
+        if archivedChats.count > 0 && indexPath.row == 0 {
+            return nil
+        }
+        return data
+    }
+
+    /// Where a conversation sits right now.
+    ///
+    /// Looked up when the action runs rather than remembered from when the menu was opened: this
+    /// list rebuilds itself on every message that arrives, so a row number from a moment ago can
+    /// already belong to a different conversation - or to no row at all.
+    private func currentIndexPath(for data: Chat) -> IndexPath? {
+        let source: [Chat] = isFiltering ? fillteredData.compactMap { $0 as? Chat } : chats
+        guard let row = source.firstIndex(where: { $0 === data || ($0.pin == data.pin && !$0.isParent) }) else {
+            return nil
+        }
+        return IndexPath(row: row, section: 0)
+    }
+
+    /// Puts a conversation in the archive.
+    func archiveConversation(_ data: Chat) {
+        let pin = data.pin
+        DispatchQueue.global().async {
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                do {
+                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+                        "pinned" : 0,
+                        "archived" : Date().currentTimeMillis()
+                    ], _where: "l_pin = '\(pin)'")
+                } catch {
+                    rollback.pointee = true
+                    print("Access database error: \(error.localizedDescription)")
+                }
+            })
+        }
+        if !isFiltering, let indexPath = currentIndexPath(for: data), indexPath.row < chats.count {
+            chats.remove(at: indexPath.row)
+            tableView.deleteRows(at: [indexPath], with: .right)
+        }
+        reloadAllData()
+    }
+
+    /// Asks first, then throws away a conversation and everything said in it.
+    func deleteConversation(_ data: Chat) {
+        var name = data.name
+        if data.messageScope == MessageScope.GROUP {
+            name = "\(data.groupName) (\(data.name))"
+        }
+        let alertController = LibAlertController(title: nil, message: "Delete chat with".localized() + " \(name)?", preferredStyle: .actionSheet)
+        alertController.addAction(UIAlertAction(title: "Delete".localized(), style: .destructive, handler: { [weak self] _ in
+            guard let self = self else {
+                return
+            }
+            let pin = data.pin
+            let scope = data.messageScope
+            let groupId = data.groupId
+            DispatchQueue.global().async {
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    do {
+                        if scope == MessageScope.GROUP {
+                            var chatId = ""
+                            if pin != groupId {
+                                chatId = pin
+                            }
+                            _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE", _where: "(l_pin='\(groupId)' and chat_id='\(chatId)') and message_scope_id='4'")
+                        } else {
+                            _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE", _where: "(f_pin='\(pin)' or l_pin='\(pin)') and (message_scope_id='\(MessageScope.WHISPER)' or message_scope_id='\(MessageScope.FORM)' or message_scope_id='\(MessageScope.CALL)' or message_scope_id='\(MessageScope.MISSED_CALL)') and is_call_center = 0")
+                        }
+                        _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", _where: "l_pin='\(pin)'")
+                    } catch {
+                        rollback.pointee = true
+                        print("Access database error: \(error.localizedDescription)")
+                    }
+                })
+            }
+            if !self.isFiltering, let indexPath = self.currentIndexPath(for: data), indexPath.row < self.chats.count {
+                self.chats.remove(at: indexPath.row)
+                if self.chats.count > 1 {
+                    self.tableView.deleteRows(at: [indexPath], with: .left)
+                }
+            }
+            self.reloadAllData()
+        }))
+        alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
+        // An action sheet has nowhere to point on iPad unless it is told where it came from.
+        if let popover = alertController.popoverPresentationController {
+            popover.sourceView = tableView
+            popover.sourceRect = currentIndexPath(for: data).map { tableView.rectForRow(at: $0) } ?? tableView.bounds
+        }
+        present(alertController, animated: true)
+    }
+
+    override func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+        guard let data = actionableConversation(at: indexPath) else {
+            return nil
+        }
+        // The conversation itself is what is shown under the finger, the way WhatsApp does it.
+        // It is built in preview mode: nothing about it counts as having been read until the
+        // preview is tapped.
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: { [weak self] in
+            return self?.conversationController(for: data, preview: true)
+        }) { [weak self] _ in
+            let archive = UIAction(title: "Archive".localized(), image: UIImage(systemName: "archivebox")) { _ in
+                self?.archiveConversation(data)
+            }
+            let delete = UIAction(title: "Delete chat".localized(), image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+                self?.deleteConversation(data)
+            }
+            return UIMenu(title: "", children: [archive, delete])
+        }
+    }
+
     override func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         if segment.numberOfSegments != 3 || (segment.numberOfSegments == 3 && segment.selectedSegmentIndex != 0) {
             return nil
@@ -1568,30 +1818,9 @@ extension ContactChatViewController {
                 return nil
             }
             let archiveAction = UIContextualAction(style: .normal, title: nil) { (_, _, completionHandler) in
-                DispatchQueue.global().async {
-                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                        do {
-                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
-                                "pinned" : 0,
-                                "archived" : Date().currentTimeMillis()
-                            ], _where: "l_pin = '\(data.pin)'")
-                        } catch {
-                            rollback.pointee = true
-                            print("Access database error: \(error.localizedDescription)")
-                        }
-                    })
-                }
-                self.chats.remove(at: indexPath.row)
-                tableView.deleteRows(at: [indexPath], with: .right)
-                self.getChats() {
-                    DispatchQueue.main.async {
-                        self.tableView.reloadData()
-                        self.isGettingData = false
-                    }
-                }
+                self.archiveConversation(data)
                 completionHandler(true)
             }
-            archiveAction.backgroundColor = .mainColor
             let archiveIcon = UIImage(systemName: "archivebox.fill")!.createCustomIconWithText(text: "Archive".localized())
             archiveAction.image = archiveIcon
 
@@ -1928,10 +2157,7 @@ extension ContactChatViewController {
                     let calendar = Calendar.current
                     
                     if (calendar.isDateInToday(date)) {
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "HH:mm"
-                        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                        timeView.text = formatter.string(from: date as Date)
+                        timeView.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                     } else {
                         let startOfNow = calendar.startOfDay(for: Date())
                         let startOfTimeStamp = calendar.startOfDay(for: date)
@@ -1949,10 +2175,7 @@ extension ContactChatViewController {
                                 }
                                 timeView.text = formatter.string(from: date)
                             } else {
-                                let formatter = DateFormatter()
-                                formatter.dateFormat = "M/dd/yy"
-                                formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                                let stringFormat = formatter.string(from: date as Date)
+                                let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "M/dd/yy", localeIdentifier: "id")
                                 timeView.text = stringFormat
                             }
                         }

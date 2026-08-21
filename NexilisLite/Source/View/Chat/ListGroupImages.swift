@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import ImageIO
 import Popover
 
 class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDelegate {
@@ -208,10 +209,7 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
         let timeInImage = UILabel()
         containerTimeStatus.addSubview(timeInImage)
         let date = Date(milliseconds: Int64(listGroupingImages[indexPath.row].time) ?? 100)
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-        timeInImage.text = formatter.string(from: date as Date)
+        timeInImage.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
         timeInImage.textColor = .white
         timeInImage.font = UIFont.systemFont(ofSize: 12, weight: .medium)
         
@@ -678,53 +676,95 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
         Nexilis.deleteQueueMessage(message: tmessage)
     }
     
+    /// Sizes already worked out, kept by file name.
+    ///
+    /// Fix: this used to decode the whole image just to read its width and height, and the chat
+    /// bubbles asked for it twice each - once for the height and once for the width - on every
+    /// pass over a cell. Decoding a photo to measure it is the most expensive way to do it; the
+    /// dimensions sit in the file's header and can be read without touching the pixels.
+    private static var measuredSizes: [String: CGSize] = [:]
+    private static let measuredSizesLock = NSLock()
+
+    /// What a picture is given until its thumbnail has arrived.
+    ///
+    /// Fix: an image with nothing downloaded yet was measured as 100x100, and the bubble was
+    /// built to that. The moment the thumbnail landed the bubble jumped to the real size, which
+    /// moves everything below it - felt as the list lurching while it is being scrolled. A
+    /// portrait box of the usual proportions is held instead, so what is reserved is close to
+    /// what arrives and the row barely moves.
+    private static func placeholderSize(screenWidth: CGFloat, screenHeight: CGFloat) -> CGSize {
+        // Square: the picture that arrives is drawn to fill this box, and a square takes the
+        // same small bite out of a portrait photo as it does out of a landscape one.
+        let side = min(screenWidth, screenHeight)
+        return CGSize(width: side, height: side)
+    }
+
+    /// The pixel size of an image file, read from its header rather than by decoding it.
+    private static func pixelSize(of image: String) -> CGSize? {
+        measuredSizesLock.lock()
+        let known = measuredSizes[image]
+        measuredSizesLock.unlock()
+        if let known = known {
+            return known
+        }
+
+        let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
+        guard let dirPath = paths.first else {
+            return nil
+        }
+        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(image)
+        var size: CGSize?
+        if FileManager.default.fileExists(atPath: imageURL.path) {
+            if let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
+               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+               let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+               let height = properties[kCGImagePropertyPixelHeight] as? CGFloat {
+                size = CGSize(width: width, height: height)
+            }
+        } else if FileEncryption.shared.isSecureExists(filename: image) {
+            // An encrypted file has to be read out before anything can be read from it, but the
+            // pixels still do not have to be decoded.
+            do {
+                if var imageData = try FileEncryption.shared.readSecure(filename: image) {
+                    if let decrypted = FileEncryption.shared.decryptFileFromServer(data: imageData) {
+                        imageData = decrypted
+                    }
+                    if let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+                       let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                       let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+                       let height = properties[kCGImagePropertyPixelHeight] as? CGFloat {
+                        size = CGSize(width: width, height: height)
+                    }
+                }
+            } catch {
+                return nil
+            }
+        }
+
+        guard let size = size, size.width > 0, size.height > 0 else {
+            return nil
+        }
+        measuredSizesLock.lock()
+        measuredSizes[image] = size
+        measuredSizesLock.unlock()
+        return size
+    }
+
     static func getImageSize(
         image: String,
         screenWidth: CGFloat,
         screenHeight: CGFloat
     ) -> CGSize {
 
-        let paths = NSSearchPathForDirectoriesInDomains(
-            .documentDirectory,
-            .userDomainMask,
-            true
-        )
-
-        guard let dirPath = paths.first else {
-            return CGSize(width: 100, height: 100)
+        guard let pixels = pixelSize(of: image) else {
+            return placeholderSize(screenWidth: screenWidth, screenHeight: screenHeight)
         }
 
-        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(image)
-        var imagePath: UIImage?
-
-        do {
-            if FileManager.default.fileExists(atPath: imageURL.path) {
-                imagePath = UIImage(contentsOfFile: imageURL.path)
-            } else if FileEncryption.shared.isSecureExists(filename: image) {
-                if var imageData = try FileEncryption.shared.readSecure(filename: image) {
-                    if let decrypted = FileEncryption.shared.decryptFileFromServer(data: imageData) {
-                        imageData = decrypted
-                    }
-                    imagePath = UIImage(data: imageData)
-                }
-            }
-        } catch {
-            return CGSize(width: 100, height: 100)
-        }
-
-        // ✅ SAFE UNWRAP
-        guard let image = imagePath else {
-            return CGSize(width: 100, height: 100)
-        }
-
-        let imageWidth = image.size.width
-        let imageHeight = image.size.height
-        let aspectRatio = imageWidth / imageHeight
-
+        let aspectRatio = pixels.width / pixels.height
         var displayWidth: CGFloat
         var displayHeight: CGFloat
 
-        if imageWidth > imageHeight {
+        if pixels.width > pixels.height {
             displayWidth = screenWidth
             displayHeight = screenWidth / aspectRatio
         } else {

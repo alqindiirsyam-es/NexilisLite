@@ -620,11 +620,27 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         
     }
     
+    /// Whether anything is unread at all, as of the last count.
+    private var hasUnreadMark = false
+
+    /// Puts the mark on the button, or takes it off.
+    ///
+    /// Fix: whether the mark showed was decided in two places that did not agree - counting put
+    /// the view in and took it out again, while opening and closing the button hid and unhid the
+    /// same view. Coming back from an Editor that had just cleared the last unread message could
+    /// leave it behind: attached, not hidden, and marking a button with nothing behind it until
+    /// the app was restarted. One answer now, asked from both places.
+    func updateUnreadMark() {
+        indicatorCounterFBBig.isHidden = !hasUnreadMark || isShow
+        indicatorCounterFB.isHidden = !hasUnreadMark
+    }
+
     @objc func checkCounter() {
         DispatchQueue.global().async { [self] in
             let counter = APIS.getTotalCounter()
             if counter > 0 {
                 DispatchQueue.main.async { [self] in
+                    hasUnreadMark = true
                     if button_fb2 != nil && !indicatorCounterFB.isDescendant(of: button_fb2) {
                         button_fb2.addSubview(indicatorCounterFB)
                         indicatorCounterFB.layer.cornerRadius = 7.5
@@ -643,9 +659,14 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                         indicatorCounterFBBig.anchor(top: nexilis_button.topAnchor, left: nexilis_button.leftAnchor, paddingTop: 5, paddingLeft: 5, width: 15, height: 15)
                     }
                     labelCounterFB.text = "\(counter)"
+                    updateUnreadMark()
                 }
             } else {
                 DispatchQueue.main.async { [self] in
+                    hasUnreadMark = false
+                    // Hidden as well as taken out: taking it out only works if it is where it
+                    // was expected to be, and hiding it is true wherever it ended up.
+                    updateUnreadMark()
                     if button_fb2 != nil && indicatorCounterFB.isDescendant(of: button_fb2) {
                         indicatorCounterFB.removeFromSuperview()
                     }
@@ -705,9 +726,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         if isShow {
             animationTimer.invalidate()
             pullButton()
-            if indicatorCounterFBBig.isDescendant(of: nexilis_button) {
-                indicatorCounterFBBig.isHidden = true
-            }
+            updateUnreadMark()
             var height = CGFloat((defaultWidthHeightMenuFB * countMenuFB) + defaultHeightFB + 5) //defaultWidthHeightMenuFB
             var width = frame.width
             var xPosition = frame.origin.x
@@ -757,9 +776,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 }
             })
         } else {
-            if indicatorCounterFBBig.isDescendant(of: nexilis_button) {
-                indicatorCounterFBBig.isHidden = false
-            }
+            updateUnreadMark()
             var height = CGFloat((defaultWidthHeightMenuFB * countMenuFB) + defaultHeightFB + 5) //defaultWidthHeightMenuFB
             var width = defaultWidthFB
             if configModeFB == MODE_VERTICAL_ANIMATION {
@@ -916,6 +933,11 @@ public extension FloatingButton {
         // on every tick would be pointless work.
         if button.isHidden != shouldHide {
             button.isHidden = shouldHide
+            if !shouldHide {
+                // Back in view, and most often straight out of a chat that has just cleared its
+                // unread messages. Ask again rather than trusting a mark set before that.
+                button.checkCounter()
+            }
         }
     }
 

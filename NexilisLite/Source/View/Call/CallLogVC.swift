@@ -169,10 +169,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                     let calendar = Calendar.current
                     
                     if (calendar.isDateInToday(date)) {
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "HH:mm"
-                        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                        timeCall = formatter.string(from: date as Date)
+                        timeCall = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                     } else {
                         let startOfNow = calendar.startOfDay(for: Date())
                         let startOfTimeStamp = calendar.startOfDay(for: date)
@@ -190,10 +187,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                                 }
                                 timeCall = formatter.string(from: date)
                             } else {
-                                let formatter = DateFormatter()
-                                formatter.dateFormat = "M/dd/yy"
-                                formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                                let stringFormat = formatter.string(from: date as Date)
+                                let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "M/dd/yy", localeIdentifier: "id")
                                 timeCall = stringFormat
                             }
                         }

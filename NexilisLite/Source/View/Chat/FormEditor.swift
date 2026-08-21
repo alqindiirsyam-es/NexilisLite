@@ -162,10 +162,7 @@ class FormEditor: UIViewController {
             let dateLabel = UILabel()
             let stringDate = dateApproved.isEmpty ? "\(Date().currentTimeMillis())" : dateApproved
             let date = Date(milliseconds: Int64(stringDate)!)
-            let formatter = DateFormatter()
-            formatter.dateFormat = "dd MMM yyyy, HH:mm"
-            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-            dateLabel.text = formatter.string(from: date as Date)
+            dateLabel.text = DateFormatterPool.shared.string(from: date as Date, format: "dd MMM yyyy, HH:mm", localeIdentifier: "id")
             dateLabel.font = .systemFont(ofSize: 14.0)
             dateLabel.textColor = .black
             containerView.addSubview(dateLabel)

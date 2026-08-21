@@ -49,6 +49,18 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     var messagesByDate: [String: [[String: Any?]]] = [:]
     var dataDates: [String] = []
+
+    /// The messages of one date section.
+    ///
+    /// Fix: this screen already groups its messages by date - cellForRow and numberOfRows read
+    /// that grouping - but every other table-view callback still filtered the whole loaded
+    /// conversation to find the same rows, once per row. With a few hundred messages loaded
+    /// that is thousands of dictionary lookups and string comparisons that the grouping had
+    /// already done, and it is a good part of why scrolling dragged on an older phone.
+    func messages(onDate date: String) -> [[String: Any?]] {
+        return messagesByDate[date] ?? []
+    }
+
     var users: [User] = []
     public var dataMessageForward: [[String: Any?]]?
     var imageVideoPicker: ImageVideoPicker!
@@ -192,6 +204,338 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var fakeProgMultip = 0
     let maxFakeProgMultip = 2
     var groupImages: [String:[ImageGrouping]] = [:]
+
+
+    /// The size a picture's bubble was first given, kept so it never changes afterwards.
+    ///
+    /// Fix: a picture not yet downloaded was measured as a placeholder, and the moment its
+    /// thumbnail arrived the bubble was measured again against the real thing. The row changed
+    /// height and everything below it slid down - the drop the reader sees. What is reserved for
+    /// a picture is decided once now and held: the thumbnail, when it comes, fills exactly the
+    /// space that was already being kept for it, so the only thing that changes on screen is the
+    /// picture appearing. Reopening the chat starts afresh, by which time the file is there and
+    /// its real proportions are used from the start.
+    private var imageBubbleSizes: [String: CGSize] = [:]
+
+    func imageBubbleSize(messageId: String, thumb: String) -> CGSize {
+        if let known = imageBubbleSizes[messageId] {
+            return known
+        }
+        let size = ListGroupImages.getImageSize(image: thumb, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)
+        if !messageId.isEmpty {
+            imageBubbleSizes[messageId] = size
+        }
+        return size
+    }
+
+
+    /// Joins a run of pictures that a page boundary split in two.
+    ///
+    /// Fix: pictures are gathered into a collage while a page of messages is being read, and
+    /// every page starts with nothing in hand - so a run that happened to straddle the boundary
+    /// between two pages was always broken, leaving one picture on its own directly above a
+    /// collage of the rest, for no reason the reader can see. Once the two pages are side by
+    /// side the seam between them is looked at again, and the halves are joined if they were one
+    /// run all along.
+    private func mergeImageRunAcrossSeam(at seam: Int) {
+        guard seam > 0, seam < dataMessages.count else {
+            return
+        }
+        let above = dataMessages[seam - 1]
+        let below = dataMessages[seam]
+        let aboveId = above["message_id"] as? String ?? ""
+        let belowId = below["message_id"] as? String ?? ""
+        guard !aboveId.isEmpty, !belowId.isEmpty else {
+            return
+        }
+        // Each side is either a collage already, or a lone picture that could begin one.
+        let aboveRun: [ImageGrouping]
+        if let existing = groupImages[aboveId] {
+            aboveRun = existing
+        } else if isCollageCandidate(above) {
+            aboveRun = [imageGrouping(from: above)]
+        } else {
+            return
+        }
+        let belowRun: [ImageGrouping]
+        if let existing = groupImages[belowId] {
+            belowRun = existing
+        } else if isCollageCandidate(below) {
+            belowRun = [imageGrouping(from: below)]
+        } else {
+            return
+        }
+        guard let last = aboveRun.last, let first = belowRun.first,
+              (last.dataMessage["f_pin"] as? String ?? "") == (first.dataMessage["f_pin"] as? String ?? ""),
+              (above["chat_date"] as? String ?? "") == (below["chat_date"] as? String ?? ""),
+              aboveRun.count + belowRun.count <= EditorPersonal.maximumImagesInCollage else {
+            return
+        }
+        let minutesApart = getSecondsDifferenceFromTwoDates(
+            start: Date(milliseconds: Int64(last.time) ?? 0),
+            end: Date(milliseconds: Int64(first.time) ?? 0)) / 60
+        guard minutesApart < 11 else {
+            return
+        }
+        groupImages[belowId] = nil
+        groupImages[aboveId] = aboveRun + belowRun
+        dataMessages.remove(at: seam)
+    }
+
+
+    // MARK: - Preview
+
+    /// Built to be looked at rather than opened: the preview behind the chat list's long-press
+    /// menu. Reading a conversation is something the reader does on purpose, so everything that
+    /// says they have - the unread count, and the read marks the other side sees - waits here
+    /// until the preview is actually opened.
+    public var isPreview = false
+
+    /// Read marks the loading pass would have sent, held back while this is only a preview.
+    private var deferredReadReceipts: [(chatId: String, fPin: String, scope: String, messageId: String)] = []
+
+    /// The preview has been tapped: it is a real conversation now, so everything held back
+    /// happens at once.
+    public func didOpenFromPreview() {
+        guard isPreview else {
+            return
+        }
+        isPreview = false
+        let pending = deferredReadReceipts
+        deferredReadReceipts.removeAll()
+        for receipt in pending {
+            sendReadMessageStatus(chat_id: receipt.chatId, f_pin: receipt.fPin, message_scope_id: receipt.scope, message_id: receipt.messageId)
+        }
+        if counter > 0 {
+            counter = 0
+            updateCounter(counter: counter)
+        }
+        scheduleAutoDownloadSweep()
+    }
+
+    // MARK: - Auto download
+
+    /// Files this screen has started fetching on its own and is still waiting for.
+    private var autoDownloadsInFlight: Set<String> = []
+    private var autoDownloadTimer: Timer?
+    /// How long the list has to settle before anything is fetched. Flinging past a hundred
+    /// messages should not start a hundred transfers - only what the reader stops on counts.
+    private static let autoDownloadSettleDelay: TimeInterval = 0.3
+    /// How many at a time. Each one that finishes redraws its row, and redrawing rows is the
+    /// expensive part; a few at a time keeps the list moving while they arrive.
+    private static let maximumConcurrentAutoDownloads = 3
+
+    /// Asks again once the list has settled. Cheap to call from anywhere that scrolls.
+    private func scheduleAutoDownloadSweep() {
+        guard !isPreview, Utils.isAutoDownloadOn else {
+            return
+        }
+        autoDownloadTimer?.invalidate()
+        autoDownloadTimer = Timer.scheduledTimer(withTimeInterval: EditorPersonal.autoDownloadSettleDelay, repeats: false) { [weak self] _ in
+            self?.autoDownloadTimer = nil
+            self?.sweepVisibleRowsForAutoDownload()
+        }
+    }
+
+    /// Fetches what is on screen and not here yet, nearest the middle of the view first.
+    private func sweepVisibleRowsForAutoDownload() {
+        guard Utils.isAutoDownloadOn,
+              let visible = tableChatView.indexPathsForVisibleRows, !visible.isEmpty else {
+            return
+        }
+        var slots = EditorPersonal.maximumConcurrentAutoDownloads - autoDownloadsInFlight.count
+        guard slots > 0 else {
+            return
+        }
+        // Light things first, across every visible row, before anything heavy is started at
+        // all: a document or a video can hold a place for a long time, and a thumbnail two rows
+        // down should not be waiting behind it to appear.
+        for keys in [EditorPersonal.lightAttachmentKeys, EditorPersonal.heavyAttachmentKeys] {
+            for indexPath in visible {
+                for filename in autoDownloadableFiles(at: indexPath, keys: keys) {
+                    guard slots > 0 else {
+                        return
+                    }
+                    guard !autoDownloadsInFlight.contains(filename),
+                          !Download.isDownloading(forKey: filename) else {
+                        continue
+                    }
+                    startAutoDownload(filename)
+                    slots -= 1
+                }
+            }
+        }
+    }
+
+    /// What the bubble draws: small, and worth having before anything else.
+    private static let lightAttachmentKeys = ["thumb_id", "image_id", "gif_id", "audio_id"]
+    /// What the bubble only offers to open. Fetched too, but never ahead of the above.
+    private static let heavyAttachmentKeys = ["video_id", "file_id"]
+
+    /// The attachments of one row that are not on this device yet.
+    ///
+    /// A collage row stands for several messages, so all of their pictures count - that is the
+    /// row the reader is looking at.
+    private func autoDownloadableFiles(at indexPath: IndexPath, keys: [String]) -> [String] {
+        guard let row = message(at: indexPath) else {
+            return []
+        }
+        var rows: [[String: Any?]] = [row]
+        if let messageId = row["message_id"] as? String, let group = groupImages[messageId] {
+            rows = group.map { $0.dataMessage }
+        }
+        var files: [String] = []
+        for row in rows {
+            for key in keys {
+                let filename = (row[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !filename.isEmpty, !isFilePresent(filename) else {
+                    continue
+                }
+                files.append(filename)
+            }
+        }
+        return files
+    }
+
+    private func isFilePresent(_ filename: String) -> Bool {
+        let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
+        guard let dirPath = paths.first else {
+            return false
+        }
+        let url = URL(fileURLWithPath: dirPath).appendingPathComponent(filename)
+        return FileManager.default.fileExists(atPath: url.path) || FileEncryption.shared.isSecureExists(filename: filename)
+    }
+
+    private func startAutoDownload(_ filename: String) {
+        autoDownloadsInFlight.insert(filename)
+        Download().startHTTP(forKey: filename) { [weak self] name, progress in
+            guard progress >= 100 || progress < 0 else {
+                return
+            }
+            DispatchQueue.main.async {
+                guard let self = self else {
+                    return
+                }
+                self.autoDownloadsInFlight.remove(name)
+                if progress >= 100 {
+                    // Straight away, scrolling or not: the bubble was already given its size, so
+                    // the picture appearing moves nothing.
+                    self.reloadMessageRow(withFileNamed: name)
+                }
+                // A place has come free; whatever else is on screen can have it.
+                self.scheduleAutoDownloadSweep()
+            }
+        }
+    }
+
+
+    /// Whether a message can sit inside a collage at all: an image on its own, with no caption,
+    /// no reply attached and nothing else that needs a bubble of its own.
+    private func isCollageCandidate(_ row: [String: Any?]) -> Bool {
+        return row["image_id"] != nil
+            && !(row["image_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (row["message_text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (row["reff_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (row["credential"] as? String ?? "") != "1"
+            && (row["read_receipts"] as? String ?? "") != "8"
+    }
+
+    private func imageGrouping(from row: [String: Any?]) -> ImageGrouping {
+        return ImageGrouping(messageId: row["message_id"] as? String ?? "",
+                             thumbId: row["thumb_id"] as? String ?? "",
+                             imageId: row["image_id"] as? String ?? "",
+                             status: row["status"] as? String ?? "",
+                             time: row["server_date"] as? String ?? "",
+                             lPin: row["l_pin"] as? String ?? "",
+                             dataMessage: row,
+                             dataPerson: dataPerson,
+                             dataGroup: [:],
+                             dataTopic: [:])
+    }
+
+    /// Folds a message that has just arrived into the collage its sender is building at the
+    /// bottom of the conversation.
+    ///
+    /// Fix: images were only ever gathered into collages while the conversation was being read
+    /// from the database, so a run that arrived - or was sent - with this screen already open
+    /// stayed as separate bubbles until the chat was opened again. The run is now continued as
+    /// it happens, by the same rules the reading path uses: one sender, no more than eleven
+    /// minutes apart, under the same date.
+    ///
+    /// Returns the row that draws the collage and therefore has to be redrawn, or nil when the
+    /// message does not continue a run and belongs on a row of its own.
+    private func foldIntoImageGroup(_ row: [String: Any?]) -> IndexPath? {
+        guard isCollageCandidate(row), let lastIndex = dataMessages.indices.last else {
+            return nil
+        }
+        let lastRow = dataMessages[lastIndex]
+        let date = lastRow["chat_date"] as? String ?? ""
+        // A collage cannot straddle a date header.
+        guard date == (row["chat_date"] as? String ?? "") else {
+            return nil
+        }
+        let parentId = lastRow["message_id"] as? String ?? ""
+        var run: [ImageGrouping]
+        if let existing = groupImages[parentId] {
+            run = existing
+        } else {
+            // What is on screen is a lone image: it becomes the first of the run, and this
+            // message its second.
+            guard isCollageCandidate(lastRow) else {
+                return nil
+            }
+            run = [imageGrouping(from: lastRow)]
+        }
+        guard let last = run.last,
+              run.count < EditorPersonal.maximumImagesInCollage,
+              (last.dataMessage["f_pin"] as? String ?? "") == (row["f_pin"] as? String ?? "") else {
+            return nil
+        }
+        let minutesApart = getSecondsDifferenceFromTwoDates(
+            start: Date(milliseconds: Int64(last.time) ?? 0),
+            end: Date(milliseconds: Int64(row["server_date"] as? String ?? "") ?? 0)) / 60
+        guard minutesApart < 11 else {
+            return nil
+        }
+        guard let section = dataDates.firstIndex(of: date),
+              let rowIndex = messages(onDate: date).firstIndex(where: { $0["message_id"] as? String ?? "" == parentId }) else {
+            return nil
+        }
+        run.append(imageGrouping(from: row))
+        groupImages[parentId] = run
+        return IndexPath(row: rowIndex, section: section)
+    }
+
+
+    /// How many images one person has to send in a row before they are drawn as one collage
+    /// rather than as separate bubbles. Two, the way WhatsApp does it.
+    static let minimumImagesForCollage = 2
+    /// The most a single collage holds; images beyond this start another one.
+    static let maximumImagesInCollage = 30
+
+    /// Closes off the run of images collected so far, making a collage of it if there are
+    /// enough. A collage keeps only its first message as a row of its own - the rest are drawn
+    /// inside it - so the followers are taken back out of what was loaded.
+    private func closeImageGroup(_ tempImages: inout [ImageGrouping], loaded: inout [[String: Any?]]) {
+        defer { tempImages.removeAll() }
+        guard tempImages.count >= EditorPersonal.minimumImagesForCollage else {
+            return
+        }
+        if tempImages.count > EditorPersonal.maximumImagesInCollage {
+            tempImages.removeSubrange(EditorPersonal.maximumImagesInCollage..<tempImages.count)
+        }
+        groupImages[tempImages[0].messageId] = tempImages
+        guard let idxTemp = loaded.firstIndex(where: { $0["message_id"] as? String ?? "" == tempImages[0].messageId }) else {
+            return
+        }
+        for _ in 1..<tempImages.count {
+            guard idxTemp + 1 < loaded.count else {
+                break
+            }
+            loaded.remove(at: idxTemp + 1)
+        }
+    }
+
     var titleText: String!
     var lastY: CGFloat = 0
     var editVC = UIViewController()
@@ -764,7 +1108,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
            let parent = groupImages.first(where: { $0.value.contains(where: { $0.messageId == marker }) })?.key {
             markerCounter = parent
         }
-        if counter > 0 {
+        if counter > 0, !isPreview {
             counter = 0
             updateCounter(counter: counter)
         }
@@ -805,7 +1149,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             self.referenceChatDate = self.chatDate(stringDate: self.dataMessages[self.dataMessages.firstIndex(where: {$0["message_id"] as? String == self.referenceMessageId} )!][TypeDataMessage.server_date] as! String)
                         }
                         let section = self.dataDates.firstIndex(of: self.referenceChatDate)
-                        let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.referenceChatDate}).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
+                        let row = self.messages(onDate: self.referenceChatDate).firstIndex(where: { $0["message_id"] as? String == self.referenceMessageId})
                         if row != nil && section != nil {
                             let indexPath = IndexPath(row: row!, section: section!)
                             self.tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: false)
@@ -1001,7 +1345,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == data.key })
                     if (idx != nil) {
                         let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                        let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
                         if second == 0 {
                             timer.invalidate()
                             self.listTimerCredential.removeValue(forKey: data.key)
@@ -1520,7 +1864,6 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     // messages have to go in front of what is on screen, and the image
                     // grouping below has to look at this batch rather than the whole chat.
                     var loaded: [[String: Any?]] = []
-                    let previousRow: [String: Any?]? = prepend ? nil : self.dataMessages.last
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
                         row["message_id"] = cursorData.string(forColumnIndex: 0)
@@ -1628,30 +1971,40 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 }
                             }
                         }
-                        let lastRow = loaded.last ?? previousRow
-                        if (lastRow == nil || lastRow!["f_pin"]  as? String ?? "" == row["f_pin"]  as? String ?? "") && tempImages.count <= 30 && row["image_id"] != nil && !(row["image_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["message_text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["reff_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (row["credential"] as? String ?? "") != "1" && (row["read_receipts"] as? String ?? "") != "8" {
-                            if tempImages.count != 0 && getSecondsDifferenceFromTwoDates(start: Date.init(milliseconds: Int64(tempImages.last!.time)!), end: Date.init(milliseconds: Int64(row["server_date"]  as? String ?? "")!))/60 >= 11 {
-                                if tempImages.count >= 4 {
-                                    groupImages[tempImages[0].messageId] = tempImages
-                                    if let idxTemp = loaded.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
-                                        for _ in 1..<tempImages.count {
-                                            loaded.remove(at: idxTemp + 1)
-                                        }
-                                    }
-                                }
-                                tempImages.removeAll()
+                        let isCollageCandidate = row["image_id"] != nil
+                            && !(row["image_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && (row["message_text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && (row["reff_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && (row["credential"] as? String ?? "") != "1"
+                            && (row["read_receipts"] as? String ?? "") != "8"
+                        if isCollageCandidate {
+                            // A collage is one person's unbroken run of images.
+                            //
+                            // Fix: this used to ask whether the row *before this one* came from
+                            // the same person, whoever they were. A run beginning right after
+                            // somebody else's message therefore failed on its own first image,
+                            // which was left out and drawn on its own - five images sent
+                            // together arrived as one loose image and a collage of four. What
+                            // decides the group is the run itself, so the comparison is against
+                            // the images already collected, and an empty collection starts a new
+                            // run whatever came before it.
+                            let breaksRun: Bool
+                            if let last = tempImages.last {
+                                let minutesApart = getSecondsDifferenceFromTwoDates(
+                                    start: Date(milliseconds: Int64(last.time) ?? 0),
+                                    end: Date(milliseconds: Int64(row["server_date"] as? String ?? "") ?? 0)) / 60
+                                breaksRun = (last.dataMessage["f_pin"] as? String ?? "") != (row["f_pin"] as? String ?? "")
+                                    || minutesApart >= 11
+                                    || tempImages.count >= EditorPersonal.maximumImagesInCollage
+                            } else {
+                                breaksRun = false
+                            }
+                            if breaksRun {
+                                closeImageGroup(&tempImages, loaded: &loaded)
                             }
                             tempImages.append(ImageGrouping(messageId: row["message_id"]  as? String ?? "", thumbId: row["thumb_id"]  as? String ?? "", imageId: row["image_id"]  as? String ?? "", status: row["status"]  as? String ?? "", time: row["server_date"]  as? String ?? "", lPin: row["l_pin"]  as? String ?? "", dataMessage: row, dataPerson: dataPerson, dataGroup: [:], dataTopic: [:]))
-                        } else if tempImages.count >= 4 {
-                            groupImages[tempImages[0].messageId] = tempImages
-                            if let idxTemp = loaded.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
-                                for _ in 1..<tempImages.count {
-                                    loaded.remove(at: idxTemp + 1)
-                                }
-                            }
-                            tempImages.removeAll()
-                        } else if tempImages.count != 0 {
-                            tempImages.removeAll()
+                        } else {
+                            closeImageGroup(&tempImages, loaded: &loaded)
                         }
                         if marksFirstAsUnread && idxOff == 0 {
                             self.markerCounter = row["message_id"] as? String
@@ -1659,17 +2012,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         loaded.append(row)
                         idxOff+=1
                     }
-                    if tempImages.count >= 4 {
-                        if tempImages.count > 30 {
-                            tempImages.removeSubrange(30..<tempImages.count)
-                        }
-                        groupImages[tempImages[0].messageId] = tempImages
-                        if let idxTemp = loaded.firstIndex(where: { $0["message_id"]  as? String ?? "" == tempImages[0].messageId }) {
-                            for _ in 1..<tempImages.count {
-                                loaded.remove(at: idxTemp + 1)
-                            }
-                        }
-                    }
+                    closeImageGroup(&tempImages, loaded: &loaded)
                     cursorData.close()
                     // A message deleted from the middle of the conversation shifts every
                     // offset after it, so a page read later can overlap what is already on
@@ -1680,8 +2023,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     }
                     if prepend {
                         self.dataMessages.insert(contentsOf: loaded, at: 0)
+                        self.mergeImageRunAcrossSeam(at: loaded.count)
                     } else {
+                        let seam = self.dataMessages.count
                         self.dataMessages.append(contentsOf: loaded)
+                        self.mergeImageRunAcrossSeam(at: seam)
                     }
                     // chatDate() appends the day headers as it meets them, which is the right
                     // order only while messages arrive newest-last. Rebuilding from the list
@@ -2040,9 +2386,19 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 
     /// Where a message sits in the table right now.
     private func indexPath(forMessageId messageId: String) -> IndexPath? {
+        // A message gathered into a collage is no longer a row of its own; the row that draws it
+        // is the collage's. Without this, an anchor held across a page load - which is how the
+        // scroll position is kept - would be lost the moment that message joined a collage.
+        var messageId = messageId
+        if !dataMessages.contains(where: { $0["message_id"] as? String == messageId }),
+           let parent = groupImages.first(where: { _, images in
+               images.contains(where: { $0.messageId == messageId })
+           })?.key {
+            messageId = parent
+        }
         guard let message = dataMessages.first(where: { $0["message_id"] as? String == messageId }),
               let section = dataDates.firstIndex(of: message["chat_date"] as? String ?? ""),
-              let row = dataMessages.filter({ $0["chat_date"] as? String ?? "" == dataDates[section] })
+              let row = messages(onDate: dataDates[section])
                   .firstIndex(where: { $0["message_id"] as? String == messageId }) else {
             return nil
         }
@@ -2216,7 +2572,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             if section == nil {
                 return
             }
-            let row = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[section!]}).firstIndex(where: { $0["message_id"] as? String == dataMessages[idx!]["message_id"] as? String})
+            let row = messages(onDate: dataDates[section!]).firstIndex(where: { $0["message_id"] as? String == dataMessages[idx!]["message_id"] as? String})
             if row == nil {
                 return
             }
@@ -2272,7 +2628,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 if section == nil {
                     return
                 }
-                let row = dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[section!]}).firstIndex(where: { $0["message_id"] as? String == dataMessages[idx!]["message_id"] as? String})
+                let row = messages(onDate: dataDates[section!]).firstIndex(where: { $0["message_id"] as? String == dataMessages[idx!]["message_id"] as? String})
                 if row == nil {
                     return
                 }
@@ -2382,7 +2738,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
                     if indexMessage != nil {
                         let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
-                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                        let row = self.messages(onDate: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
                         self.tableChatView.safeScrollToRow(at: IndexPath(row: row!, section: section!), at: .top, animated: true)
                     }
                 } else if self.buttonScrollToBottom.isDescendant(of: self.view) {
@@ -2413,7 +2769,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             if idx != nil{
                 self.dataMessages[idx!][TypeDataMessage.is_pinned] = isPinned
                 let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                let row = self.dataMessages.filter({ $0["chat_date"] as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
+                let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
                 if row != nil && section != nil  {
                     DispatchQueue.main.async {
                         self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
@@ -2595,7 +2951,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         self.dataMessages[idx!][TypeDataMessage.last_edit] = Int64(chatData[CoreMessage_TMessageKey.LAST_EDIT]!)
                         self.dataMessages[idx!][TypeDataMessage.status] = chatData[CoreMessage_TMessageKey.STATUS]
                         let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                        let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
                         if row != nil && section != nil  {
                             self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                         }
@@ -2687,8 +3043,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
                         self.listTimerCredential[row["message_id"]  as? String ?? ""] = 60
                     }
-                    self.dataMessages.append(row)
-                    self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+                    if let collageRow = self.foldIntoImageGroup(row) {
+                        // Part of the run above it: no new row goes in, the row that draws the
+                        // collage is redrawn to take it.
+                        self.tableChatView.reloadRows(at: [collageRow], with: .none)
+                    } else {
+                        self.dataMessages.append(row)
+                        self.tableChatView.insertRows(at: [IndexPath(row: self.messages(onDate: self.dataDates[self.dataDates.count - 1]).count - 1, section: self.dataDates.count - 1)], with: .none)
+                    }
                     self.tableChatView.layoutIfNeeded()
                     if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
                         var timer = Timer()
@@ -2722,7 +3084,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 }
                             }
                             let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
-                            let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == row["message_id"] as? String})
+                            let row = self.messages(onDate: self.dataDates[self.dataDates.count - 1]).firstIndex(where: { $0["message_id"] as? String == row["message_id"] as? String})
                             if row != nil && section != nil{
                                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                             }
@@ -2750,7 +3112,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             self.sendReadMessageStatus(chat_id: "", f_pin: chatData[CoreMessage_TMessageKey.F_PIN]!, message_scope_id: chatData[CoreMessage_TMessageKey.MESSAGE_SCOPE_ID]!, message_id: chatData[CoreMessage_TMessageKey.MESSAGE_ID]!)
                         }
                         self.tableChatView.scrollToBottom()
-                        if ( self.currentIndexpath!.section <= self.dataDates.count - 1 && self.currentIndexpath!.row <= self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1)  {
+                        if ( self.currentIndexpath!.section <= self.dataDates.count - 1 && self.currentIndexpath!.row <= self.messages(onDate: self.dataDates[self.dataDates.count - 1]).count - 1)  {
                             self.counter = 0
                             self.updateCounter(counter: self.counter)
                         }
@@ -2761,7 +3123,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
                         if indexMessage != nil {
                             let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
-                            let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                            let row = self.messages(onDate: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
                             if row != nil && section != nil  {
                                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                             }
@@ -2783,7 +3145,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
                             if indexMessage != nil {
                                 let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
-                                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                                let row = self.messages(onDate: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
                                 if row != nil && section != nil  {
                                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                                 }
@@ -2929,7 +3291,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 do {
                     self.dataMessages[idx!]["status"] = status
                     let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                    let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                    let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
                     if row != nil && section != nil  {
                         self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                     }
@@ -2998,8 +3360,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 self.dataDates.append("Today".localized())
                 self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
             }
-            self.dataMessages.append(row)
-            self.tableChatView.insertRows(at: [IndexPath(row: self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).count - 1, section: self.dataDates.count - 1)], with: .none)
+            if let collageRow = self.foldIntoImageGroup(row) {
+                // Part of the run above it: no new row goes in, the row that draws the
+                // collage is redrawn to take it.
+                self.tableChatView.reloadRows(at: [collageRow], with: .none)
+            } else {
+                self.dataMessages.append(row)
+                self.tableChatView.insertRows(at: [IndexPath(row: self.messages(onDate: self.dataDates[self.dataDates.count - 1]).count - 1, section: self.dataDates.count - 1)], with: .none)
+            }
             self.tableChatView.layoutIfNeeded()
         }
     }
@@ -3013,7 +3381,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             self.dataMessages[idx!]["lock"] = "1"
             self.dataMessages[idx!]["reff_id"] = ""
             let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-            let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+            let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
             if row != nil && section != nil  {
                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
             }
@@ -3037,7 +3405,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             }
             self.dataMessages[idx!]["status"] = chatData[CoreMessage_TMessageKey.STATUS]!
             let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-            let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+            let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
             if row != nil && section != nil  {
                 self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
             }
@@ -3182,7 +3550,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     }
                 }
             } else {
-                let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[self.currentIndexpath!.section] })
+                let dataMessages = self.messages(onDate: self.dataDates[self.currentIndexpath!.section])
                 var listData = dataMessages
                 listData = listData.filter({$0["status"]  as? String ?? "" != "4" && $0["status"]  as? String ?? "" != "8"})
                 if listData.count != 0 && !self.isContactCenter {
@@ -3910,8 +4278,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             tableChatView.insertSections(IndexSet(integer: dataDates.count - 1), with: .none)
         }
         row["chat_date"] = "Today".localized()
-        dataMessages.append(row)
-        tableChatView.insertRows(at: [IndexPath(row: dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[dataDates.count - 1]}).count - 1, section: dataDates.count - 1)], with: .none)
+        if let collageRow = foldIntoImageGroup(row) {
+            // Part of the run above it: no new row goes in, the row that draws the
+            // collage is redrawn to take it.
+            tableChatView.reloadRows(at: [collageRow], with: .none)
+        } else {
+            dataMessages.append(row)
+            tableChatView.insertRows(at: [IndexPath(row: messages(onDate: dataDates[dataDates.count - 1]).count - 1, section: dataDates.count - 1)], with: .none)
+        }
         tableChatView.layoutIfNeeded()
         if credential == "1" {
             var timer = Timer()
@@ -3942,7 +4316,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     }
                 }
                 let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
-                let row = self.dataMessages.filter({$0["chat_date"]  as? String ?? "" == self.dataDates[self.dataDates.count - 1]}).firstIndex(where: { $0["message_id"] as? String == messageId})
+                let row = self.messages(onDate: self.dataDates[self.dataDates.count - 1]).firstIndex(where: { $0["message_id"] as? String == messageId})
                 if row != nil && section != nil{
                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                 }
@@ -3967,7 +4341,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == lastMarkerCounter })
             if indexMessage != nil {
                 let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
-                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[indexMessage!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
+                let row = self.messages(onDate: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
                 if row != nil && section != nil  {
                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                 }
@@ -4007,7 +4381,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                         }
                         for i in 0..<self.dataDates.count {
-                            if self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[i] }).count == 0 {
+                            if self.messages(onDate: self.dataDates[i]).count == 0 {
                                 self.dataDates.remove(at: i)
                             }
                         }
@@ -4430,6 +4804,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         guard !f_pin.elementsEqual("-999"),
               !message_scope_id.elementsEqual("16"),
               !message_scope_id.elementsEqual("15") else { return }
+        guard !isPreview else {
+            // Looking at a preview is not reading it. Kept, and sent if it is really opened.
+            deferredReadReceipts.append((chat_id, f_pin, message_scope_id, message_id))
+            return
+        }
 
         let task = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -4637,7 +5016,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 ////                                }
 ////                                DispatchQueue.main.async { [self] in
 ////                                    let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-////                                    let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+////                                    let row = messages(onDate: dataMessages[index]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == message_id})
 ////                                    if row != nil && section != nil{
 ////                                        tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
 ////                                    }
@@ -4678,7 +5057,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 ////                            }
 ////                            DispatchQueue.main.async { [self] in
 ////                                let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-////                                let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+////                                let row = messages(onDate: dataMessages[index]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == message_id})
 ////                                if row != nil && section != nil{
 ////                                    tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
 ////                                }
@@ -4728,7 +5107,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 ////                        }
 ////                        DispatchQueue.main.async { [self] in
 ////                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-////                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+////                            let row = messages(onDate: dataMessages[index]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == message_id})
 ////                            if row != nil && section != nil{
 ////                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
 ////                            }
@@ -4742,7 +5121,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 ////                        }
 ////                        DispatchQueue.main.async { [self] in
 ////                            let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"]  as? String ?? "")
-////                            let row = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataMessages[index]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == message_id})
+////                            let row = messages(onDate: dataMessages[index]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == message_id})
 ////                            if row != nil && section != nil{
 ////                                tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
 ////                            }
@@ -4770,6 +5149,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func updateCounter(counter: Int) {
+        guard !isPreview else {
+            return
+        }
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
@@ -5033,6 +5415,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             (filtered[current.row]["message_id"] as? String ?? "")
         }) else { return }
 
+        guard !isPreview else {
+            return
+        }
         if idx >= dataMessages.count - counter {
             let delta = idx - (dataMessages.count - counter)
             counter -= (delta + 1)
@@ -6162,7 +6547,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         // by the previous long-press are dropped here rather than piling up on self.
         contextMenuActionHandlers.removeAll()
         let indexPath = self.tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: self.tableChatView))
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath!.section]})
+        let dataMessages = self.messages(onDate: dataDates[indexPath!.section])
         var star: UIAction
         if (dataMessages[indexPath!.row]["is_stared"]  as? String ?? "" == "0") {
             star = chatMenuAction(title: "Star".localized(), image: UIImage(systemName: "star"), handler: {(_) in
@@ -6548,7 +6933,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     self.dataMessages[idx!][TypeDataMessage.status] = "1"
                     self.dataMessages[idx!][TypeDataMessage.progress] = 0.0
                     let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                    let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
+                    let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
                     if row != nil && section != nil  {
                         self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                     }
@@ -6705,7 +7090,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                         if idx != nil{
                             self.dataMessages[idx!][TypeDataMessage.is_pinned] = isPinned ? "\(Date().currentTimeMillis())" : "0"
                             let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                            let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataMessages[idx!]["chat_date"]  as? String ?? ""}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
+                            let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
                             if row != nil && section != nil  {
                                 DispatchQueue.main.async {
                                     self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
@@ -6740,7 +7125,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         tempListMentionInTextField = listMentionInTextField
         listMentionWithText.removeAll()
         listMentionInTextField.removeAll()
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        let dataMessages = self.messages(onDate: dataDates[indexPath.section])
         var oldText = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
         if !(dataMessages[indexPath.row][TypeDataMessage.file_id] as? String ?? "").isEmpty {
             oldText = oldText.components(separatedBy: "|")[1]
@@ -7442,7 +7827,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         if (dataMessages[indexPath.row]["message_text"]  as? String ?? "").isEmpty {
             ratingButtonTitles = ["Image".localized()]
         }
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        let dataMessages = self.messages(onDate: dataDates[indexPath.section])
         let copyActions = ratingButtonTitles
             .enumerated()
             .map { index, title in
@@ -7544,7 +7929,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                                     if i > dataDates.count - 1 {
                                         continue
                                     }
-                                    if self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[i] }).count == 0 {
+                                    if self.messages(onDate: dataDates[i]).count == 0 {
                                         dataDates.remove(at: i)
                                     }
                                 }
@@ -7567,7 +7952,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                                 if i > dataDates.count - 1 {
                                     continue
                                 }
-                                if self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[i] }).count == 0 {
+                                if self.messages(onDate: dataDates[i]).count == 0 {
                                     dataDates.remove(at: i)
                                 }
                             }
@@ -7746,6 +8131,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if let messageId = message(at: indexPath)?["message_id"] as? String, cell.frame.height > 0 {
             measuredRowHeights[messageId] = cell.frame.height
         }
+        // Something new came into view; fetch whatever it needs once the list settles.
+        scheduleAutoDownloadSweep()
     }
 
     public func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
@@ -7805,6 +8192,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             return
         }
         prefetchOlderMessagesIfIdle()
+        scheduleAutoDownloadSweep()
     }
 
     public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
@@ -7812,6 +8200,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             return
         }
         prefetchOlderMessagesIfIdle()
+        scheduleAutoDownloadSweep()
     }
     
     public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -7889,7 +8278,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if isContactCenter && indexPath.row == 0 && isRequestContactCenter {
             return
         }
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section] })
+        let dataMessages = self.messages(onDate: dataDates[indexPath.section])
         if copySession || forwardSession || deleteSession || summarizeSession {
             guard indexPath.row < dataMessages.count else {
                 return
@@ -9195,10 +9584,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 }
             } else {
                 let date = Date(milliseconds: Int64(stringDate) ?? 100)
-                let formatter = DateFormatter()
-                formatter.dateFormat = "HH:mm"
-                formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                timeMessage.text = formatter.string(from: date as Date)
+                timeMessage.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                 timeMessage.textColor = .lightGray
             }
             timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
@@ -9345,19 +9731,53 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     topMarginText.constant = topMarginText.constant + 10
                     constTop = 35.0
                 }
-                let listImageThumb: [UIImageView] = [UIImageView(), UIImageView(), UIImageView(), UIImageView()]
-                for i in 0..<4 {
+                // WhatsApp's arrangement, and the reason it changes with the count: two
+                // images are two tall halves side by side, three are one tall half beside two
+                // stacked quarters, four or more are a square of quarters. The whole collage
+                // occupies the same box either way, so nothing else about the bubble moves.
+                let tileCount = min(listImages.count, 4)
+                let listImageThumb: [UIImageView] = (0..<tileCount).map { _ in UIImageView() }
+                for i in 0..<tileCount {
                     containerMessage.addSubview(listImageThumb[i])
                     listImageThumb[i].layer.cornerRadius = 5.0
                     listImageThumb[i].clipsToBounds = true
                     listImageThumb[i].contentMode = .scaleAspectFill
                     let widthHeightImage: CGFloat = 120
-                    switch i {
-                        case 0:
+                    // The collage is a square of the same tiles however many there are:
+                    // 120 + 5 + 120 on a side. Sizes are written out rather than left to the
+                    // edges of the bubble, because an image view with no height of its own takes
+                    // its height from the picture inside it - a loaded thumbnail was pushing the
+                    // whole bubble open to hundreds of points tall.
+                    let collageSide = widthHeightImage * 2 + 5
+                    listImageThumb[i].setContentHuggingPriority(.defaultLow, for: .vertical)
+                    listImageThumb[i].setContentHuggingPriority(.defaultLow, for: .horizontal)
+                    listImageThumb[i].setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+                    listImageThumb[i].setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                    switch (tileCount, i) {
+                        case (2, 0), (3, 0):
+                            // The tall half down the left: full height of the square, half its
+                            // width. Pinned to the bottom of the bubble as well as the top - the
+                            // same way the four-image arrangement has always been - so the bubble
+                            // is exactly as tall as the collage rather than as tall as whatever
+                            // margin happens to be set for the text below it.
+                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingTop: constTop, paddingLeft: 5, paddingBottom: 5, width: widthHeightImage, height: collageSide)
+                        case (2, 1):
+                            // The other half, level with it. This one also reaches the right edge
+                            // of the bubble: the bubble is only as wide as what is pinned to both
+                            // of its sides, and without that it stayed narrow enough to cut this
+                            // tile off entirely - the collage looked like a single tall sliver.
+                            listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: collageSide)
+                        case (3, 1):
+                            // Reaches the right edge for the same reason; the quarter below it
+                            // then only needs to line up under this one.
+                            listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
+                        case (3, 2):
+                            listImageThumb[i].anchor(top: listImageThumb[1].bottomAnchor, left: listImageThumb[0].rightAnchor, paddingTop: 5, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
+                        case (_, 0):
                             listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, paddingTop: constTop, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
-                        case 1:
+                        case (_, 1):
                             listImageThumb[i].anchor(top: containerMessage.topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingTop: constTop, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
-                        case 2:
+                        case (_, 2):
                             listImageThumb[i].anchor(left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingLeft: 5, paddingBottom: 5, width: widthHeightImage, height: widthHeightImage)
                         default:
                             listImageThumb[i].anchor(left: listImageThumb[2].rightAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingBottom: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
@@ -9453,10 +9873,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     let timeInImage = UILabel()
                     containerTimeStatus.addSubview(timeInImage)
                     let date = Date(milliseconds: Int64(listImages[i].time) ?? 100)
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "HH:mm"
-                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                    timeInImage.text = formatter.string(from: date as Date)
+                    timeInImage.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                     timeInImage.textColor = .white
                     timeInImage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
                     
@@ -9504,7 +9921,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         objectTap.isInitiator = dataMessages[indexPath.row]["f_pin"] as? String == idMe
                     }
                 }
-                if  listImages.count > 4 {
+                if listImages.count > 4, listImageThumb.count == 4 {
                     let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.dark)
                     let blurEffectView = UIVisualEffectView(effect: blurEffect)
                     blurEffectView.frame = CGRect(x: 0, y: 0, width: listImageThumb[3].frame.size.width, height: listImageThumb[3].frame.size.height)
@@ -9519,8 +9936,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     countRestImages.textColor = .white
                 }
             } else {
-                let getHeightImage: CGFloat = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).height
-                let getWidthImage: CGFloat = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).width
+                // One measurement, not two: the width and the height come from the same look
+                // at the file.
+                let thumbSize = imageBubbleSize(messageId: messageIdChat, thumb: thumbChat)
+                let getHeightImage: CGFloat = thumbSize.height
+                let getWidthImage: CGFloat = thumbSize.width
                 topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 45 : getHeightImage + 5)
                 
                 containerMessage.addSubview(imageThumb)
@@ -9542,6 +9962,15 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageThumb.layer.cornerRadius = 5.0
                 imageThumb.clipsToBounds = true
                 imageThumb.contentMode = .scaleAspectFill
+                // Fix: an image view carries the size of the picture inside it, and this one is
+                // held between the top of the bubble and the text below rather than by a height
+                // of its own. When a thumbnail arrived, its own size pushed against the margin
+                // that sets the bubble's height - which is only defaultHigh - and the bubble
+                // opened up under the reader. What is inside no longer has a say in the layout.
+                imageThumb.setContentHuggingPriority(.defaultLow, for: .vertical)
+                imageThumb.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                imageThumb.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+                imageThumb.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 
                 let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                 let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
@@ -9587,6 +10016,18 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                             
                         }
                     } else {
+                        // Nothing to draw yet. A spinner in the middle of the space being held for
+                        // the picture says so - the reader sees that it is coming rather than a
+                        // blank grey block that looks like nothing is happening.
+                        let ringIsShowing = Download.isDownloading(forKey: videoChat.isEmpty ? imageChat : videoChat)
+                        let waiting = UIActivityIndicatorView(style: .medium)
+                        waiting.isHidden = ringIsShowing
+                        imageThumb.addSubview(waiting)
+                        waiting.translatesAutoresizingMaskIntoConstraints = false
+                        waiting.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
+                        waiting.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+                        waiting.color = .white
+                        waiting.startAnimating()
                         // Fix: cellForRow runs again on every scroll pass, and each pass used to hand the
                         // same file another completion to call - dozens of them by the time a transfer
                         // finished, every one of them reloading the same row. The transfer that is already
@@ -9614,7 +10055,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         imageThumb.addSubview(blurEffectView)
                         // Fix: while the image is actually downloading the progress ring stands in for
                         // this button - they are both centred on the thumbnail and would overlap.
-                        if !imageChat.isEmpty, !Download.isDownloading(forKey: imageChat) {
+                        // Fix: the arrow used to show whenever the full picture was not here,
+                        // even while the thumbnail it stands on had not arrived either - an
+                        // invitation to tap a blank square, next to a spinner saying the opposite.
+                        // Nothing can be asked for before there is a picture to ask about.
+                        let hasThumb = FileManager.default.fileExists(atPath: thumbURL.path) || FileEncryption.shared.isSecureExists(filename: thumbChat)
+                        if hasThumb, !imageChat.isEmpty, !Download.isDownloading(forKey: imageChat) {
                             let imageDownload = UIImageView(image: UIImage(systemName: "arrow.down.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .bold, scale: .default)))
                             imageThumb.addSubview(imageDownload)
                             imageDownload.tintColor = .black.withAlphaComponent(0.3)
@@ -10491,7 +10937,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             return
         }
         let indexPath = sender.indexPath
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        let dataMessages = self.messages(onDate: dataDates[indexPath.section])
         if dataMessages[indexPath.row]["status"]  as? String ?? "" == "8" {
             return
         }
@@ -10519,7 +10965,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     if let index = self.dataMessages.firstIndex(where: {$0["message_id"] as? String == dataMessages[indexPath.row]["message_id"] as? String}) {
                         self.dataMessages[index]["status"] = "8"
                         let section = self.dataDates.firstIndex(of: self.dataMessages[index]["chat_date"]  as? String ?? "")
-                        let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[index]["message_id"]  as? String ?? ""})
+                        let row = self.messages(onDate: self.dataDates[section!]).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[index]["message_id"]  as? String ?? ""})
                         if row != nil && section != nil {
                             self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
                         }
@@ -10555,7 +11001,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
 //        if x <= -(recognizer.view?.frame.size.width ?? 0) * 0.05 {
 //            let idMe = User.getMyPin() as String?
 //            let indexPath = self.tableChatView.indexPath(for: recognizer.view! as! UITableViewCell)
-//            let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath!.section]})
+//            let dataMessages = self.messages(onDate: dataDates[indexPath!.section])
 //            if (dataMessages[indexPath!.row]["f_pin"] as? String == idMe) {
 //                let messageInfoVC = MessageInfo()
 //                messageInfoVC.data = dataMessages[indexPath!.row]
@@ -10609,13 +11055,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if indexPath.count == 0 {
             if let index = self.dataMessages.firstIndex(where: {$0["message_id"] as? String == sender.message_id}) {
                 let section = self.dataDates.firstIndex(of: self.dataMessages[index]["chat_date"]  as? String ?? "")
-                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[section!]}).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[index]["message_id"]  as? String ?? ""})
+                let row = self.messages(onDate: self.dataDates[section!]).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[index]["message_id"]  as? String ?? ""})
                 if row != nil && section != nil {
                     indexPath = IndexPath(row: row!, section: section!)
                 }
             }
         }
-        let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+        let dataMessages = self.messages(onDate: dataDates[indexPath.section])
         func showMedia(data: Data? = nil, url: URL? = nil, type: Int = 0) {
             let image = UIImage(data: data ?? Data())
             let imageViewer = MediaViewerViewController()
@@ -10981,7 +11427,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 if section == nil {
                     return
                 }
-                let row = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == self.dataDates[section!]}).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String})
+                let row = self.messages(onDate: self.dataDates[section!]).firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String})
                 if row == nil {
                     return
                 }
@@ -11427,7 +11873,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         // conversation has any messages to show.
         var dataMessages: [[String: Any?]] = []
         if indexPath.section < dataDates.count {
-            dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
+            dataMessages = self.messages(onDate: dataDates[indexPath.section])
         }
         var chatGroup: [Chat] = []
         if reffId.isEmpty {
@@ -12396,18 +12842,26 @@ extension EditorPersonal {
             return nil
         }
         let fileKeys = ["image_id", "video_id", "file_id", "audio_id", "thumb_id", "gif_id"]
-        guard let index = dataMessages.lastIndex(where: { message in
+        var messageId: String?
+        if let index = dataMessages.lastIndex(where: { message in
             return fileKeys.contains(where: { (message[$0] as? String ?? "") == name })
-        }) else {
-            return nil
+        }) {
+            messageId = dataMessages[index]["message_id"] as? String
+        } else {
+            // Fix: a collage stands for several messages and only its first one is still a row -
+            // the others were taken out of the list when they were gathered into it. A picture
+            // arriving for any of the others found no row to redraw, so it stayed behind its
+            // blur until the chat was opened again. The row to redraw is the collage's own.
+            messageId = groupImages.first(where: { _, images in
+                images.contains(where: { image in
+                    fileKeys.contains(where: { (image.dataMessage[$0] as? String ?? "") == name })
+                })
+            })?.key
         }
-        guard let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as? String ?? "") else {
-            return nil
-        }
-        let messageId = dataMessages[index]["message_id"] as? String
-        guard let row = dataMessages
-            .filter({ $0["chat_date"] as? String ?? "" == dataDates[section] })
-            .firstIndex(where: { $0["message_id"] as? String == messageId }) else {
+        guard let messageId = messageId,
+              let index = dataMessages.lastIndex(where: { ($0["message_id"] as? String) == messageId }),
+              let section = dataDates.firstIndex(of: dataMessages[index]["chat_date"] as? String ?? ""),
+              let row = messages(onDate: dataDates[section]).firstIndex(where: { ($0["message_id"] as? String) == messageId }) else {
             return nil
         }
         return IndexPath(row: row, section: section)

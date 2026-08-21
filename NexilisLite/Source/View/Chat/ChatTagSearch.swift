@@ -750,10 +750,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
                 let calendar = Calendar.current
                 
                 if (calendar.isDateInToday(date)) {
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "HH:mm"
-                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                    timeView.text = formatter.string(from: date as Date)
+                    timeView.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                 } else {
                     let startOfNow = calendar.startOfDay(for: Date())
                     let startOfTimeStamp = calendar.startOfDay(for: date)
@@ -771,10 +768,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
                             }
                             timeView.text = formatter.string(from: date)
                         } else {
-                            let formatter = DateFormatter()
-                            formatter.dateFormat = "M/dd/yy"
-                            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                            let stringFormat = formatter.string(from: date as Date)
+                            let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "M/dd/yy", localeIdentifier: "id")
                             timeView.text = stringFormat
                         }
                     }
@@ -891,7 +885,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
                         }
                     }
                     var dataURL = ""
-                    subtitle.text = txtData
+                    subtitle.text = txtData.mentionsAsNames()
                     Database.shared.database?.inTransaction({ (fmdb, rollback) in
                         do {
                             if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select data_link from LINK_PREVIEW where link='\(text)'"), cursor.next() {
@@ -1124,7 +1118,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
             line.append(NSAttributedString(attachment: attachment))
             line.append(NSAttributedString(string: " ", attributes: [.font: font]))
         }
-        let caption = data.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let caption = data.messageText.mentionsAsNames().trimmingCharacters(in: .whitespacesAndNewlines)
         line.append(NSAttributedString(string: caption.isEmpty ? fallback : caption,
                                        attributes: [.font: font, .foregroundColor: UIColor.gray]))
         return line

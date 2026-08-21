@@ -3430,9 +3430,30 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 }
 
+public extension Utils {
+    /// Whether attachments fetch themselves as they come into view.
+    ///
+    /// On unless the reader has turned it off. The preference is only ever written when the
+    /// switch in Settings is used, so nothing stored means it was never touched - which is why
+    /// the default belongs here rather than at each place that reads it.
+    static var isAutoDownloadOn: Bool {
+        return SecureUserDefaults.shared.value(forKey: "autoDownload") ?? true
+    }
+}
+
 public class SecureUserDefaults {
     public static let shared = SecureUserDefaults()
     private let defaults: UserDefaults
+
+    /// What has already been decoded, kept so it is decoded once.
+    ///
+    /// Fix: reading one of these is a read from the store, an AES decrypt and a JSON decode, and
+    /// a few of them - the signed-in pin, the chosen language - are read over and over while a
+    /// single screen is drawn: every chat bubble asked for both. Nothing outside this class
+    /// writes these keys, and every way of changing one goes through set or removeValue below,
+    /// so what is held here cannot fall behind what is stored.
+    private var cache: [String: Any] = [:]
+    private let cacheLock = NSLock()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -3446,22 +3467,42 @@ public class SecureUserDefaults {
             return
         }
         defaults.set(encryptedData, forKey: key)
+        cacheLock.lock()
+        cache[key] = value
+        cacheLock.unlock()
     }
 
     // Retrieve a value
     public func value<T: Codable>(forKey key: String) -> T? {
+        cacheLock.lock()
+        let cached = cache[key]
+        cacheLock.unlock()
+        if let cached = cached {
+            // The same cast the decode would have had to satisfy: a value stored as one type
+            // and asked for as another is nil here exactly as it was before.
+            return cached as? T
+        }
         guard let encryptedData = defaults.data(forKey: key),
               let decryptedData = try? MasterKeyUtil.shared.decryptP(data: encryptedData) else {
 //            print("Failed to decrypt data \(key)")
             return nil
         }
         let decoder = JSONDecoder()
-        return try? decoder.decode(T.self, from: decryptedData)
+        guard let decoded = try? decoder.decode(T.self, from: decryptedData) else {
+            return nil
+        }
+        cacheLock.lock()
+        cache[key] = decoded
+        cacheLock.unlock()
+        return decoded
     }
 
     // Remove a value
     public func removeValue(forKey key: String) {
         defaults.removeObject(forKey: key)
+        cacheLock.lock()
+        cache.removeValue(forKey: key)
+        cacheLock.unlock()
     }
 }
 

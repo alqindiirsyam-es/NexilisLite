@@ -117,10 +117,7 @@ public class HistoryCCViewController: UITableViewController, QLPreviewController
         cell.labelComplaintId.text = data[indexPath.row]["complaint_id"] as? String ?? ""
         let stringDate = data[indexPath.row]["date_start"] as? String ?? ""
         let date = Date(milliseconds: Int64(stringDate) ?? 0)
-        let formatter = DateFormatter()
-        formatter.dateFormat = "dd/MM/yyyy HH:mm"
-        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-        cell.labelDate.text = formatter.string(from: date as Date)
+        cell.labelDate.text = DateFormatterPool.shared.string(from: date as Date, format: "dd/MM/yyyy HH:mm", localeIdentifier: "id")
         cell.viewContainer.layer.borderWidth = 1
         cell.viewContainer.layer.borderColor = UIColor.whiteBubbleColor.cgColor
         cell.viewContainer.layer.cornerRadius = 10

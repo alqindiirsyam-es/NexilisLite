@@ -662,10 +662,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             let calendar = Calendar.current
             
             if (calendar.isDateInToday(date)) {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "HH:mm"
-                formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                timeView.text = formatter.string(from: date as Date)
+                timeView.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
             } else {
                 let startOfNow = calendar.startOfDay(for: Date())
                 let startOfTimeStamp = calendar.startOfDay(for: date)
@@ -683,10 +680,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                         }
                         timeView.text = formatter.string(from: date)
                     } else {
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "M/dd/yy"
-                        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                        let stringFormat = formatter.string(from: date as Date)
+                        let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "M/dd/yy", localeIdentifier: "id")
                         timeView.text = stringFormat
                     }
                 }
@@ -1080,10 +1074,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             let calendar = Calendar.current
             
             if (calendar.isDateInToday(date)) {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "HH:mm"
-                formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                timeView.text = formatter.string(from: date as Date)
+                timeView.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
             } else {
                 let startOfNow = calendar.startOfDay(for: Date())
                 let startOfTimeStamp = calendar.startOfDay(for: date)
@@ -1101,10 +1092,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                         }
                         timeView.text = formatter.string(from: date)
                     } else {
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "M/dd/yy"
-                        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                        let stringFormat = formatter.string(from: date as Date)
+                        let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "M/dd/yy", localeIdentifier: "id")
                         timeView.text = stringFormat
                     }
                 }

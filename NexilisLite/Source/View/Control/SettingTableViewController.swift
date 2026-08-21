@@ -52,7 +52,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         switchAutoDownload.onTintColor = .mainColor
         let vibrateMode: Bool = SecureUserDefaults.shared.value(forKey: "vibrateMode") ?? false
         let saveGallery: Bool = SecureUserDefaults.shared.value(forKey: "saveToGallery") ?? false
-        let autoDownload: Bool = SecureUserDefaults.shared.value(forKey: "autoDownload") ?? false
+        let autoDownload = Utils.isAutoDownloadOn
         if vibrateMode {
             switchVibrateMode.setOn(true, animated: false)
         }

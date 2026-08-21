@@ -105,10 +105,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                         }
                     }
                     
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "HH:mm"
-                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                    timeLastBackup = formatter.string(from: date as Date)
+                    timeLastBackup = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                     
                     valueLastBackup = dayLastBackup.localized() + ", " + timeLastBackup
                     valuesizeBackup = Units(bytes: Int64(filesize)!).getReadableUnit()
@@ -1081,10 +1078,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                                             }
                                         }
                                         
-                                        let formatter = DateFormatter()
-                                        formatter.dateFormat = "HH:mm"
-                                        formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                                        timeLastBackup = formatter.string(from: date as Date)
+                                        timeLastBackup = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
                                         
                                         valueLastBackup = dayLastBackup.localized() + ", " + timeLastBackup
                                         valuesizeBackup = Units(bytes: fileSize).getReadableUnit()

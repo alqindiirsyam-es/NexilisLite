@@ -641,10 +641,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         let stringDate = (dataMessages[indexPath.row]["server_date"]  as? String ?? "")
         if !stringDate.isEmpty {
             let date = Date(milliseconds: Int64(stringDate) ?? 100)
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm"
-            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-            timeMessage.text = formatter.string(from: date as Date)
+            timeMessage.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
             timeMessage.textColor = .lightGray
             timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
             if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
@@ -780,8 +777,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
         
         if (!thumbChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
-            let getHeightImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).height
-            let getWidthImage = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305).width
+            // One measurement, not two: the width and the height come from the same look
+            // at the file.
+            let thumbSize = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)
+            let getHeightImage: CGFloat = thumbSize.height
+            let getWidthImage: CGFloat = thumbSize.width
             topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 40 : getHeightImage)
             
             containerMessage.addSubview(imageThumb)

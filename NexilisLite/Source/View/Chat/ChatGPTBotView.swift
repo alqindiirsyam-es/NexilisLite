@@ -2089,10 +2089,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
         let stringDate = (dataMessages[indexPath.row]["server_date"] as? String) ?? ""
         if !stringDate.isEmpty {
             let date = Date(milliseconds: Int64(stringDate) ?? 100)
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm"
-            formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-            timeMessage.text = formatter.string(from: date as Date)
+            timeMessage.text = DateFormatterPool.shared.string(from: date as Date, format: "HH:mm", localeIdentifier: "id")
             timeMessage.textColor = .lightGray
             timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
         }

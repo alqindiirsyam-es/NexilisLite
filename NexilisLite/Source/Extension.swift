@@ -27,9 +27,7 @@ extension Date {
     }
     
     func format(dateFormat: String) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = dateFormat
-        return formatter.string(from: self)
+        return DateFormatterPool.shared.string(from: self, format: dateFormat)
     }
     
     var millisecondsSince1970:Int64 {
@@ -880,30 +878,79 @@ extension UIView {
 extension String {
     
     public func localized(uppercased: Bool = false) -> String {
-        if let _ : String = SecureUserDefaults.shared.value(forKey: "i18n_language") {} else {
-            // we set a default, just in case
-            let langDefault = UserDefaults.standard.stringArray(forKey: "AppleLanguages")
-            if langDefault![0].contains("id") {
-                SecureUserDefaults.shared.set("id", forKey: "i18n_language")
-            } else {
-                SecureUserDefaults.shared.set("en", forKey: "i18n_language")
-            }
-        }
-        let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? ""
-        let bundle = Bundle.resourceBundle(for: Nexilis.self).path(forResource: lang, ofType: "lproj")
-        let bundlePath = Bundle(path: bundle!)
-        let result = NSLocalizedString(
-            self,
-            tableName: "Localizable",
-            bundle: bundlePath!,
-            value: self,
-            comment: self)
+        let result = LocalizedStrings.shared.string(for: self)
         if uppercased {
             return result.uppercased()
         }
         return result
     }
     
+}
+
+/// The language bundle and what has already been looked up in it.
+///
+/// Fix: every single `localized()` call used to work all of this out again - the chosen language
+/// read back out of the encrypted preferences, the framework's resource bundle located on disk
+/// and opened, the language folder inside it located and opened as a second bundle, and only
+/// then the lookup. One screenful of chat bubbles asks for dozens of strings, and this is a good
+/// part of why scrolling dragged on an older phone. None of it changes while the app runs,
+/// except when the reader picks a different language - which is noticed here by the language
+/// itself changing, and throws away what was looked up under the old one.
+public final class LocalizedStrings {
+    public static let shared = LocalizedStrings()
+
+    private let lock = NSLock()
+    private var language: String?
+    private var bundle: Bundle?
+    private var lookedUp: [String: String] = [:]
+
+    private init() {}
+
+    /// The language the app is running in, defaulting from the device the first time.
+    private func currentLanguage() -> String {
+        if let stored: String = SecureUserDefaults.shared.value(forKey: "i18n_language") {
+            return stored
+        }
+        // we set a default, just in case
+        let langDefault = UserDefaults.standard.stringArray(forKey: "AppleLanguages")
+        let fallback = (langDefault?.first?.contains("id") ?? false) ? "id" : "en"
+        SecureUserDefaults.shared.set(fallback, forKey: "i18n_language")
+        return fallback
+    }
+
+    func string(for key: String) -> String {
+        let language = currentLanguage()
+        lock.lock()
+        if self.language != language {
+            // The reader changed language: nothing looked up under the old one still applies.
+            self.language = language
+            self.bundle = Self.languageBundle(for: language)
+            self.lookedUp.removeAll()
+        }
+        if let known = lookedUp[key] {
+            lock.unlock()
+            return known
+        }
+        let bundle = self.bundle
+        lock.unlock()
+
+        guard let bundle = bundle else {
+            return key
+        }
+        let result = NSLocalizedString(key, tableName: "Localizable", bundle: bundle, value: key, comment: key)
+        lock.lock()
+        lookedUp[key] = result
+        lock.unlock()
+        return result
+    }
+
+    private static func languageBundle(for language: String) -> Bundle? {
+        let resources = Bundle.resourceBundle(for: Nexilis.self)
+        guard let path = resources.path(forResource: language, ofType: "lproj") else {
+            return resources
+        }
+        return Bundle(path: path) ?? resources
+    }
 }
 
 extension UIViewController {
@@ -1309,8 +1356,7 @@ extension String {
                     }
                 }
             } else {
-                if let member = Member.getMember(f_pin: username) {
-                    let fullName = "\(member.fullName)".trimmingCharacters(in: .whitespaces)
+                if let fullName = MentionNames.name(forPin: username) {
                     text.replaceCharacters(in: range, with: fullName)
                     if ((!groupID.isEmpty && Member.getMemberInGroup(f_pin: username, group_id: groupID) != nil) || username == "-997") {
                         let newRange = (text.string as NSString).range(of: "@\(fullName)")
@@ -1334,6 +1380,57 @@ extension String {
         return utf16.distance(from: startIndex, to: index)
     }
     
+}
+
+
+/// Names behind the pins that mentions are stored as.
+///
+/// One lookup per person rather than one per row drawn: a mention is resolved every time a
+/// message is put on screen, and each resolution was a query of its own.
+enum MentionNames {
+    private static var cache: [String: String] = [:]
+    private static let lock = NSLock()
+
+    /// The name to show for a mention, or nil when the pin belongs to nobody known.
+    static func name(forPin pin: String) -> String? {
+        lock.lock()
+        let known = cache[pin]
+        lock.unlock()
+        if let known = known {
+            return known.isEmpty ? nil : known
+        }
+        let resolved = Member.getMember(f_pin: pin)?.fullName.trimmingCharacters(in: .whitespaces) ?? ""
+        lock.lock()
+        cache[pin] = resolved
+        lock.unlock()
+        return resolved.isEmpty ? nil : resolved
+    }
+}
+
+public extension String {
+    /// The same text with its mentions written out as names.
+    ///
+    /// Fix: a mention is stored as "@" followed by the person's pin, and everywhere a message is
+    /// drawn through richText() that becomes their name. Text put on screen as plain characters -
+    /// the captions under the media results in search - showed the pin itself, which says nothing
+    /// to a reader.
+    func mentionsAsNames() -> String {
+        guard contains("@"), let regex = try? NSRegularExpression(pattern: "@([\\w-]+)", options: []) else {
+            return self
+        }
+        let original = self as NSString
+        var result = self
+        // Backwards, so a replacement never moves the ranges still to be dealt with.
+        for match in regex.matches(in: self, options: [], range: NSRange(location: 0, length: original.length)).reversed() {
+            let pinRange = match.range(at: 1)
+            guard pinRange.location != NSNotFound,
+                  let name = MentionNames.name(forPin: original.substring(with: pinRange)) else {
+                continue
+            }
+            result = (result as NSString).replacingCharacters(in: pinRange, with: name)
+        }
+        return result
+    }
 }
 
 extension UIFont {
@@ -1387,45 +1484,69 @@ extension UILabel {
 
 extension Bundle {
 
+    /// Bundles already found, kept so they are found once.
+    ///
+    /// Fix: both of these used to walk the file system and build a Bundle every time they were
+    /// called, and they are called for every icon a chat bubble draws - nineteen times in one
+    /// pass over a single cell. Worse, UIImage(named:in:) caches decoded images against the
+    /// bundle it was given, so a fresh Bundle each time meant the cache never matched and every
+    /// icon was decoded from disk again while the reader scrolled. Bundles do not move while
+    /// the app runs.
+    private static var cachedBundles: [String: Bundle] = [:]
+    private static let cachedBundlesLock = NSLock()
+
+    private static func cachedBundle(named name: String, for frameworkClass: AnyClass) -> Bundle {
+        let key = "\(name)|\(String(describing: frameworkClass))"
+        cachedBundlesLock.lock()
+        if let known = cachedBundles[key] {
+            cachedBundlesLock.unlock()
+            return known
+        }
+        cachedBundlesLock.unlock()
+
+        let frameworkBundle = Bundle(for: frameworkClass)
+        let resolved: Bundle
+#if SWIFT_PACKAGE
+        // `NexilisLiteResources.bundle` is an optional media bundle supplied by the host app.
+        // Depending on whether the package is linked statically or dynamically it lands either
+        // in the app bundle or next to the library, so check both before falling back to the
+        // package's own resources.
+        var found: Bundle?
+        for candidate in [frameworkBundle, Bundle.main] {
+            if let resourceBundleURL = candidate.url(forResource: name, withExtension: "bundle"),
+               let resourceBundle = Bundle(url: resourceBundleURL) {
+                found = resourceBundle
+                break
+            }
+        }
+        resolved = found ?? Bundle.module
+#else
+        if let resourceBundleURL = frameworkBundle.url(forResource: name, withExtension: "bundle"),
+           let resourceBundle = Bundle(url: resourceBundleURL) {
+            resolved = resourceBundle
+        } else {
+            resolved = frameworkBundle
+        }
+#endif
+        cachedBundlesLock.lock()
+        cachedBundles[key] = resolved
+        cachedBundlesLock.unlock()
+        return resolved
+    }
+
     public static func resourceBundle(for frameworkClass: AnyClass) -> Bundle {
 #if SWIFT_PACKAGE
-        // Under SwiftPM the `Resource` directory is compiled into the target's
-        // own resource bundle, which `Bundle.module` resolves for us.
+        // Under SwiftPM the `Resource` directory is compiled into the target's own resource
+        // bundle, which `Bundle.module` resolves for us - itself a lookup made once, so it does
+        // not need the cache above.
         return Bundle.module
 #else
-        let frameworkBundle = Bundle(for: frameworkClass)
-        guard let resourceBundleURL = frameworkBundle.url(forResource: "NexilisLite", withExtension: "bundle"),
-              let resourceBundle = Bundle(url: resourceBundleURL) else {
-            return frameworkBundle
-        }
-        return resourceBundle
+        return cachedBundle(named: "NexilisLite", for: frameworkClass)
 #endif
     }
     
     public static func resourcesMediaBundle(for frameworkClass: AnyClass) -> Bundle {
-#if SWIFT_PACKAGE
-        // `NexilisLiteResources.bundle` is an optional media bundle supplied by
-        // the host app. Depending on whether the package is linked statically or
-        // dynamically it lands either in the app bundle or next to the library,
-        // so check both before falling back to the package's own resources.
-        let frameworkBundle = Bundle(for: frameworkClass)
-        for candidate in [frameworkBundle, Bundle.main] {
-            if let resourceBundleURL = candidate.url(forResource: "NexilisLiteResources", withExtension: "bundle"),
-               let resourceBundle = Bundle(url: resourceBundleURL) {
-                return resourceBundle
-            }
-        }
-        return Bundle.module
-#else
-        let frameworkBundle = Bundle(for: frameworkClass)
-
-        guard let resourceBundleURL = frameworkBundle.url(forResource: "NexilisLiteResources", withExtension: "bundle"),
-              let resourceBundle = Bundle(url: resourceBundleURL) else {
-            return frameworkBundle
-        }
-
-        return resourceBundle
-#endif
+        return cachedBundle(named: "NexilisLiteResources", for: frameworkClass)
     }
     
 }
@@ -2549,3 +2670,39 @@ extension Task where Success == Never, Failure == Never {
 }
 
 
+
+
+/// Date formatters, made once per format rather than once per use.
+///
+/// Fix: building a DateFormatter is one of the more expensive things in Foundation - it reads
+/// the locale, parses the format and builds an ICU formatter - and this app built a fresh one
+/// for every timestamp it drew. A screenful of chat bubbles is a screenful of them, which on an
+/// older phone is felt directly as the scroll stuttering. Formatters are not safe to use from
+/// two threads at once, so the formatting itself is done under the lock; it is microseconds
+/// against the milliseconds that building one costs.
+public final class DateFormatterPool {
+    public static let shared = DateFormatterPool()
+
+    private let lock = NSLock()
+    private var formatters: [String: DateFormatter] = [:]
+
+    private init() {}
+
+    public func string(from date: Date, format: String, localeIdentifier: String? = nil) -> String {
+        let key = localeIdentifier.map { "\(format)|\($0)" } ?? format
+        lock.lock()
+        defer { lock.unlock() }
+        let formatter: DateFormatter
+        if let known = formatters[key] {
+            formatter = known
+        } else {
+            formatter = DateFormatter()
+            formatter.dateFormat = format
+            if let localeIdentifier = localeIdentifier {
+                formatter.locale = Locale(identifier: localeIdentifier)
+            }
+            formatters[key] = formatter
+        }
+        return formatter.string(from: date)
+    }
+}
