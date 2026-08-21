@@ -1106,7 +1106,7 @@ class QmeraVideoViewController: UIViewController {
     @objc func didTapChatButton(){
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         let members: String = SecureUserDefaults.shared.value(forKey: "membersCC") ?? ""
-        let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+        let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
         let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
         editorPersonalVC.hidesBottomBarWhenPushed = true
         editorPersonalVC.unique_l_pin = officer
@@ -1377,8 +1377,8 @@ class QmeraVideoViewController: UIViewController {
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         if !onGoingCC.isEmpty {
             let requester = onGoingCC.components(separatedBy: ",")[0]
-            let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-            let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
+            let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
+            let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.component(2, separatedBy: ",")
             let idMe = User.getMyPin()!
             let startTimeCC: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
             DispatchQueue.global().async {
@@ -1461,7 +1461,7 @@ class QmeraVideoViewController: UIViewController {
         if !Nexilis.checkingAccess(key: "video_call_add") {
             if Nexilis.checkingAccessAlert(key: "video_call_add") != "|" && !Nexilis.checkingAccessAlert(key: "video_call_add").isEmpty {
                 let title = Nexilis.checkingAccessAlert(key: "video_call_add").components(separatedBy: "|")[0]
-                let message = Nexilis.checkingAccessAlert(key: "video_call_add").components(separatedBy: "|")[1]
+                let message = Nexilis.checkingAccessAlert(key: "video_call_add").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
                 UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -1477,7 +1477,7 @@ class QmeraVideoViewController: UIViewController {
                     DispatchQueue.global().async {
                         let myPin = User.getMyPin() ?? ""
                         let myUser = User.getDataCanNil(pin: myPin)
-                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: data["f_pin"]!!, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "2", f_name: myUser == nil ? data["name"]!! : myUser!.fullName, f_thumb: myUser == nil ? data["picture"]!! : myUser!.thumb))
+                        _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: data["f_pin"]!!, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.component(2, separatedBy: ","), channel: "2", f_name: myUser == nil ? data["name"]!! : myUser!.fullName, f_thumb: myUser == nil ? data["picture"]!! : myUser!.thumb))
                     }
                     DispatchQueue.main.async {
                         self.isAddCall = data["f_pin"]!!
@@ -1872,7 +1872,7 @@ class QmeraVideoViewController: UIViewController {
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             if !onGoingCC.isEmpty {
                 let requester = onGoingCC.components(separatedBy: ",")[0]
-                let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
                 if arrayMessage[0] == requester || arrayMessage[0] == officer {
                     DispatchQueue.main.async {
                         let controller = self.presentedViewController

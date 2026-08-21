@@ -223,7 +223,7 @@ public class Network {
         let MIME_TYPE = "multipart/form-data; boundary=" + BOUNDARY
         let headers: HTTPHeaders = [
             "Content-Type": MIME_TYPE,
-            "Host": Utils.getURLBase().components(separatedBy: "/")[2],
+            "Host": Utils.getURLBase().component(2, separatedBy: "/"),
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "Keep-Alive",
             "Accept": "*/*",

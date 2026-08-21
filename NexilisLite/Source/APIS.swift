@@ -294,7 +294,7 @@ public class APIS: NSObject {
         if !Nexilis.checkingAccess(key: "call_center") {
             if Nexilis.checkingAccessAlert(key: "call_center") != "|" && !Nexilis.checkingAccessAlert(key: "call_center").isEmpty {
                 let title = Nexilis.checkingAccessAlert(key: "call_center").components(separatedBy: "|")[0]
-                let message = Nexilis.checkingAccessAlert(key: "call_center").components(separatedBy: "|")[1]
+                let message = Nexilis.checkingAccessAlert(key: "call_center").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
                 UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -372,7 +372,7 @@ public class APIS: NSObject {
         if !Nexilis.checkingAccess(key: "call_center") {
             if Nexilis.checkingAccessAlert(key: "call_center") != "|" && !Nexilis.checkingAccessAlert(key: "call_center").isEmpty {
                 let title = Nexilis.checkingAccessAlert(key: "call_center").components(separatedBy: "|")[0]
-                let message = Nexilis.checkingAccessAlert(key: "call_center").components(separatedBy: "|")[1]
+                let message = Nexilis.checkingAccessAlert(key: "call_center").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
                 UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -527,7 +527,7 @@ public class APIS: NSObject {
         if !Nexilis.checkingAccess(key: "live_streaming") {
             if Nexilis.checkingAccessAlert(key: "live_streaming") != "|" && !Nexilis.checkingAccessAlert(key: "live_streaming").isEmpty {
                 let title = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[0]
-                let message = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[1]
+                let message = Nexilis.checkingAccessAlert(key: "live_streaming").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
                 UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -555,7 +555,7 @@ public class APIS: NSObject {
         if !Nexilis.checkingAccess(key: "vconf_room") {
             if Nexilis.checkingAccessAlert(key: "vconf_room") != "|" && !Nexilis.checkingAccessAlert(key: "vconf_room").isEmpty {
                 let title = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[0]
-                let message = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[1]
+                let message = Nexilis.checkingAccessAlert(key: "vconf_room").component(1, separatedBy: "|")
                 APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
             } else {
                 UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -2486,7 +2486,7 @@ public class APIS: NSObject {
                 return
             }
         }
-        var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+        var nameSound = soundId.component(1, separatedBy: ":").replacingOccurrences(of: " ", with: "_")
         var fromPref = false
         if nameSound.contains("_(Default)") {
             if !Utils.getDefaultIncomingMsg().isEmpty {

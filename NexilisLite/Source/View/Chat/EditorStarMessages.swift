@@ -560,9 +560,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageSticker.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 imageSticker.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 imageSticker.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                var imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                var imageStickerBundle = UIImage(named: (textChat.component(1, separatedBy: "/")), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 if imageStickerBundle == nil {
-                    imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+                    imageStickerBundle = UIImage(named: (textChat.component(1, separatedBy: "/")), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
                 }
                 imageSticker.image = imageStickerBundle //resourcesMediaBundle
                 imageSticker.contentMode = .scaleAspectFit
@@ -1521,7 +1521,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     }
                 }
                 if (attachment_flag == "11") {
-                    let imageSticker = UIImageView(image: UIImage(named: (message_text.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
+                    let imageSticker = UIImageView(image: UIImage(named: (message_text.component(1, separatedBy: "/")), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
                     containerReply.addSubview(imageSticker)
                     imageSticker.layer.cornerRadius = 2.0
                     imageSticker.clipsToBounds = true
@@ -2467,7 +2467,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 if !Nexilis.checkingAccess(key: "live_streaming") {
                     if Nexilis.checkingAccessAlert(key: "live_streaming") != "|" && !Nexilis.checkingAccessAlert(key: "live_streaming").isEmpty {
                         let title = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[0]
-                        let message = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[1]
+                        let message = Nexilis.checkingAccessAlert(key: "live_streaming").component(1, separatedBy: "|")
                         APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                     } else {
                         UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -2496,7 +2496,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 if !Nexilis.checkingAccess(key: "vconf_room") {
                     if Nexilis.checkingAccessAlert(key: "vconf_room") != "|" && !Nexilis.checkingAccessAlert(key: "vconf_room").isEmpty {
                         let title = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[0]
-                        let message = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[1]
+                        let message = Nexilis.checkingAccessAlert(key: "vconf_room").component(1, separatedBy: "|")
                         APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                     } else {
                         UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)

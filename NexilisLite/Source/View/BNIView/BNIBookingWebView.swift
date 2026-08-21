@@ -178,7 +178,7 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         let cookieScriptInjection1 = WKUserScript(source: cookieScript1, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         configuration.userContentController.addUserScript(cookieScriptInjection1)
         
-        let cookieScript2 = "document.cookie = '\(Utils.getCookiesMobile().components(separatedBy: ";")[1])';"
+        let cookieScript2 = "document.cookie = '\(Utils.getCookiesMobile().component(1, separatedBy: ";"))';"
         let cookieScriptInjection2 = WKUserScript(source: cookieScript2, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         configuration.userContentController.addUserScript(cookieScriptInjection2)
         

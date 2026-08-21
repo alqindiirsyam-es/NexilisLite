@@ -279,7 +279,7 @@ public class Nexilis: NSObject {
                 }
 //                print("ADDRESS LEWAT: \(address)")
                 Nexilis.ADDRESS = address.components(separatedBy: ":")[0]
-                Nexilis.PORT = Int(address.components(separatedBy: ":")[1]) ?? 0
+                Nexilis.PORT = Int(address.component(1, separatedBy: ":")) ?? 0
                 if id.isEmpty {
                     let sDID = UIDevice.current.identifierForVendor?.uuidString ?? "UNK-DEVICE"
                     id = String(sDID[sDID.index(sDID.endIndex, offsetBy: -5)...]) + "\(Date().currentTimeMillis())"
@@ -967,8 +967,8 @@ public class Nexilis: NSObject {
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         if !onGoingCC.isEmpty {
             let requester = onGoingCC.components(separatedBy: ",")[0]
-            let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-            let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
+            let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
+            let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.component(2, separatedBy: ",")
             let idMe = User.getMyPin()!
             let startTimeCC: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
             let date = "\(Date().currentTimeMillis())"
@@ -1136,7 +1136,7 @@ public class Nexilis: NSObject {
                 return
             }
             let html = String(data: data, encoding: .utf8)!
-            let base64Address = html.components(separatedBy: "<body>")[1].components(separatedBy: "</body>")[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let base64Address = html.component(1, separatedBy: "<body>").components(separatedBy: "</body>")[0].trimmingCharacters(in: .whitespacesAndNewlines)
             if let addressData = Data(base64Encoded: base64Address), let decodeAddress = String(data: addressData, encoding: .utf8) {
                 let rows = decodeAddress.trimmingCharacters(in: CharacterSet.newlines).split(separator: ",")
                 for r in rows {
@@ -1440,7 +1440,7 @@ public class Nexilis: NSObject {
                 if !Nexilis.checkingAccess(key: "wallet") {
                     if Nexilis.checkingAccessAlert(key: "wallet") != "|" && !Nexilis.checkingAccessAlert(key: "wallet").isEmpty {
                         let title = Nexilis.checkingAccessAlert(key: "wallet").components(separatedBy: "|")[0]
-                        let message = Nexilis.checkingAccessAlert(key: "wallet").components(separatedBy: "|")[1]
+                        let message = Nexilis.checkingAccessAlert(key: "wallet").component(1, separatedBy: "|")
                         APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                     } else {
                         UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -1452,7 +1452,7 @@ public class Nexilis: NSObject {
                 if !Nexilis.checkingAccess(key: "ppob") {
                     if Nexilis.checkingAccessAlert(key: "ppob") != "|" && !Nexilis.checkingAccessAlert(key: "ppob").isEmpty {
                         let title = Nexilis.checkingAccessAlert(key: "ppob").components(separatedBy: "|")[0]
-                        let message = Nexilis.checkingAccessAlert(key: "ppob").components(separatedBy: "|")[1]
+                        let message = Nexilis.checkingAccessAlert(key: "ppob").component(1, separatedBy: "|")
                         APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                     } else {
                         UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -4845,7 +4845,7 @@ extension Nexilis: MessageDelegate {
                                                 soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
                                             }
                                             do {
-                                                var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+                                                var nameSound = soundId.component(1, separatedBy: ":").replacingOccurrences(of: " ", with: "_")
                                                 var fromPref = false
                                                 if nameSound.contains("_(Default)") {
                                                     if !Utils.getDefaultIncomingMsg().isEmpty {
@@ -4968,7 +4968,7 @@ extension Nexilis: MessageDelegate {
                             soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
                         }
                         do {
-                            var nameSound = soundId.components(separatedBy: ":")[1].replacingOccurrences(of: " ", with: "_")
+                            var nameSound = soundId.component(1, separatedBy: ":").replacingOccurrences(of: " ", with: "_")
                             var fromPref = false
                             if nameSound.contains("_(Default)") {
                                 if !Utils.getDefaultIncomingMsg().isEmpty {
@@ -5160,8 +5160,8 @@ extension Nexilis: MessageDelegate {
                             editorPersonalVC.unique_l_pin = threadIdentifier
                             editorPersonalVC.fromNotification = true
                             if !onGoingCC.isEmpty {
-                                let compalintId = onGoingCC.components(separatedBy: ",")[2]
-                                let fPinCC = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                                let compalintId = onGoingCC.component(2, separatedBy: ",")
+                                let fPinCC = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
                                 editorPersonalVC.isContactCenter = true
                                 editorPersonalVC.fPinContacCenter = fPinCC
                                 editorPersonalVC.complaintId = compalintId

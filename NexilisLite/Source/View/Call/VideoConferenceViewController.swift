@@ -696,7 +696,7 @@ class VideoConferenceViewController: UIViewController {
     @objc func didTapChatButton(){
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         let members: String = SecureUserDefaults.shared.value(forKey: "membersCC") ?? ""
-        let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+        let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
         let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
         editorPersonalVC.hidesBottomBarWhenPushed = true
         editorPersonalVC.unique_l_pin = officer

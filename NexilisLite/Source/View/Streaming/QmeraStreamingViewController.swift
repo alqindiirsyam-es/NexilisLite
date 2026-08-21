@@ -461,7 +461,7 @@ class QmeraStreamingViewController: UIViewController {
                     let titleRaw = message.getBody(key: CoreMessage_TMessageKey.TITLE)
                     let tagline = message.getBody(key: CoreMessage_TMessageKey.TAGLINE, default_value: self.tagline.text!)
                     if !titleRaw.isEmpty || !tagline.isEmpty{
-                        let titleWithChar = titleRaw.components(separatedBy: "~")[1]
+                        let titleWithChar = titleRaw.component(1, separatedBy: "~")
                         let title = titleWithChar.components(separatedBy: "■")[0]
                         
                         self.status.text = title.toNormalString()

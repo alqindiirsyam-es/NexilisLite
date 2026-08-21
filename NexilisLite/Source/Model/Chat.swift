@@ -393,7 +393,7 @@ public class Chat: Model {
                 var lastQuery = ""
                 var text = withText
                 if text.contains("~"){
-                    text = withText.components(separatedBy: "~")[1].trimmingCharacters(in: .whitespaces)
+                    text = withText.component(1, separatedBy: "~").trimmingCharacters(in: .whitespaces)
                 }
                 if isImage {
                     lastQuery = "m.image_id IS NOT NULL AND m.image_id != ''"

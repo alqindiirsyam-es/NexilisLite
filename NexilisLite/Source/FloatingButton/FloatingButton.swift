@@ -36,7 +36,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
     public static var datePull: Date?
     var animationTimer = Timer()
     var configAnim: Int = Int(Utils.getFloatingAnim().components(separatedBy: "~")[0]) ?? 1
-    var isLoopingAnim = (Int(Utils.getFloatingAnim().components(separatedBy: "~")[1]) ?? 1) == 1 ? true : false
+    var isLoopingAnim = (Int(Utils.getFloatingAnim().component(1, separatedBy: "~")) ?? 1) == 1 ? true : false
     var lastRunAnimationHrz = -1
     var lastRunAnimationVrt = -1
     

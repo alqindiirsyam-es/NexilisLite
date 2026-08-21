@@ -561,7 +561,7 @@ public final class Utils {
             return showNSMutableAttributedString(("📄 " + "Live Streaming".localized()))
         } else if chat.attachmentFlag == "61" {
             let textName = chat.messageText.components(separatedBy: "~")[0]
-            let textAfterName = chat.messageText.components(separatedBy: "~")[1]
+            let textAfterName = chat.messageText.component(1, separatedBy: "~")
             return (textName + " " + textAfterName.localized()).richText(group_id: chat.pin)
         } else if chat.attachmentFlag == "26" {
             return showNSMutableAttributedString(("📄 " + "Seminar".localized()))
@@ -595,7 +595,7 @@ public final class Utils {
                 return showNSMutableAttributedString(("📄 Form"))
             }
             let nameFile = chat.messageText.components(separatedBy: "|")[0]
-            let dataText = chat.messageText.components(separatedBy: "|")[1]
+            let dataText = chat.messageText.component(1, separatedBy: "|")
             if !dataText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return ("📄 " + dataText).richText(group_id: chat.pin)
             }
@@ -3270,7 +3270,7 @@ public class DialogBroadcastInApp: UIViewController {
             
             var finalTitleButton = title
             if title.starts(with: "call_") {
-                finalTitleButton = "Call " + title.components(separatedBy: "_")[1]
+                finalTitleButton = "Call " + title.component(1, separatedBy: "_")
             } else if title == "cc" {
                 finalTitleButton = "Contact Center"
             }

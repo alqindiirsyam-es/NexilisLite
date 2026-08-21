@@ -225,7 +225,7 @@ public class Download {
             let MIME_TYPE = "multipart/form-data; boundary=" + BOUNDARY
             let headers: HTTPHeaders = [
                 "Content-Type": MIME_TYPE,
-                "Host": Utils.getURLBase().components(separatedBy: "/")[2],
+                "Host": Utils.getURLBase().component(2, separatedBy: "/"),
                 "Accept-Encoding": "gzip, deflate, br",
                 "Connection": "Keep-Alive",
                 "Accept": "*/*",
@@ -312,7 +312,7 @@ public class SessionManager {
         let sessionConfiguration = URLSessionConfiguration.default
         sessionConfiguration.timeoutIntervalForRequest = 60
         let serverTrustManager = ServerTrustManager(allHostsMustBeEvaluated: false,
-                                                    evaluators: [Utils.getURLBase().components(separatedBy: "/")[2]: DisabledTrustEvaluator()])
+                                                    evaluators: [Utils.getURLBase().component(2, separatedBy: "/"): DisabledTrustEvaluator()])
         self.session = Session(configuration: sessionConfiguration, serverTrustManager: serverTrustManager)
     }
 }

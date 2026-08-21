@@ -1433,6 +1433,25 @@ public extension String {
     }
 }
 
+
+public extension String {
+    /// The part at `index` when this is split on `separator`, or "" when there is no such part.
+    ///
+    /// Fix: a message's text is data - it is whatever somebody sent - so splitting it on a
+    /// separator that turns out not to be there leaves one part, not two, and reaching for the
+    /// second one is an NSRangeException. That is not a hypothetical: a file message whose text
+    /// carried no "|" brought the app down every time its bubble was drawn, and auto download
+    /// made bubbles get drawn at moments nobody chose. Where the part exists this behaves
+    /// exactly as the subscript did.
+    func component(_ index: Int, separatedBy separator: String) -> String {
+        let parts = components(separatedBy: separator)
+        guard index >= 0, index < parts.count else {
+            return ""
+        }
+        return parts[index]
+    }
+}
+
 extension UIFont {
     var bold: UIFont {
         return with(traits: .traitBold)

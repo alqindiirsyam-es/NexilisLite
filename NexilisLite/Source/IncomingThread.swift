@@ -424,8 +424,8 @@ class IncomingThread {
                 SecureUserDefaults.shared.removeValue(forKey: "channelCC")
                 return
             }
-            let complaintId = onGoingCC.components(separatedBy: ",")[2]
-            let fPinCC = onGoingCC.components(separatedBy: ",")[1]
+            let complaintId = onGoingCC.component(2, separatedBy: ",")
+            let fPinCC = onGoingCC.component(1, separatedBy: ",")
             if fPinCC == User.getMyPin() {
                 return
             }
@@ -1667,8 +1667,8 @@ class IncomingThread {
                     let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
                     if !onGoingCC.isEmpty {
                         let requester = onGoingCC.components(separatedBy: ",")[0]
-                        let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-                        let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
+                        let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
+                        let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.component(2, separatedBy: ",")
                         let startTimeCC: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
                         let date = "\(Date().currentTimeMillis())"
                         if officer == idMe {

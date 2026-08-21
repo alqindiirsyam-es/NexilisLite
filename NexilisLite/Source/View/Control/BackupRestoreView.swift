@@ -1052,7 +1052,7 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                                         let attrib = try FileManager.default.attributesOfItem(atPath: path)
                                         let fileSize = attrib[.size] as! Int64
                                         DispatchQueue.global().async { [self] in
-                                            _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupUploaded(option: choosenOption, fileid: nameZip.components(separatedBy: "_")[2], filesize: String(fileSize), recordSize: String(recordSize)))
+                                            _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupUploaded(option: choosenOption, fileid: nameZip.component(2, separatedBy: "_"), filesize: String(fileSize), recordSize: String(recordSize)))
                                         }
                                         let date = Date()
                                         let calendar = Calendar.current

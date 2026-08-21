@@ -289,7 +289,7 @@ class QmeraAudioConference: UIViewController {
                 DispatchQueue.global().async {
                     let myPin = User.getMyPin() ?? ""
                     let myUser = User.getDataCanNil(pin: myPin)
-                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: user.pin, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2], channel: "1", f_name: myUser == nil ? user.fullName : myUser!.fullName, f_thumb: myUser == nil ? user.thumb : myUser!.thumb))
+                    _ = Nexilis.write(message: CoreMessage_TMessageBank.getCCRoomInvite(l_pin: user.pin, ticket_id: onGoingCC.isEmpty ? "" : onGoingCC.component(2, separatedBy: ","), channel: "1", f_name: myUser == nil ? user.fullName : myUser!.fullName, f_thumb: myUser == nil ? user.thumb : myUser!.thumb))
                 }
                 DispatchQueue.main.async {
                     self.isAddCall = user.pin
@@ -310,8 +310,8 @@ class QmeraAudioConference: UIViewController {
             if sender != nil && sender is Bool {
                 self.dismiss(animated: false, completion: nil)
                 let requester = onGoingCC.components(separatedBy: ",")[0]
-                let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-                let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
+                let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
+                let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.component(2, separatedBy: ",")
                 let startTimeCC: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
                 DispatchQueue.global().async {
                     let date = "\(Date().currentTimeMillis())"
@@ -345,8 +345,8 @@ class QmeraAudioConference: UIViewController {
             alert.addAction(UIAlertAction(title: "Yes".localized(), style: UIAlertAction.Style.default, handler: {(_) in
                 self.dismiss(animated: false, completion: nil)
                 let requester = onGoingCC.components(separatedBy: ",")[0]
-                let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
-                let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[2]
+                let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
+                let complaintId = onGoingCC.isEmpty ? "" : onGoingCC.component(2, separatedBy: ",")
                 let idMe = User.getMyPin()!
                 let startTimeCC: String = SecureUserDefaults.shared.value(forKey: "startTimeCC") ?? ""
                 DispatchQueue.global().async {
@@ -538,7 +538,7 @@ class QmeraAudioConference: UIViewController {
 //                    users.remove(at: index)
 //                    if !onGoingCC.isEmpty && users.count != 0 {
 //                        let requester = onGoingCC.components(separatedBy: ",")[0]
-//                        let officer = onGoingCC.components(separatedBy: ",")[1]
+//                        let officer = onGoingCC.component(1, separatedBy: ",")
 //                        if pin == requester || pin == officer {
 //                            DispatchQueue.main.async {
 //                                self.timer?.invalidate()

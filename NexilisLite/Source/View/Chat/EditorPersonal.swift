@@ -313,6 +313,56 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         scheduleAutoDownloadSweep()
     }
 
+
+    /// Starts fetching one of a message's files, exactly the way tapping it does.
+    ///
+    /// Fix: the sweep that fetches attachments as they come into view used to start a transfer of
+    /// its own, beside this one. It fetched the file and nothing more - so a document's row kept
+    /// its download icon afterwards, because what clears that icon is the message's own
+    /// `progress`, and only the tap was writing it. There is one way to start a transfer now, and
+    /// the sweep takes the same one: same guard against starting it twice, same ring, same row
+    /// redrawn when it lands.
+    ///
+    /// Returns whether a transfer was actually started - one already running is left to finish.
+    @discardableResult
+    func beginTransfer(ofFileNamed filename: String, from indexPath: IndexPath? = nil, onFinish: (() -> Void)? = nil) -> Bool {
+        // Fix: this used to compare the index path too, so the same file could be started again
+        // from a row that had shifted, stacking a second progress ring on the bubble. All that
+        // matters is whether this screen is already following it.
+        guard !filename.isEmpty, downloadList[filename] == nil, !Download.isDownloading(forKey: filename) else {
+            return false
+        }
+        downloadList[filename] = indexPath ?? IndexPath(row: 0, section: 0)
+        // Fix: this used to build a progress ring by hand, onto the one cell instance that had
+        // been tapped - lost the moment that cell was recycled. cellForRow draws it now, and
+        // onDownloadChat moves it, so this only has to start the transfer.
+        Download().startHTTP(forKey: filename) { [weak self] (name, progress) in
+            guard progress >= 100 || progress < 0 else {
+                return
+            }
+            DispatchQueue.main.async {
+                guard let self = self else {
+                    return
+                }
+                // A download that failed used to stay in downloadList forever, and the guard
+                // above then swallowed every retry.
+                self.downloadList.removeValue(forKey: name)
+                if progress >= 100, let idx = self.dataMessages.firstIndex(where: {
+                    ($0["video_id"] as? String ?? "") == name || ($0["file_id"] as? String ?? "") == name
+                }) {
+                    // What the bubble reads to decide whether it still offers to fetch this.
+                    self.dataMessages[idx]["progress"] = 100.0
+                }
+                self.reloadMessageRow(withFileNamed: name)
+                onFinish?()
+            }
+        }
+        // Draw the row again so the ring appears straight away, at whatever progress the
+        // transfer is already at.
+        reloadMessageRow(withFileNamed: filename)
+        return true
+    }
+
     // MARK: - Auto download
 
     /// Files this screen has started fetching on its own and is still waiting for.
@@ -408,23 +458,19 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 
     private func startAutoDownload(_ filename: String) {
         autoDownloadsInFlight.insert(filename)
-        Download().startHTTP(forKey: filename) { [weak self] name, progress in
-            guard progress >= 100 || progress < 0 else {
+        // The same call a tap makes. Fetching a file is more than fetching a file - the row has
+        // to stop offering to fetch it, and the ring has to appear while it is on its way - and
+        // all of that lives in one place rather than being half-repeated here.
+        let started = beginTransfer(ofFileNamed: filename) { [weak self] in
+            guard let self = self else {
                 return
             }
-            DispatchQueue.main.async {
-                guard let self = self else {
-                    return
-                }
-                self.autoDownloadsInFlight.remove(name)
-                if progress >= 100 {
-                    // Straight away, scrolling or not: the bubble was already given its size, so
-                    // the picture appearing moves nothing.
-                    self.reloadMessageRow(withFileNamed: name)
-                }
-                // A place has come free; whatever else is on screen can have it.
-                self.scheduleAutoDownloadSweep()
-            }
+            self.autoDownloadsInFlight.remove(filename)
+            // A place has come free; whatever else is on screen can have it.
+            self.scheduleAutoDownloadSweep()
+        }
+        if !started {
+            autoDownloadsInFlight.remove(filename)
         }
     }
 
@@ -2582,8 +2628,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     self.fakeProgMultip = self.fakeProgMultip + 1
                 }
                 let fakeProgress = useFakeProgress ? Double(self.fakeProgMultip) * (100.0 / Double(self.maxFakeProgMultip)) : 0.0
-                let progress = max(data["progress"] as! Double, fakeProgress)
-                if(data["progress"] as! Double == 100.0){
+                let progress = max(data["progress"] as? Double ?? 0.0, fakeProgress)
+                if(data["progress"] as? Double ?? 0.0 == 100.0){
                     self.fakeProgMultip = 0
                 }
                 if let cell = self.tableChatView.cellForRow(at: indexPath) {
@@ -2638,8 +2684,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         self.fakeProgMultip = self.fakeProgMultip + 1
                     }
                     let fakeProgress = useFakeProgress ? Double(self.fakeProgMultip) * (100.0 / Double(self.maxFakeProgMultip)) : 0.0
-                    let progress = max(data["progress"] as! Double, fakeProgress)
-                    if(data["progress"] as! Double == 100.0){
+                    let progress = max(data["progress"] as? Double ?? 0.0, fakeProgress)
+                    if(data["progress"] as? Double ?? 0.0 == 100.0){
                         self.fakeProgMultip = 0
                     }
                     if let cell = self.tableChatView.cellForRow(at: indexPath) {
@@ -2883,7 +2929,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         return
                     }
                     let requester = onGoingCC.components(separatedBy: ",")[0]
-                    let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                    let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
                     let fPin = dataMessage.getCode() == CoreMessage_TMessageCode.END_CALL_CENTER ? chatData[CoreMessage_TMessageKey.F_PIN] : dataMessage.getPIN()
                     if fPin == officer || fPin == requester {
                         DispatchQueue.global().async {
@@ -3093,7 +3139,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     if self.isContactCenter {
                         let idMe = User.getMyPin()!
                         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
-                        let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                        let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
                         if officer == idMe {
                             self.timeoutCC.invalidate()
                         } else if !fromVCAC {
@@ -3419,7 +3465,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             let message: TMessage = data["message"] as! TMessage
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             if !onGoingCC.isEmpty {
-                let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
                 if message.getBody(key: CoreMessage_TMessageKey.F_PIN) != officer {
                     //print("RESET TIMER")
 //                    timeoutCC.invalidate()
@@ -3962,7 +4008,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         let idMe = User.getMyPin()!
         let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
         let requester = onGoingCC.components(separatedBy: ",")[0]
-        let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+        let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
         DispatchQueue.global().async {
             let date = "\(Date().currentTimeMillis())"
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
@@ -4368,7 +4414,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
         Nexilis.showLoader()
         let lPin = sender.restorationIdentifier?.components(separatedBy: ",")[0]
-        let messageId = sender.restorationIdentifier?.components(separatedBy: ",")[1]
+        let messageId = sender.restorationIdentifier?.component(1, separatedBy: ",")
         let isAccept = (sender.tag == 0)
         DispatchQueue.global(qos: .userInitiated).async {
             if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getAddFriendApproval(lPin: lPin ?? "", isAccept: isAccept), timeout: 5 * 1000) {
@@ -4432,7 +4478,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             return
         }
         let id = sender.restorationIdentifier?.components(separatedBy: ",")[0]
-        let service_id = sender.restorationIdentifier?.components(separatedBy: ",")[1]
+        let service_id = sender.restorationIdentifier?.component(1, separatedBy: ",")
         let level = id!.substring(from: 5, to: 5)
         let levelNow = self.nowSelectedCategoryCC.substring(from: 5, to: 5)
         var isRequest = false
@@ -4478,7 +4524,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     row["attachment_flag"] = "503"
                 }
             } else {
-                channel = Int((id?.components(separatedBy: "_")[1])!)!
+                channel = Int((id?.component(1, separatedBy: "_"))!)!
                 if channel == 1 || channel == 2 {
                     if channel == 2 {
                         let goAudioCall = Nexilis.checkMicPermission()
@@ -4625,7 +4671,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     @objc func busyCCAction(sender: UIButton) {
         let id = sender.restorationIdentifier?.components(separatedBy: ",")[0]
-        let service_id = sender.restorationIdentifier?.components(separatedBy: ",")[1]
+        let service_id = sender.restorationIdentifier?.component(1, separatedBy: ",")
         let level = id!.substring(from: 5, to: 5)
         var row: [String: Any?] = [:]
         if id == "level\(Int(level)!)_0" {
@@ -7005,7 +7051,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             if (!(dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty) {
                 var isEmpty = true
                 let messageText = dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? ""
-                if !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && !messageText.components(separatedBy: "|")[1].isEmpty {
+                if !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && !messageText.component(1, separatedBy: "|").isEmpty {
                     isEmpty = false
                 } else if (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && !messageText.isEmpty {
                     isEmpty = false
@@ -7026,7 +7072,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe && ((dataMessages[indexPath!.row][TypeDataMessage.is_forwarded] as? Int) ?? 0) == 0 && (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" {
                     var textFile = dataMessages[indexPath!.row][TypeDataMessage.message_text] as? String ?? ""
                     if !(dataMessages[indexPath!.row][TypeDataMessage.file_id] as? String ?? "").isEmpty {
-                        textFile = textFile.components(separatedBy: "|")[1]
+                        textFile = textFile.component(1, separatedBy: "|")
                     }
                     if !textFile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         let valueDate = Date(milliseconds: Int64(dataMessages[indexPath!.row][TypeDataMessage.server_date] as? String ?? "") ?? 0)
@@ -7128,7 +7174,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         let dataMessages = self.messages(onDate: dataDates[indexPath.section])
         var oldText = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
         if !(dataMessages[indexPath.row][TypeDataMessage.file_id] as? String ?? "").isEmpty {
-            oldText = oldText.components(separatedBy: "|")[1]
+            oldText = oldText.component(1, separatedBy: "|")
         }
         var oldTextForTextview = oldText
         let pattern = "@[\\w]+"
@@ -7141,7 +7187,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 String(oldText[Range($0.range, in: oldText)!])
             }
             for result in results {
-                let pinRes = result.components(separatedBy: "@")[1]
+                let pinRes = result.component(1, separatedBy: "@")
                 Database.shared.database?.inTransaction({ fmdb, rollback in
                     do {
                         if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name || ' ' || ifnull(last_name, '') name FROM GROUPZ_MEMBER where f_pin = '\(pinRes)'"), cursor.next() {
@@ -7638,7 +7684,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
             cancelAction()
         } else if forwardSession {
-            var dataMessages = self.dataMessages.filter({ $0["isSelected"] as! Bool == true })
+            var dataMessages = self.dataMessages.filter({ $0["isSelected"] as? Bool ?? false == true })
             let countSelected = dataMessages.count
             if countSelected == 0 {
                 return
@@ -7678,7 +7724,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
             self.present(contactChatNav, animated: true, completion: nil)
         } else if deleteSession {
-            let dataMessages = self.dataMessages.filter({ $0["isSelected"] as! Bool == true })
+            let dataMessages = self.dataMessages.filter({ $0["isSelected"] as? Bool ?? false == true })
             var countSelected = dataMessages.count
             if countSelected == 0 {
                 return
@@ -7707,7 +7753,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
             self.present(alertController, animated: true)
         } else if summarizeSession {
-            let dataMessages = self.dataMessages.filter({ $0["isSelected"] as! Bool == true })
+            let dataMessages = self.dataMessages.filter({ $0["isSelected"] as? Bool ?? false == true })
             var countSelected = dataMessages.count
             if countSelected == 0 {
                 return
@@ -8311,18 +8357,18 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
                         if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
                             return
-                        }  else if !fileChat.isEmpty && messageText.components(separatedBy: "|")[1].isEmpty {
+                        }  else if !fileChat.isEmpty && messageText.component(1, separatedBy: "|").isEmpty {
                             return
                         }
                     }
                 }
             }
-            if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "11" || (dataMessages[indexPath.row]["message_id"] as! String).contains("NTFPIN_") || dataMessages[indexPath.row]["message_scope_id"] as? String == MessageScope.CALL) {
+            if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "11" || (dataMessages[indexPath.row]["message_id"] as? String ?? "").contains("NTFPIN_") || dataMessages[indexPath.row]["message_scope_id"] as? String == MessageScope.CALL) {
                 return
             }
             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath.row]["message_id"] as? String})
             if idx != nil {
-                self.dataMessages[idx!]["isSelected"] = !(self.dataMessages[idx!]["isSelected"] as! Bool)
+                self.dataMessages[idx!]["isSelected"] = !(self.dataMessages[idx!]["isSelected"] as? Bool ?? false)
                 self.tableChatView.reloadRows(at: [indexPath], with: .none)
             }
             containerMultpileSelectSession.subviews.forEach({ $0.removeFromSuperview() })
@@ -8339,7 +8385,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     if !Nexilis.checkingAccess(key: "live_streaming") {
                         if Nexilis.checkingAccessAlert(key: "live_streaming") != "|" && !Nexilis.checkingAccessAlert(key: "live_streaming").isEmpty {
                             let title = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[0]
-                            let message = Nexilis.checkingAccessAlert(key: "live_streaming").components(separatedBy: "|")[1]
+                            let message = Nexilis.checkingAccessAlert(key: "live_streaming").component(1, separatedBy: "|")
                             APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                         } else {
                             UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -8387,7 +8433,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 if !Nexilis.checkingAccess(key: "vconf_room") {
                     if Nexilis.checkingAccessAlert(key: "vconf_room") != "|" && !Nexilis.checkingAccessAlert(key: "vconf_room").isEmpty {
                         let title = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[0]
-                        let message = Nexilis.checkingAccessAlert(key: "vconf_room").components(separatedBy: "|")[1]
+                        let message = Nexilis.checkingAccessAlert(key: "vconf_room").component(1, separatedBy: "|")
                         APIS.nexilisShowAlertWithHTMLMessage(on: UIApplication.shared.visibleViewController ?? UIViewController(), title: title, message: message)
                     } else {
                         UIApplication.shared.visibleViewController?.view.makeToast("Feature disabled".localized(), duration: 5)
@@ -8540,12 +8586,22 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             return cellMention
         }
         let idMe = User.getMyPin() as String?
-        let dateKey = dataDates[indexPath.section]
-        let dataMessages = messagesByDate[dateKey]!
         let profileMessage = UIImageView()
         let cell = tableView.dequeueReusableCell(withIdentifier: "cellEditorPersonal", for: indexPath as IndexPath)
         cell.contentView.subviews.forEach({ $0.removeConstraints($0.constraints) })
         cell.contentView.subviews.forEach({ $0.removeFromSuperview() })
+        // Fix: this used to force the section's messages out of the grouping - a bang that is a
+        // crash the moment the table asks about a section the list no longer has. It learns
+        // about a change a moment after the list itself changes, and a transfer finishing
+        // redraws rows in between. Every read below is against these two lines being true.
+        guard indexPath.section >= 0, indexPath.section < dataDates.count else {
+            return cell
+        }
+        let dateKey = dataDates[indexPath.section]
+        let dataMessages = messagesByDate[dateKey] ?? []
+        guard indexPath.row >= 0, indexPath.row < dataMessages.count else {
+            return cell
+        }
         
         if isContactCenter && isRequestContactCenter && dataMessages[indexPath.row]["category_cc"] != nil {
             cell.backgroundColor = .clear
@@ -8908,7 +8964,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
                         if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
                             showSelectedImage = false
-                        } else if !fileChat.isEmpty && textChat.components(separatedBy: "|")[1].isEmpty {
+                        } else if !fileChat.isEmpty && textChat.component(1, separatedBy: "|").isEmpty {
                             showSelectedImage = false
                         }
                     }
@@ -8938,7 +8994,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 selectedImage.circle()
                 selectedImage.layer.borderWidth = 2
                 selectedImage.layer.borderColor = UIColor.mainColor.cgColor
-                if dataMessages[indexPath.row]["isSelected"] as! Bool {
+                if dataMessages[indexPath.row]["isSelected"] as? Bool ?? false {
                     selectedImage.image = UIImage(systemName: "checkmark.circle.fill")
                 }
                 selectedImage.tintColor = .mainColor
@@ -9246,7 +9302,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageLS.image = UIImage(named: "pb_seminar_wpr", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             } else if dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "27" {
                 imageLS.image = UIImage(named: "pb_live_tv", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-            } else if dataMessages[indexPath.row]["attachment_flag"] as! String == "25" {
+            } else if dataMessages[indexPath.row]["attachment_flag"] as? String ?? "" == "25" {
                 imageLS.image = UIImage(named: "pb_vroom", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             } else if dataMessages[indexPath.row]["message_scope_id"] as? String == MessageScope.FORM {
                 imageLS.image = UIImage(systemName: "doc.richtext.fill")
@@ -9316,7 +9372,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             buttonDecline.addTarget(self, action: #selector(addFriendReqAction), for: .touchUpInside)
             
             let textName = textChat.components(separatedBy: "~")[0]
-            let textAfterName = textChat.components(separatedBy: "~")[1]
+            let textAfterName = textChat.component(1, separatedBy: "~")
             messageRequestFriend = textName + " " + textAfterName.localized()
         } else {
             let bottomConstraint = messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15)
@@ -9403,9 +9459,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageSticker.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 imageSticker.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 imageSticker.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                var imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                var imageStickerBundle = UIImage(named: (textChat.component(1, separatedBy: "/")), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 if imageStickerBundle == nil {
-                    imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+                    imageStickerBundle = UIImage(named: (textChat.component(1, separatedBy: "/")), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
                 }
                 imageSticker.image = imageStickerBundle //resourcesMediaBundle
                 imageSticker.contentMode = .scaleAspectFit
@@ -9498,7 +9554,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             let isVideo = textChat.lowercased().contains("video")
             let isMissedCall = textChat.lowercased().contains("missed")
             let isImageLeft = textChat.lowercased().contains("incoming") || isMissedCall
-            let longCall = textChat.components(separatedBy: " at ")[1]
+            let longCall = textChat.component(1, separatedBy: " at ")
             var subTextCall = longCall
             
             let contIconCall = UIView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
@@ -9567,7 +9623,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             containerMessage.isUserInteractionEnabled = true
         }
         
-        if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.CALL && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.MISSED_CALL && dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String != "11" && !(dataMessages[indexPath.row][TypeDataMessage.message_id] as! String).contains("NTFPIN_") {
+        if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.CALL && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.MISSED_CALL && dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String != "11" && !(dataMessages[indexPath.row][TypeDataMessage.message_id] as? String ?? "").contains("NTFPIN_") {
             messageText.attributedText = messageRequestFriend != nil ? messageRequestFriend.richText(isSearching: true, textSearch: textSearch) : stringLS.isEmpty ? textChat.richText(isSearching: true, textSearch: textSearch) : stringLS.richText(isSearching: true, textSearch: textSearch)
         }
         
@@ -9588,7 +9644,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 timeMessage.textColor = .lightGray
             }
             timeMessage.font = UIFont.systemFont(ofSize: 10 + offset(), weight: .medium)
-            if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as! Int64 != 0 {
+            if dataMessages[indexPath.row][TypeDataMessage.last_edit] != nil && dataMessages[indexPath.row][TypeDataMessage.last_edit] as? Int64 ?? 0 != 0 {
                 timeMessage.text = (timeMessage.text ?? "") + "\n" + "Edited".localized()
                 if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
                     timeMessage.textAlignment = .right
@@ -9603,7 +9659,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if !audioChat.isEmpty {
             messageText.isHidden = true
             var padTop: CGFloat = 15
-            if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int != 0 {
+            if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 {
                 padTop = 35
             }
             
@@ -9727,7 +9783,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageStared.isHidden = true
                 topMarginText.constant = topMarginText.constant + 205
                 var constTop = 5.0
-                if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int != 0 {
+                if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 {
                     topMarginText.constant = topMarginText.constant + 10
                     constTop = 35.0
                 }
@@ -9947,7 +10003,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageThumb.frame = CGRect(x: 0, y: 0, width: getWidthImage, height: getHeightImage)
                 imageThumb.translatesAutoresizingMaskIntoConstraints = false
                 let data = queryMessageReply(message_id: reffChat)
-                if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
+                if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 == 0) {
                     imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
                 }
                 imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
@@ -10142,7 +10198,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     }
                 }
                 
-                if (dataMessages[indexPath.row]["progress"] as! Double != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                if (dataMessages[indexPath.row]["progress"] as? Double ?? 0.0 != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
                     let container = UIView()
                     imageThumb.addSubview(container)
                     container.translatesAutoresizingMaskIntoConstraints = false
@@ -10264,7 +10320,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             containerMessage.addSubview(containerViewFile)
             containerViewFile.translatesAutoresizingMaskIntoConstraints = false
             let data = queryMessageReply(message_id: reffChat)
-            if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
+            if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 == 0) {
                 containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
             } else {
                 containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
@@ -10297,7 +10353,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             nameFile.textColor = .white
             nameFile.text = originalMessageText.components(separatedBy: "|")[0]
             
-            if (dataMessages[indexPath.row]["progress"] as! Double != 100.0) {
+            if (dataMessages[indexPath.row]["progress"] as? Double ?? 0.0 != 100.0) {
                 let containerLoading = UIView()
                 containerViewFile.addSubview(containerLoading)
                 containerLoading.translatesAutoresizingMaskIntoConstraints = false
@@ -10444,7 +10500,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         linkPreview.textColor = .gray
                         linkPreview.numberOfLines = 1
                         
-                        if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int != 0 {
+                        if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 {
                             showForwardedSign()
                         }
                         
@@ -10698,7 +10754,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     }
                 }
                 if (attachment_flag == "11" && message_text.components(separatedBy: "/").count > 1) {
-                    let imageSticker = UIImageView(image: UIImage(named: (message_text.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
+                    let imageSticker = UIImageView(image: UIImage(named: (message_text.component(1, separatedBy: "/")), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
                     containerReply.addSubview(imageSticker)
                     imageSticker.layer.cornerRadius = 2.0
                     imageSticker.clipsToBounds = true
@@ -10718,7 +10774,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 }
             }
         }
-        if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int != 0 && !isLoadingShowLink {
+        if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 && !isLoadingShowLink {
             showForwardedSign()
         }
         
@@ -11043,8 +11099,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if tableView == tableViewConfigFile {
             return 2
         }
-        let dateKey = dataDates[section]
-        return messagesByDate[dateKey]?.count ?? 0
+        // The table asks about sections it was told about a moment ago; the list can already
+        // have fewer. Answering for a section that is gone is a crash, answering zero is not.
+        guard section >= 0, section < dataDates.count else {
+            return 0
+        }
+        return messagesByDate[dataDates[section]]?.count ?? 0
     }
     
     @objc func contentMessageTapped(_ sender: ObjectGesture) {
@@ -11145,20 +11205,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         print("Error reading secure file")
                     }
                 } else {
-                    // Fix: this used to put a spinner of its own on the bubble. The progress ring
-                    // cellForRow draws does that job now - for images as well as videos - so all this
-                    // has left to do is redraw the row once the file is here.
-                    Download().startHTTP(forKey: sender.image_id) { [weak self] (name, progress) in
-                        guard progress >= 100 || progress < 0 else {
-                            return
-                        }
-                        DispatchQueue.main.async {
-                            self?.reloadMessageRow(withFileNamed: name)
-                        }
-                    }
-                    // Draw the row again so the ring appears straight away, at whatever progress the
-                    // transfer is already at.
-                    reloadMessageRow(withFileNamed: sender.image_id)
+                    beginTransfer(ofFileNamed: sender.image_id, from: sender.indexPath)
                 }
             }
         } else if (sender.gif_id != "") {
@@ -11206,36 +11253,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         
                     }
                 } else {
-                    // Fix: this also compared the index path, so the same file could be started
-                    // again from a row that had shifted, stacking a second progress ring on the
-                    // bubble. All that matters is whether this screen is already following it.
-                    if downloadList[sender.video_id] != nil {
-                        return
-                    }
-                    downloadList[sender.video_id] = sender.indexPath
-                    // Fix: this used to build a progress ring by hand, onto the one cell instance that
-                    // had been tapped - lost the moment that cell was recycled. cellForRow draws it now,
-                    // and onDownloadChat moves it, so this only has to start the transfer.
-                    Download().startHTTP(forKey: sender.video_id) { [weak self] (name, progress) in
-                        guard progress >= 100 || progress < 0 else {
-                            return
-                        }
-                        DispatchQueue.main.async {
-                            guard let self = self else {
-                                return
-                            }
-                            // A download that failed used to stay in downloadList forever, and the guard
-                            // above this call then swallowed every retry.
-                            self.downloadList.removeValue(forKey: name)
-                            if progress >= 100, let idx = self.dataMessages.firstIndex(where: { $0["video_id"] as? String ?? "" == name }) {
-                                self.dataMessages[idx]["progress"] = 100.0
-                            }
-                            self.reloadMessageRow(withFileNamed: name)
-                        }
-                    }
-                    // Draw the row again so the ring appears straight away, at whatever progress the
-                    // transfer is already at.
-                    reloadMessageRow(withFileNamed: sender.video_id)
+                    beginTransfer(ofFileNamed: sender.video_id, from: sender.indexPath)
                 }
             }
         } else if (sender.file_id != "") {
@@ -11371,36 +11389,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         
                     }
                 } else {
-                    // Fix: this also compared the index path, so the same file could be started
-                    // again from a row that had shifted, stacking a second progress ring on the
-                    // bubble. All that matters is whether this screen is already following it.
-                    if downloadList[sender.file_id] != nil {
-                        return
-                    }
-                    downloadList[sender.file_id] = sender.indexPath
-                    // Fix: this used to build a progress ring by hand, onto the one cell instance that
-                    // had been tapped - lost the moment that cell was recycled. cellForRow draws it now,
-                    // and onDownloadChat moves it, so this only has to start the transfer.
-                    Download().startHTTP(forKey: sender.file_id) { [weak self] (name, progress) in
-                        guard progress >= 100 || progress < 0 else {
-                            return
-                        }
-                        DispatchQueue.main.async {
-                            guard let self = self else {
-                                return
-                            }
-                            // A download that failed used to stay in downloadList forever, and the guard
-                            // above this call then swallowed every retry.
-                            self.downloadList.removeValue(forKey: name)
-                            if progress >= 100, let idx = self.dataMessages.firstIndex(where: { $0["file_id"] as? String ?? "" == name }) {
-                                self.dataMessages[idx]["progress"] = 100.0
-                            }
-                            self.reloadMessageRow(withFileNamed: name)
-                        }
-                    }
-                    // Draw the row again so the ring appears straight away, at whatever progress the
-                    // transfer is already at.
-                    reloadMessageRow(withFileNamed: sender.file_id)
+                    beginTransfer(ofFileNamed: sender.file_id, from: sender.indexPath)
                 }
             }
         } else {
@@ -12044,7 +12033,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
         }
         if (attachment_flag == "11") {
-            let imageSticker = UIImageView(image: UIImage(named: (message_text.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
+            let imageSticker = UIImageView(image: UIImage(named: (message_text.component(1, separatedBy: "/")), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
             self.containerPreviewReply.addSubview(imageSticker)
             imageSticker.layer.cornerRadius = 2.0
             imageSticker.clipsToBounds = true
@@ -12880,9 +12869,23 @@ extension EditorPersonal {
     // Reloads the row a transfer belongs to, if it is still on screen at all. Safe to call
     // from a download that outlived the screen which started it.
     func reloadMessageRow(withFileNamed name: String) {
+        guard Thread.isMainThread else {
+            // Transfers finish on whatever thread carried them; the table is the main thread's.
+            DispatchQueue.main.async { [weak self] in
+                self?.reloadMessageRow(withFileNamed: name)
+            }
+            return
+        }
         guard let indexPath = indexPathForMessage(withFileNamed: name),
               indexPath.section < tableChatView.numberOfSections,
               indexPath.row < tableChatView.numberOfRows(inSection: indexPath.section) else {
+            return
+        }
+        // The row has to exist on both sides. The table is told about changes a moment after the
+        // list itself changes, so between the two it can hold a row the list no longer has -
+        // asking it to redraw that one draws a blank.
+        guard indexPath.section < dataDates.count,
+              indexPath.row < messages(onDate: dataDates[indexPath.section]).count else {
             return
         }
         tableChatView.reloadRows(at: [indexPath], with: .none)

@@ -1087,7 +1087,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             let message: TMessage = data["message"] as! TMessage
             let onGoingCC: String = SecureUserDefaults.shared.value(forKey: "onGoingCC") ?? ""
             if !onGoingCC.isEmpty {
-                let officer = onGoingCC.isEmpty ? "" : onGoingCC.components(separatedBy: ",")[1]
+                let officer = onGoingCC.isEmpty ? "" : onGoingCC.component(1, separatedBy: ",")
                 if message.getBody(key: CoreMessage_TMessageKey.F_PIN) != officer {
                     //print("RESET TIMER")
 //                    timeoutCC.invalidate()

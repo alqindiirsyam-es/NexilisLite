@@ -743,9 +743,9 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     imageSticker.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                     imageSticker.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                     imageSticker.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                    var imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                    var imageStickerBundle = UIImage(named: (textChat.component(1, separatedBy: "/")), in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                     if imageStickerBundle == nil {
-                        imageStickerBundle = UIImage(named: (textChat.components(separatedBy: "/")[1]), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+                        imageStickerBundle = UIImage(named: (textChat.component(1, separatedBy: "/")), in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
                     }
                     imageSticker.image = imageStickerBundle //resourcesMediaBundle
                     imageSticker.contentMode = .scaleAspectFit
@@ -1132,7 +1132,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         }
                     }
                     if (attachment_flag == "11" && message_text.components(separatedBy: "/").count > 1) {
-                        let imageSticker = UIImageView(image: UIImage(named: (message_text.components(separatedBy: "/")[1]), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
+                        let imageSticker = UIImageView(image: UIImage(named: (message_text.component(1, separatedBy: "/")), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
                         containerReply.addSubview(imageSticker)
                         imageSticker.layer.cornerRadius = 2.0
                         imageSticker.clipsToBounds = true
