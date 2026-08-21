@@ -483,7 +483,11 @@ class QmeraAudioViewController: UIViewController {
         view.addSubview(name)
         
         view.addSubview(minimizeLogo)
-        minimizeLogo.anchor(top: view.topAnchor, left: view.leftAnchor, paddingTop: 30, paddingLeft: 20, width: 40, height: 40)
+        // Fix: 30 points from the top of the view, which is the top of the screen - a figure
+        // that happened to clear the status bar on the phones this was written on and does not
+        // on the ones since. The safe area is the same question answered by the device itself,
+        // whatever it has up there. Matches the video call screen, which already does this.
+        minimizeLogo.anchor(top: view.safeAreaLayoutGuide.topAnchor, left: view.leftAnchor, paddingTop: 10, paddingLeft: 20, width: 40, height: 40)
         minimizeLogo.addTarget(self, action: #selector(didMinimized(sender:)), for: .touchUpInside)
         minimizeLogo.isHidden = true
         

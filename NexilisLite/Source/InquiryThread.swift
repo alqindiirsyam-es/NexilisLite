@@ -17,7 +17,14 @@ class InquiryThread {
     
     private var connection = DispatchSemaphore(value: 0)
     
-    private var dispatchQueue = DispatchQueue(label: "InquiryThread")
+        // Fix: this queue had no quality of service of its own, so the loop below took whichever
+    // one the caller of run() happened to be on. When that was user-initiated, the loop then
+    // sat blocked on a semaphore that only a utility thread signals - a high-priority thread
+    // waiting on a low-priority one, which is the priority inversion the Thread Performance
+    // Checker reports as a hang risk. This is a socket worker that spends its life asleep
+    // waiting for something to send; utility is what it is, and saying so keeps it level with
+    // the threads that wake it.
+    private var dispatchQueue = DispatchQueue(label: "InquiryThread", qos: .utility)
     
     private var queue = [TMessage]()
     
@@ -122,7 +129,7 @@ class InquiryThread {
         }
         //print("isRunning false")
         isRunning = true
-        dispatchQueue.async {
+        dispatchQueue.async(qos: .utility, flags: .enforceQoS) {
             while self.isRunning {
                 if self.isWait {
                     //print("CONNECTION INQUIRY.wait")

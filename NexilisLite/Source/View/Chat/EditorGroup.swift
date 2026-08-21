@@ -299,6 +299,44 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
 
     // MARK: - Preview
 
+    /// The conversation's name, across the top, while this screen is a preview.
+    ///
+    /// Fix: a preview is not inside a navigation controller, so the header this screen normally
+    /// hands to the navigation bar has nowhere to go - the card opened straight into the
+    /// messages with nothing saying which conversation they belong to. WhatsApp puts the name
+    /// there, and so does this. Only ever built for a preview; the real screen has its bar.
+    private weak var previewHeader: UIVisualEffectView?
+    private weak var previewHeaderLabel: UILabel?
+
+    private func addPreviewHeaderIfNeeded() {
+        guard isPreview, previewHeaderLabel == nil else {
+            return
+        }
+        let header = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
+        view.addSubview(header)
+        header.translatesAutoresizingMaskIntoConstraints = false
+        let label = UILabel()
+        header.contentView.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: view.topAnchor),
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            header.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 44),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: header.contentView.leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: header.contentView.trailingAnchor, constant: -16),
+            label.centerXAnchor.constraint(equalTo: header.contentView.centerXAnchor),
+            label.bottomAnchor.constraint(equalTo: header.contentView.bottomAnchor, constant: -11)
+        ])
+        label.font = UIFont.systemFont(ofSize: 15 + offset()).bold
+        label.textColor = .label
+        label.textAlignment = .center
+        label.lineBreakMode = .byTruncatingTail
+        label.text = titleText
+        previewHeader = header
+        previewHeaderLabel = label
+    }
+
     /// Built to be looked at rather than opened: the preview behind the chat list's long-press
     /// menu. Reading a conversation is something the reader does on purpose, so everything that
     /// says they have - the unread count, and the read marks the other side sees - waits here
@@ -315,6 +353,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             return
         }
         isPreview = false
+        // The navigation bar is about to say the name properly; two headers would be one too many.
+        previewHeader?.removeFromSuperview()
+        previewHeader = nil
+        previewHeaderLabel = nil
         let pending = deferredReadReceipts
         deferredReadReceipts.removeAll()
         for receipt in pending {
@@ -375,6 +417,65 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         // transfer is already at.
         reloadMessageRow(withFileNamed: filename)
         return true
+    }
+
+
+    // MARK: - Bubble reuse
+
+    /// Bumped whenever a file arrives, so a bubble drawn against "not downloaded yet" is not
+    /// mistaken for one that is still current.
+    private static var transferTick = 0
+
+    private static var bubbleSignatureKey: UInt8 = 0
+
+    /// Everything the drawing of one bubble depends on, in one string.
+    ///
+    /// The whole message goes in, not a chosen few of its fields. Choosing which fields matter
+    /// is exactly how a bubble ends up showing yesterday's state, and a field costs nothing to
+    /// include - where the answer is "something changed", the bubble is simply built the way it
+    /// always was.
+    private func bubbleSignature(for message: [String: Any?], at indexPath: IndexPath) -> String {
+        let messageId = message["message_id"] as? String ?? ""
+        var parts: [String] = ["\(indexPath.section).\(indexPath.row)"]
+        for key in message.keys.sorted() {
+            parts.append("\(key)=" + (message[key].map { String(describing: $0) } ?? "nil"))
+        }
+        // ...and the state of the screen around it, which the drawing reads just as much.
+        parts.append("session=\(copySession)\(forwardSession)\(deleteSession)\(summarizeSession)")
+        parts.append("search=\(isSearching)|\(textSearch)")
+        parts.append("reference=\(referenceMessageId == messageId)")
+        parts.append("marker=\(markerCounter == messageId)")
+        parts.append("timer=\(listTimerCredential[messageId] ?? -1)")
+        parts.append("font=\(offset())")
+        // Width decides how wide a picture is drawn and where a bubble ends; appearance decides
+        // half the colours. Neither is in the message, and both change under the reader.
+        parts.append("width=\(Int(view.frame.size.width))")
+        parts.append("appearance=\(traitCollection.userInterfaceStyle.rawValue)")
+        parts.append("files=\(EditorGroup.transferTick)")
+        if let group = groupImages[messageId] {
+            parts.append("group=" + group.map { "\($0.messageId):\($0.status)" }.joined(separator: ","))
+        }
+        return parts.joined(separator: ";")
+    }
+
+    /// What the cell in hand was last built for, or nil when it holds nothing built.
+    private func builtSignature(of cell: UITableViewCell) -> String? {
+        return objc_getAssociatedObject(cell, &EditorGroup.bubbleSignatureKey) as? String
+    }
+
+    private func setBuiltSignature(_ signature: String?, on cell: UITableViewCell) {
+        objc_setAssociatedObject(cell, &EditorGroup.bubbleSignatureKey, signature, .OBJC_ASSOCIATION_COPY_NONATOMIC)
+    }
+
+    /// Takes a cell back to empty, ready to be built into.
+    ///
+    /// Fix: this used to ask every subview to remove its own constraints first. Taking a view
+    /// out of the hierarchy already breaks the constraints that cross its edge, and the ones
+    /// wholly inside it go when it does - so that pass built an array per subview to remove
+    /// constraints that were about to be released anyway, on every row that scrolled past.
+    private func emptyBubbleCell(_ cell: UITableViewCell) {
+        setBuiltSignature(nil, on: cell)
+        cell.contentView.subviews.forEach({ $0.removeFromSuperview() })
     }
 
     // MARK: - Auto download
@@ -731,7 +832,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         applyPendingUnreadMarkerScroll()
     }
 
-    public override func viewDidAppear(_ animated: Bool) {
+    /// Puts the header in place: colours, the back button's tint, and the bar itself if the
+    /// screen underneath had hidden it.
+    private func prepareNavigationBar() {
         let navBarAppearance = UINavigationBarAppearance()
         navBarAppearance.configureWithOpaqueBackground()
         navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
@@ -748,6 +851,22 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
         navigationController?.navigationBar.prefersLargeTitles = false
         navigationController?.navigationItem.largeTitleDisplayMode = .never
+    }
+
+    /// Fix: all of the above used to run in viewDidAppear - after the push had finished and the
+    /// conversation had already been laid out to the full height of the screen. The bar then
+    /// arrived, took its space out of the top, and everything the reader was looking at slid.
+    /// The chat list hides the bar for itself, so opening a chat from there showed this every
+    /// single time. Done before the screen appears, the messages are laid out under a header
+    /// that is already there, and nothing moves.
+    public override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        prepareNavigationBar()
+        addPreviewHeaderIfNeeded()
+    }
+
+    public override func viewDidAppear(_ animated: Bool) {
+        prepareNavigationBar()
         updateProfile()
         // The first page only covers the screen; topping it up now means the reader's first
         // flick upwards does not immediately run out of messages.
@@ -2215,6 +2334,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             
             navigationItem.titleView = viewAppBar
             titleText = titleNavigation.text
+            previewHeaderLabel?.text = titleText
         } else {
             searchBar = UISearchBar()
             searchBar.autocapitalizationType = .none
@@ -7490,19 +7610,35 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         let cellMessage = tableView.dequeueReusableCell(withIdentifier: "cellEditorGroup", for: indexPath as IndexPath)
         cellMessage.backgroundColor = .clear
         cellMessage.selectionStyle = .none
-        cellMessage.contentView.subviews.forEach({ $0.removeConstraints($0.constraints) })
-        cellMessage.contentView.subviews.forEach({ $0.removeFromSuperview() })
         // The table can ask for a row this section no longer has. It learns about a change a
         // moment after the list itself changes, and a transfer finishing redraws rows in
         // between - reading past the end there is a crash, where an empty cell for one frame is
         // not. Every read below is against these two lines being true.
         guard indexPath.section >= 0, indexPath.section < dataDates.count else {
+            emptyBubbleCell(cellMessage)
             return cellMessage
         }
         let dataMessages = messages(onDate: dataDates[indexPath.section])
         guard indexPath.row >= 0, indexPath.row < dataMessages.count else {
+            emptyBubbleCell(cellMessage)
             return cellMessage
         }
+        // Fix: a bubble was emptied and built again from nothing every time this ran - forty-odd
+        // views and two hundred constraints - and it runs for every row of every redraw, not
+        // only for rows that are new to the screen. A message arriving, a status changing, a
+        // file landing: each of those redraws rows whose bubbles are already correct and already
+        // in front of the reader. When the cell in hand was built for this message in this state,
+        // it is already the answer.
+        let signature = bubbleSignature(for: dataMessages[indexPath.row], at: indexPath)
+        if builtSignature(of: cellMessage) == signature {
+            // A pull that was interrupted can leave a bubble sitting off to one side. Building
+            // the cell again used to clear that as a side effect of throwing the views away, so
+            // handing one back has to say it plainly.
+            cellMessage.contentView.subviews.forEach { $0.transform = .identity }
+            return cellMessage
+        }
+        emptyBubbleCell(cellMessage)
+        setBuiltSignature(signature, on: cellMessage)
         
         let profileMessage = UIImageView()
         profileMessage.frame.size = CGSize(width: 35, height: 35)
@@ -11314,6 +11450,7 @@ extension EditorGroup {
     // Reloads the row a transfer belongs to, if it is still on screen at all. Safe to call
     // from a download that outlived the screen which started it.
     func reloadMessageRow(withFileNamed name: String) {
+        EditorGroup.transferTick += 1
         guard Thread.isMainThread else {
             // Transfers finish on whatever thread carried them; the table is the main thread's.
             DispatchQueue.main.async { [weak self] in
