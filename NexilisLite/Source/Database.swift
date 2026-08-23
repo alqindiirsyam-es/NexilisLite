@@ -268,6 +268,10 @@ public class Database {
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "story_pin", columnType: "TEXT", defaultValue: "")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "attachment_speciality", columnType: "TEXT", defaultValue: "")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "is_bot", columnType: "INTEGER", defaultValue: "0")
+                // How long a video runs, in seconds. Not sent with the message - it is worked out
+                // the first time the file can be read and kept here, so the media grid can label
+                // every video without opening any of them.
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "video_duration", columnType: "INTEGER", defaultValue: "0")
                 
                 //COMMUNITY
                 changeNameColumn(database: fmdb, tableName: "COMMUNITY", oldColumnName: "group_type", newColumnName: "community_type")

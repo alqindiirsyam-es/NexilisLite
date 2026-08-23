@@ -63,6 +63,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
 
     var users: [User] = []
     public var dataMessageForward: [[String: Any?]]?
+    /// A picture to open as soon as this conversation has finished loading.
+    public var openMediaOnceLoaded = ""
+    /// A message to scroll to as soon as this conversation has finished loading.
+    public var goToMessageOnceLoaded = ""
+    /// True when this conversation is only loaded to answer for another screen and is never shown.
+    public var isBackgroundHelper = false
+    /// Asked, when this conversation is only a helper, to put a real one on screen at a message.
+    public var onNeedsRealConversation: ((String) -> Void)?
     var imageVideoPicker: ImageVideoPicker!
     var documentPicker: DocumentPicker!
     var currentIndexpath: IndexPath?
@@ -283,6 +291,621 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
 
 
+
+    // MARK: - Media viewer
+
+    /// Every picture and video of this conversation, in the order they were sent, for the strip
+    /// along the foot of the viewer.
+    ///
+    /// A collage is one row standing for several messages, so its members are unfolded here -
+    /// the strip is about the pictures, not about how they happen to be grouped in the list.
+    func conversationMediaStrip() -> [MediaViewerViewController.StripItem] {
+        var entries: [(date: Double, order: Int, item: MediaViewerViewController.StripItem)] = []
+        var seen = Set<String>()
+        // Carried forward so a row whose date will not parse keeps the place it had in the list
+        // rather than being flung to one end by the sort below.
+        var lastDate: Double = 0
+        for message in dataMessages {
+            let rowId = message["message_id"] as? String ?? ""
+            let rows = groupImages[rowId]?.map { $0.dataMessage } ?? [message]
+            for row in rows {
+                let messageId = row["message_id"] as? String ?? ""
+                let thumb = row["thumb_id"] as? String ?? ""
+                let isVideo = !(row["video_id"] as? String ?? "").isEmpty
+                let hasPicture = isVideo || !(row["image_id"] as? String ?? "").isEmpty
+                guard !messageId.isEmpty, !thumb.isEmpty, hasPicture, !seen.contains(messageId) else {
+                    continue
+                }
+                // A message taken back, or one that only opens once, is not part of the run.
+                guard (row["lock"] as? String ?? "") != "1", (row["credential"] as? String ?? "") != "1" else {
+                    continue
+                }
+                seen.insert(messageId)
+                let profile = getDataProfile(message_id: messageId)
+                var when = ""
+                let timestamp = Double(row[TypeDataMessage.server_date] as? String ?? "")
+                if let timestamp = timestamp {
+                    when = DateFormatterPool.shared.string(from: Date(timeIntervalSince1970: timestamp / 1000), format: "dd/MM/yy HH:mm")
+                }
+                lastDate = timestamp ?? lastDate
+                entries.append((lastDate, entries.count, MediaViewerViewController.StripItem(
+                    messageId: messageId,
+                    thumbFileName: thumb,
+                    mediaFileName: isVideo ? (row["video_id"] as? String ?? "") : (row["image_id"] as? String ?? ""),
+                    isVideo: isVideo,
+                    caption: row["message_text"] as? String ?? "",
+                    title: profile["name"] ?? "",
+                    subtitle: when,
+                    isStarred: (row["is_stared"] as? String ?? "0") == "1")))
+            }
+        }
+
+        appendMediaOutsideWindow(to: &entries, seen: &seen)
+
+        // The two runs have to be woven together by date, not simply joined: the window is not
+        // always sitting at the newest end of the conversation - opening a message from search
+        // leaves it in the middle - so what is missing can be on either side of it.
+        return entries
+            .sorted { $0.date == $1.date ? $0.order < $1.order : $0.date < $1.date }
+            .map { $0.item }
+    }
+
+    /// Full rows for media the window in memory does not hold, so the viewer's caption, star,
+    /// forward and delete still have a message to work with once the strip reaches past the page.
+    private var mediaRowsOutsideWindowStorage: [String: [String: Any?]] = [:]
+
+    /// Adds the conversation's media that pagination has left out of memory.
+    ///
+    /// Fix: the strip was built from `dataMessages` alone, which is a window on the conversation
+    /// rather than the whole of it - so a viewer opened straight after the conversation showed a
+    /// handful of pictures, and the same viewer opened after scrolling up showed far more. Reading
+    /// every message back in would answer it, but it would also undo the paging that keeps this
+    /// screen quick on an older phone. Only the media rows are wanted, and there are far fewer of
+    /// those than there are messages, so they are read on their own.
+    /// Every message of this conversation matching an extra condition, whatever page it lives on.
+    ///
+    /// Pagination means `dataMessages` is only a window on the conversation, so anything that has
+    /// to speak for the whole of it - the strip under a picture, the media browser - cannot be
+    /// built from memory alone. Reading every message back in would answer it and undo the paging
+    /// that keeps this screen quick on an older phone; this reads only the rows that qualify.
+    func messageRows(matching condition: String) -> [[String: Any?]] {
+        var rows: [[String: Any?]] = []
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            let query = """
+                SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, \
+                audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, \
+                attachment_flag, reff_id, lock, is_stared, blog_id, credential, is_call_center, \
+                call_center_id, opposite_pin, last_edited, gif_id, is_forwarded_message, \
+                attachment_speciality, is_pinned, is_bot, f_display_name FROM MESSAGE \
+                where \(self.messageWhereClause()) AND \(condition) \
+                AND (lock IS NULL OR lock <> '1') AND (credential IS NULL OR credential <> '1') \
+                order by server_date asc
+                """
+            guard let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) else {
+                return
+            }
+            while cursor.next() {
+                let messageId = cursor.string(forColumnIndex: 0) ?? ""
+                if messageId.isEmpty {
+                    continue
+                }
+                var row: [String: Any?] = [:]
+                row["message_id"] = messageId
+                row["f_pin"] = cursor.string(forColumnIndex: 1)
+                row["l_pin"] = cursor.string(forColumnIndex: 2)
+                row["message_scope_id"] = cursor.string(forColumnIndex: 3)
+                row["server_date"] = cursor.string(forColumnIndex: 4)
+                row["status"] = cursor.string(forColumnIndex: 5)
+                row["message_text"] = cursor.string(forColumnIndex: 6)
+                row["audio_id"] = cursor.string(forColumnIndex: 7)
+                row["video_id"] = cursor.string(forColumnIndex: 8)
+                row["image_id"] = cursor.string(forColumnIndex: 9)
+                row["thumb_id"] = cursor.string(forColumnIndex: 10)
+                row["read_receipts"] = cursor.string(forColumnIndex: 11)
+                row["chat_id"] = cursor.string(forColumnIndex: 12)
+                row["file_id"] = cursor.string(forColumnIndex: 13)
+                row["attachment_flag"] = cursor.string(forColumnIndex: 14)
+                row["reff_id"] = cursor.string(forColumnIndex: 15)
+                row["lock"] = cursor.string(forColumnIndex: 16)
+                row["is_stared"] = cursor.string(forColumnIndex: 17)
+                row["blog_id"] = cursor.string(forColumnIndex: 18)
+                row["credential"] = cursor.string(forColumnIndex: 19)
+                row[TypeDataMessage.is_call_center] = cursor.string(forColumnIndex: 20)
+                row[TypeDataMessage.call_center_id] = cursor.string(forColumnIndex: 21)
+                row[TypeDataMessage.opposite_pin] = cursor.string(forColumnIndex: 22)
+                row[TypeDataMessage.last_edit] = cursor.longLongInt(forColumnIndex: 23)
+                row[TypeDataMessage.gif_id] = cursor.string(forColumnIndex: 24)
+                row[TypeDataMessage.is_forwarded] = Int(cursor.int(forColumnIndex: 25))
+                row[TypeDataMessage.spec_file] = cursor.string(forColumnIndex: 26)
+                row[TypeDataMessage.is_pinned] = cursor.string(forColumnIndex: 27)
+                row["is_bot"] = cursor.string(forColumnIndex: 28)
+                row["f_display_name"] = cursor.string(forColumnIndex: 29)
+                row["progress"] = 0.0
+                row["isSelected"] = false
+                rows.append(row)
+            }
+            cursor.close()
+        })
+        return rows
+    }
+
+    /// How long each video of this conversation runs, for the grid to label them with.
+    ///
+    /// One small query rather than a column added to the message loader: the loader maps its
+    /// columns by position, and threading another one through it to reach a label is a poor trade.
+    func videoDurations() -> [String: Int] {
+        var found: [String: Int] = [:]
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            let query = "SELECT message_id, video_duration FROM MESSAGE where \(self.messageWhereClause()) AND video_duration > 0"
+            guard let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) else {
+                return
+            }
+            while cursor.next() {
+                let messageId = cursor.string(forColumnIndex: 0) ?? ""
+                if !messageId.isEmpty {
+                    found[messageId] = Int(cursor.int(forColumnIndex: 1))
+                }
+            }
+            cursor.close()
+        })
+        return found
+    }
+
+    /// The documents and the links of this conversation, for the browser's other two tabs.
+    ///
+    /// Read on the same terms as the pictures: whole conversation, not the page in memory. The
+    /// rows are kept as well as the summaries, so following one back to its message - or
+    /// forwarding it, or deleting it - does not need a second trip to the database.
+    func conversationDocsAndLinks() -> (docs: [MediaBrowserViewController.DocItem], links: [MediaBrowserViewController.LinkItem]) {
+        let rows = messageRows(matching: "((file_id IS NOT NULL AND file_id <> '') "
+                               + "OR (message_text LIKE '%http://%' OR message_text LIKE '%https://%'))")
+        var docs: [MediaBrowserViewController.DocItem] = []
+        var links: [MediaBrowserViewController.LinkItem] = []
+        for row in rows {
+            let messageId = row["message_id"] as? String ?? ""
+            mediaRowsOutsideWindowStorage[messageId] = row
+            let when = Double(row["server_date"] as? String ?? "") ?? 0
+            let text = row["message_text"] as? String ?? ""
+            let file = row["file_id"] as? String ?? ""
+            if !file.isEmpty {
+                // A file message carries its own name, size and kind in the text, separated by
+                // bars - the same reading the bubble in the conversation does.
+                let parts = text.components(separatedBy: "|")
+                docs.append(MediaBrowserViewController.DocItem(messageId: messageId,
+                                                              fileName: parts.first ?? file,
+                                                              storedName: file,
+                                                              detail: parts.count > 1 ? parts[1] : "",
+                                                              date: when))
+            } else if let url = MediaBrowserViewController.firstLink(in: text) {
+                links.append(MediaBrowserViewController.LinkItem(messageId: messageId,
+                                                                 url: url,
+                                                                 caption: text,
+                                                                 thumbFileName: row["thumb_id"] as? String ?? "",
+                                                                 date: when))
+            }
+        }
+        return (docs, links)
+    }
+
+    private func appendMediaOutsideWindow(to entries: inout [(date: Double, order: Int, item: MediaViewerViewController.StripItem)],
+                                          seen: inout Set<String>) {
+        guard hasOlderMessages else {
+            return
+        }
+        // Pictures and video: anything carrying a thumbnail and something to open behind it.
+        let rows = messageRows(matching: "thumb_id IS NOT NULL AND thumb_id <> '' "
+                               + "AND ((image_id IS NOT NULL AND image_id <> '') "
+                               + "OR (video_id IS NOT NULL AND video_id <> ''))")
+            .filter { !seen.contains($0["message_id"] as? String ?? "") }
+        for row in rows {
+            seen.insert(row["message_id"] as? String ?? "")
+        }
+
+        // The name this screen shows is the message's own `f_display_name`, which the query above
+        // already carried out - so unlike the group screen there is nothing further to look up,
+        // and no second trip to the database per picture.
+        for row in rows {
+            let messageId = row["message_id"] as? String ?? ""
+            let isVideo = !(row["video_id"] as? String ?? "").isEmpty
+            var when = ""
+            let timestamp = Double(row["server_date"] as? String ?? "")
+            if let timestamp = timestamp {
+                when = DateFormatterPool.shared.string(from: Date(timeIntervalSince1970: timestamp / 1000), format: "dd/MM/yy HH:mm")
+            }
+            mediaRowsOutsideWindowStorage[messageId] = row
+            entries.append((timestamp ?? 0, entries.count, MediaViewerViewController.StripItem(
+                messageId: messageId,
+                thumbFileName: row["thumb_id"] as? String ?? "",
+                mediaFileName: isVideo ? (row["video_id"] as? String ?? "") : (row["image_id"] as? String ?? ""),
+                isVideo: isVideo,
+                caption: row["message_text"] as? String ?? "",
+                title: row["f_display_name"] as? String ?? "",
+                subtitle: when,
+                isStarred: (row["is_stared"] as? String ?? "0") == "1")))
+        }
+    }
+
+    /// Opens the list of everything sent in this conversation, at the picture being looked at.
+    ///
+    /// The same screen a collage opens - the pictures of a whole conversation are the same kind
+    /// of thing as the pictures of one collage, so there is no reason for a second one.
+    /// Opens the picture viewer on one message, wherever the browser found it.
+    ///
+    /// The tap handler this hands off to works from the conversation's own list, so the message
+    /// has to be on a loaded page before it can be pointed at - the browser reaches past the page
+    /// in memory, and a picture from years back would otherwise have no row to open.
+    /// Brings this conversation to the front and shows one of its messages.
+    ///
+    /// Three cases: it is already what the reader is looking at, it is somewhere below in the
+    /// stack, or it is not on screen at all - which is what a profile keeps, a conversation loaded
+    /// behind a browser purely to answer for it. Only the last one needs a conversation opened.
+    /// Scrolls to a message and flashes it, the way arriving from a search does.
+    ///
+    /// The same thing `referenceMessageId` does when this screen is opened fresh - but this one
+    /// works on a conversation already loaded, where that has long since been read.
+    func highlightMessage(_ messageId: String) {
+        _ = ensureMessageLoaded(messageId: messageId)
+        guard let indexPath = indexPath(forMessageId: messageId) else {
+            return
+        }
+        tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: false)
+        tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            self?.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
+        }
+    }
+
+    func reveal(messageId: String, from presenter: UIViewController?) {
+        // Fix: a conversation kept behind a browser is the root of a navigation controller of its
+        // own, so "am I in my own stack" was true and it took the first branch - popping nothing
+        // and scrolling a table nobody could see. Being a helper is not something that can be
+        // worked out from the hierarchy, so it is said outright.
+        if !isBackgroundHelper, let stack = navigationController, stack.viewControllers.contains(self) {
+            guard stack.topViewController !== self else {
+                highlightMessage(messageId)
+                return
+            }
+            // Fix: the scroll used to be asked for while the pop was still running, and the two
+            // fought over the table - which is why it landed near the message rather than on it.
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { [weak self] in
+                self?.highlightMessage(messageId)
+            }
+            stack.popToViewController(self, animated: true)
+            CATransaction.commit()
+            return
+        }
+        // Whoever keeps this conversation behind their screen decides how to hand over to a real
+        // one - they are the ones who know what of theirs should be left behind.
+        if let handOver = onNeedsRealConversation {
+            handOver(messageId)
+            return
+        }
+        guard let stack = presenter?.navigationController else {
+            return
+        }
+        let fresh = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+        fresh.unique_l_pin = unique_l_pin
+        fresh.hidesBottomBarWhenPushed = true
+        // The same field a search result sets: the conversation scrolls to it while it loads
+        // and flashes the bubble, rather than jumping there afterwards.
+        fresh.referenceMessageId = messageId
+        stack.pushViewController(fresh, animated: true)
+    }
+
+    func openMedia(messageId: String, from presenter: UIViewController? = nil, origin: UIImageView? = nil) {
+        // Only when nobody else is showing it. Opened from a collage the viewer goes up over that
+        // screen, so closing it lands back on the collage rather than skipping past it.
+        if presenter == nil {
+            navigationController?.popViewController(animated: false)
+        }
+        _ = ensureMessageLoaded(messageId: messageId)
+        guard let indexPath = indexPath(forMessageId: messageId),
+              let row = messageForMedia(messageId: messageId) else {
+            return
+        }
+        let gesture = ObjectGesture()
+        gesture.indexPath = indexPath
+        gesture.message_id = messageId
+        gesture.image_id = row["image_id"] as? String ?? ""
+        gesture.video_id = row["video_id"] as? String ?? ""
+        gesture.gif_id = row[TypeDataMessage.gif_id] as? String ?? ""
+        gesture.file_id = row["file_id"] as? String ?? ""
+        gesture.specFile = row[TypeDataMessage.spec_file] as? String ?? ""
+        gesture.isInitiator = (row["f_pin"] as? String) == User.getMyPin()
+        gesture.presenter = presenter
+        if let origin = origin {
+            gesture.imageView = origin
+        } else if let cell = tableChatView.cellForRow(at: indexPath),
+                  let thumbnail = Self.firstImageView(in: cell.contentView) {
+            gesture.imageView = thumbnail
+        }
+        contentMessageTapped(gesture)
+    }
+
+    func showAllMedia(startingAt messageId: String, in stack: UINavigationController? = nil, returningTo viewer: MediaViewerViewController? = nil) {
+        let browser = MediaBrowserViewController()
+        let durations = videoDurations()
+        browser.media = conversationMediaStrip().map {
+            MediaBrowserViewController.MediaItem(messageId: $0.messageId,
+                                                 thumbFileName: $0.thumbFileName,
+                                                 mediaFileName: $0.mediaFileName,
+                                                 isVideo: $0.isVideo,
+                                                 durationSeconds: durations[$0.messageId] ?? 0,
+                                                 date: Double(messageForMedia(messageId: $0.messageId)?["server_date"] as? String ?? "") ?? 0)
+        }
+        let other = conversationDocsAndLinks()
+        browser.docs = other.docs
+        browser.links = other.links
+        browser.conversationName = titleText ?? ""
+        browser.onOpenMedia = { [weak self, weak viewer, weak stack] shown in
+            // Opened from the picture viewer, so a picture chosen here goes back to it rather
+            // than dropping the reader into the conversation.
+            if let viewer = viewer, let stack = stack {
+                viewer.show(messageId: shown)
+                stack.popViewController(animated: true)
+                return
+            }
+            self?.openMedia(messageId: shown)
+        }
+        browser.onGoToMessage = { [weak self] shown in
+            guard let self = self else {
+                return
+            }
+            // The conversation is behind everything the viewer put up, so it is that whole stack
+            // that has to come down before the message can be shown.
+            if stack != nil {
+                self.dismiss(animated: true) {
+                    self.goToMessage(messageId: shown)
+                }
+            } else {
+                self.navigationController?.popViewController(animated: true)
+                self.goToMessage(messageId: shown)
+            }
+        }
+        // The browser has no idea what forwarding or deleting means; it only knows what was
+        // ticked. Both are handed back to the conversation, which already owns the rules.
+        browser.onForward = { [weak self] ids in
+            guard let self = self else {
+                return
+            }
+            let rows = ids.compactMap { self.messageForMedia(messageId: $0) }
+            self.presentForwardChooser(for: rows, from: browser)
+        }
+        browser.onDelete = { [weak self] ids in
+            guard let self = self else {
+                return
+            }
+            let rows = ids.compactMap { self.messageForMedia(messageId: $0) }
+            self.presentDeleteOptions(for: rows, from: browser)
+        }
+        browser.focusMessageId = messageId
+        if let stack = stack, let viewer = viewer {
+            // Held on the browser so it lives as long as the two screens do - a navigation
+            // controller does not keep its delegate.
+            let zoom = MediaGridTransitionDelegate(viewer: viewer, browser: browser)
+            browser.transitionKeeper = zoom
+            stack.delegate = zoom
+        }
+        (stack ?? navigationController)?.pushViewController(browser, animated: true)
+    }
+
+    /// The picture inside a bubble, for the viewer to shrink back into when it closes.
+    static func firstImageView(in view: UIView) -> UIImageView? {
+        for subview in view.subviews {
+            if let imageView = subview as? UIImageView, imageView.image != nil, imageView.bounds.width > 40 {
+                return imageView
+            }
+            if let found = firstImageView(in: subview) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    /// The message a picture belongs to, wherever it is - a row of its own, or inside a collage.
+    func messageForMedia(messageId: String) -> [String: Any?]? {
+        if let row = dataMessages.first(where: { ($0["message_id"] as? String) == messageId }) {
+            return row
+        }
+        for (_, images) in groupImages {
+            if let image = images.first(where: { $0.messageId == messageId }) {
+                return image.dataMessage
+            }
+        }
+        // Media the strip reached past the end of the window for. Read once while the strip was
+        // built, so following one of these costs nothing here.
+        return mediaRowsOutsideWindowStorage[messageId]
+    }
+
+    /// Brings a message into view, reading the page it lives on first if it is not loaded.
+    func goToMessage(messageId: String) {
+        guard !messageId.isEmpty else {
+            return
+        }
+        _ = ensureMessageLoaded(messageId: messageId)
+        guard let indexPath = indexPath(forMessageId: messageId) else {
+            return
+        }
+        tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
+    }
+
+    /// Turns the star on a message on or off, in the database and in what is on screen.
+    func toggleStar(messageId: String) {
+        guard let row = messageForMedia(messageId: messageId) else {
+            return
+        }
+        let starred = (row["is_stared"] as? String ?? "0") == "1"
+        let value = starred ? "0" : "1"
+        DispatchQueue.global().async {
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                do {
+                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                        "is_stared" : Int(value) ?? 0
+                    ], _where: "message_id = '\(messageId)'")
+                } catch {
+                    rollback.pointee = true
+                    print("Access database error: \(error.localizedDescription)")
+                }
+            })
+        }
+        if let idx = dataMessages.firstIndex(where: { ($0["message_id"] as? String) == messageId }) {
+            dataMessages[idx]["is_stared"] = value
+        }
+        for (key, images) in groupImages {
+            if let index = images.firstIndex(where: { $0.messageId == messageId }) {
+                groupImages[key]?[index].dataMessage["is_stared"] = value
+            }
+        }
+        if mediaRowsOutsideWindowStorage[messageId] != nil {
+            mediaRowsOutsideWindowStorage[messageId]?["is_stared"] = value
+        }
+        tableChatView.reloadData()
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil, userInfo: nil)
+    }
+
+    /// Starts the forward or delete session with this one message already picked - which is what
+    /// those buttons mean when they are pressed from a picture: do this to the one I am looking
+    /// at. The session itself is the one the long-press menu opens; nothing here is a second way
+    /// of doing it.
+    func beginMessageSession(forwarding: Bool, messageId: String) {
+        if isSearching {
+            cancelAction()
+        }
+        if reffId != nil {
+            deleteReplyView()
+        }
+        if forwarding {
+            forwardSession = true
+        } else {
+            deleteSession = true
+        }
+        let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
+        cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
+        navigationItem.rightBarButtonItems = nil
+        navigationItem.rightBarButtonItem = cancelButton
+        changeAppBar()
+        if let idx = dataMessages.firstIndex(where: { ($0["message_id"] as? String) == messageId }) {
+            dataMessages[idx]["isSelected"] = true
+        }
+        addMultipleSelectSession()
+        tableChatView.reloadData()
+    }
+
+    /// Opens the picker for where messages are being forwarded to.
+    ///
+    /// Shared by the selection session and by the viewer's forward button. Pulled out so the
+    /// picture path is not a second way of forwarding that can drift from the first - the rules
+    /// about unfolding a collage and about which screen the choice lands on live here only.
+    func presentForwardChooser(for messages: [[String: Any?]], from presenter: UIViewController? = nil) {
+        var dataMessages = messages
+        let countSelected = dataMessages.count
+        guard countSelected > 0 else {
+            return
+        }
+        for i in 0..<countSelected {
+            if groupImages[dataMessages[i]["message_id"]  as? String ?? ""] != nil {
+                var tempData = dataMessages
+                tempData.remove(at: 0)
+                let dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"]  as? String ?? ""]!).map({ $0.dataMessage })
+                tempData.insert(contentsOf: dataMessageInGrouping, at: i)
+                dataMessages = tempData
+            }
+        }
+        // A card that slides up over whatever is on screen rather than a full-screen takeover, so
+        // the conversation - or the picture the forward was pressed from - stays behind it.
+        contactChatNav.modalPresentationStyle = .pageSheet
+        if let sheet = contactChatNav.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+            sheet.preferredCornerRadius = 20
+        }
+        contactChatNav.navigationBar.tintColor = .white
+        contactChatNav.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        contactChatNav.navigationBar.isTranslucent = false
+        let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
+        contactChatNav.navigationBar.titleTextAttributes = textAttributes
+        let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
+        UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
+        contactChatNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        if let controller = contactChatNav.viewControllers.first as? ContactChatViewController {
+            controller.isChooser = { [weak self] scope, pin in
+                guard let self = self else {
+                    return
+                }
+                let openDestination = {
+                    if scope == MessageScope.WHISPER || scope == MessageScope.CALL || scope == MessageScope.MISSED_CALL {
+                        let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
+                        editorPersonalVC.unique_l_pin = pin
+                        editorPersonalVC.dataMessageForward = dataMessages
+                        self.navigationController?.replaceAllViewController(with: editorPersonalVC, animated: true)
+                    } else {
+                        let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorGroupVC") as! EditorGroup
+                        editorGroupVC.unique_l_pin = pin
+                        editorGroupVC.dataMessageForward = dataMessages
+                        self.navigationController?.replaceAllViewController(with: editorGroupVC, animated: true)
+                    }
+                }
+                guard presenter != nil else {
+                    openDestination()
+                    return
+                }
+                // Opened from a picture, so there is a viewer between the conversation and the
+                // chooser. Dismissing what the conversation itself presented takes both down at
+                // once - otherwise the destination is swapped in underneath two screens and the
+                // reader is left looking at the photo they just forwarded.
+                self.dismiss(animated: false, completion: openDestination)
+            }
+        }
+        (presenter ?? self).present(contactChatNav, animated: true, completion: nil)
+    }
+
+    /// Asks whether a message is being taken back for everyone or only here.
+    ///
+    /// Shared by the selection session and by the viewer's delete button, for the same reason as
+    /// the chooser above: which of the two offers appear depends on who sent the message, whether
+    /// it is locked and whether it ever left the phone, and that belongs in one place.
+    func presentDeleteOptions(for messages: [[String: Any?]], from presenter: UIViewController? = nil) {
+        let dataMessages = messages
+        // Anything shown over the conversation is holding a message that is about to stop
+        // existing, so it is taken down with it rather than left displaying a gap.
+        let onDeleted: (() -> Void)? = presenter.map { shown in
+            return { [weak shown] in shown?.dismiss(animated: true) }
+        }
+        var countSelected = dataMessages.count
+        guard countSelected > 0 else {
+            return
+        }
+        for i in 0..<countSelected {
+            if let isGroupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
+                countSelected += (isGroupingImages.count - 1)
+            }
+        }
+        var options: [BottomChoiceSheet.Option] = []
+        options.append(BottomChoiceSheet.Option(title: "Delete".localized() + " \(countSelected) " + "For Me".localized(), isDestructive: true) { [weak self] in
+            self?.performDelete(for: "me", dataMessages: dataMessages, onDone: onDeleted)
+        })
+        let idMe = User.getMyPin() as String?
+        let dataFilterFpin = dataMessages.filter({ $0["l_pin"] as? String == idMe})
+        let dataFilterLock = dataMessages.filter({ $0["lock"] as? String == "1" || $0["lock"] as? String == "2" })
+        let dataFilterCall = dataMessages.filter({ $0[TypeDataMessage.message_scope_id] as? String == MessageScope.CALL || $0[TypeDataMessage.message_scope_id] as? String == MessageScope.MISSED_CALL })
+//            let statusDataRead = dataMessages.filter({ Int($0["status"]  as? String ?? "")! >= 4})
+        let statusFailed = dataMessages.filter({ (Int($0["status"] as? String ?? "") ?? -1) == 0})
+        if dataFilterFpin.count == 0 && dataFilterLock.count == 0 && statusFailed.count == 0 && dataFilterCall.count == 0 {
+            options.append(BottomChoiceSheet.Option(title: "Delete".localized() + " \(countSelected) " + "For Everyone".localized(), isDestructive: true) { [weak self] in
+                self?.performDelete(for: "everyone", dataMessages: dataMessages, onDone: onDeleted)
+            })
+        }
+        // There is no Cancel among the answers: the card carries a close button and shuts on a tap
+        // outside, the way the design asks for.
+        let sheet = BottomChoiceSheet(question: "Delete message?".localized(),
+                                      options: options,
+                                      appearance: presenter == nil ? .unspecified : .dark)
+        // Putting a sheet up from a controller that is not on screen does nothing at all, so it is
+        // whoever is in front that shows it - the conversation, or the picture viewer over it.
+        (presenter ?? self).present(sheet, animated: true)
+    }
+
     // MARK: - Preview
 
     /// The conversation's name, across the top, while this screen is a preview.
@@ -374,6 +997,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         guard !filename.isEmpty, downloadList[filename] == nil, !Download.isDownloading(forKey: filename) else {
             return false
         }
+        // Asked for on purpose, so it is worth another try whatever happened last time.
+        unreachableFiles.remove(filename)
         downloadList[filename] = indexPath ?? IndexPath(row: 0, section: 0)
         // Fix: this used to build a progress ring by hand, onto the one cell instance that had
         // been tapped - lost the moment that cell was recycled. cellForRow draws it now, and
@@ -389,6 +1014,19 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 // A download that failed used to stay in downloadList forever, and the guard
                 // above then swallowed every retry.
                 self.downloadList.removeValue(forKey: name)
+                if progress < 0 {
+                    // Fix: a file the server will not give up failed, was forgotten, and was
+                    // picked straight back up by the next auto-download sweep - which redrew the
+                    // row, which ran the sweep again. That loop is what made the bubble flicker.
+                    // A failure is remembered, so nothing starts it again on its own; tapping it
+                    // still can, and clears the mark.
+                    self.unreachableFiles.insert(name)
+                } else if progress >= 100 {
+                    self.unreachableFiles.remove(name)
+                    // A video that has just landed can be measured now, so the lengths are read
+                    // again rather than staying as they were when this screen opened.
+                    self.videoLengths = nil
+                }
                 if progress >= 100, let idx = self.dataMessages.firstIndex(where: {
                     ($0["video_id"] as? String ?? "") == name || ($0["file_id"] as? String ?? "") == name
                 }) {
@@ -439,7 +1077,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         parts.append("appearance=\(traitCollection.userInterfaceStyle.rawValue)")
         parts.append("files=\(EditorPersonal.transferTick)")
         if let group = groupImages[messageId] {
-            parts.append("group=" + group.map { "\($0.messageId):\($0.status)" }.joined(separator: ","))
+            // Fix: starring a picture inside a collage changed the member's row and nothing else,
+            // and a signature that only carried the members' ids and transfer state read as
+            // unchanged - so the bubble was never rebuilt and the star did not appear until the
+            // conversation was opened again.
+            parts.append("group=" + group.map {
+                "\($0.messageId):\($0.status):\($0.dataMessage["is_stared"] as? String ?? "0")"
+            }.joined(separator: ","))
         }
         return parts.joined(separator: ";")
     }
@@ -508,6 +1152,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         return
                     }
                     guard !autoDownloadsInFlight.contains(filename),
+                          !unreachableFiles.contains(filename),
                           !Download.isDownloading(forKey: filename) else {
                         continue
                     }
@@ -555,6 +1200,29 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
         let url = URL(fileURLWithPath: dirPath).appendingPathComponent(filename)
         return FileManager.default.fileExists(atPath: url.path) || FileEncryption.shared.isSecureExists(filename: filename)
+    }
+
+    /// Files this screen has tried to fetch and could not. Left alone by the sweep from then on.
+    private var unreachableFiles = Set<String>()
+
+    /// Whether a file is one the sweep has already failed to fetch - what the bubble reads to
+    /// decide between offering to download and saying it cannot.
+    func isUnreachable(fileNamed filename: String) -> Bool {
+        return unreachableFiles.contains(filename)
+    }
+
+    /// How long each video runs, read from the database once and kept for the drawing to use.
+    ///
+    /// A bubble is drawn many times a second while the reader scrolls; a query per bubble is out
+    /// of the question. The column is written by whatever first has the file open, so this only
+    /// has to be re-read when something new arrives.
+    private var videoLengths: [String: Int]?
+
+    private func videoLength(ofMessage row: [String: Any?]) -> Int {
+        if videoLengths == nil {
+            videoLengths = videoDurations()
+        }
+        return videoLengths?[row["message_id"] as? String ?? ""] ?? 0
     }
 
     private func startAutoDownload(_ filename: String) {
@@ -1498,6 +2166,17 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // no load left to hide.
         DispatchQueue.main.async { [weak self] in
             self?.isInitialLoading = false
+            // A screen that has no conversation of its own - a profile, say - can ask for one of
+            // this conversation's pictures to be opened. It has to wait until there is something
+            // to open it from, which is here.
+            if let wanted = self?.openMediaOnceLoaded, !wanted.isEmpty {
+                self?.openMediaOnceLoaded = ""
+                self?.openMedia(messageId: wanted)
+            }
+            if let wanted = self?.goToMessageOnceLoaded, !wanted.isEmpty {
+                self?.goToMessageOnceLoaded = ""
+                self?.highlightMessage(wanted)
+            }
         }
         for data in listTimerCredential {
             if data.value > 0 {
@@ -2774,7 +3453,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                             containerView = viewInContainer.subviews[1]
                                         }
                                     }
-                                    if let loading = containerView?.layer.sublayers?[1] as? CAShapeLayer {
+                                    // Fix: this read the second sublayer by position, and
+                                    // `sublayers` is a bridged NSArray - so a container holding
+                                    // only one raised NSRangeException rather than returning nil,
+                                    // and the app went down. The ring is drawn as a track and a
+                                    // progress shape on top of it, so the last shape layer is the
+                                    // one to move, however many layers the view happens to carry.
+                                    if let loading = containerView?.layer.sublayers?
+                                        .compactMap({ $0 as? CAShapeLayer }).last {
                                         loading.strokeEnd = CGFloat(progress / 100)
                                         if (progress == 100.0) {
                                             self.dataMessages[idx!]["progress"] = progress
@@ -7804,74 +8490,9 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
             cancelAction()
         } else if forwardSession {
-            var dataMessages = self.dataMessages.filter({ $0["isSelected"] as? Bool ?? false == true })
-            let countSelected = dataMessages.count
-            if countSelected == 0 {
-                return
-            }
-            for i in 0..<countSelected {
-                if groupImages[dataMessages[i]["message_id"]  as? String ?? ""] != nil {
-                    var tempData = dataMessages
-                    tempData.remove(at: 0)
-                    let dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"]  as? String ?? ""]!).map({ $0.dataMessage })
-                    tempData.insert(contentsOf: dataMessageInGrouping, at: i)
-                    dataMessages = tempData
-                }
-            }
-            contactChatNav.modalPresentationStyle = .custom
-            contactChatNav.navigationBar.tintColor = .white
-            contactChatNav.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-            contactChatNav.navigationBar.isTranslucent = false
-            let textAttributes = [NSAttributedString.Key.foregroundColor:UIColor.white]
-            contactChatNav.navigationBar.titleTextAttributes = textAttributes
-            let cancelButtonAttributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font : UIFont.systemFont(ofSize: 16)]
-            UIBarButtonItem.appearance().setTitleTextAttributes(cancelButtonAttributes, for: .normal)
-            contactChatNav.view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-            if let controller = contactChatNav.viewControllers.first as? ContactChatViewController {
-                controller.isChooser = { [weak self] scope, pin in
-                    if scope == MessageScope.WHISPER || scope == MessageScope.CALL || scope == MessageScope.MISSED_CALL {
-                        let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
-                        editorPersonalVC.unique_l_pin = pin
-                        editorPersonalVC.dataMessageForward = dataMessages
-                        self?.navigationController?.replaceAllViewController(with: editorPersonalVC, animated: true)
-                    } else {
-                        let editorGroupVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorGroupVC") as! EditorGroup
-                        editorGroupVC.unique_l_pin = pin
-                        editorGroupVC.dataMessageForward = dataMessages
-                        self?.navigationController?.replaceAllViewController(with: editorGroupVC, animated: true)
-                    }
-                }
-            }
-            self.present(contactChatNav, animated: true, completion: nil)
+            presentForwardChooser(for: self.dataMessages.filter({ $0["isSelected"] as? Bool ?? false == true }))
         } else if deleteSession {
-            let dataMessages = self.dataMessages.filter({ $0["isSelected"] as? Bool ?? false == true })
-            var countSelected = dataMessages.count
-            if countSelected == 0 {
-                return
-            }
-            for i in 0..<countSelected {
-                if let isGroupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
-                    countSelected += (isGroupingImages.count - 1)
-                }
-            }
-            let alertController = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
-
-            if let action = self.actionDelete(for: "me", title: "Delete".localized() + " \(countSelected) " + "For Me".localized(), dataMessages: dataMessages) {
-                alertController.addAction(action)
-            }
-            let idMe = User.getMyPin() as String?
-            let dataFilterFpin = dataMessages.filter({ $0["l_pin"] as? String == idMe})
-            let dataFilterLock = dataMessages.filter({ $0["lock"] as? String == "1" || $0["lock"] as? String == "2" })
-            let dataFilterCall = dataMessages.filter({ $0[TypeDataMessage.message_scope_id] as? String == MessageScope.CALL || $0[TypeDataMessage.message_scope_id] as? String == MessageScope.MISSED_CALL })
-//            let statusDataRead = dataMessages.filter({ Int($0["status"]  as? String ?? "")! >= 4})
-            let statusFailed = dataMessages.filter({ Int($0["status"]  as? String ?? "")! == 0})
-            if dataFilterFpin.count == 0 && dataFilterLock.count == 0 && statusFailed.count == 0 && dataFilterCall.count == 0 {
-                if let action = self.actionDelete(for: "everyone", title: "Delete".localized() + " \(countSelected) " + "For Everyone".localized(), dataMessages: dataMessages) {
-                    alertController.addAction(action)
-                }
-            }
-            alertController.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
-            self.present(alertController, animated: true)
+            presentDeleteOptions(for: self.dataMessages.filter({ $0["isSelected"] as? Bool ?? false == true }))
         } else if summarizeSession {
             let dataMessages = self.dataMessages.filter({ $0["isSelected"] as? Bool ?? false == true })
             var countSelected = dataMessages.count
@@ -8074,46 +8695,27 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             children: copyActions)
     }
     
-    private func actionDelete(for type: String, title: String, dataMessages: [[String: Any?]]) -> UIAlertAction? {
-        return UIAlertAction(title: title, style: .destructive) { [unowned self] _ in
-            for i in 0..<dataMessages.count {
-                if (type == "me") {
-                    if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
-                        for i in 0..<groupingImages.count {
-                            var pin = groupingImages[i].lPin
-                            if pin == User.getMyPin() ?? "" {
-                                pin = self.dataPerson["f_pin"] as? String ?? ""
-                            }
-                            self.deleteMessage(l_pin: pin, message_id: groupingImages[i].messageId, scope: MessageScope.WHISPER, type: "1", chat: "")
-                            let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId })
-                            if idx != nil {
-                                self.dataMessages.remove(at: idx!)
-//                                if (idx == self.dataMessages.count - 1) {
-//                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-//                                }
-                                for i in 0..<dataDates.count {
-                                    if i > dataDates.count - 1 {
-                                        continue
-                                    }
-                                    if self.messages(onDate: dataDates[i]).count == 0 {
-                                        dataDates.remove(at: i)
-                                    }
-                                }
-                            }
-                        }
-                        self.groupImages.removeValue(forKey: groupingImages[0].messageId)
-                    } else {
-                        var pin = dataMessages[i]["l_pin"]  as? String ?? ""
+    /// Takes a run of messages back, either only from this phone or from everyone.
+    ///
+    /// This used to be the body of a `UIAlertAction`, which meant the only way to offer it was a
+    /// system action sheet. It is a plain method now so the card that asks the question can be
+    /// drawn to look like the rest of the app.
+    private func performDelete(for type: String, dataMessages: [[String: Any?]], onDone: (() -> Void)? = nil) {
+        for i in 0..<dataMessages.count {
+            if (type == "me") {
+                if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
+                    for i in 0..<groupingImages.count {
+                        var pin = groupingImages[i].lPin
                         if pin == User.getMyPin() ?? "" {
                             pin = self.dataPerson["f_pin"] as? String ?? ""
                         }
-                        self.deleteMessage(l_pin: pin, message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
-                        let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
+                        self.deleteMessage(l_pin: pin, message_id: groupingImages[i].messageId, scope: MessageScope.WHISPER, type: "1", chat: "")
+                        let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId })
                         if idx != nil {
                             self.dataMessages.remove(at: idx!)
-//                            if (idx == self.dataMessages.count - 1) {
-//                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-//                            }
+//                                if (idx == self.dataMessages.count - 1) {
+//                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+//                                }
                             for i in 0..<dataDates.count {
                                 if i > dataDates.count - 1 {
                                     continue
@@ -8124,51 +8726,76 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                             }
                         }
                     }
+                    self.groupImages.removeValue(forKey: groupingImages[0].messageId)
                 } else {
-                    if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
-                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
-                        imageView.tintColor = .white
-                        let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
-                        banner.show()
-                    } else {
-                        if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
-                            for i in 0..<groupingImages.count {
-                                self.deleteMessage(l_pin: groupingImages[i].lPin, message_id: groupingImages[i].messageId, scope: MessageScope.WHISPER, type: "2", chat: "")
-                                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId})
-                                if idx != nil {
-                                    self.dataMessages[idx!]["lock"] = "1"
-                                    self.dataMessages[idx!]["attachment_flag"] = "0"
-                                    self.dataMessages[idx!]["reff_id"] = ""
-                                }
+                    var pin = dataMessages[i]["l_pin"]  as? String ?? ""
+                    if pin == User.getMyPin() ?? "" {
+                        pin = self.dataPerson["f_pin"] as? String ?? ""
+                    }
+                    self.deleteMessage(l_pin: pin, message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.WHISPER, type: "1", chat: "")
+                    let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
+                    if idx != nil {
+                        self.dataMessages.remove(at: idx!)
+//                            if (idx == self.dataMessages.count - 1) {
+//                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+//                            }
+                        for i in 0..<dataDates.count {
+                            if i > dataDates.count - 1 {
+                                continue
                             }
-                            if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[0].messageId}) {
-                                var dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"]  as? String ?? ""]!).map({ $0.dataMessage })
-                                dataMessageInGrouping.remove(at: 0)
-                                self.dataMessages.insert(contentsOf: dataMessageInGrouping, at: idx+1)
-                                self.groupImages.removeValue(forKey: groupingImages[0].messageId)
+                            if self.messages(onDate: dataDates[i]).count == 0 {
+                                dataDates.remove(at: i)
                             }
-                        } else {
-                            self.deleteMessage(l_pin: dataMessages[i]["l_pin"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.WHISPER, type: "2", chat: "")
-                            let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
+                        }
+                    }
+                }
+            } else {
+                if !CheckConnection.isConnectedToNetwork()  || API.nGetCLXConnState() == 0 {
+                    let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                    imageView.tintColor = .white
+                    let banner = FloatingNotificationBanner(title: "Check your connection".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                    banner.show()
+                } else {
+                    if let groupingImages = groupImages[dataMessages[i]["message_id"]  as? String ?? ""] {
+                        for i in 0..<groupingImages.count {
+                            self.deleteMessage(l_pin: groupingImages[i].lPin, message_id: groupingImages[i].messageId, scope: MessageScope.WHISPER, type: "2", chat: "")
+                            let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[i].messageId})
                             if idx != nil {
                                 self.dataMessages[idx!]["lock"] = "1"
                                 self.dataMessages[idx!]["attachment_flag"] = "0"
                                 self.dataMessages[idx!]["reff_id"] = ""
                             }
                         }
+                        if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == groupingImages[0].messageId}) {
+                            var dataMessageInGrouping = (groupImages[dataMessages[i]["message_id"]  as? String ?? ""]!).map({ $0.dataMessage })
+                            dataMessageInGrouping.remove(at: 0)
+                            self.dataMessages.insert(contentsOf: dataMessageInGrouping, at: idx+1)
+                            self.groupImages.removeValue(forKey: groupingImages[0].messageId)
+                        }
+                    } else {
+                        self.deleteMessage(l_pin: dataMessages[i]["l_pin"]  as? String ?? "", message_id: dataMessages[i]["message_id"]  as? String ?? "", scope: MessageScope.WHISPER, type: "2", chat: "")
+                        let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[i]["message_id"] as? String})
+                        if idx != nil {
+                            self.dataMessages[idx!]["lock"] = "1"
+                            self.dataMessages[idx!]["attachment_flag"] = "0"
+                            self.dataMessages[idx!]["reff_id"] = ""
+                        }
                     }
                 }
-                if self.listTimerCredential[dataMessages[i]["message_id"]  as? String ?? ""] != nil {
-                    self.listTimerCredential.removeValue(forKey: dataMessages[i]["message_id"]  as? String ?? "")
-                    self.timerCredential[dataMessages[i]["message_id"]  as? String ?? ""]?.invalidate()
-                    self.timerCredential.removeValue(forKey: dataMessages[i]["message_id"]  as? String ?? "")
-                }
             }
-            let dataMessagesPin = self.pinnedMessagesForBanner()
-            self.pinAllMessages(dataMessages: dataMessagesPin)
-            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-            cancelAction()
+            if self.listTimerCredential[dataMessages[i]["message_id"]  as? String ?? ""] != nil {
+                self.listTimerCredential.removeValue(forKey: dataMessages[i]["message_id"]  as? String ?? "")
+                self.timerCredential[dataMessages[i]["message_id"]  as? String ?? ""]?.invalidate()
+                self.timerCredential.removeValue(forKey: dataMessages[i]["message_id"]  as? String ?? "")
+            }
         }
+        let dataMessagesPin = self.pinnedMessagesForBanner()
+        self.pinAllMessages(dataMessages: dataMessagesPin)
+        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
+        cancelAction()
+        // Only reached when a message was really taken back, so a viewer still open over the
+        // top of this - showing a picture that no longer exists - can be closed here.
+        onDone?()
     }
     
     private func updateProfile() {
@@ -9266,7 +9893,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
         
         let imageStared = UIImageView()
-        if dataMessages[indexPath.row]["is_stared"] as? String == "1" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" == "0") {
+        // Fix: the guard here is meant to keep the star off a message that is locked or opens
+        // only once. It used to read `["lock"] == nil`, which in a dictionary of optional values
+        // is only true when the key is absent - a key that is present carrying a database NULL is
+        // `.some(nil)`, so it fell through to the string test, came out as "" rather than "0", and
+        // the star was withheld from a message that was never locked at all. Absent and NULL both
+        // mean unlocked, so both are read that way now. The star drawn inside a collage tile never
+        // had this test, which is why a starred picture in a group could show there and nowhere
+        // else.
+        let lockFlag = dataMessages[indexPath.row]["lock"] as? String ?? "0"
+        if dataMessages[indexPath.row]["is_stared"] as? String == "1" && (lockFlag.isEmpty || lockFlag == "0") {
             cell.contentView.addSubview(imageStared)
             imageStared.translatesAutoresizingMaskIntoConstraints = false
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
@@ -10334,12 +10970,17 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     }
                 }
                 
-                if (dataMessages[indexPath.row]["progress"] as? Double ?? 0.0 != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                // Fix: this asked only whether `progress` had reached 100, and a row read back
+                // from the database starts at 0 - so every video this phone had ever sent wore an
+                // upload ring for ever. What settles it is the message's own status: still being
+                // sent (1) means a transfer really is running; anything above that has arrived.
+                let sendingNow = (dataMessages[indexPath.row]["status"] as? String ?? "") == "1"
+                if (sendingNow && dataMessages[indexPath.row]["progress"] as? Double ?? 0.0 != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
                     let container = UIView()
                     imageThumb.addSubview(container)
                     container.translatesAutoresizingMaskIntoConstraints = false
-                    container.bottomAnchor.constraint(equalTo: imageThumb.bottomAnchor, constant: -10).isActive = true
-                    container.leadingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: 10).isActive = true
+                    container.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
+                    container.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
                     container.widthAnchor.constraint(equalToConstant: 30).isActive = true
                     container.heightAnchor.constraint(equalToConstant: 30).isActive = true
                     container.backgroundColor = .white.withAlphaComponent(0.1)
@@ -10362,8 +11003,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     imageupload.tintColor = .white
                     container.addSubview(imageupload)
                     imageupload.translatesAutoresizingMaskIntoConstraints = false
-                    imageupload.bottomAnchor.constraint(equalTo: imageThumb.bottomAnchor, constant: -10).isActive = true
-                    imageupload.leadingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: 10).isActive = true
+                    imageupload.centerXAnchor.constraint(equalTo: container.centerXAnchor).isActive = true
+                    imageupload.centerYAnchor.constraint(equalTo: container.centerYAnchor).isActive = true
                     imageupload.widthAnchor.constraint(equalToConstant: 20).isActive = true
                     imageupload.heightAnchor.constraint(equalToConstant: 20).isActive = true
                     // Fix: the same caption as the download ring - how much of the file has gone up
@@ -10382,6 +11023,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let downloadingChat = !videoChat.isEmpty ? videoChat : imageChat
                 if !downloadingChat.isEmpty, Download.isDownloading(forKey: downloadingChat) {
                     ChatTransferRing.add(to: imageThumb, fileName: downloadingChat, progress: Download.progress(forKey: downloadingChat) ?? 0)
+                } else if !videoChat.isEmpty, !sendingNow, isUnreachable(fileNamed: videoChat) {
+                    // Here, and the file is not: tried, could not be had. An offer to fetch it
+                    // rather than a ring that would never fill.
+                    VideoBubbleChrome.addUnavailable(to: imageThumb, sizeText: ChatTransferRing.sizeText(forFileNamed: videoChat))
+                }
+                if !videoChat.isEmpty {
+                    VideoBubbleChrome.addFooter(to: imageThumb, seconds: videoLength(ofMessage: dataMessages[indexPath.row]))
                 }
                 
                 if !copySession && !forwardSession && !deleteSession && !summarizeSession {
@@ -11034,6 +11682,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     
     @objc func imageGroupingTapped(_ sender: ObjectGesture) {
         let listGroupingImages = ListGroupImages()
+        // Opened by the conversation itself, so a picture reached through a collage lands on the
+        // same viewer, with the same strip and the same menu, as one tapped in a bubble.
+        listGroupingImages.openSingle = { [weak self] messageId, presenter, origin in
+            self?.openMedia(messageId: messageId, from: presenter, origin: origin)
+        }
         listGroupingImages.imageTapped = sender.indexImageTapped
         listGroupingImages.listGroupingImages = sender.listImageFromGrouping
         listGroupingImages.titleName = titleText
@@ -11265,6 +11918,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 imageViewer.media = .image(image ?? UIImage())
             } else if type == 1 {
                 imageViewer.media = .video(url ?? URL(string: "")!)
+                // Opened straight onto a video from the conversation, so it starts playing.
+                imageViewer.autoPlaysOnOpen = true
             } else if type == 2 {
                 imageViewer.media = .gif(data ?? Data())
             }
@@ -11280,22 +11935,122 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
             let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
             imageViewer.navigationItem.leftBarButtonItem = backButton
+            // What was written with the picture, and every other picture of the conversation.
+            //
+            // Fix: this took the row's own message, and a collage is one row standing for several
+            // - so its id is the first picture of the group whichever one was tapped. Tapping the
+            // third opened the first. The gesture names the picture when it knows it, which is
+            // what a tap from the collage screen sets.
+            let rowMessageId = dataMessages[indexPath.row]["message_id"] as? String ?? ""
+            let messageId = messageForMedia(messageId: sender.message_id) != nil ? sender.message_id : rowMessageId
+            let opened = messageForMedia(messageId: messageId) ?? dataMessages[indexPath.row]
+            imageViewer.caption = opened["message_text"] as? String ?? ""
+            // Only hand over the strip when the picture being opened is in it. A one-time
+            // picture is left out of the run on purpose, and a strip that does not contain what
+            // was tapped would open the viewer on somebody else's picture.
+            let strip = self.conversationMediaStrip()
+            if let opened = strip.firstIndex(where: { $0.messageId == messageId }) {
+                imageViewer.stripItems = strip
+                imageViewer.currentStripIndex = opened
+            }
+            imageViewer.isStarred = (opened["is_stared"] as? String ?? "0") == "1"
+
             if (Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share")) && dataMessages[indexPath.row]["credential"] as? String != "1" {
-                let shareAction = UIAction { _ in
+                imageViewer.onShare = { [weak imageViewer] _ in
+                    guard let imageViewer = imageViewer else {
+                        return
+                    }
                     var activityViewController = UIActivityViewController(activityItems: [""], applicationActivities: nil)
                     if type == 1 {
                         activityViewController = UIActivityViewController(activityItems: [url ?? URL(string: "")!], applicationActivities: nil)
                     } else {
                         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("ImageSharedNexilis-\(Date().currentTimeMillis())" + ".jpeg")
-                        try? data!.write(to: tempURL)
+                        try? data?.write(to: tempURL)
                         activityViewController = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
                     }
                     activityViewController.popoverPresentationController?.sourceView = imageViewer.view
                     imageViewer.present(activityViewController, animated: true, completion: nil)
                 }
-                let shareButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "square.and.arrow.up"), primaryAction: shareAction, menu: nil)
-                imageViewer.navigationItem.rightBarButtonItem = shareButton
             }
+
+            // Everything below closes the viewer first: what it does happens back in the
+            // conversation, and leaving the picture over the top of it would hide the result.
+            // Each of these is about whichever picture is on screen, which is not necessarily
+            // the one that was tapped - the viewer moves between them on its own now.
+            imageViewer.onAllMedia = { [weak self] shownId in
+                // Fix: this used to close the viewer and push the browser on the conversation, so
+                // Back out of the browser landed in the conversation rather than on the picture
+                // the reader had opened the browser from. It is pushed on the viewer's own stack.
+                self?.showAllMedia(startingAt: shownId.isEmpty ? messageId : shownId,
+                                   in: navigationController,
+                                   returningTo: imageViewer)
+            }
+            imageViewer.onGoToMessage = { [weak self] shownId in
+                let wanted = shownId.isEmpty ? messageId : shownId
+                // Fix: this scrolled this conversation and stopped there. Opened from a media
+                // browser that is itself on top of this screen - or from a profile, where this
+                // conversation is only kept behind the browser and never shown - scrolling it did
+                // nothing the reader could see. Whatever the case, the conversation is brought to
+                // the front first.
+                (sender.presenter ?? self)?.dismiss(animated: true) {
+                    self?.reveal(messageId: wanted, from: sender.presenter)
+                }
+            }
+            imageViewer.onStar = { [weak self] shownId in
+                self?.toggleStar(messageId: shownId.isEmpty ? messageId : shownId)
+            }
+            // Fix: these used to open the selection session with the picture already ticked, which
+            // meant closing the viewer only to be handed the conversation with a tick on it and a
+            // second press still to make. Pressed from a picture the message is already chosen, so
+            // the chooser and the delete offer are put up directly.
+            imageViewer.onForward = { [weak self] shownId in
+                guard let self = self,
+                      let row = self.messageForMedia(messageId: shownId.isEmpty ? messageId : shownId) else {
+                    return
+                }
+                self.presentForwardChooser(for: [row], from: imageViewer)
+            }
+            imageViewer.onDelete = { [weak self] shownId in
+                guard let self = self,
+                      let row = self.messageForMedia(messageId: shownId.isEmpty ? messageId : shownId) else {
+                    return
+                }
+                self.presentDeleteOptions(for: [row], from: imageViewer)
+            }
+            // The conversation follows along while the viewer is open, so by the time it is
+            // closed the reader is already where they expect to be - and the picture shrinks
+            // back towards the message it belongs to rather than towards wherever the list
+            // happened to be left.
+            imageViewer.onMediaChanged = { [weak self] shownId in
+                guard let self = self, !shownId.isEmpty else {
+                    return
+                }
+                // Moved past what the collage holds. The collage has nothing to say about this
+                // picture, so it steps out of the way behind the viewer - and closing then lands
+                // on the conversation, at the message being looked at, rather than back on a
+                // screen that no longer shows it.
+                if let collage = sender.presenter as? ListGroupImages, !collage.holds(messageId: shownId) {
+                    self.navigationController?.popToViewController(self, animated: false)
+                    sender.presenter = nil
+                }
+                self.goToMessage(messageId: shownId)
+                if let indexPath = self.indexPath(forMessageId: shownId),
+                   let cell = self.tableChatView.cellForRow(at: indexPath),
+                   let thumbnail = EditorPersonal.firstImageView(in: cell.contentView) {
+                    self.transitioningDelegateRef?.originImageView = thumbnail
+                }
+            }
+            imageViewer.onDismiss = { [weak self] shownId in
+                guard !shownId.isEmpty, shownId != messageId else {
+                    return
+                }
+                self?.goToMessage(messageId: shownId)
+            }
+            imageViewer.navigationItem.rightBarButtonItem = UIBarButtonItem(
+                title: nil,
+                image: UIImage(systemName: "ellipsis"),
+                primaryAction: nil,
+                menu: imageViewer.makeOverflowMenu())
             
             let user = User.getData(pin: dataMessages[indexPath.row]["f_pin"] as? String)
             let name = user?.fullName
@@ -11310,10 +12065,32 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             
             let transitionDelegate = ZoomTransitioningDelegate()
             transitionDelegate.originImageView = sender.imageView
+            // Answered when a transition starts, not stored up front: the viewer moves between
+            // pictures on its own, and the bubble to shrink back into is whichever one holds the
+            // picture being shown at that moment. Reading it fresh also means it is never a cell
+            // the table has since handed to another message.
+            transitionDelegate.originProvider = { [weak self, weak imageViewer] in
+                guard let self = self, let viewer = imageViewer else {
+                    return nil
+                }
+                // Still on one of the collage's own pictures, so it is the collage's row that the
+                // viewer came out of and should go back into. Once the reader has moved past what
+                // the collage holds, `presenter` has been let go and the conversation answers.
+                if let collage = sender.presenter as? ListGroupImages, collage.holds(messageId: viewer.currentMessageId) {
+                    return sender.imageView
+                }
+                let shown = viewer.currentMessageId
+                guard !shown.isEmpty,
+                      let indexPath = self.indexPath(forMessageId: shown),
+                      let cell = self.tableChatView.cellForRow(at: indexPath) else {
+                    return nil
+                }
+                return EditorPersonal.firstImageView(in: cell.contentView)
+            }
             navigationController.transitioningDelegate = transitionDelegate
             self.transitioningDelegateRef = transitionDelegate
             
-            present(navigationController, animated: true) {
+            (sender.presenter ?? self).present(navigationController, animated: true) {
                 imageViewer.animateBackgroundIn()
             }
         }
@@ -12391,6 +13168,9 @@ public class ObjectGesture: UITapGestureRecognizer {
     public var labelFile = UILabel()
     public var videoURL: NSURL?
     public var indexPath = IndexPath()
+    /// Who should put the viewer on screen. Nil means the conversation itself; a collage sets it
+    /// to itself, so opening one of its pictures does not have to close it first.
+    public weak var presenter: UIViewController?
     public var indexImageTapped: Int!
     public var listImageFromGrouping: [ImageGrouping]!
     public var isInitiator: Bool!

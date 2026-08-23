@@ -2142,7 +2142,13 @@ extension ContactChatViewController {
                 
                 if !data.isParent {
                     titleView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10.0).isActive = true
-                    titleView.text = data.name
+                    // The account's mark in front of the name, as the profile screen shows it.
+                    // People only: a group already carries marks of its own.
+                    if data.groupId.isEmpty, Utils.accountBadge(forPin: data.pin) != nil {
+                        titleView.attributedText = Utils.nameWithBadge(data.name, forPin: data.pin, size: 16, color: titleView.textColor)
+                    } else {
+                        titleView.text = data.name
+                    }
                     
                     content.addSubview(timeView)
                     timeView.translatesAutoresizingMaskIntoConstraints = false

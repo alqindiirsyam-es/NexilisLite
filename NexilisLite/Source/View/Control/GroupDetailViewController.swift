@@ -37,6 +37,7 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     private enum Section {
         case profile
         case description
+        case attachments
         case access
         case topic
         case detail
@@ -47,10 +48,32 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     private var sections: [Section] = [
         .profile,
         .description,
+        .attachments,
         .access,
         .topic,
         .detail
     ]
+
+    /// The conversation this screen was opened from - a topic of the group, or the group itself.
+    ///
+    /// Everything the attachments section offers is about one conversation, and this is the one
+    /// the reader was reading a moment ago. It is read from the screen underneath rather than
+    /// being passed in, which is how the topic rows already tell whether they are the current one.
+    private var openedFrom: EditorGroup? {
+        return previousViewController as? EditorGroup
+    }
+
+    private var openedTopicChatId: String {
+        return openedFrom?.dataTopic["chat_id"] as? String ?? ""
+    }
+
+    private var openedTopicName: String {
+        let chatId = openedTopicChatId
+        if chatId.isEmpty {
+            return group?.name ?? ""
+        }
+        return group?.topics.first(where: { $0.chatId == chatId })?.title ?? ""
+    }
     
     var checkReadMessage: (() -> ())?
     
@@ -104,21 +127,25 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     
     func reload() {
         getData { group in
-            self.group = group
-            if let myData = self.group?.members.first(where: { member in
-                return member.pin == User.getMyPin()!
-            }) {
-                if myData.position == "1" {
-                    self.isAdmin = true
-                } else {
-                    self.isAdmin = false
-                }
-            }
-            if self.sections.count == 5, group.groupType != "1" {
-                self.sections.append(.member)
-                self.sections.append(.exit)
-            }
+            // Fix: everything the table reads used to be written right here, on whatever thread
+            // the fetch came back on, while only the reload was moved to the main one. UIKit asks
+            // a table for its rows during a navigation transition, and it did so while the list of
+            // sections was half-changed - reading past its end and bringing the app down. What the
+            // table reads is written on the thread the table is read on.
             DispatchQueue.main.async {
+                self.group = group
+                if let myData = self.group?.members.first(where: { member in
+                    return member.pin == User.getMyPin()!
+                }) {
+                    self.isAdmin = myData.position == "1"
+                }
+                // Asks what it means: the members and the way out have not been added yet. It used
+                // to ask whether there were exactly five sections, which broke the moment another
+                // section was added above.
+                if !self.sections.contains(.member), group.groupType != "1" {
+                    self.sections.append(.member)
+                    self.sections.append(.exit)
+                }
                 self.title = group.name
                 
                 self.tableView.reloadData()
@@ -315,6 +342,12 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: false)
         switch sections[indexPath.section] {
+        case .attachments:
+            if indexPath.row == 0 {
+                showTopicMedia()
+            } else {
+                navigationController?.pushViewController(Nexilis.getEditorStarMessage(), animated: true)
+            }
         case .profile:
             if isAdmin {
                 let alert = LibAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
@@ -827,10 +860,14 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     }
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        guard let g = group else {
-            return 1
+        // Asked about a section this screen no longer has - which UIKit does while a transition is
+        // running and its own count is a moment behind.
+        guard section < sections.count, let g = group else {
+            return section < sections.count ? 1 : 0
         }
         switch sections[section] {
+        case .attachments:
+            return 2
         case .topic:
             return isAdmin ? g.topics.count + 1 : g.topics.count
         case .detail:
@@ -843,7 +880,14 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     }
     
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        guard section < sections.count else {
+            return nil
+        }
         switch sections[section] {
+        case .attachments:
+            // Named, so it is plain which conversation these belong to - the group has several.
+            let where_ = openedTopicName
+            return where_.isEmpty ? "Topic".localized() : "Topic".localized() + " — " + where_
         case .description:
             return "Description".localized()
         case .topic:
@@ -859,6 +903,20 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         switch sections[indexPath.section] {
+        case .attachments:
+            let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+            var content = cell.defaultContentConfiguration()
+            if indexPath.row == 0 {
+                content.text = "Media, links and docs".localized()
+                content.image = UIImage(systemName: "photo.on.rectangle")
+            } else {
+                content.text = "Starred Messages".localized()
+                content.image = UIImage(systemName: "star")
+            }
+            content.imageProperties.tintColor = .secondaryLabel
+            cell.contentConfiguration = content
+            cell.accessoryType = .disclosureIndicator
+            return cell
         case .profile:
             let cell = tableView.dequeueReusableCell(withIdentifier: "profileCell", for: indexPath) as! ProfileCell
             cell.cover.image = UIImage(named: "Sofa", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
@@ -1160,5 +1218,110 @@ extension GroupDetailViewController: ImageVideoPickerDelegate {
         mutableAttributedString.append(textString)
         
         return mutableAttributedString
+    }
+}
+
+// MARK: - What this topic has been sent
+
+extension GroupDetailViewController {
+
+    /// Opens the browser on everything attached to the conversation this screen came from.
+    @objc func showTopicMedia() {
+        let browser = MediaBrowserViewController()
+        browser.conversationName = openedTopicName
+        let rows = topicMessageRows()
+        browser.media = rows.compactMap { row in
+            let thumb = row["thumb_id"] as? String ?? ""
+            let video = row["video_id"] as? String ?? ""
+            let image = row["image_id"] as? String ?? ""
+            guard !thumb.isEmpty, !(video.isEmpty && image.isEmpty) else {
+                return nil
+            }
+            return MediaBrowserViewController.MediaItem(
+                messageId: row["message_id"] as? String ?? "",
+                thumbFileName: thumb,
+                mediaFileName: video.isEmpty ? image : video,
+                isVideo: !video.isEmpty,
+                durationSeconds: Int(row["video_duration"] as? Int32 ?? 0),
+                date: Double(row["server_date"] as? String ?? "") ?? 0)
+        }
+        for row in rows {
+            let messageId = row["message_id"] as? String ?? ""
+            let when = Double(row["server_date"] as? String ?? "") ?? 0
+            let text = row["message_text"] as? String ?? ""
+            let file = row["file_id"] as? String ?? ""
+            if !file.isEmpty {
+                let parts = text.components(separatedBy: "|")
+                browser.docs.append(MediaBrowserViewController.DocItem(messageId: messageId,
+                                                                       fileName: parts.first ?? file,
+                                                                       storedName: file,
+                                                                       detail: parts.count > 1 ? parts[1] : "",
+                                                                       date: when))
+            } else if let url = MediaBrowserViewController.firstLink(in: text) {
+                browser.links.append(MediaBrowserViewController.LinkItem(messageId: messageId,
+                                                                        url: url,
+                                                                        caption: text,
+                                                                        thumbFileName: row["thumb_id"] as? String ?? "",
+                                                                        date: when))
+            }
+        }
+        // Opened by the conversation itself, which is the screen underneath this one. A picture
+        // reached through here then lands on exactly the viewer a picture tapped in a bubble does:
+        // same caption, same star, same forward and delete, same menu. A viewer built here would
+        // be a second viewer, and the two would drift.
+        // Fix: this asked for the conversation when the picture was tapped, and `previousViewController`
+        // is the second from the top of the whole stack - by then the browser is on top and the
+        // answer was this screen itself, so nothing happened. It is taken now, while this screen
+        // is still the one on top.
+        let conversation = openedFrom
+        browser.onOpenMedia = { [weak browser] messageId in
+            guard let conversation = conversation, let browser = browser else {
+                return
+            }
+            conversation.openMedia(messageId: messageId, from: browser, origin: browser.tileView(for: messageId))
+        }
+        navigationController?.pushViewController(browser, animated: true)
+    }
+
+    /// The attachments of the conversation this screen came from.
+    ///
+    /// A group's messages are told apart by `chat_id`: a topic has one of its own, and the group's
+    /// own conversation has none - the same reading the conversation screen uses to decide what
+    /// belongs to it.
+    private func topicMessageRows() -> [[String: Any?]] {
+        let chatId = openedTopicChatId
+        let groupId = group?.id ?? ""
+        guard !chatId.isEmpty || !groupId.isEmpty else {
+            return []
+        }
+        let belongsTo = chatId.isEmpty ? "chat_id='' AND l_pin='\(groupId)'" : "chat_id='\(chatId)'"
+        var rows: [[String: Any?]] = []
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            let query = """
+                SELECT message_id, server_date, message_text, image_id, video_id, thumb_id, file_id, video_duration \
+                FROM MESSAGE where \(belongsTo) \
+                AND (lock IS NULL OR lock <> '1') AND (credential IS NULL OR credential <> '1') \
+                AND ((thumb_id IS NOT NULL AND thumb_id <> '') OR (file_id IS NOT NULL AND file_id <> '') \
+                OR message_text LIKE '%http://%' OR message_text LIKE '%https://%') \
+                order by server_date asc
+                """
+            guard let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) else {
+                return
+            }
+            while cursor.next() {
+                var row: [String: Any?] = [:]
+                row["message_id"] = cursor.string(forColumnIndex: 0)
+                row["server_date"] = cursor.string(forColumnIndex: 1)
+                row["message_text"] = cursor.string(forColumnIndex: 2)
+                row["image_id"] = cursor.string(forColumnIndex: 3)
+                row["video_id"] = cursor.string(forColumnIndex: 4)
+                row["thumb_id"] = cursor.string(forColumnIndex: 5)
+                row["file_id"] = cursor.string(forColumnIndex: 6)
+                row["video_duration"] = cursor.int(forColumnIndex: 7)
+                rows.append(row)
+            }
+            cursor.close()
+        })
+        return rows
     }
 }

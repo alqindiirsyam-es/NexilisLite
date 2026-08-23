@@ -14,6 +14,7 @@ import CoreLocation
 import CryptoKit
 import LocalAuthentication
 import AVFoundation
+import AVKit
 import PDFKit
 import SDWebImage
 //import var CommonCrypto.CC_MD5_DIGEST_LENGTH
@@ -3563,6 +3564,289 @@ class SecureField : UITextField {
     override func becomeFirstResponder() -> Bool {false}
 }
 
+
+
+/// One picture of the conversation, filling the screen and zoomable on its own.
+///
+/// A page owns its zooming, so moving between pictures is the collection view's job and
+/// nothing has to be torn down and set up again on the way past.
+final class MediaPageCell: UICollectionViewCell, UIScrollViewDelegate {
+    let zoomView = UIScrollView()
+    let imageView = SDAnimatedImageView()
+    private let videoBadge = UIImageView(image: UIImage(systemName: "play.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 56, weight: .regular)))
+    private var loadingName: String?
+    private static let loadQueue = DispatchQueue(label: "MediaPage.pictures", qos: .userInitiated)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.addSubview(zoomView)
+        zoomView.frame = contentView.bounds
+        zoomView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        zoomView.delegate = self
+        zoomView.minimumZoomScale = 1.0
+        zoomView.maximumZoomScale = 3.0
+        zoomView.showsVerticalScrollIndicator = false
+        zoomView.showsHorizontalScrollIndicator = false
+        zoomView.bouncesZoom = true
+        zoomView.backgroundColor = .clear
+        // Each page carries its own scroll view for zooming, and it runs the full height under the
+        // bar as well, so it would draw the same system edge fade the pager does.
+        if #available(iOS 26.0, *) {
+            zoomView.topEdgeEffect.isHidden = true
+            zoomView.bottomEdgeEffect.isHidden = true
+            zoomView.leftEdgeEffect.isHidden = true
+            zoomView.rightEdgeEffect.isHidden = true
+        }
+
+        zoomView.addSubview(imageView)
+        imageView.frame = zoomView.bounds
+        imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        imageView.contentMode = .scaleAspectFit
+
+        contentView.addSubview(videoBadge)
+        videoBadge.tintColor = UIColor.white.withAlphaComponent(0.9)
+        videoBadge.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            videoBadge.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            videoBadge.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        zoomView.setZoomScale(1.0, animated: false)
+        imageView.image = nil
+        loadingName = nil
+    }
+
+    /// Video pages show their poster here; the player itself belongs to the screen, which puts
+    /// it over whichever page has settled.
+    func configure(with item: MediaViewerViewController.StripItem, isVideoHost: Bool) {
+        // Never: the screen puts a real, tappable play button over a video page as soon as it is
+        // shown, so this drew a second one that could not be pressed - and the two crossed over as
+        // the page settled.
+        videoBadge.isHidden = true
+        let name = item.isVideo ? item.thumbFileName : (item.mediaFileName.isEmpty ? item.thumbFileName : item.mediaFileName)
+        loadingName = name
+        guard !name.isEmpty else {
+            imageView.image = nil
+            return
+        }
+        if let cached = Nexilis.imageCache.object(forKey: ("page-" + name) as NSString) {
+            imageView.image = cached
+            return
+        }
+        imageView.image = MediaStripCell.thumbnail(named: item.thumbFileName)
+        MediaPageCell.loadQueue.async { [weak self] in
+            let image = MediaPageCell.picture(named: name)
+            DispatchQueue.main.async {
+                guard let self = self, self.loadingName == name, let image = image else {
+                    return
+                }
+                self.imageView.image = image
+            }
+        }
+    }
+
+    private static func picture(named name: String) -> UIImage? {
+        let key = ("page-" + name) as NSString
+        if let cached = Nexilis.imageCache.object(forKey: key) {
+            return cached
+        }
+        let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
+        guard let dirPath = paths.first else {
+            return nil
+        }
+        let url = URL(fileURLWithPath: dirPath).appendingPathComponent(name)
+        var data: Data?
+        if FileManager.default.fileExists(atPath: url.path) {
+            data = try? Data(contentsOf: url)
+        } else if FileEncryption.shared.isSecureExists(filename: name) {
+            if var secure = try? FileEncryption.shared.readSecure(filename: name) {
+                if let decrypted = FileEncryption.shared.decryptFileFromServer(data: secure) {
+                    secure = decrypted
+                }
+                data = secure
+            }
+        }
+        guard let data = data else {
+            return nil
+        }
+        let image = SDAnimatedImage(data: data) ?? UIImage(data: data)
+        if let image = image {
+            Nexilis.imageCache.setObject(image, forKey: key)
+        }
+        return image
+    }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        return imageView
+    }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        let size = imageView.frame.size
+        let bounds = scrollView.bounds.size
+        let vertical = size.height < bounds.height ? (bounds.height - size.height) / 2 : 0
+        let horizontal = size.width < bounds.width ? (bounds.width - size.width) / 2 : 0
+        scrollView.contentInset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
+    }
+}
+
+/// One thumbnail in the strip along the foot of the viewer.
+final class MediaStripCell: UICollectionViewCell {
+    let imageView = UIImageView()
+    private let videoBadge = UIImageView(image: UIImage(systemName: "play.fill"))
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.addSubview(imageView)
+        imageView.frame = contentView.bounds
+        imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+        contentView.layer.cornerRadius = 4
+        contentView.clipsToBounds = true
+        contentView.addSubview(videoBadge)
+        videoBadge.tintColor = .white
+        videoBadge.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            videoBadge.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            videoBadge.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            videoBadge.widthAnchor.constraint(equalToConstant: 14),
+            videoBadge.heightAnchor.constraint(equalToConstant: 14)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    /// The one being looked at is wider and outlined; the rest keep their own brightness.
+    ///
+    /// Fix: the others used to be drawn at 55% opacity, which is invisible when the pictures are
+    /// pale - a strip of screenshots came out as a row of grey smudges. Size and an outline say
+    /// which one is current without taking the others' colour away.
+    var isCurrent: Bool = false {
+        didSet {
+            contentView.layer.cornerRadius = isCurrent ? 5 : 2
+            contentView.layer.borderWidth = isCurrent ? 2 : 0
+            contentView.layer.borderColor = UIColor.white.cgColor
+            imageView.alpha = 1.0
+        }
+    }
+
+    /// The file this cell is waiting for. A cell is handed from one thumbnail to the next as
+    /// the strip scrolls, and the answer to the one it used to hold must not land in it.
+    private var loadingName: String?
+
+    /// Reading and decoding a hundred small pictures does not belong on the shared pool.
+    ///
+    /// Fix: it was on DispatchQueue.global(), which this app fills with calls blocked on the
+    /// socket - so the work was queued behind them and the strip stayed a row of empty grey
+    /// boxes. Its own queue cannot be held up by anything but itself.
+    private static let loadQueue = DispatchQueue(label: "MediaStrip.thumbnails", qos: .userInitiated)
+
+    func configure(with item: MediaViewerViewController.StripItem) {
+        videoBadge.isHidden = !item.isVideo
+        // The thumbnail if there is one, the picture itself if there is not.
+        let name = item.thumbFileName.isEmpty ? item.mediaFileName : item.thumbFileName
+        loadingName = name
+        guard !name.isEmpty else {
+            imageView.image = nil
+            return
+        }
+        if let cached = Nexilis.imageCache.object(forKey: name as NSString) {
+            imageView.image = cached
+            return
+        }
+        imageView.image = nil
+        MediaStripCell.loadQueue.async { [weak self] in
+            let image = MediaStripCell.thumbnail(named: name)
+            DispatchQueue.main.async {
+                guard let self = self, self.loadingName == name else {
+                    return
+                }
+                self.imageView.image = image
+            }
+        }
+    }
+
+    static func thumbnail(named name: String) -> UIImage? {
+        if let cached = Nexilis.imageCache.object(forKey: name as NSString) {
+            return cached
+        }
+        let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
+        guard let dirPath = paths.first else {
+            return nil
+        }
+        let url = URL(fileURLWithPath: dirPath).appendingPathComponent(name)
+        var image: UIImage?
+        if FileManager.default.fileExists(atPath: url.path) {
+            image = UIImage(contentsOfFile: url.path)
+        } else if FileEncryption.shared.isSecureExists(filename: name) {
+            if var data = try? FileEncryption.shared.readSecure(filename: name) {
+                if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) {
+                    data = decrypted
+                }
+                image = UIImage(data: data)
+            }
+        }
+        guard let resized = image?.resize(target: CGSize(width: 200, height: 200)) else {
+            return image
+        }
+        Nexilis.imageCache.setObject(resized, forKey: name as NSString)
+        return resized
+    }
+}
+
+extension MediaViewerViewController: UICollectionViewDataSource, UICollectionViewDelegate {
+    public func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        return stripItems.count
+    }
+
+    public func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        guard indexPath.item < stripItems.count else {
+            return collectionView.dequeueReusableCell(withReuseIdentifier: collectionView === pager ? "page" : "strip", for: indexPath)
+        }
+        let item = stripItems[indexPath.item]
+        if collectionView === pager {
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "page", for: indexPath)
+            (cell as? MediaPageCell)?.configure(with: item, isVideoHost: indexPath.item == currentStripIndex)
+            return cell
+        }
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "strip", for: indexPath)
+        guard let stripCell = cell as? MediaStripCell else {
+            return cell
+        }
+        stripCell.isCurrent = indexPath.item == highlightedStripIndex
+        stripCell.configure(with: item)
+        return stripCell
+    }
+
+    public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard collectionView !== pager else {
+            return
+        }
+        showStripItem(at: indexPath.item)
+    }
+}
+
+extension MediaViewerViewController: UICollectionViewDelegateFlowLayout {
+    public func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        if collectionView === pager {
+            return collectionView.bounds.size
+        }
+        return indexPath.item == highlightedStripIndex
+            ? MediaViewerViewController.stripCurrentItemSize
+            : MediaViewerViewController.stripItemSize
+    }
+}
+
 class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, UIScrollViewDelegate {
     
     enum MediaType {
@@ -3571,17 +3855,87 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         case video(URL)
     }
 
+    /// One picture or video of the conversation, as the strip along the bottom needs it.
+    public struct StripItem {
+        public let messageId: String
+        public let thumbFileName: String
+        /// The full-size file, so the viewer can move to this one on its own.
+        public let mediaFileName: String
+        public let isVideo: Bool
+        public let caption: String
+        public let title: String
+        public let subtitle: String
+        public let isStarred: Bool
+
+        public init(messageId: String, thumbFileName: String, mediaFileName: String, isVideo: Bool,
+                    caption: String, title: String, subtitle: String, isStarred: Bool) {
+            self.messageId = messageId
+            self.thumbFileName = thumbFileName
+            self.mediaFileName = mediaFileName
+            self.isVideo = isVideo
+            self.caption = caption
+            self.title = title
+            self.subtitle = subtitle
+            self.isStarred = isStarred
+        }
+    }
+
     var media: MediaType!
 
     public let backgroundView = UIView()
     public var titleCustom = ""
     public var subtitleCustom = ""
+    /// What was written with the picture, drawn across the bottom of it.
+    public var caption = ""
+    /// Every picture and video of the conversation, for the strip along the bottom.
+    /// Set by whoever opens this screen on a video, so it plays without being asked twice.
+    public var autoPlaysOnOpen = false
+    public var stripItems: [StripItem] = []
+    /// Which of them is on screen.
+    public var currentStripIndex = 0 {
+        didSet { highlightedStripIndex = currentStripIndex }
+    }
+    /// Which of them the strip is drawing as current, which runs ahead of the picture during a
+    /// drag.
+    private var highlightedStripIndex = 0
+    /// Asked for by the strip when another picture is chosen.
+    public var onAllMedia: ((String) -> Void)?
+    public var onGoToMessage: ((String) -> Void)?
+    public var onShare: ((String) -> Void)?
+    public var onForward: ((String) -> Void)?
+    public var onStar: ((String) -> Void)?
+    public var onDelete: ((String) -> Void)?
+    /// Told which picture was on screen when the viewer closed, so the conversation behind it
+    /// can be left showing that one rather than the one that was tapped several swipes ago.
+    public var onDismiss: ((String) -> Void)?
+    /// Told each time the picture changes, so the conversation underneath can move with it -
+    /// then closing the viewer lands on the right message rather than scrolling there after.
+    public var onMediaChanged: ((String) -> Void)?
+
+    /// The message the viewer is showing right now, which is what every action above is about.
+    public var currentMessageId: String {
+        guard currentStripIndex >= 0, currentStripIndex < stripItems.count else {
+            return ""
+        }
+        return stripItems[currentStripIndex].messageId
+    }
+    /// Whether this picture is already starred, for which way round to draw the star.
+    public var isStarred = false
     private let scrollView = UIScrollView()
     private let imageView = SDAnimatedImageView()
     private var statusBarBackgroundView: UIView!
     private var player: AVPlayer?
     private var playerLayer: AVPlayerLayer?
     private let playPauseButton = UIButton(type: .custom)
+    /// The band of playback controls that sits under the title while a video is open.
+    private let videoBar = UIView()
+    private let pipButton = UIButton(type: .system)
+    private var pictureInPicture: AVPictureInPictureController?
+    /// Carries the player layer, so it is never inside a cell that gets handed to another picture.
+    private let videoHost = UIView()
+    private var hasBuiltVideoChrome = false
+    /// Held so the previous video's ticker can be taken off before the next one puts one on.
+    private var timeObserverToken: Any?
     private var isVideoPlaying = false
     public var isSecure = false
     
@@ -3636,7 +3990,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         }
 
         // Background view
-        backgroundView.backgroundColor = .white
+        backgroundView.backgroundColor = .black
         backgroundView.alpha = 0
         backgroundView.frame = view.bounds
         if isSecure {
@@ -3645,51 +3999,849 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             view.addSubview(backgroundView)
         }
 
-        // ScrollView for zooming
+        // The video player still needs somewhere to live; the pictures no longer do.
         scrollView.frame = view.bounds
-        scrollView.delegate = self
-        scrollView.minimumZoomScale = 1.0
-        scrollView.maximumZoomScale = 3.0
-        scrollView.showsVerticalScrollIndicator = false
-        scrollView.showsHorizontalScrollIndicator = false
-        scrollView.bouncesZoom = true
+        scrollView.isUserInteractionEnabled = false
         if isSecure {
             secureView.addSubview(scrollView)
         } else {
             view.addSubview(scrollView)
         }
 
-        // Add imageView to scrollView
-        imageView.frame = scrollView.bounds
-        imageView.contentMode = .scaleAspectFit
-        scrollView.addSubview(imageView)
+        setupPager()
+        setupTopScrim()
 
-        configureMedia()
+        if stripItems.isEmpty {
+            // Opened on something the strip does not carry - a picture that can only be seen
+            // once, say. There is nothing to page through, so it is shown on its own the way it
+            // always was, and the pager stays out of the way.
+            pager.isHidden = true
+            scrollView.isUserInteractionEnabled = true
+            scrollView.delegate = self
+            scrollView.minimumZoomScale = 1.0
+            scrollView.maximumZoomScale = 3.0
+            scrollView.showsVerticalScrollIndicator = false
+            scrollView.showsHorizontalScrollIndicator = false
+            scrollView.bouncesZoom = true
+            imageView.frame = scrollView.bounds
+            imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            imageView.contentMode = .scaleAspectFit
+            scrollView.addSubview(imageView)
+            configureMedia()
+        }
 
         // Tap gesture to toggle navigation bar
         let tap = UITapGestureRecognizer(target: self, action: #selector(toggleNavigationBar))
         tap.numberOfTapsRequired = 1
+        // Fix: a recogniser on the view cancels the touches under it by default, so a tap on a
+        // thumbnail in the strip never reached the strip - it just toggled the chrome.
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
         view.addGestureRecognizer(tap)
 
         // Pan gesture for swipe-to-dismiss
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         panGesture.delegate = self
+        panGesture.cancelsTouchesInView = false
         view.addGestureRecognizer(panGesture)
 
-        // Status bar background view
-        let window = UIApplication.shared.windows.first
-        let statusBarHeight = window?.windowScene?.statusBarManager?.statusBarFrame.height ?? 44
-
-        statusBarBackgroundView = UIView(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: statusBarHeight))
-        statusBarBackgroundView.backgroundColor = .mainColor
-        statusBarBackgroundView.autoresizingMask = [.flexibleWidth, .flexibleBottomMargin]
+        // Fix: a solid strip in the app's colour used to sit across the status bar, and the
+        // navigation bar under it was opaque - so a picture stopped short of the top of the
+        // screen and was framed rather than shown. The picture now runs the whole height and
+        // the chrome floats over it, which is what a viewer is for.
+        statusBarBackgroundView = UIView(frame: .zero)
+        statusBarBackgroundView.isHidden = true
         view.addSubview(statusBarBackgroundView)
+        makeNavigationBarTransparent()
+        setupBottomChrome()
+        highlightedStripIndex = currentStripIndex
+        // The pager has no pages until it has been laid out, so where it opens is settled on the
+        // next turn - before anything is shown, and without an animation to see.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.stripItems.isEmpty else {
+                return
+            }
+            guard self.currentStripIndex < self.stripItems.count else {
+                return
+            }
+            self.pager.layoutIfNeeded()
+            self.movePager(to: self.currentStripIndex, animated: false)
+            self.adoptCurrentPage()
+            self.stripCollection.scrollToItem(at: IndexPath(item: self.currentStripIndex, section: 0), at: .centeredHorizontally, animated: false)
+        }
+    }
+
+    /// Lets the picture run behind the bar rather than beginning underneath it.
+    private func makeNavigationBarTransparent() {
+        guard let bar = navigationController?.navigationBar else {
+            return
+        }
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithTransparentBackground()
+        appearance.backgroundColor = .clear
+        appearance.shadowColor = .clear
+        bar.standardAppearance = appearance
+        bar.scrollEdgeAppearance = appearance
+        bar.compactAppearance = appearance
+        bar.isTranslucent = true
+        bar.tintColor = .white
+        bar.overrideUserInterfaceStyle = .dark
+        // Fix: an appearance is not the whole story. backgroundColor and barTintColor are set
+        // straight onto the bar by the shared style this viewer is opened with, and they paint
+        // over a transparent appearance - which is why the top stayed blue.
+        bar.backgroundColor = .clear
+        bar.barTintColor = nil
+        bar.shadowImage = UIImage()
+        bar.setBackgroundImage(UIImage(), for: .default)
     }
     
+
+
+
+    // MARK: - The blur behind the bar
+
+    private let topScrim = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+    private let topScrimMask = CAGradientLayer()
+
+    /// How much of the material is laid over the picture.
+    ///
+    /// Set on the view rather than in the mask. The mask decides where the blur reaches and how it
+    /// fades; alpha decides how strong it is, and composites in proportion, so this figure is the
+    /// one to turn when the header wants more or less of it.
+    private static let topScrimStrength: CGFloat = 0.6
+
+    /// A light blur behind the bar, fading out downwards.
+    ///
+    /// Deliberately slight. The picture keeps its colours and shapes; what the blur takes off is
+    /// the fine detail that competes with the lettering. Most of the readability is carried by the
+    /// halo on the letters themselves, which only darkens the pixels hugging the strokes - so this
+    /// can stay thin enough to see straight through.
+    private func setupTopScrim() {
+        topScrimMask.colors = [
+            UIColor.black.cgColor,
+            UIColor.black.cgColor,
+            UIColor.black.withAlphaComponent(0.6).cgColor,
+            UIColor.black.withAlphaComponent(0.25).cgColor,
+            UIColor.clear.cgColor
+        ]
+        topScrimMask.locations = [0.0, 0.35, 0.65, 0.85, 1.0]
+        topScrim.layer.mask = topScrimMask
+        topScrim.alpha = MediaViewerViewController.topScrimStrength
+        topScrim.isUserInteractionEnabled = false
+        view.addSubview(topScrim)
+    }
+
+    private func layoutTopScrim() {
+        // Kept above the pictures, which are added and moved beneath it as pages come and go.
+        view.bringSubviewToFront(topScrim)
+        let height = (navigationController?.navigationBar.frame.maxY ?? 88) + 40
+        topScrim.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: height)
+        topScrimMask.frame = topScrim.bounds
+    }
+
+    // MARK: - The pager
+
+    private var pager: UICollectionView!
+    /// True while the pager is being put where it belongs, so its own scrolling is not mistaken
+    /// for the reader turning a page.
+    private var isSettingPagerPosition = false
+
+    /// The pictures of the conversation, side by side, one screen wide each.
+    ///
+    /// Fix: moving between pictures used to be three views shifted by hand with a transform.
+    /// That can only ever be worth one picture per drag, it leaves a seam where the views meet
+    /// - the black the reader kept seeing across the top - and the strip has to guess how far
+    /// along the finger is. A paging collection view is what this always was: the pages are
+    /// contiguous, one drag can run the length of the conversation without being lifted, and
+    /// how far along it is arrives as a contentOffset rather than as a guess.
+    private func setupPager() {
+        let layout = UICollectionViewFlowLayout()
+        layout.scrollDirection = .horizontal
+        layout.minimumLineSpacing = 0
+        layout.minimumInteritemSpacing = 0
+        layout.sectionInset = .zero
+        pager = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
+        pager.isPagingEnabled = true
+        pager.backgroundColor = .clear
+        pager.showsHorizontalScrollIndicator = false
+        pager.dataSource = self
+        pager.delegate = self
+        pager.contentInsetAdjustmentBehavior = .never
+        pager.register(MediaPageCell.self, forCellWithReuseIdentifier: "page")
+        pager.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // The dark band across the top of the picture was never ours. From iOS 26 a scroll view
+        // sitting under a bar gets an edge effect for free - a soft fade so bar buttons stay
+        // readable over whatever scrolls past. It is drawn by the system, keyed to the bar being
+        // visible, and takes the bar's dark style, which is why it survived every scrim of ours
+        // being removed. Measured off a pair of screenshots of the same picture with the bar shown
+        // and hidden, it peaked at 0.85 opacity and ran 150pt down. Turned off on all four edges:
+        // this is a full-screen media pager, where nothing should be laid over the picture.
+        if #available(iOS 26.0, *) {
+            pager.topEdgeEffect.isHidden = true
+            pager.bottomEdgeEffect.isHidden = true
+            pager.leftEdgeEffect.isHidden = true
+            pager.rightEdgeEffect.isHidden = true
+        }
+        if isSecure, let secureView = SecureField().secureContainer {
+            secureView.addSubview(pager)
+        } else {
+            view.addSubview(pager)
+        }
+        videoHost.isUserInteractionEnabled = false
+        videoHost.isHidden = true
+        videoHost.backgroundColor = .clear
+        view.addSubview(videoHost)
+    }
+
+    /// Puts the pager on a page without it counting as the reader turning one.
+    private func movePager(to index: Int, animated: Bool) {
+        guard index >= 0, index < stripItems.count, pager != nil else {
+            return
+        }
+        isSettingPagerPosition = true
+        pager.scrollToItem(at: IndexPath(item: index, section: 0), at: .centeredHorizontally, animated: animated)
+        if !animated {
+            isSettingPagerPosition = false
+        }
+    }
+
+    /// Which page the pager has come to rest on.
+    private func pageIndex() -> Int {
+        guard pager != nil, pager.bounds.width > 0 else {
+            return currentStripIndex
+        }
+        return max(0, min(stripItems.count - 1, Int(round(pager.contentOffset.x / pager.bounds.width))))
+    }
+
+    /// Everything that is about the picture rather than about the page carrying it.
+    private func adoptCurrentPage() {
+        let index = pageIndex()
+        guard index >= 0, index < stripItems.count else {
+            return
+        }
+        let changed = index != currentStripIndex
+        currentStripIndex = index
+        let item = stripItems[index]
+
+        showChrome(for: index)
+        highlightStrip(at: index)
+        prepareVideoIfNeeded(for: item)
+        if changed {
+            onMediaChanged?(item.messageId)
+        }
+    }
+
+    /// What is written around the picture: who sent it, when, its caption, whether it is starred.
+    ///
+    /// Kept apart from settling on a page so it can run while the picture is still moving. It used
+    /// to be done only once the scroll had finished, which left the name and the date belonging to
+    /// the picture the reader had just left while the next one was already most of the way across.
+    /// This changes at the same moment the strip marks its new thumbnail, so the whole screen
+    /// speaks about one picture at a time.
+    private func showChrome(for index: Int) {
+        guard index >= 0, index < stripItems.count, index != chromeShowingIndex else {
+            return
+        }
+        chromeShowingIndex = index
+        let item = stripItems[index]
+        caption = item.caption
+        captionLabel.text = item.caption.mentionsAsNames()
+        // Fix: this reached for the label's superview, which since the caption was put inside a
+        // scroll view is the scroll view - not the box in the stack that has to collapse. Showing
+        // and hiding the wrong view left the caption absent whatever the picture carried.
+        captionBox?.isHidden = item.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // Another picture, another caption - so the one just read is not left open over it.
+        isCaptionExpanded = false
+        captionLabel.numberOfLines = MediaViewerViewController.collapsedCaptionLines
+        captionScroll.setContentOffset(.zero, animated: false)
+        refreshCaptionHeight()
+        isStarred = item.isStarred
+        buildActionBar()
+        if !item.title.isEmpty {
+            setNavigationTitle(title: item.title, subtitle: item.subtitle)
+        }
+        // The player is only torn down once the scroll settles, so scrubbing quickly off a video
+        // left its button and its control band sitting over a photograph. Anything belonging to a
+        // video goes the moment the picture on screen is not one.
+        if item.isVideo {
+            // Fix: the button and the control band are built the first time a video is set up, and
+            // a viewer opened on a photograph has never done that - so scrubbing along to a video
+            // set `isHidden = false` on a button that was not in the view at all. Built here too,
+            // where the page being a video is first known.
+            buildVideoChromeIfNeeded()
+            view.setNeedsLayout()
+        }
+        playPauseButton.isHidden = !item.isVideo || isVideoPlaying
+        if !item.isVideo {
+            videoBar.isHidden = true
+        }
+    }
+
+    /// Which picture the writing around the screen is currently describing.
+    private var chromeShowingIndex = -1
+
+    /// A video page borrows the screen's player; every other page needs it gone.
+    private func prepareVideoIfNeeded(for item: StripItem) {
+        stopVideo()
+        if let token = timeObserverToken {
+            player?.removeTimeObserver(token)
+            timeObserverToken = nil
+        }
+        if let item = player?.currentItem {
+            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: item)
+        }
+        playerLayer?.removeFromSuperlayer()
+        playerLayer = nil
+        player = nil
+        isVideoPlaying = false
+        videoHost.isHidden = true
+        let videoChrome = [playPauseButton, blurBackground, videoBar] as [UIView]
+        videoChrome.forEach { $0.isHidden = true }
+        videoPageIndex = -1
+        guard item.isVideo else {
+            return
+        }
+        videoPageIndex = stripItems.firstIndex(where: { $0.messageId == item.messageId }) ?? -1
+        videoChrome.forEach { $0.isHidden = false }
+        if let known = resolvedVideoURLs[item.messageId] {
+            setupVideo(url: known)
+            return
+        }
+        // Fix: an encrypted video was read, decrypted and written out to a temporary file here, on
+        // the main thread, the instant a page settled - so every swipe onto or off a video stalled
+        // for as long as that took. It is done away from the main thread now, and the answer is
+        // kept so coming back to the same video costs nothing.
+        playPauseButton.isHidden = true
+        videoBeingResolved = item.messageId
+        let wanted = item.messageId
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard case .video(let url)? = MediaViewerViewController.loadMedia(for: item) else {
+                return
+            }
+            DispatchQueue.main.async {
+                guard let self = self, self.videoBeingResolved == wanted else {
+                    return
+                }
+                self.resolvedVideoURLs[wanted] = url
+                self.setupVideo(url: url)
+            }
+        }
+    }
+
+    /// Where each video was found, so a second visit does not decrypt and write it out again.
+    private var resolvedVideoURLs: [String: URL] = [:]
+    /// Which video is being fetched, so an answer for one the reader has already left is dropped.
+    private var videoBeingResolved = ""
+    /// Which page the playing video belongs to, so its layer can travel with that page.
+    private var videoPageIndex = -1
+
+    /// Keeps the video sitting on its own page rather than over the whole screen.
+    ///
+    /// Fix: the player layer was carried by a view the width of the screen that never moved, so
+    /// swiping off a video left the video painted on top of whatever was sliding in underneath it
+    /// until the scroll settled - which is what made leaving a video look broken rather than
+    /// merely slow. It now tracks its page exactly, and slides away with it.
+    private func positionVideoHost() {
+        guard videoPageIndex >= 0, pager != nil, pager.bounds.width > 0 else {
+            return
+        }
+        let x = CGFloat(videoPageIndex) * pager.bounds.width - pager.contentOffset.x
+        videoHost.frame = CGRect(x: x, y: 0, width: view.bounds.width, height: view.bounds.height)
+    }
+
+    /// The picture on screen right now, for a transition to grow out of or shrink back into.
+    public func currentPictureView() -> UIImageView? {
+        guard pager != nil,
+              let cell = pager.cellForItem(at: IndexPath(item: currentStripIndex, section: 0)) as? MediaPageCell else {
+            return imageView
+        }
+        return cell.imageView
+    }
+
+    /// Moves to one of the conversation's pictures by name.
+    ///
+    /// For the browser pushed on top of this screen: choosing a picture there comes back to here
+    /// rather than to the conversation, and this is how it says which one.
+    public func show(messageId: String) {
+        guard let index = stripItems.firstIndex(where: { $0.messageId == messageId }) else {
+            return
+        }
+        showStripItem(at: index, animated: false)
+    }
+
+    /// Shows another of the conversation's pictures. Everything else follows from the page.
+    func showStripItem(at index: Int, animated: Bool = true) {
+        guard index >= 0, index < stripItems.count else {
+            return
+        }
+        movePager(to: index, animated: animated)
+        if !animated {
+            adoptCurrentPage()
+        }
+    }
+
+    /// Which thumbnail is drawn as the current one, without changing what is on screen.
+    func highlightStrip(at index: Int, scrollIntoView: Bool = true) {
+        guard index != highlightedStripIndex, index >= 0, index < stripItems.count else {
+            return
+        }
+        let previous = highlightedStripIndex
+        highlightedStripIndex = index
+        // Only the two that change, and only their size - reloading the strip would throw away
+        // every thumbnail still on its way and leave a row of grey boxes.
+        for cellIndex in [previous, index] where cellIndex >= 0 && cellIndex < stripItems.count {
+            if let cell = stripCollection.cellForItem(at: IndexPath(item: cellIndex, section: 0)) as? MediaStripCell {
+                cell.isCurrent = cellIndex == index
+            }
+        }
+        // `performBatchUpdates` re-runs the layout for the whole strip and animates it. Once per
+        // picture that is nothing; during a flick it lands twenty times a second, on the main
+        // thread, while the strip is trying to decelerate - which is what made the drag feel
+        // heavy and cut a fast swipe short. The current thumbnail still marks itself out by its
+        // border above; its width settles once the strip comes to rest.
+        if !isScrubbingStrip {
+            stripCollection.performBatchUpdates(nil)
+        }
+        // Not while the reader is dragging the strip itself - moving it under their finger is a
+        // fight they cannot win.
+        guard scrollIntoView else {
+            return
+        }
+        stripCollection.scrollToItem(at: IndexPath(item: index, section: 0), at: .centeredHorizontally, animated: true)
+    }
+
+    /// True while the strip is being dragged, so the picture is following the strip rather than
+    /// the other way round.
+    private var isScrubbingStrip = false
+
+    /// Moves the picture to whichever thumbnail the strip has arrived under its middle.
+    private func scrubFromStrip() {
+        guard stripCollection.bounds.width > 0, stripItems.count > 1 else {
+            return
+        }
+        let middle = CGPoint(x: stripCollection.contentOffset.x + stripCollection.bounds.width / 2,
+                             y: stripCollection.bounds.midY)
+        guard let index = nearestStripItem(to: middle), index != pageIndex() else {
+            return
+        }
+        // Straight to the offset rather than `scrollToItem`, which goes through the layout to work
+        // out where it is being asked to go. The pager is paged and every page is a screen wide,
+        // so where page N starts is simply N screens along.
+        highlightStrip(at: index, scrollIntoView: false)
+        showChrome(for: index)
+        isSettingPagerPosition = true
+        pager.setContentOffset(CGPoint(x: CGFloat(index) * pager.bounds.width, y: 0), animated: false)
+        isSettingPagerPosition = false
+    }
+
+    /// Which thumbnail is under a point - falling back to the nearest one when the point lands in
+    /// the gap between two.
+    private func nearestStripItem(to point: CGPoint) -> Int? {
+        if let indexPath = stripCollection.indexPathForItem(at: point) {
+            return indexPath.item
+        }
+        var best: Int?
+        var shortest = CGFloat.greatestFiniteMagnitude
+        for cell in stripCollection.visibleCells {
+            let distance = abs(cell.center.x - point.x)
+            if distance < shortest, let indexPath = stripCollection.indexPath(for: cell) {
+                shortest = distance
+                best = indexPath.item
+            }
+        }
+        return best
+    }
+
+    private func endStripScrub() {
+        isScrubbingStrip = false
+        adoptCurrentPage()
+        // The width the current thumbnail was owed while the strip was moving is given to it now.
+        stripCollection.performBatchUpdates(nil)
+        stripCollection.scrollToItem(at: IndexPath(item: pageIndex(), section: 0), at: .centeredHorizontally, animated: true)
+    }
+
+    /// Keeps how long a video runs, so nothing has to open the file to find out again.
+    ///
+    /// The length is not sent with a message, and a video kept in the secure store cannot be asked
+    /// without being decrypted whole - which is not work a grid of thumbnails should start. So it
+    /// is written down the first time something has the file open for its own reasons, and read
+    /// from the database ever after.
+    public static func rememberVideoDuration(seconds: Int, messageId: String) {
+        guard seconds > 0, !messageId.isEmpty else {
+            return
+        }
+        DispatchQueue.global(qos: .utility).async {
+            Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                do {
+                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                        "video_duration": seconds
+                    ], _where: "message_id = '\(messageId)'")
+                } catch {
+                    rollback.pointee = true
+                }
+            })
+        }
+    }
+
+    /// Reads one of the conversation's files, from wherever it is kept.
+    static func loadMedia(for item: StripItem) -> MediaType? {
+        let name = item.mediaFileName.isEmpty ? item.thumbFileName : item.mediaFileName
+        guard !name.isEmpty else {
+            return nil
+        }
+        let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
+        guard let dirPath = paths.first else {
+            return nil
+        }
+        let url = URL(fileURLWithPath: dirPath).appendingPathComponent(name)
+        if item.isVideo {
+            if FileManager.default.fileExists(atPath: url.path) {
+                return .video(url)
+            }
+            // An encrypted file has to be written out before anything can play it.
+            guard var data = try? FileEncryption.shared.readSecure(filename: name) else {
+                return nil
+            }
+            if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) {
+                data = decrypted
+            }
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            guard (try? data.write(to: tempURL)) != nil else {
+                return nil
+            }
+            return .video(tempURL)
+        }
+        var data: Data?
+        if FileManager.default.fileExists(atPath: url.path) {
+            data = try? Data(contentsOf: url)
+        } else if FileEncryption.shared.isSecureExists(filename: name) {
+            if var secure = try? FileEncryption.shared.readSecure(filename: name) {
+                if let decrypted = FileEncryption.shared.decryptFileFromServer(data: secure) {
+                    secure = decrypted
+                }
+                data = secure
+            }
+        }
+        guard let data = data, let image = UIImage(data: data) else {
+            return nil
+        }
+        return .image(image)
+    }
+
+
+    // MARK: - Bottom chrome
+
+
+    /// The strip is a row of small, tightly packed thumbnails with the one being looked at
+    /// standing out from them - twice as wide, at its full size, with room either side. That
+    /// difference is the only thing saying which picture is on screen, so it has to be plain.
+    static let stripItemSize = CGSize(width: 24, height: 40)
+    static let stripCurrentItemSize = CGSize(width: 46, height: 40)
+
+    private let captionLabel = UILabel()
+    /// How much of a caption is shown before it has been asked for.
+    private static let collapsedCaptionLines = 2
+    private var isCaptionExpanded = false
+    private let captionScroll = UIScrollView()
+    private var captionHeight: NSLayoutConstraint!
+    /// The box in the bottom stack that the caption lives in - what collapses when there is none.
+    private weak var captionBox: UIView?
+    private var isMeasuringCaption = false
+
+    /// Opens a caption out to its full length, and folds it back.
+    ///
+    /// The tap that shows and hides the chrome does not reach here - touches inside the bottom
+    /// stack are already its own - so this is the only thing a tap on the caption does.
+    @objc private func toggleCaption() {
+        isCaptionExpanded.toggle()
+        captionLabel.numberOfLines = isCaptionExpanded ? 0 : MediaViewerViewController.collapsedCaptionLines
+        UIView.animate(withDuration: 0.2) {
+            self.refreshCaptionHeight()
+            self.view.layoutIfNeeded()
+        }
+    }
+
+    /// How tall the caption is allowed to be, and whether it has to be scrolled to be read.
+    ///
+    /// Opened out, it may grow until its top would reach the header - no further. A caption that
+    /// needs more room than that keeps the room and is read by scrolling, so the strip and the
+    /// row of actions are never pushed off the screen by somebody's long message.
+    private func refreshCaptionHeight() {
+        // Belt as well as braces: setting the constraint lays out again, which comes back here.
+        guard captionHeight != nil, view.bounds.width > 0, !isMeasuringCaption else {
+            return
+        }
+        isMeasuringCaption = true
+        defer { isMeasuringCaption = false }
+        let width = max(1, view.bounds.width - 32)
+        let text = captionLabel.text ?? ""
+        let full = ceil((text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: captionLabel.font as Any],
+            context: nil).height)
+        let collapsed = ceil(captionLabel.font.lineHeight * CGFloat(MediaViewerViewController.collapsedCaptionLines))
+
+        let wanted: CGFloat
+        if isCaptionExpanded {
+            // Fix: this measured the room as the bottom stack's height minus the caption's own -
+            // and the caption's height is what this method then sets. Each layout pass fed the
+            // next a different answer, and the screen span in that loop rather than settling,
+            // which is why nothing on it would respond. The other rows are measured directly, so
+            // nothing here depends on the value being worked out.
+            let others = bottomStack.arrangedSubviews
+                .filter { $0 !== captionBox && !$0.isHidden }
+                .reduce(CGFloat(0)) { $0 + $1.frame.height }
+            let headerBottom = navigationController?.navigationBar.frame.maxY ?? view.safeAreaInsets.top
+            let room = view.bounds.height - headerBottom - others - 32
+            wanted = min(full, max(collapsed, room))
+        } else {
+            wanted = min(full, collapsed)
+        }
+        captionScroll.isScrollEnabled = isCaptionExpanded && full > wanted + 1
+        guard abs(captionHeight.constant - wanted) > 0.5 else {
+            return
+        }
+        captionHeight.constant = wanted
+    }
+    private let bottomStack = UIStackView()
+    private var stripCollection: UICollectionView!
+    private let actionBar = UIStackView()
+
+    /// What sits over the foot of the picture: what was written with it, every other picture of
+    /// the conversation, and what can be done with this one - the same three things, in the same
+    /// order, that a reader expects from a photo viewer.
+    private func setupBottomChrome() {
+        bottomStack.axis = .vertical
+        bottomStack.spacing = 0
+        bottomStack.alignment = .fill
+        view.addSubview(bottomStack)
+        bottomStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bottomStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomStack.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+
+        // The caption, if there was one.
+        let captionContainer = UIView()
+        // Inside a scroll view, so a caption longer than the screen can be read through rather
+        // than either running off the bottom or pushing the strip and the actions out of sight.
+        captionScroll.translatesAutoresizingMaskIntoConstraints = false
+        captionScroll.showsHorizontalScrollIndicator = false
+        captionScroll.isScrollEnabled = false
+        captionContainer.addSubview(captionScroll)
+        captionScroll.addSubview(captionLabel)
+        captionLabel.translatesAutoresizingMaskIntoConstraints = false
+        captionHeight = captionScroll.heightAnchor.constraint(equalToConstant: 40)
+        NSLayoutConstraint.activate([
+            captionScroll.leadingAnchor.constraint(equalTo: captionContainer.leadingAnchor, constant: 16),
+            captionScroll.trailingAnchor.constraint(equalTo: captionContainer.trailingAnchor, constant: -16),
+            captionScroll.topAnchor.constraint(equalTo: captionContainer.topAnchor, constant: 10),
+            captionScroll.bottomAnchor.constraint(equalTo: captionContainer.bottomAnchor, constant: -10),
+            captionHeight,
+            captionLabel.leadingAnchor.constraint(equalTo: captionScroll.contentLayoutGuide.leadingAnchor),
+            captionLabel.trailingAnchor.constraint(equalTo: captionScroll.contentLayoutGuide.trailingAnchor),
+            captionLabel.topAnchor.constraint(equalTo: captionScroll.contentLayoutGuide.topAnchor),
+            captionLabel.bottomAnchor.constraint(equalTo: captionScroll.contentLayoutGuide.bottomAnchor),
+            captionLabel.widthAnchor.constraint(equalTo: captionScroll.frameLayoutGuide.widthAnchor)
+        ])
+        captionLabel.textColor = .white
+        captionLabel.font = UIFont.systemFont(ofSize: 15)
+        MediaViewerViewController.applyTextShadow(to: captionLabel)
+        captionLabel.numberOfLines = MediaViewerViewController.collapsedCaptionLines
+        captionLabel.lineBreakMode = .byTruncatingTail
+        // Fix: a caption was shown exactly as it is stored, and a mention is stored as the pin it
+        // points at - so a caption that named somebody read "@0254321". The same reading the
+        // conversation gives it.
+        captionLabel.text = caption.mentionsAsNames()
+        // Long captions are cut short until they are asked for.
+        captionLabel.isUserInteractionEnabled = true
+        captionLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(toggleCaption)))
+        captionContainer.isHidden = caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        captionBox = captionContainer
+        bottomStack.addArrangedSubview(captionContainer)
+        refreshCaptionHeight()
+
+        // Every other picture of the conversation.
+        let layout = UICollectionViewFlowLayout()
+        layout.scrollDirection = .horizontal
+        layout.itemSize = MediaViewerViewController.stripItemSize
+        layout.minimumLineSpacing = 2
+        layout.minimumInteritemSpacing = 2
+        layout.sectionInset = UIEdgeInsets(top: 5, left: 10, bottom: 5, right: 10)
+        stripCollection = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        stripCollection.backgroundColor = .clear
+        stripCollection.showsHorizontalScrollIndicator = false
+        stripCollection.dataSource = self
+        stripCollection.delegate = self
+        stripCollection.register(MediaStripCell.self, forCellWithReuseIdentifier: "strip")
+        stripCollection.translatesAutoresizingMaskIntoConstraints = false
+        stripCollection.heightAnchor.constraint(equalToConstant: 50).isActive = true
+        stripCollection.isHidden = stripItems.count < 2
+        // A flick should carry a long way through a conversation's pictures rather than stopping
+        // a few thumbnails along.
+        stripCollection.decelerationRate = .normal
+        stripCollection.alwaysBounceHorizontal = true
+        bottomStack.addArrangedSubview(stripCollection)
+
+        // What can be done with this one.
+        actionBar.axis = .horizontal
+        actionBar.distribution = .fillEqually
+        actionBar.alignment = .center
+        actionBar.isLayoutMarginsRelativeArrangement = true
+        actionBar.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 10, leading: 8, bottom: 6, trailing: 8)
+        bottomStack.addArrangedSubview(actionBar)
+        buildActionBar()
+
+        view.bringSubviewToFront(bottomStack)
+
+        // Dark enough for white to read on, over any picture.
+        let scrim = UIView()
+        scrim.backgroundColor = UIColor.black.withAlphaComponent(0.75)
+        scrim.isUserInteractionEnabled = false
+        bottomStack.insertSubview(scrim, at: 0)
+        scrim.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrim.topAnchor.constraint(equalTo: bottomStack.topAnchor),
+            scrim.leadingAnchor.constraint(equalTo: bottomStack.leadingAnchor),
+            scrim.trailingAnchor.constraint(equalTo: bottomStack.trailingAnchor),
+            scrim.bottomAnchor.constraint(equalTo: bottomStack.bottomAnchor)
+        ])
+    }
+
+    private func buildActionBar() {
+        actionBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        // Fix: this asked whether a player existed, and the row is rebuilt before the previous
+        // video is torn down - so arriving on a picture still found the player of the video just
+        // left and kept offering play. What matters is what is on screen, which the strip knows.
+        let showingVideo: Bool
+        if chromeShowingIndex >= 0, chromeShowingIndex < stripItems.count {
+            showingVideo = stripItems[chromeShowingIndex].isVideo
+        } else {
+            showingVideo = player != nil
+        }
+        let items: [(String, Selector, Bool)] = [
+            ("square.and.arrow.up", #selector(tapShare), onShare != nil),
+            ("arrowshape.turn.up.right", #selector(tapForward), onForward != nil),
+            (isVideoPlaying ? "pause.fill" : "play.fill", #selector(togglePlayPause), showingVideo),
+            (isStarred ? "star.fill" : "star", #selector(tapStar), onStar != nil),
+            ("trash", #selector(tapDelete), onDelete != nil)
+        ]
+        for (symbol, action, enabled) in items where enabled {
+            let button = UIButton(type: .system)
+            button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)), for: .normal)
+            button.tintColor = .white
+            button.addTarget(self, action: action, for: .touchUpInside)
+            button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+            actionBar.addArrangedSubview(button)
+        }
+        actionBar.isHidden = actionBar.arrangedSubviews.isEmpty
+    }
+
+    /// The menu behind the button in the top right.
+    func makeOverflowMenu() -> UIMenu {
+        var actions: [UIAction] = []
+        if let onAllMedia = onAllMedia {
+            actions.append(UIAction(title: "All Media".localized(), image: UIImage(systemName: "photo.on.rectangle")) { [weak self] _ in
+                onAllMedia(self?.currentMessageId ?? "")
+            })
+        }
+        if let onGoToMessage = onGoToMessage {
+            actions.append(UIAction(title: "Go to Message".localized(), image: UIImage(systemName: "bubble.right")) { [weak self] _ in
+                onGoToMessage(self?.currentMessageId ?? "")
+            })
+        }
+        return UIMenu(title: "", children: actions)
+    }
+
+    @objc private func tapShare() { onShare?(currentMessageId) }
+    @objc private func tapForward() { onForward?(currentMessageId) }
+    @objc private func tapDelete() { onDelete?(currentMessageId) }
+    @objc private func tapStar() {
+        isStarred.toggle()
+        buildActionBar()
+        // The strip was built before the star was pressed, and moving off this picture and back
+        // reads its state from there - so without this the star would appear to undo itself.
+        let index = currentStripIndex
+        if index >= 0, index < stripItems.count {
+            let was = stripItems[index]
+            stripItems[index] = StripItem(messageId: was.messageId,
+                                          thumbFileName: was.thumbFileName,
+                                          mediaFileName: was.mediaFileName,
+                                          isVideo: was.isVideo,
+                                          caption: was.caption,
+                                          title: was.title,
+                                          subtitle: was.subtitle,
+                                          isStarred: isStarred)
+        }
+        onStar?(currentMessageId)
+    }
+
+    /// The chrome along the bottom is not the picture: a touch that lands there belongs to the
+    /// strip or to a button, and neither the tap that hides the chrome nor the drag that puts
+    /// the viewer away has any business with it.
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else {
+            return true
+        }
+        // Downwards only. Anything more sideways than down is the reader turning a page, and
+        // the pager is already listening for it.
+        let velocity = pan.velocity(in: view)
+        return abs(velocity.y) > abs(velocity.x)
+    }
+
+    /// The pager and the per-page zoom view are scroll views with pans of their own, sitting over
+    /// the top of this one. Without this they win the touch outright and the downward drag never
+    /// starts. Letting them run together is safe: this pan only begins when the drag is more down
+    /// than sideways, and it turns the pager's own scrolling off for the length of the drag.
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                                  shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        return other.view is UIScrollView
+    }
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // Fix: the tap that shows and hides the chrome does not cancel touches, so pressing the
+        // play button in the middle of the picture started the video *and* took the header and the
+        // action row away with it. A touch that lands on a control belongs to that control.
+        for control in [playPauseButton, videoBar] where !control.isHidden {
+            if control.frame.contains(touch.location(in: control.superview ?? view)) {
+                return false
+            }
+        }
+        guard bottomStack.superview != nil, bottomStack.alpha > 0 else {
+            return true
+        }
+        return !bottomStack.frame.contains(touch.location(in: view))
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        refreshCaptionHeight()
         layoutVideoControls()
+        layoutTopScrim()
+        layoutStripInsets()
         playerLayer?.frame = view.bounds
+    }
+
+    /// Lets the first and the last thumbnail reach the middle of the strip.
+    ///
+    /// Fix: a thumbnail is chosen by being under the strip's centre, and with the row starting
+    /// flush at the left edge the first one could never get there - nor the last one at the other
+    /// end. However hard the strip was flung, the run stopped a few pictures short of each end.
+    /// Half a strip of empty space at either side gives every thumbnail somewhere to be centred.
+    private func layoutStripInsets() {
+        guard stripCollection != nil, stripCollection.bounds.width > 0 else {
+            return
+        }
+        let side = max(0, (stripCollection.bounds.width - MediaViewerViewController.stripCurrentItemSize.width) / 2)
+        guard abs(stripCollection.contentInset.left - side) > 0.5 else {
+            return
+        }
+        let wasAt = stripCollection.contentOffset.x + stripCollection.contentInset.left
+        stripCollection.contentInset = UIEdgeInsets(top: 0, left: side, bottom: 0, right: side)
+        // Keeping the same thumbnail in the middle rather than letting the new inset shift it.
+        stripCollection.contentOffset = CGPoint(x: wasAt - side, y: stripCollection.contentOffset.y)
     }
     
     private func setupPrivacyOverlay() {
@@ -3749,17 +4901,35 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         }
     }
     
+
+    /// A soft dark halo behind white text, for reading it over a picture of any colour.
+    static func applyTextShadow(to label: UILabel) {
+        label.layer.shadowColor = UIColor.black.cgColor
+        // Carrying the readability on its own now that nothing is laid over the picture, so it is
+        // set firmer than before. It still costs the picture nothing: a layer shadow is drawn from
+        // the glyphs, so it only darkens the few pixels hugging the strokes.
+        label.layer.shadowOpacity = 0.9
+        label.layer.shadowRadius = 5
+        label.layer.shadowOffset = .zero
+        label.layer.masksToBounds = false
+    }
+
     func setNavigationTitle(title: String, subtitle: String) {
         let titleLabel = UILabel()
         titleLabel.text = title
         titleLabel.font = UIFont.systemFont(ofSize: 15)
-        titleLabel.textColor = .label
+        titleLabel.textColor = .white
+        // Fix: keeping white legible used to mean darkening the whole top of the picture. A
+        // shadow on the letters themselves does the same work where it is actually needed -
+        // right behind the strokes - so the shadow above can be light enough to see through.
+        MediaViewerViewController.applyTextShadow(to: titleLabel)
         titleLabel.textAlignment = .center
 
         let subtitleLabel = UILabel()
         subtitleLabel.text = subtitle
         subtitleLabel.font = UIFont.systemFont(ofSize: 12)
-        subtitleLabel.textColor = .secondaryLabel
+        subtitleLabel.textColor = UIColor.white.withAlphaComponent(0.85)
+        MediaViewerViewController.applyTextShadow(to: subtitleLabel)
         subtitleLabel.textAlignment = .center
 
         let stack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
@@ -3784,54 +4954,123 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         }
     }
 
+    /// Puts a video on screen. Called every time a video page is arrived at, so it is careful to
+    /// build the once-only parts once.
+    ///
+    /// Fix: this used to do the whole lot on every visit - a second finished-playing observer, a
+    /// second periodic observer, another target on the play button so one tap toggled twice, and
+    /// the picture layer added to the single-media scroll view, which is not what the pager shows.
+    /// Leaving a video and coming back was enough to make the screen unusable.
     private func setupVideo(url: URL) {
-        player = AVPlayer(url: url)
-        playerLayer = AVPlayerLayer(player: player)
-        playerLayer?.frame = scrollView.bounds
-        playerLayer?.videoGravity = .resizeAspect
-        scrollView.layer.addSublayer(playerLayer!)
-        
-        // Observe when video finished playing
-        NotificationCenter.default.addObserver(self, selector: #selector(videoDidFinish), name: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem)
+        buildVideoChromeIfNeeded()
 
-        // Add play/pause button
-        playPauseButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold, scale: .default)), for: .normal)
-        playPauseButton.tintColor = .white
-        playPauseButton.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
-        playPauseButton.backgroundColor = .black.withAlphaComponent(0.3)
+        player = AVPlayer(url: url)
+        let layer = AVPlayerLayer(player: player)
+        layer.videoGravity = .resizeAspect
+        playerLayer = layer
+        // Held by a view of the viewer's own rather than by whichever cell is showing: cells are
+        // handed on to other pictures as the reader scrolls, and a player layer left inside one
+        // would go with it.
+        videoHost.isHidden = false
+        positionVideoHost()
+        videoHost.layer.addSublayer(layer)
+        // No implicit animation on a layer that is simply being placed.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.frame = videoHost.bounds
+        CATransaction.commit()
+
+        NotificationCenter.default.addObserver(self, selector: #selector(videoDidFinish), name: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem)
+        addPeriodicTimeObserver()
+
+        // Written down while it is open. This is the only moment a video kept encrypted is ever
+        // readable without decrypting it on purpose, so it is not passed up.
+        let messageId = currentStripIndex < stripItems.count ? stripItems[currentStripIndex].messageId : ""
+        DispatchQueue.global(qos: .utility).async {
+            let seconds = CMTimeGetSeconds(AVURLAsset(url: url).duration)
+            guard seconds.isFinite, seconds > 0 else {
+                return
+            }
+            MediaViewerViewController.rememberVideoDuration(seconds: Int(seconds.rounded()), messageId: messageId)
+        }
+
+        isVideoPlaying = false
+        playPauseButton.isHidden = false
+        slider.value = 0
+        timeCurrentLabel.text = "0:00"
+        buildActionBar()
+
+        // A video opened from the conversation starts on its own, the way the reference does.
+        // Only that one: swiping onto a video further along the strip leaves it waiting, so the
+        // reader is not walking into sound they did not ask for.
+        if autoPlaysOnOpen {
+            autoPlaysOnOpen = false
+            togglePlayPause()
+        }
+    }
+
+    private func buildVideoChromeIfNeeded() {
+        guard !hasBuiltVideoChrome else {
+            return
+        }
+        hasBuiltVideoChrome = true
+        // Built out of sight; whoever asked for it decides what shows.
+        defer {
+            playPauseButton.isHidden = true
+            videoBar.isHidden = true
+        }
+        // Large, pale and solid the way the reference draws it, rather than a small dark disc:
+        // this is the one thing on an unplayed video that has to be obvious.
+        playPauseButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium, scale: .default)), for: .normal)
+        playPauseButton.tintColor = UIColor.black.withAlphaComponent(0.55)
+        playPauseButton.frame = CGRect(x: 0, y: 0, width: 72, height: 72)
+        playPauseButton.backgroundColor = UIColor.white.withAlphaComponent(0.85)
         playPauseButton.center = view.center
         playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
         view.addSubview(playPauseButton)
-        playPauseButton.circle()
-        
+        // Not `circle()`, which clips to bounds and would cut the shadow off. A corner radius on
+        // its own still rounds the background; nothing inside the button reaches the edge, so
+        // there is nothing that needed clipping anyway.
+        playPauseButton.clipsToBounds = false
+        playPauseButton.layer.cornerRadius = playPauseButton.bounds.width / 2
+        // A pale button on a pale frame of video would otherwise have no edge at all.
+        playPauseButton.layer.shadowColor = UIColor.black.cgColor
+        playPauseButton.layer.shadowOpacity = 0.35
+        playPauseButton.layer.shadowRadius = 8
+        playPauseButton.layer.shadowOffset = CGSize(width: 0, height: 2)
         setupVideoControls()
-        
-        togglePlayPause()
     }
     
     private func setupVideoControls() {
-        
-        view.addSubview(blurBackground)
+        // A band directly under the title, the way the reference has it - the scrubber used to sit
+        // at the foot of the screen, on top of the strip of thumbnails and the row of actions.
+        videoBar.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+        view.addSubview(videoBar)
+
+        pipButton.setImage(UIImage(systemName: "pip.enter", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .regular)), for: .normal)
+        pipButton.tintColor = .white
+        pipButton.addTarget(self, action: #selector(togglePictureInPicture), for: .touchUpInside)
+        videoBar.addSubview(pipButton)
 
         // Current time
         timeCurrentLabel.text = "0:00"
         timeCurrentLabel.textColor = .white
         timeCurrentLabel.font = .systemFont(ofSize: 13)
-        view.addSubview(timeCurrentLabel)
+        videoBar.addSubview(timeCurrentLabel)
 
         // Remaining time
         timeRemainingLabel.text = "-0:00"
         timeRemainingLabel.textColor = .white
         timeRemainingLabel.font = .systemFont(ofSize: 13)
         timeRemainingLabel.textAlignment = .right
-        view.addSubview(timeRemainingLabel)
+        videoBar.addSubview(timeRemainingLabel)
 
         // Playback speed button
         speedButton.setTitle("1×", for: .normal)
         speedButton.tintColor = .white
         speedButton.titleLabel?.font = .boldSystemFont(ofSize: 15)
         speedButton.addTarget(self, action: #selector(toggleSpeed), for: .touchUpInside)
-        view.addSubview(speedButton)
+        videoBar.addSubview(speedButton)
 
         // Slider
         let thumbImg = makeThumb(size: 20)
@@ -3841,12 +5080,9 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         slider.maximumValue = 1
         slider.tintColor = .white
         slider.addTarget(self, action: #selector(sliderChanged(_:)), for: .valueChanged)
-        view.addSubview(slider)
+        videoBar.addSubview(slider)
 
         layoutVideoControls()
-
-        // Update every 0.2 sec
-        addPeriodicTimeObserver()
     }
     
     func makeThumb(size: CGFloat, color: UIColor = .white) -> UIImage {
@@ -3861,7 +5097,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     private func addPeriodicTimeObserver() {
         guard let player = player else { return }
 
-        player.addPeriodicTimeObserver(
+        timeObserverToken = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
             queue: .main
         ) { [weak self] time in
@@ -3924,36 +5160,27 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     }
     
     private func layoutVideoControls() {
-        let padding: CGFloat = 16
-        let labelWidth: CGFloat = 45
+        let padding: CGFloat = 14
+        let labelWidth: CGFloat = 42
+        let barHeight: CGFloat = 44
+        let top = (navigationController?.navigationBar.frame.maxY ?? 88) + 4
+        videoBar.frame = CGRect(x: 0, y: top, width: view.bounds.width, height: barHeight)
+        positionVideoHost()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer?.frame = videoHost.bounds
+        CATransaction.commit()
+        playPauseButton.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
 
-        timeCurrentLabel.frame = CGRect(
-            x: padding,
-            y: view.bounds.height - 50,
-            width: labelWidth,
-            height: 20
-        )
-
-        speedButton.frame = CGRect(
-            x: view.bounds.width - padding - 35,
-            y: view.bounds.height - 50,
-            width: 35,
-            height: 20
-        )
-
-        timeRemainingLabel.frame = CGRect(
-            x: speedButton.frame.minX - labelWidth - 8,
-            y: view.bounds.height - 50,
-            width: labelWidth,
-            height: 20
-        )
-
-        slider.frame = CGRect(
-            x: timeCurrentLabel.frame.maxX + 8,
-            y: view.bounds.height - 50,
-            width: timeRemainingLabel.frame.minX - timeCurrentLabel.frame.maxX - 16,
-            height: 20
-        )
+        let row = (barHeight - 20) / 2
+        timeCurrentLabel.frame = CGRect(x: padding, y: row, width: labelWidth, height: 20)
+        pipButton.frame = CGRect(x: videoBar.bounds.width - padding - 26, y: row - 3, width: 26, height: 26)
+        speedButton.frame = CGRect(x: pipButton.frame.minX - 8 - 30, y: row, width: 30, height: 20)
+        timeRemainingLabel.frame = CGRect(x: speedButton.frame.minX - labelWidth - 6, y: row, width: labelWidth, height: 20)
+        slider.frame = CGRect(x: timeCurrentLabel.frame.maxX + 8,
+                              y: row,
+                              width: max(0, timeRemainingLabel.frame.minX - timeCurrentLabel.frame.maxX - 16),
+                              height: 20)
         
         let minX = min(
             timeCurrentLabel.frame.minX,
@@ -3981,11 +5208,16 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     }
 
     @objc private func togglePlayPause() {
-        guard let player = player else { return }
+        guard let player = player else {
+            // Pressed while the file is still being read - an encrypted video takes a moment. The
+            // intent is remembered rather than dropped, and playing begins as soon as it is ready.
+            autoPlaysOnOpen = true
+            return
+        }
 
         if isVideoPlaying {
             player.pause()
-            playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+            playPauseButton.isHidden = false
         } else {
             prepareForVideoPlayback()
             if let currentItem = player.currentItem,
@@ -3993,14 +5225,31 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
                 player.seek(to: .zero)
             }
             player.play()
-            playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
-            DispatchQueue.global().async {
-                while self.statusBarBackgroundView == nil {
-                    Thread.sleep(forTimeInterval: 0.25)
-                }
-            }
+            // Nothing over the picture once it is running; pausing is done from the row below.
+            playPauseButton.isHidden = true
+            videoBar.isHidden = isNavigationBarHidden
         }
         isVideoPlaying.toggle()
+        // The action row carries the same play and pause, so it changes with it.
+        buildActionBar()
+    }
+
+    /// Hands the video to the system's floating window.
+    @objc private func togglePictureInPicture() {
+        guard let layer = playerLayer, AVPictureInPictureController.isPictureInPictureSupported() else {
+            return
+        }
+        if pictureInPicture == nil {
+            pictureInPicture = AVPictureInPictureController(playerLayer: layer)
+        }
+        guard let controller = pictureInPicture else {
+            return
+        }
+        if controller.isPictureInPictureActive {
+            controller.stopPictureInPicture()
+        } else {
+            controller.startPictureInPicture()
+        }
     }
     
     func prepareForVideoPlayback() {
@@ -4030,29 +5279,80 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         UIView.animate(withDuration: 0.25) {
             navController.setNavigationBarHidden(self.isNavigationBarHidden, animated: true)
             self.statusBarBackgroundView.alpha = self.isNavigationBarHidden ? 0 : 1
-            self.playPauseButton.alpha = self.isNavigationBarHidden ? 0 : 1
-            self.timeCurrentLabel.alpha = self.isNavigationBarHidden ? 0 : 1
-            self.timeRemainingLabel.alpha = self.isNavigationBarHidden ? 0 : 1
-            self.speedButton.alpha = self.isNavigationBarHidden ? 0 : 1
-            self.slider.alpha = self.isNavigationBarHidden ? 0 : 1
+            // A video waiting to be started keeps its button whatever the chrome is doing - that
+            // button is not chrome, it is the only way to start the thing. Once it is running the
+            // button is gone anyway, and pausing is done from the row along the bottom.
+            self.playPauseButton.alpha = self.isVideoPlaying ? 0 : 1
+            // The band of playback controls is chrome, so it goes with the rest of it - it used to
+            // be only its contents that faded, leaving an empty grey strip behind.
+            self.videoBar.alpha = self.isNavigationBarHidden ? 0 : 1
             self.blurBackground.alpha = self.isNavigationBarHidden ? 0 : 1
+            self.bottomStack.alpha = self.isNavigationBarHidden ? 0 : 1
+            self.topScrim.alpha = self.isNavigationBarHidden ? 0 : MediaViewerViewController.topScrimStrength
         }
     }
     
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Before, not after: whatever the conversation does with this needs to have happened by
+        // the time the viewer has finished getting out of the way.
+        onDismiss?(currentMessageId)
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         self.stopVideo()
     }
 
+    /// The bubble in the conversation this viewer was opened from, when it was opened from one.
+    ///
+    /// The zoom transition is what knows about it, so that is what is asked - rather than the
+    /// conversation being made to hand it over a second time.
+    private func originBubbleView() -> UIImageView? {
+        return (navigationController?.transitioningDelegate as? ZoomTransitioningDelegate)?.currentOrigin()
+    }
+
+    /// Whatever is carrying the picture on screen, so the drag moves what the reader can see.
+    ///
+    /// Fix: this used to always move `scrollView`. Once the pictures moved into the pager that
+    /// view was no longer the one on screen, so a downward drag ran but shifted something hidden -
+    /// which read as the gesture having been taken away.
+    private var draggableView: UIView {
+        return stripItems.isEmpty ? scrollView : pager
+    }
+
+    /// Dragging downwards puts the viewer away. Sideways belongs to the pager, which is a
+    /// scroll view and handles it itself.
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-        guard scrollView.zoomScale == 1.0 else { return }
+        if stripItems.isEmpty {
+            guard scrollView.zoomScale == 1.0 else {
+                return
+            }
+        } else {
+            guard let page = pager.cellForItem(at: IndexPath(item: currentStripIndex, section: 0)) as? MediaPageCell,
+                  page.zoomView.zoomScale == 1.0 else {
+                return
+            }
+        }
 
         let translation = gesture.translation(in: view)
         let velocity = gesture.velocity(in: view)
 
+
         switch gesture.state {
+        case .began:
+            // The pager is a scroll view and would otherwise keep drifting sideways underneath a
+            // drag that is meant to be taking the viewer away. It is handed back on the way out.
+            pager?.isScrollEnabled = false
+            // The conversation comes through as the backdrop fades, and the bubble this picture
+            // was opened from is sitting in it still holding the picture - so the same photograph
+            // appears twice, one being dragged and one waiting behind. Put away for the drag; if
+            // the drag is abandoned it comes straight back, and if it carries through to a dismiss
+            // the transition hands it back at the far end.
+            originBubbleView()?.isHidden = true
+
         case .changed:
             let transform = CGAffineTransform(translationX: translation.x, y: translation.y)
-            scrollView.transform = transform
+            draggableView.transform = transform
             
             // Calculate percentage based on distance from center
             let distance = hypot(translation.x, translation.y)
@@ -4068,16 +5368,19 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
             }
 
         case .ended, .cancelled:
-            let distance = hypot(translation.x, translation.y)
+            let distance = abs(translation.y)
             let threshold: CGFloat = 120
 
-            if distance > threshold || abs(velocity.y) > 500 || abs(velocity.x) > 500 {
+            pager?.isScrollEnabled = true
+
+            if distance > threshold || abs(velocity.y) > 500 {
                 // Dismiss if far enough or fast swipe
                 self.stopVideo()
                 NotificationCenter.default.removeObserver(self)
                 dismiss(animated: true, completion: nil)
             } else {
                 // Return to center if not far enough
+                originBubbleView()?.isHidden = false
                 if isSecure {
                     self.privacyOverlay.isHidden = false
                 }
@@ -4086,7 +5389,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
                     togglePlayPause()
                 }
                 UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0.8, options: [], animations: {
-                    self.scrollView.transform = .identity
+                    self.draggableView.transform = .identity
                     self.backgroundView.alpha = 1.0
                 }, completion: nil)
             }
@@ -4097,16 +5400,79 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
 
     // MARK: - UIScrollViewDelegate
 
-    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-        return imageView
+    public func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        return scrollView === self.scrollView ? imageView : nil
     }
 
-    func scrollViewDidZoom(_ scrollView: UIScrollView) {
-        let imageViewSize = imageView.frame.size
-        let scrollViewSize = scrollView.bounds.size
-        let verticalPadding = imageViewSize.height < scrollViewSize.height ? (scrollViewSize.height - imageViewSize.height) / 2 : 0
-        let horizontalPadding = imageViewSize.width < scrollViewSize.width ? (scrollViewSize.width - imageViewSize.width) / 2 : 0
-        scrollView.contentInset = UIEdgeInsets(top: verticalPadding, left: horizontalPadding, bottom: verticalPadding, right: horizontalPadding)
+    public func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        guard scrollView === self.scrollView else {
+            return
+        }
+        let size = imageView.frame.size
+        let bounds = scrollView.bounds.size
+        let vertical = size.height < bounds.height ? (bounds.height - size.height) / 2 : 0
+        let horizontal = size.width < bounds.width ? (bounds.width - size.width) / 2 : 0
+        scrollView.contentInset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
+    }
+
+    /// The strip follows the pager as it moves, not once it has arrived: how far along the
+    /// finger is comes straight from the offset, so the thumbnail grows while the picture is
+    /// still sliding.
+    public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if scrollView === stripCollection {
+            // Only when the reader is the one moving it. The strip is also scrolled to follow the
+            // picture, and treating that as a scrub would have the two chasing each other.
+            if isScrubbingStrip {
+                scrubFromStrip()
+            }
+            return
+        }
+        guard scrollView === pager, pager.bounds.width > 0 else {
+            return
+        }
+        positionVideoHost()
+        let nearest = max(0, min(stripItems.count - 1, Int(round(pager.contentOffset.x / pager.bounds.width))))
+        highlightStrip(at: nearest)
+        showChrome(for: nearest)
+    }
+
+    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        if scrollView === stripCollection {
+            isScrubbingStrip = true
+        }
+    }
+
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        if scrollView === stripCollection {
+            endStripScrub()
+            return
+        }
+        guard scrollView === pager else {
+            return
+        }
+        isSettingPagerPosition = false
+        adoptCurrentPage()
+    }
+
+    public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        guard scrollView === pager else {
+            return
+        }
+        isSettingPagerPosition = false
+        adoptCurrentPage()
+    }
+
+    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if scrollView === stripCollection {
+            if !decelerate {
+                endStripScrub()
+            }
+            return
+        }
+        guard scrollView === pager, !decelerate else {
+            return
+        }
+        adoptCurrentPage()
     }
 }
 
@@ -4120,13 +5486,24 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
 
     func animateTransition(using transitionContext: UIViewControllerContextTransitioning) {
         guard let fromVC = transitionContext.viewController(forKey: .from),
-              let toVC = transitionContext.viewController(forKey: .to),
-              let originImageView = originImageView else {
+              let toVC = transitionContext.viewController(forKey: .to) else {
+            self.originImageView?.isHidden = false
             transitionContext.completeTransition(false)
+            return
+        }
+        guard let originImageView = originImageView, originImageView.window != nil else {
+            // No bubble on screen to aim at - a picture whose message is not in the loaded window,
+            // say. Flying to a stale reference is worse than not flying at all, so it fades.
+            self.originImageView?.isHidden = false
+            fadeTransition(using: transitionContext, from: fromVC, to: toVC)
             return
         }
 
         let container = transitionContext.containerView
+        // The bubble keeps its own thumbnail on screen while the snapshot flies over it, so for a
+        // moment the same picture is drawn twice - once sitting still in the conversation and once
+        // moving. It is put away for the length of the move and handed back at the end.
+        originImageView.isHidden = true
         let imageViewSnapshot = UIImageView(image: originImageView.image)
         imageViewSnapshot.contentMode = .scaleAspectFit
         imageViewSnapshot.clipsToBounds = true
@@ -4135,6 +5512,10 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         if isPresenting {
             toVC.view.alpha = 0
             container.addSubview(toVC.view)
+            // Starts cropped, the way the bubble is actually drawing it, and opens out to the
+            // whole picture. Beginning aspect-fit instead put the entire picture inside the
+            // bubble's frame for one frame - a visible squeeze before the animation had moved.
+            imageViewSnapshot.contentMode = .scaleAspectFill
             container.addSubview(imageViewSnapshot)
 
             let finalFrame = toVC.view.frame
@@ -4146,21 +5527,36 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                            options: .curveEaseOut, animations: {
 
                 imageViewSnapshot.frame = finalFrame
+                imageViewSnapshot.contentMode = .scaleAspectFit
                 toVC.view.alpha = 1
 
             }) { _ in
                 imageViewSnapshot.removeFromSuperview()
+                originImageView.isHidden = false
                 transitionContext.completeTransition(true)
             }
 
         } else {
-            let navVC = fromVC as! UINavigationController
-            let fromImageVC = navVC.viewControllers.first as! MediaViewerViewController
+            let navVC = fromVC as? UINavigationController
+            let fromImageVC = navVC?.viewControllers.first as? MediaViewerViewController
             let finalFrame = container.convert(originImageView.bounds, from: originImageView)
 
+            // Fix: the snapshot was put at the bubble's frame and then animated to the bubble's
+            // frame - the same place - so closing the viewer never moved anything; the picture
+            // simply blinked out. It starts where the picture actually is, full screen, and
+            // shrinks from there into the bubble it belongs to.
+            let shown = fromImageVC?.currentPictureView()
+            if let shown = shown, let picture = shown.image {
+                imageViewSnapshot.image = picture
+                imageViewSnapshot.frame = container.convert(ZoomAnimator.drawnFrame(of: shown), from: shown.superview)
+            } else {
+                imageViewSnapshot.frame = container.bounds
+            }
+            imageViewSnapshot.contentMode = .scaleAspectFit
+
             container.addSubview(imageViewSnapshot)
-            fromImageVC.view.alpha = 0
-            fromImageVC.backgroundView.alpha = 0 // fade background
+            fromImageVC?.view.alpha = 0
+            fromImageVC?.backgroundView.alpha = 0 // fade background
 
             UIView.animate(withDuration: transitionDuration(using: transitionContext),
                            delay: 0,
@@ -4169,17 +5565,68 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                            options: .curveEaseOut, animations: {
 
                 imageViewSnapshot.frame = finalFrame
+                imageViewSnapshot.contentMode = .scaleAspectFill
 
             }) { _ in
                 imageViewSnapshot.removeFromSuperview()
+                originImageView.isHidden = false
                 transitionContext.completeTransition(true)
             }
         }
+    }
+
+    private func fadeTransition(using transitionContext: UIViewControllerContextTransitioning,
+                                from fromVC: UIViewController,
+                                to toVC: UIViewController) {
+        let container = transitionContext.containerView
+        if isPresenting {
+            toVC.view.alpha = 0
+            container.addSubview(toVC.view)
+        }
+        UIView.animate(withDuration: transitionDuration(using: transitionContext), animations: {
+            if self.isPresenting {
+                toVC.view.alpha = 1
+            } else {
+                fromVC.view.alpha = 0
+            }
+        }, completion: { _ in
+            fromVC.view.alpha = 1
+            transitionContext.completeTransition(!transitionContext.transitionWasCancelled)
+        })
+    }
+
+    /// Where the picture actually is inside its view, which for an aspect-fit image view is not
+    /// the view's own bounds - without this a tall picture appears to jump wider as it starts.
+    static func drawnFrame(of view: UIImageView) -> CGRect {
+        guard let size = view.image?.size, size.width > 0, size.height > 0 else {
+            return view.frame
+        }
+        let scale = min(view.bounds.width / size.width, view.bounds.height / size.height)
+        let drawn = CGSize(width: size.width * scale, height: size.height * scale)
+        return CGRect(x: view.frame.origin.x + (view.bounds.width - drawn.width) / 2,
+                      y: view.frame.origin.y + (view.bounds.height - drawn.height) / 2,
+                      width: drawn.width,
+                      height: drawn.height)
     }
 }
 
 class ZoomTransitioningDelegate: NSObject, UIViewControllerTransitioningDelegate {
     var originImageView: UIImageView?
+
+    /// Asked for the bubble at the moment a transition starts, rather than being told about it in
+    /// advance.
+    ///
+    /// Fix: the viewer moves between a conversation's pictures on its own, so the bubble it should
+    /// shrink back into is not the one it grew out of. It was being updated as pages turned, but a
+    /// message far from the one opened has no row on screen to update it from - and a table reuses
+    /// its cells, so the reference left over pointed at a bubble now showing something else
+    /// entirely. That is what made a dismiss from a distant picture fly to the wrong place.
+    var originProvider: (() -> UIImageView?)?
+
+    /// The bubble to use now: whatever the provider says, or the one handed over at the start.
+    func currentOrigin() -> UIImageView? {
+        return originProvider?() ?? originImageView
+    }
 
     func animationController(forPresented presented: UIViewController,
                              presenting: UIViewController, source: UIViewController)
@@ -4194,7 +5641,7 @@ class ZoomTransitioningDelegate: NSObject, UIViewControllerTransitioningDelegate
         -> UIViewControllerAnimatedTransitioning? {
             let animator = ZoomAnimator()
             animator.isPresenting = false
-            animator.originImageView = originImageView
+            animator.originImageView = currentOrigin()
             return animator
     }
 }
@@ -5806,5 +7253,291 @@ final class APNPendingOpenStore {
     func clear() {
         UserDefaults.standard.removeObject(forKey: idKey)
         UserDefaults.standard.removeObject(forKey: timeKey)
+    }
+}
+
+/// A card that rises from the foot of the screen carrying a question and a short list of answers.
+///
+/// Written to replace the system action sheet behind "Delete message?". The system sheet cannot be
+/// made to look like this - its title is small grey text, its rows are full-width dividers and its
+/// Cancel is a separate slab - so the card is drawn here instead. Nothing about it is specific to
+/// deleting: it takes a question and some answers, and it is the caller that decides what they mean.
+public final class BottomChoiceSheet: UIViewController {
+
+    public struct Option {
+        public let title: String
+        public let isDestructive: Bool
+        public let handler: () -> Void
+
+        public init(title: String, isDestructive: Bool = false, handler: @escaping () -> Void) {
+            self.title = title
+            self.isDestructive = isDestructive
+            self.handler = handler
+        }
+    }
+
+    private let question: String
+    private let options: [Option]
+    private let backdrop = UIView()
+    private let card = UIView()
+    private var cardBottom: NSLayoutConstraint!
+
+    public init(question: String, options: [Option], appearance: UIUserInterfaceStyle = .unspecified) {
+        self.question = question
+        self.options = options
+        super.init(nibName: nil, bundle: nil)
+        // Shown over a picture the card has to stay dark, or a light card lands on a dark photo.
+        // Shown over the conversation it follows the app, which is what `.unspecified` leaves it to.
+        overrideUserInterfaceStyle = appearance
+        modalPresentationStyle = .overFullScreen
+        modalTransitionStyle = .crossDissolve
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+
+        backdrop.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        backdrop.alpha = 0
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(backdrop)
+        backdrop.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapBackdrop)))
+
+        card.backgroundColor = .secondarySystemBackground
+        card.layer.cornerRadius = 20
+        card.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        card.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(card)
+
+        let title = UILabel()
+        title.text = question
+        // Not `.semibold`: the app remaps that weight onto a bold-italic face, so asking for it
+        // here would set the question in italics.
+        title.font = .boldSystemFont(ofSize: 17)
+        title.textColor = .label
+        title.textAlignment = .center
+        title.numberOfLines = 2
+        title.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(title)
+
+        let close = UIButton(type: .system)
+        close.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)), for: .normal)
+        close.tintColor = .label
+        close.backgroundColor = .tertiarySystemFill
+        close.layer.cornerRadius = 18
+        close.addTarget(self, action: #selector(tapBackdrop), for: .touchUpInside)
+        close.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(close)
+
+        let rows = UIStackView()
+        rows.axis = .vertical
+        rows.spacing = 10
+        rows.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(rows)
+
+        for (index, option) in options.enumerated() {
+            let button = UIButton(type: .system)
+            button.setTitle(option.title, for: .normal)
+            button.setTitleColor(option.isDestructive ? .systemRed : .label, for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 17)
+            button.titleLabel?.adjustsFontSizeToFitWidth = true
+            button.titleLabel?.minimumScaleFactor = 0.8
+            button.contentHorizontalAlignment = .leading
+            button.contentEdgeInsets = UIEdgeInsets(top: 0, left: 22, bottom: 0, right: 22)
+            button.backgroundColor = .tertiarySystemBackground
+            button.layer.cornerRadius = 27
+            button.tag = index
+            button.addTarget(self, action: #selector(tapOption(_:)), for: .touchUpInside)
+            button.heightAnchor.constraint(equalToConstant: 54).isActive = true
+            rows.addArrangedSubview(button)
+        }
+
+        cardBottom = card.topAnchor.constraint(equalTo: view.bottomAnchor)
+        NSLayoutConstraint.activate([
+            backdrop.topAnchor.constraint(equalTo: view.topAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            card.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            cardBottom,
+
+            title.topAnchor.constraint(equalTo: card.topAnchor, constant: 22),
+            title.centerXAnchor.constraint(equalTo: card.centerXAnchor),
+            title.leadingAnchor.constraint(greaterThanOrEqualTo: card.leadingAnchor, constant: 70),
+
+            close.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            close.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            close.widthAnchor.constraint(equalToConstant: 36),
+            close.heightAnchor.constraint(equalToConstant: 36),
+
+            rows.topAnchor.constraint(equalTo: close.bottomAnchor, constant: 16),
+            rows.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            rows.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            rows.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16)
+        ])
+    }
+
+    public override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        view.layoutIfNeeded()
+        cardBottom.isActive = false
+        card.bottomAnchor.constraint(equalTo: view.bottomAnchor).isActive = true
+        UIView.animate(withDuration: 0.28, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0.6, options: [], animations: {
+            self.backdrop.alpha = 1
+            self.view.layoutIfNeeded()
+        })
+    }
+
+    @objc private func tapBackdrop() {
+        close(then: nil)
+    }
+
+    @objc private func tapOption(_ sender: UIButton) {
+        guard sender.tag >= 0, sender.tag < options.count else {
+            return
+        }
+        // The answer is run after the card has gone, so whatever it puts up next - or takes down -
+        // is not fighting this one for the screen.
+        let handler = options[sender.tag].handler
+        close(then: handler)
+    }
+
+    private func close(then finish: (() -> Void)?) {
+        UIView.animate(withDuration: 0.2, animations: {
+            self.backdrop.alpha = 0
+            self.card.transform = CGAffineTransform(translationX: 0, y: self.card.bounds.height)
+        }, completion: { _ in
+            self.dismiss(animated: false) {
+                finish?()
+            }
+        })
+    }
+}
+
+/// The marks a video bubble carries: how long it runs, and - when the file is not here and cannot
+/// be fetched - an offer to fetch it rather than a ring that never fills.
+public enum VideoBubbleChrome {
+
+    /// The camcorder and the running time along the foot of a video thumbnail.
+    public static func addFooter(to host: UIView, seconds: Int) {
+        let badge = UIImageView(image: UIImage(systemName: "video.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)))
+        badge.tintColor = .white
+        badge.contentMode = .scaleAspectFit
+        shade(badge.layer)
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(badge)
+
+        let length = UILabel()
+        length.text = seconds > 0 ? String(format: "%d:%02d", seconds / 60, seconds % 60) : ""
+        length.font = .systemFont(ofSize: 11)
+        length.textColor = .white
+        shade(length.layer)
+        length.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(length)
+
+        NSLayoutConstraint.activate([
+            badge.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 8),
+            badge.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -8),
+            length.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 5),
+            length.centerYAnchor.constraint(equalTo: badge.centerYAnchor)
+        ])
+    }
+
+    /// The pale pill in the middle of a video that is not on this device.
+    ///
+    /// What used to sit here was a progress ring, which meant a file the server will not give up
+    /// showed something that looked like it was arriving and never did. This says plainly that it
+    /// has to be fetched, and how big it is when that is known.
+    @discardableResult
+    public static func addUnavailable(to host: UIView, sizeText: String?) -> UIView {
+        let pill = UIView()
+        pill.backgroundColor = UIColor(white: 0.85, alpha: 0.92)
+        pill.layer.cornerRadius = 22
+        pill.isUserInteractionEnabled = false
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(pill)
+
+        let arrow = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)))
+        arrow.tintColor = UIColor(white: 0.25, alpha: 1)
+        arrow.contentMode = .scaleAspectFit
+        arrow.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(arrow)
+
+        let size = UILabel()
+        size.text = sizeText
+        size.font = .systemFont(ofSize: 14)
+        size.textColor = UIColor(white: 0.25, alpha: 1)
+        size.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(size)
+
+        NSLayoutConstraint.activate([
+            pill.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            pill.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            pill.heightAnchor.constraint(equalToConstant: 44),
+            arrow.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 16),
+            arrow.centerYAnchor.constraint(equalTo: pill.centerYAnchor),
+            arrow.widthAnchor.constraint(equalToConstant: 18),
+            size.leadingAnchor.constraint(equalTo: arrow.trailingAnchor, constant: (sizeText?.isEmpty == false) ? 8 : 0),
+            size.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -16),
+            size.centerYAnchor.constraint(equalTo: pill.centerYAnchor)
+        ])
+        return pill
+    }
+
+    private static func shade(_ layer: CALayer) {
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.5
+        layer.shadowRadius = 2
+        layer.shadowOffset = .zero
+    }
+}
+
+public extension Utils {
+
+    /// The mark that says what kind of account somebody is, or nothing for an ordinary one.
+    ///
+    /// The same reading the profile screen does, in one place - the chat lists show it in front of
+    /// a name too, and three copies of "which of these five tests wins" would drift apart.
+    static func accountBadge(forPin pin: String?) -> UIImage? {
+        guard let pin = pin, !pin.isEmpty, let user = User.getData(pin: pin) else {
+            return nil
+        }
+        return accountBadge(official: user.official ?? "", userType: user.userType ?? "")
+    }
+
+    static func accountBadge(official: String, userType: String) -> UIImage? {
+        let bundle = Bundle.resourceBundle(for: Nexilis.self)
+        if User.isOfficialRegular(official_account: official) || User.isOfficial(official_account: official) {
+            return UIImage(named: "ic_official_flag", in: bundle, with: nil)
+        }
+        if User.isVerified(official_account: official) {
+            return UIImage(named: "ic_verified", in: bundle, with: nil)
+        }
+        if User.isInternal(userType: userType) {
+            return UIImage(named: "ic_internal", in: bundle, with: nil)
+        }
+        if User.isCallCenter(userType: userType) {
+            return UIImage(named: "pb_call_center", in: bundle, with: nil)
+        }
+        return nil
+    }
+
+    /// A name with its account mark set in front of it, or the plain name when there is none.
+    static func nameWithBadge(_ name: String, forPin pin: String?, size: CGFloat, color: UIColor) -> NSAttributedString {
+        guard let badge = accountBadge(forPin: pin) else {
+            return NSAttributedString(string: name, attributes: [.foregroundColor: color])
+        }
+        let attachment = NSTextAttachment()
+        attachment.image = badge
+        attachment.bounds = CGRect(x: 0, y: -4, width: size, height: size)
+        let line = NSMutableAttributedString(attachment: attachment)
+        line.append(NSAttributedString(string: "  " + name, attributes: [.foregroundColor: color]))
+        return line
     }
 }
