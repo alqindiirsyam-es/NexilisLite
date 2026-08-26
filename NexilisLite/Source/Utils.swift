@@ -569,6 +569,23 @@ public final class Utils {
         } else if chat.attachmentFlag == "25" {
             return showNSMutableAttributedString("📄 " + "Video Conference Room".localized())
         } else if !chat.audio.isEmpty {
+            // A voice note says what it is and how long it runs; an ordinary audio attachment is
+            // just audio, and the flag it travelled under is what tells the two apart.
+            if chat.attachmentFlag == "60" {
+                let mic = NSTextAttachment()
+                mic.image = UIImage(systemName: "mic.fill")?.withTintColor(.gray, renderingMode: .alwaysOriginal)
+                mic.bounds = CGRect(x: 0, y: -2, width: 13, height: 15)
+                var text = "Voice Message".localized()
+                if let seconds = AudioDurationStore.seconds(forFileNamed: chat.audio) {
+                    text += String(format: " (%d:%02d)", seconds / 60, seconds % 60)
+                }
+                let line = NSMutableAttributedString(attachment: mic)
+                line.append(NSAttributedString(string: " " + text, attributes: [
+                    .font: UIFont.systemFont(ofSize: 12 + String.offset()),
+                    .foregroundColor: UIColor.gray
+                ]))
+                return line
+            }
             return showNSMutableAttributedString(("♫ " + "Audio".localized()))
         } else if !chat.image.isEmpty {
             if !chat.messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -6414,6 +6431,170 @@ class QRScannerViewController: UIViewController {
 
 /// The strip that stands in for a call screen while the call is minimised: who it is with, how
 /// long it has been running, mute, and hang up. Tapping it goes back to the call.
+/// The strip that keeps a restore in view after its screen has been left.
+///
+/// Same shape and window as the minimised call: a restore takes minutes, and the reader should be
+/// able to get on with the app without losing sight of it or wondering whether it is still running.
+public final class RestoreProgressBanner: UIView {
+
+    private let iconView = UIImageView()
+    private let titleLabel = UILabel()
+    private let bar = UIProgressView(progressViewStyle: .default)
+
+    static let height: CGFloat = 60
+    static let cornerOverhang: CGFloat = 10
+    private static let barColor = UIColor(red: 36.0 / 255.0, green: 38.0 / 255.0, blue: 37.0 / 255.0, alpha: 1.0)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = RestoreProgressBanner.barColor
+
+        iconView.image = UIImage(systemName: "arrow.down.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        iconView.tintColor = .mainColor
+        iconView.contentMode = .scaleAspectFit
+        addSubview(iconView)
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.textColor = .mainColor
+        titleLabel.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+        addSubview(titleLabel)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        bar.progressTintColor = .mainColor
+        bar.trackTintColor = UIColor(white: 1, alpha: 0.2)
+        bar.layer.cornerRadius = 2
+        bar.clipsToBounds = true
+        addSubview(bar)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            iconView.centerYAnchor.constraint(equalTo: topAnchor, constant: 22),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+            titleLabel.centerYAnchor.constraint(equalTo: iconView.centerYAnchor),
+
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            bar.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 8),
+            bar.heightAnchor.constraint(equalToConstant: 4)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(text: String, fraction: Double) {
+        titleLabel.text = text
+        bar.setProgress(Float(min(max(fraction, 0), 1)), animated: true)
+    }
+
+    func onTap(_ target: Any, action: Selector) {
+        addGestureRecognizer(UITapGestureRecognizer(target: target, action: action))
+    }
+}
+
+/// Where the restore says how far it has got, whether or not its own screen is on show.
+public final class RestoreProgressManager {
+
+    public static let shared = RestoreProgressManager()
+
+    private var banner: RestoreProgressBanner?
+    private var window: MiniCallBannerWindow?
+    private var text = ""
+    private var fraction: Double = 0
+    /// Whether a restore is running at all - the strip is only worth showing while one is.
+    public private(set) var isRunning = false
+    /// What to do when the strip is tapped: put the reader back on the restore screen.
+    public var onTap: (() -> Void)?
+
+    private init() {}
+
+    public func begin() {
+        isRunning = true
+    }
+
+    public func finish() {
+        isRunning = false
+        hide()
+    }
+
+    /// Called from wherever the work is, at whatever rate it likes. Kept even while the strip is
+    /// down, so putting it up mid-restore shows the right thing immediately.
+    public func report(text: String, fraction: Double) {
+        DispatchQueue.main.async {
+            self.text = text
+            self.fraction = fraction
+            self.banner?.update(text: text, fraction: fraction)
+        }
+    }
+
+    public func show() {
+        guard isRunning, banner == nil else {
+            banner?.update(text: text, fraction: fraction)
+            return
+        }
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+            return
+        }
+        let banner = RestoreProgressBanner()
+        banner.update(text: text, fraction: fraction)
+        banner.onTap(self, action: #selector(bannerTapped))
+
+        let host = UIViewController()
+        host.view.backgroundColor = .clear
+        host.view.addSubview(banner)
+        banner.translatesAutoresizingMaskIntoConstraints = false
+
+        let window = MiniCallBannerWindow(windowScene: scene)
+        window.backgroundColor = .clear
+        window.windowLevel = .statusBar + 1
+        window.rootViewController = host
+        window.isHidden = false
+
+        NSLayoutConstraint.activate([
+            banner.leadingAnchor.constraint(equalTo: host.view.leadingAnchor),
+            banner.trailingAnchor.constraint(equalTo: host.view.trailingAnchor),
+            banner.topAnchor.constraint(equalTo: host.view.safeAreaLayoutGuide.topAnchor),
+            banner.heightAnchor.constraint(equalToConstant: RestoreProgressBanner.height + RestoreProgressBanner.cornerOverhang)
+        ])
+        window.layoutIfNeeded()
+
+        self.window = window
+        self.banner = banner
+
+        banner.transform = CGAffineTransform(translationX: 0, y: -(RestoreProgressBanner.height + RestoreProgressBanner.cornerOverhang + window.safeAreaInsets.top))
+        UIView.animate(withDuration: 0.30, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0.4) {
+            banner.transform = .identity
+        }
+    }
+
+    public func hide() {
+        guard let banner = banner, let window = window else {
+            return
+        }
+        self.banner = nil
+        self.window = nil
+        UIView.animate(withDuration: 0.25, animations: {
+            banner.transform = CGAffineTransform(translationX: 0, y: -(RestoreProgressBanner.height + RestoreProgressBanner.cornerOverhang + window.safeAreaInsets.top))
+        }, completion: { _ in
+            window.isHidden = true
+            window.rootViewController = nil
+        })
+    }
+
+    @objc private func bannerTapped() {
+        onTap?()
+    }
+}
+
 final class MiniCallBanner: UIView {
 
     private let muteButton = UIButton(type: .system)
@@ -7425,7 +7606,8 @@ public final class BottomChoiceSheet: UIViewController {
 public enum VideoBubbleChrome {
 
     /// The camcorder and the running time along the foot of a video thumbnail.
-    public static func addFooter(to host: UIView, seconds: Int) {
+    @discardableResult
+    public static func addFooter(to host: UIView, seconds: Int) -> UILabel {
         let badge = UIImageView(image: UIImage(systemName: "video.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)))
         badge.tintColor = .white
         badge.contentMode = .scaleAspectFit
@@ -7447,6 +7629,7 @@ public enum VideoBubbleChrome {
             length.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 5),
             length.centerYAnchor.constraint(equalTo: badge.centerYAnchor)
         ])
+        return length
     }
 
     /// The pale pill in the middle of a video that is not on this device.
@@ -7504,6 +7687,49 @@ public extension Utils {
     ///
     /// The same reading the profile screen does, in one place - the chat lists show it in front of
     /// a name too, and three copies of "which of these five tests wins" would drift apart.
+    /// A flat, fully rounded bar for a slider with nothing drawn behind it - the plain track the
+    /// reference gives an audio file, as opposed to the waveform a voice note gets. Kept once it
+    /// has been drawn, since it is asked for again for every bubble that scrolls past.
+    private static var sliderTracks: [String: UIImage] = [:]
+    static func sliderTrack(colour: UIColor, height: CGFloat = 6) -> UIImage {
+        let key = "\(colour.description)-\(height)"
+        if let known = sliderTracks[key] {
+            return known
+        }
+        let size = CGSize(width: height, height: height)
+        let drawn = UIGraphicsImageRenderer(size: size).image { _ in
+            colour.setFill()
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: height / 2).fill()
+        }
+        // Stretched from the middle, so the rounded ends stay round however wide the slider is.
+        let image = drawn.resizableImage(withCapInsets: UIEdgeInsets(top: 0, left: height / 2, bottom: 0, right: height / 2))
+        sliderTracks[key] = image
+        return image
+    }
+
+    /// What a piece of audio reads as when it is being quoted - in a bubble's reply block and in
+    /// the strip above the input bar alike. A voice note says so and how long it runs; an audio
+    /// attachment is just audio. Both used to fall through every branch of those two, leaving the
+    /// line blank.
+    static func audioPreviewLine(attachmentFlag: String, audioName: String, font: UIFont, colour: UIColor) -> NSAttributedString {
+        guard attachmentFlag == "60" else {
+            return NSAttributedString(string: "\u{266B} " + "Audio".localized(),
+                                      attributes: [.font: font, .foregroundColor: colour])
+        }
+        let mic = NSTextAttachment()
+        mic.image = UIImage(systemName: "mic.fill")?.withTintColor(colour, renderingMode: .alwaysOriginal)
+        // Sized off the text it sits in rather than a fixed number, since this line is drawn at
+        // two different sizes.
+        mic.bounds = CGRect(x: 0, y: -font.pointSize * 0.15, width: font.pointSize * 0.85, height: font.pointSize)
+        var text = "Voice Message".localized()
+        if let seconds = AudioDurationStore.seconds(forFileNamed: audioName) {
+            text += String(format: " (%d:%02d)", seconds / 60, seconds % 60)
+        }
+        let line = NSMutableAttributedString(attachment: mic)
+        line.append(NSAttributedString(string: " " + text, attributes: [.font: font, .foregroundColor: colour]))
+        return line
+    }
+
     static func accountBadge(forPin pin: String?) -> UIImage? {
         guard let pin = pin, !pin.isEmpty, let user = User.getData(pin: pin) else {
             return nil
@@ -7539,5 +7765,1530 @@ public extension Utils {
         let line = NSMutableAttributedString(attachment: attachment)
         line.append(NSAttributedString(string: "  " + name, attributes: [.foregroundColor: color]))
         return line
+    }
+}
+
+// MARK: - Voice notes
+
+/// The bar that takes over the bottom of a conversation while a voice note is being recorded.
+///
+/// Holds the recorder as well as the controls, so a conversation only has to say where to put it
+/// and what to do with what comes back. Both conversations use the same one - there is no version
+/// of this for groups and another for people.
+public final class VoiceNoteBar: UIView, AVAudioRecorderDelegate, AVAudioPlayerDelegate {
+
+    /// Thrown away: the recording is deleted and nothing is sent.
+    public var onCancel: (() -> Void)?
+    /// Finished: the file, and how long it runs.
+    public var onSend: ((URL, Int) -> Void)?
+
+    /// Measured off the reference, which is a 3x screen: the panel stands 146pt, its two rows sit
+    /// 31pt and 83pt down it, the send button is 40pt across and the pause ring 27pt.
+    public static let barHeight: CGFloat = 146
+
+    private let capsule = UIView()
+    private let playButton = UIButton(type: .system)
+    private let timeLabel = UILabel()
+    private let wave = VoiceWaveView()
+    private let binButton = UIButton(type: .system)
+    private let pauseButton = UIButton(type: .system)
+    private let sendButton = UIButton(type: .system)
+
+    private var recorder: AVAudioRecorder?
+    private var player: AVAudioPlayer?
+    private var meter: Timer?
+    /// Each stretch of speech between one pause and the next. Folded into one file whenever the
+    /// recording stops, so there is only ever one thing to play and one thing to send.
+    private var segments: [URL] = []
+    private var recordedSoFar: TimeInterval = 0
+    private var isPaused = false
+    private(set) public var fileURL: URL?
+
+    private var timeLeading: NSLayoutConstraint!
+    private var timeTrailing: NSLayoutConstraint!
+    private var waveLeading: NSLayoutConstraint!
+    private var waveTrailing: NSLayoutConstraint!
+    private var pausedWave: [NSLayoutConstraint] = []
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        build()
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    private func build() {
+        backgroundColor = .clear
+
+        capsule.backgroundColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.10) : UIColor(white: 0, alpha: 0.06) }
+        capsule.layer.cornerRadius = 22
+        capsule.isHidden = true
+
+        playButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)), for: .normal)
+        playButton.tintColor = .label
+        playButton.addTarget(self, action: #selector(tapPlay), for: .touchUpInside)
+        playButton.isHidden = true
+
+        timeLabel.text = "0:00"
+        timeLabel.font = .monospacedDigitSystemFont(ofSize: 19, weight: .regular)
+        timeLabel.textColor = .secondaryLabel
+        timeLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        binButton.setImage(UIImage(systemName: "trash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .light)), for: .normal)
+        binButton.tintColor = .secondaryLabel
+        binButton.addTarget(self, action: #selector(tapBin), for: .touchUpInside)
+
+        pauseButton.tintColor = .systemRed
+        pauseButton.addTarget(self, action: #selector(tapPause), for: .touchUpInside)
+        showPauseGlyph()
+
+        let plane = UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        sendButton.setImage(plane?.withRenderingMode(.alwaysOriginal), for: .normal)
+        sendButton.imageView?.contentMode = .scaleAspectFit
+        sendButton.backgroundColor = .mainColor
+        sendButton.layer.cornerRadius = 20
+        sendButton.addTarget(self, action: #selector(tapSend), for: .touchUpInside)
+
+        for view in [capsule, playButton, timeLabel, wave, binButton, pauseButton, sendButton] as [UIView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        sendSubviewToBack(capsule)
+
+        // Two arrangements of the top row, one per state, swapped rather than rebuilt.
+        timeLeading = timeLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20)
+        timeTrailing = timeLabel.trailingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: -18)
+        waveLeading = wave.leadingAnchor.constraint(equalTo: timeLabel.trailingAnchor, constant: 12)
+        waveTrailing = wave.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: VoiceNoteBar.barHeight),
+
+            timeLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: 31),
+            timeLeading,
+
+            wave.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor),
+            wave.heightAnchor.constraint(equalToConstant: 30),
+            waveLeading,
+            waveTrailing,
+
+            capsule.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            capsule.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            capsule.centerYAnchor.constraint(equalTo: timeLabel.centerYAnchor),
+            capsule.heightAnchor.constraint(equalToConstant: 44),
+
+            playButton.leadingAnchor.constraint(equalTo: capsule.leadingAnchor, constant: 14),
+            playButton.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
+            playButton.widthAnchor.constraint(equalToConstant: 24),
+
+            binButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            binButton.centerYAnchor.constraint(equalTo: topAnchor, constant: 83),
+            binButton.widthAnchor.constraint(equalToConstant: 30),
+            binButton.heightAnchor.constraint(equalToConstant: 30),
+
+            pauseButton.centerXAnchor.constraint(equalTo: centerXAnchor),
+            pauseButton.centerYAnchor.constraint(equalTo: binButton.centerYAnchor),
+            pauseButton.widthAnchor.constraint(equalToConstant: 30),
+            pauseButton.heightAnchor.constraint(equalToConstant: 30),
+
+            sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            sendButton.centerYAnchor.constraint(equalTo: binButton.centerYAnchor),
+            sendButton.widthAnchor.constraint(equalToConstant: 40),
+            sendButton.heightAnchor.constraint(equalToConstant: 40)
+        ])
+    }
+
+    /// A ring while it is listening, the bare microphone once it has stopped - which is how the
+    /// reference tells the two states apart at a glance.
+    private func showPauseGlyph() {
+        // The microphone is drawn lighter than the ring: at the same weight it reads as the
+        // heavier of the two, which is the wrong way round for what it is.
+        let name = isPaused ? "mic" : "pause.circle"
+        let size: CGFloat = isPaused ? 24 : 27
+        let weight: UIImage.SymbolWeight = isPaused ? .light : .regular
+        pauseButton.setImage(UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: weight)), for: .normal)
+    }
+
+    private func applyLayout(forPaused paused: Bool) {
+        capsule.isHidden = !paused
+        playButton.isHidden = !paused
+        NSLayoutConstraint.deactivate(pausedWave)
+        timeLeading.isActive = !paused
+        timeTrailing.isActive = paused
+        waveLeading.isActive = !paused
+        waveTrailing.isActive = !paused
+        pausedWave = paused
+            ? [wave.leadingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: 12),
+               wave.trailingAnchor.constraint(equalTo: timeLabel.leadingAnchor, constant: -12)]
+            : []
+        NSLayoutConstraint.activate(pausedWave)
+        showPauseGlyph()
+        layoutIfNeeded()
+    }
+
+    // MARK: Recording
+
+    public func begin(completion: @escaping (Bool) -> Void) {
+        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+            DispatchQueue.main.async {
+                guard granted, let self = self, self.start() else {
+                    completion(false)
+                    return
+                }
+                completion(true)
+            }
+        }
+    }
+
+    @discardableResult
+    private func start() -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setActive(true)
+        } catch {
+            return false
+        }
+        let name = "VoiceNote_\(Date().currentTimeMillis())_\(segments.count).m4a"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+        ]
+        do {
+            let made = try AVAudioRecorder(url: url, settings: settings)
+            made.delegate = self
+            made.isMeteringEnabled = true
+            guard made.record() else {
+                return false
+            }
+            recorder = made
+        } catch {
+            return false
+        }
+        isPaused = false
+        applyLayout(forPaused: false)
+        VoiceNoteBar.tap(.medium)
+        meter?.invalidate()
+        meter = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.tick()
+        }
+        return true
+    }
+
+    private func tick() {
+        guard let recorder = recorder, recorder.isRecording else {
+            return
+        }
+        recorder.updateMeters()
+        refreshTime(recordedSoFar + recorder.currentTime)
+        // Fix: the height came from the average power on a straight line from -55dB to 0, and
+        // both halves of that were wrong. An average over the sampling window irons out exactly
+        // the peaks that make a voice look like a voice, and decibels are logarithmic - spread
+        // evenly they put ordinary speech in a narrow band near the top, which is why every bar
+        // came out much the same height. The peak is what is taken now, and it is turned back
+        // into plain amplitude, where a loud syllable really is many times a quiet one.
+        let peak = recorder.peakPower(forChannel: 0)
+        let amplitude = pow(10, peak / 20)
+        // Speech rarely reaches full scale, so it is lifted to fill the height; silence keeps a
+        // floor, which is the row of small dots the reference shows between words.
+        wave.add(level: CGFloat(min(1, max(0.07, amplitude * 2.6))))
+    }
+
+    private func refreshTime(_ seconds: TimeInterval) {
+        timeLabel.text = String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60)
+    }
+
+    /// Stops, keeps the stretch just recorded, and folds every stretch into one file.
+    ///
+    /// A recording paused and resumed is several files - m4a cannot be appended to - so they are
+    /// joined here. Doing it at each pause rather than at the end means there is always exactly
+    /// one file to play, and playing is the whole reason a pause has a play button on it.
+    private func stopAndGather(completion: @escaping () -> Void) {
+        meter?.invalidate()
+        meter = nil
+        if let recorder = recorder {
+            recordedSoFar += recorder.currentTime
+            recorder.stop()
+            segments.append(recorder.url)
+        }
+        recorder = nil
+        guard segments.count > 1 else {
+            fileURL = segments.first
+            completion()
+            return
+        }
+        VoiceNoteBar.join(segments) { [weak self] joined in
+            guard let self = self else {
+                return
+            }
+            if let joined = joined {
+                self.segments.forEach { try? FileManager.default.removeItem(at: $0) }
+                self.segments = [joined]
+            }
+            self.fileURL = self.segments.first
+            completion()
+        }
+    }
+
+    /// Lays the stretches end to end into one file.
+    private static func join(_ parts: [URL], completion: @escaping (URL?) -> Void) {
+        let composition = AVMutableComposition()
+        guard let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            completion(nil)
+            return
+        }
+        var at = CMTime.zero
+        for part in parts {
+            let asset = AVURLAsset(url: part)
+            guard let source = asset.tracks(withMediaType: .audio).first else {
+                continue
+            }
+            try? track.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: source, at: at)
+            at = CMTimeAdd(at, asset.duration)
+        }
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VoiceNote_\(Date().currentTimeMillis()).m4a")
+        guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
+            completion(nil)
+            return
+        }
+        export.outputURL = output
+        export.outputFileType = .m4a
+        export.exportAsynchronously {
+            DispatchQueue.main.async {
+                completion(export.status == .completed ? output : nil)
+            }
+        }
+    }
+
+    // MARK: What the buttons do
+
+    @objc private func tapPause() {
+        VoiceNoteBar.tap(.rigid)
+        guard !isPaused else {
+            player?.stop()
+            player = nil
+            wave.mark(progress: nil)
+            wave.showWholeRecording(false)
+            start()
+            return
+        }
+        isPaused = true
+        applyLayout(forPaused: true)
+        wave.showWholeRecording(true)
+        stopAndGather { [weak self] in
+            self?.refreshTime(self?.recordedSoFar ?? 0)
+        }
+    }
+
+    @objc private func tapPlay() {
+        guard let url = fileURL else {
+            return
+        }
+        if let playing = player, playing.isPlaying {
+            playing.pause()
+            showPlayGlyph(playing: false)
+            return
+        }
+        do {
+            let made = try player ?? AVAudioPlayer(contentsOf: url)
+            made.delegate = self
+            player = made
+            made.play()
+        } catch {
+            return
+        }
+        showPlayGlyph(playing: true)
+        meter?.invalidate()
+        meter = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self = self, let player = self.player else {
+                return
+            }
+            self.refreshTime(player.currentTime)
+            self.wave.mark(progress: CGFloat(player.currentTime / max(player.duration, 0.01)))
+        }
+    }
+
+    private func showPlayGlyph(playing: Bool) {
+        let name = playing ? "pause.fill" : "play.fill"
+        playButton.setImage(UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)), for: .normal)
+    }
+
+    public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        meter?.invalidate()
+        meter = nil
+        self.player = nil
+        wave.mark(progress: nil)
+        refreshTime(recordedSoFar)
+        showPlayGlyph(playing: false)
+    }
+
+    /// A short knock, prepared and fired at once, so every way in and out feels the same.
+    static func tap(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        let generator = UIImpactFeedbackGenerator(style: style)
+        generator.prepare()
+        generator.impactOccurred()
+    }
+
+    @objc private func tapBin() {
+        VoiceNoteBar.tap(.light)
+        finish()
+        segments.forEach { try? FileManager.default.removeItem(at: $0) }
+        segments = []
+        fileURL = nil
+        onCancel?()
+    }
+
+    @objc private func tapSend() {
+        VoiceNoteBar.tap(.light)
+        player?.stop()
+        player = nil
+        stopAndGather { [weak self] in
+            guard let self = self else {
+                return
+            }
+            let seconds = Int(self.recordedSoFar.rounded())
+            self.finish()
+            guard let url = self.fileURL, seconds > 0 else {
+                self.onCancel?()
+                return
+            }
+            self.onSend?(url, seconds)
+        }
+    }
+
+    /// Stops everything, so nothing is left running behind a bar that has gone.
+    public func finish() {
+        meter?.invalidate()
+        meter = nil
+        player?.stop()
+        player = nil
+        recorder?.stop()
+        recorder = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+}
+
+/// The line that moves while somebody is speaking.
+public final class VoiceWaveView: UIView {
+
+    /// What is on screen while recording - a rolling window, only as much as fits.
+    private var levels: [CGFloat] = []
+    /// Every reading taken, kept whole. The preview shown when the recording is paused is the
+    /// whole of it, not the last few seconds that happened to still be on screen.
+    private var recorded: [CGFloat] = []
+    private var showsWhole = false
+    private let barWidth: CGFloat = 3
+    private let gap: CGFloat = 2
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    public func reset() {
+        levels.removeAll()
+        recorded.removeAll()
+        showsWhole = false
+        played = nil
+        setNeedsDisplay()
+    }
+
+    /// Whether to draw the whole recording rather than the tail of it.
+    public func showWholeRecording(_ on: Bool) {
+        showsWhole = on
+        setNeedsDisplay()
+    }
+
+    public func add(level: CGFloat) {
+        recorded.append(level)
+        levels.append(level)
+        // Only what fits is kept: the line scrolls rather than squeezing more in.
+        let room = Int(bounds.width / (barWidth + gap)) + 1
+        if levels.count > room {
+            levels.removeFirst(levels.count - room)
+        }
+        setNeedsDisplay()
+    }
+
+    /// How far through the recording has been played, or nothing when it is not being played.
+    /// What has been heard is drawn solid, what has not is faded - and the dot sits between them.
+    public func mark(progress: CGFloat?) {
+        played = progress
+        setNeedsDisplay()
+    }
+
+    private var played: CGFloat?
+
+    /// The whole recording squeezed into the bars there is room for.
+    ///
+    /// Each bar takes the loudest reading of the stretch it stands for, not the average of it.
+    /// Averaging is what flattens a voice into a straight line - the same mistake the meter itself
+    /// used to make - and the peaks are exactly what makes speech look like speech.
+    private func fitted(_ all: [CGFloat]) -> [CGFloat] {
+        let slots = max(1, Int(bounds.width / (barWidth + gap)))
+        guard all.count > slots else {
+            return all
+        }
+        let per = Double(all.count) / Double(slots)
+        return (0..<slots).map { slot in
+            let from = Int(Double(slot) * per)
+            let to = min(all.count, max(from + 1, Int(Double(slot + 1) * per)))
+            return all[from..<to].max() ?? 0
+        }
+    }
+
+    public override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else {
+            return
+        }
+        // While recording the line is drawn from the right, so it runs in as it is spoken. Once
+        // the recording is paused the whole of it is on show, from the left.
+        let drawn = showsWhole ? fitted(recorded) : levels
+        guard !drawn.isEmpty else {
+            return
+        }
+        let span = CGFloat(drawn.count) * (barWidth + gap)
+        var x = showsWhole ? 0 : max(0, bounds.width - span)
+        let step = barWidth + gap
+        let edge = played.map { bounds.width * $0 }
+        for level in drawn {
+            let height = max(2, level * bounds.height)
+            let bar = CGRect(x: x, y: (bounds.height - height) / 2, width: barWidth, height: height)
+            let heard = edge.map { x <= $0 } ?? true
+            context.setFillColor(UIColor.secondaryLabel.withAlphaComponent(heard ? 0.75 : 0.3).cgColor)
+            context.addPath(UIBezierPath(roundedRect: bar, cornerRadius: barWidth / 2).cgPath)
+            context.fillPath()
+            x += step
+        }
+        guard let edge = edge else {
+            return
+        }
+        // The dot the reference puts at the point that has been reached.
+        context.setFillColor(UIColor.mainColor.cgColor)
+        let dot = CGRect(x: edge - 5, y: bounds.midY - 5, width: 10, height: 10)
+        context.addEllipse(in: dot)
+        context.fillPath()
+    }
+}
+
+/// The line a voice note is drawn as, once it has been sent.
+///
+/// Told how loud each stretch of the recording was and how far through it has been played; what
+/// has been heard is drawn solid, the rest faded.
+public final class AudioWaveformView: UIView {
+
+    public var levels: [CGFloat] = [] {
+        didSet { setNeedsDisplay() }
+    }
+    public var progress: CGFloat = 0 {
+        didSet { setNeedsDisplay() }
+    }
+    public var playedColor: UIColor = .white
+    public var restColor: UIColor = UIColor(white: 1, alpha: 0.45)
+
+    private let barWidth: CGFloat = 3
+    private let gap: CGFloat = 2
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    public override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext(), !levels.isEmpty, bounds.width > 0 else {
+            return
+        }
+        let slots = max(1, Int(bounds.width / (barWidth + gap)))
+        let drawn = AudioWaveformView.fit(levels, into: slots)
+        let edge = bounds.width * max(0, min(1, progress))
+        var x: CGFloat = 0
+        for level in drawn {
+            let height = max(2, level * bounds.height)
+            let bar = CGRect(x: x, y: (bounds.height - height) / 2, width: barWidth, height: height)
+            context.setFillColor((x <= edge ? playedColor : restColor).cgColor)
+            context.addPath(UIBezierPath(roundedRect: bar, cornerRadius: barWidth / 2).cgPath)
+            context.fillPath()
+            x += barWidth + gap
+        }
+    }
+
+    /// The loudest reading of each stretch, never the average - averaging is what turns a voice
+    /// into a straight line.
+    static func fit(_ all: [CGFloat], into slots: Int) -> [CGFloat] {
+        guard all.count > slots, slots > 0 else {
+            return all
+        }
+        let per = Double(all.count) / Double(slots)
+        return (0..<slots).map { slot in
+            let from = Int(Double(slot) * per)
+            let to = min(all.count, max(from + 1, Int(Double(slot + 1) * per)))
+            return all[from..<to].max() ?? 0
+        }
+    }
+}
+
+/// Works out what a recording looks like, once per file.
+///
+/// Reading a whole audio file is not something a bubble can do while it is being drawn, and a
+/// conversation draws the same bubble many times over as it scrolls - so it is read away from the
+/// main thread, and the answer is kept.
+/// How long each recording runs, so the conversation list can say so without opening the file
+/// again for every row it draws.
+public enum AudioDurationStore {
+
+    private static var known: [String: Int] = [:]
+
+    /// The length of a recording in whole seconds, or nil while the file is not on this device -
+    /// in which case the list simply says less rather than guessing. Reading the length of a local
+    /// m4a only parses its header, and each file is read at most once.
+    public static func seconds(forFileNamed name: String) -> Int? {
+        guard !name.isEmpty else {
+            return nil
+        }
+        if let already = known[name] {
+            return already
+        }
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        // The bubble writes a decrypted copy into Caches under the same name, so a file held only
+        // in secure storage is still readable here without decrypting it a second time.
+        let candidates = [documents.appendingPathComponent(name),
+                          caches.appendingPathComponent(name),
+                          caches.appendingPathComponent(name.replacingOccurrences(of: ".aac", with: ".m4a"))]
+        guard let url = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+            return nil
+        }
+        let found = Int(CMTimeGetSeconds(AVURLAsset(url: url).duration).rounded())
+        guard found > 0 else {
+            return nil
+        }
+        known[name] = found
+        return found
+    }
+}
+
+/// How long each video runs, worked out from the file when the database does not know yet.
+///
+/// The length never travels with a message, and until now it was only ever written down when
+/// somebody opened the video - so a clip that had not been watched had no length under it. That
+/// showed up most on anything arriving from the share sheet, which is watched least often, but it
+/// was true of every video. Anything with the file on this device can answer the question itself.
+public enum VideoDurationStore {
+
+    private static var known: [String: Int] = [:]
+    private static var asking: Set<String> = []
+    private static var waiting: [String: [(Int) -> Void]] = [:]
+    /// Files already looked for and not found - so a video still downloading is not searched for
+    /// again on every pass of every row.
+    private static var absent: Set<String> = []
+    private static let queue = DispatchQueue(label: "nexilis.videolength", qos: .utility)
+
+    public static func seconds(forFileNamed name: String) -> Int? {
+        return known[name]
+    }
+
+    /// Answers on the main thread, and writes what it finds into the message so the question is
+    /// only ever asked once per file.
+    public static func read(fileNamed name: String, messageId: String, completion: @escaping (Int) -> Void) {
+        guard !name.isEmpty else {
+            return
+        }
+        if let already = known[name] {
+            completion(already)
+            return
+        }
+        guard !absent.contains(name) else {
+            return
+        }
+        waiting[name, default: []].append(completion)
+        guard !asking.contains(name) else {
+            return
+        }
+        asking.insert(name)
+        queue.async {
+            let found = measure(fileNamed: name)
+            DispatchQueue.main.async {
+                asking.remove(name)
+                let callers = waiting.removeValue(forKey: name) ?? []
+                guard found > 0 else {
+                    absent.insert(name)
+                    return
+                }
+                known[name] = found
+                MediaViewerViewController.rememberVideoDuration(seconds: found, messageId: messageId)
+                callers.forEach { $0(found) }
+            }
+        }
+    }
+
+    /// Only the plain file is read. One kept in the secure store would have to be decrypted whole
+    /// to be asked, and that is not work a scrolling conversation should start; it gets its length
+    /// the first time it is opened, as before.
+    private static func measure(fileNamed name: String) -> Int {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let candidates = [documents.appendingPathComponent(name), caches.appendingPathComponent(name)]
+        guard let url = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+            return 0
+        }
+        let seconds = CMTimeGetSeconds(AVURLAsset(url: url).duration)
+        guard seconds.isFinite, seconds > 0 else {
+            return 0
+        }
+        return Int(seconds.rounded())
+    }
+}
+
+/// The "Preparing 1 of 3..." card, with how far along it is and a way out of it.
+///
+/// Put in a window of its own rather than presented: what follows it is itself a presentation - the
+/// attachment preview - and two modals taking turns is how a screen ends up presenting nothing at
+/// all. A window can simply be taken away at the moment the next thing goes up.
+public enum PreparingOverlay {
+
+    private static var host: UIWindow?
+    private static var titleLabel: UILabel?
+    private static var bar: UIProgressView?
+    private static var onCancel: (() -> Void)?
+
+    public static var isShowing: Bool {
+        return host != nil
+    }
+
+    public static func show(title: String, onCancel cancel: @escaping () -> Void) {
+        hide()
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+            return
+        }
+        onCancel = cancel
+
+        let window = UIWindow(windowScene: scene)
+        window.windowLevel = .alert + 1
+        window.backgroundColor = UIColor(white: 0, alpha: 0.4)
+        let root = UIViewController()
+        root.view.backgroundColor = .clear
+        window.rootViewController = root
+        window.isHidden = false
+        host = window
+
+        let card = UIView()
+        card.backgroundColor = .tertiarySystemBackground
+        card.layer.cornerRadius = 14
+        card.clipsToBounds = true
+        root.view.addSubview(card)
+        card.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = UILabel()
+        label.text = title
+        label.textColor = .label
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.font = .systemFont(ofSize: 17, weight: .semibold)
+        card.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel = label
+
+        let progress = UIProgressView(progressViewStyle: .default)
+        progress.progressTintColor = .systemBlue
+        progress.trackTintColor = UIColor.systemGray.withAlphaComponent(0.5)
+        progress.layer.cornerRadius = 2
+        progress.clipsToBounds = true
+        progress.setProgress(0, animated: false)
+        card.addSubview(progress)
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        bar = progress
+
+        let separator = UIView()
+        separator.backgroundColor = .separator
+        card.addSubview(separator)
+        separator.translatesAutoresizingMaskIntoConstraints = false
+
+        let cancelButton = UIButton(type: .system)
+        cancelButton.setTitle("Cancel".localized(), for: .normal)
+        cancelButton.setTitleColor(.systemRed, for: .normal)
+        cancelButton.titleLabel?.font = .systemFont(ofSize: 17)
+        cancelButton.addTarget(self, action: #selector(Trampoline.cancelTapped), for: .touchUpInside)
+        card.addSubview(cancelButton)
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            card.centerXAnchor.constraint(equalTo: root.view.centerXAnchor),
+            card.centerYAnchor.constraint(equalTo: root.view.centerYAnchor),
+            card.widthAnchor.constraint(equalToConstant: 270),
+
+            label.topAnchor.constraint(equalTo: card.topAnchor, constant: 22),
+            label.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+
+            progress.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 22),
+            progress.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 22),
+            progress.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -22),
+            progress.heightAnchor.constraint(equalToConstant: 4),
+
+            separator.topAnchor.constraint(equalTo: progress.bottomAnchor, constant: 22),
+            separator.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 0.5),
+
+            cancelButton.topAnchor.constraint(equalTo: separator.bottomAnchor),
+            cancelButton.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            cancelButton.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            cancelButton.heightAnchor.constraint(equalToConstant: 48),
+            cancelButton.bottomAnchor.constraint(equalTo: card.bottomAnchor)
+        ])
+    }
+
+    public static func update(title: String? = nil, fraction: Double) {
+        DispatchQueue.main.async {
+            if let title = title {
+                titleLabel?.text = title
+            }
+            bar?.setProgress(Float(min(max(fraction, 0), 1)), animated: true)
+        }
+    }
+
+    public static func hide(completion: (() -> Void)? = nil) {
+        let takeDown = {
+            host?.isHidden = true
+            host?.rootViewController = nil
+            host = nil
+            titleLabel = nil
+            bar = nil
+            onCancel = nil
+            completion?()
+        }
+        if Thread.isMainThread {
+            takeDown()
+        } else {
+            DispatchQueue.main.async(execute: takeDown)
+        }
+    }
+
+    /// A button needs an object to send to, and this is an enum.
+    private final class Trampoline: NSObject {
+        @objc static func cancelTapped() {
+            let cancel = PreparingOverlay.onCancel
+            PreparingOverlay.hide()
+            cancel?()
+        }
+    }
+}
+
+/// The inside of an audio bubble: the picture or the disc, the microphone in its corner, the speed
+/// button that trades places with them, the play button, the line and the length.
+///
+/// Built once, here, because it is drawn in more than one place - the conversation and the message
+/// info screen - and the two had drifted into showing the same voice note as two different things.
+/// Whoever puts it in a bubble decides only where its edges go; everything inside is settled here.
+public final class AudioBubbleContent: UIView {
+
+    public let avatarBox = UIView()
+    public let picture = UIImageView()
+    public let micBadge = UIImageView()
+    public let speedPill = UIButton(type: .system)
+    public let playButton = UIButton(type: .system)
+    public let slider = UISlider()
+    public let wave = AudioWaveformView()
+    public let timeLabel = UILabel()
+    public let isVoiceNote: Bool
+    /// How long the line under a note runs. Fixed, as the reference has it: a five-second note and
+    /// a five-minute one are the same width, and only the drawing inside them differs.
+    public static let trackWidth: CGFloat = 132
+
+    public init(incoming: Bool, isVoiceNote: Bool, bubbleColour: UIColor, traits: UITraitCollection, fontOffset: CGFloat) {
+        self.isVoiceNote = isVoiceNote
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        // The picture stands 44pt and would otherwise sit hard against the top and bottom of the
+        // bubble. A floor under the row gives it somewhere to breathe.
+        heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+
+        // The sender's own picture rather than a music note - a voice note is somebody talking, and
+        // the reference says whose before it says anything else. The picture and the speed button
+        // share this one slot, so a box holds the picture and the two are swapped in and out of it;
+        // nothing else in the row moves when they change places. A note somebody else sent is laid
+        // out the other way round - their picture on the far side, so the two sides of the
+        // conversation mirror each other rather than both leading with a face.
+        addSubview(avatarBox)
+        if incoming {
+            avatarBox.anchor(centerY: centerYAnchor, width: 44, height: 44)
+        } else {
+            avatarBox.anchor(left: leftAnchor, centerY: centerYAnchor, width: 44, height: 44)
+        }
+
+        picture.clipsToBounds = true
+        picture.layer.cornerRadius = 22
+        avatarBox.addSubview(picture)
+        picture.anchor(top: avatarBox.topAnchor, left: avatarBox.leftAnchor, bottom: avatarBox.bottomAnchor, right: avatarBox.rightAnchor)
+        if isVoiceNote {
+            picture.contentMode = .scaleAspectFill
+            picture.backgroundColor = .tertiarySystemFill
+            picture.image = UIImage(systemName: "person.crop.circle.fill")
+            picture.tintColor = .lightGray
+        } else {
+            // Measured off the reference: the same 44pt circle the picture fills, in a muted red,
+            // with the note centred in it rather than stretched to the edges.
+            picture.contentMode = .center
+            picture.backgroundColor = UIColor(red: 228 / 255, green: 132 / 255, blue: 130 / 255, alpha: 1)
+            picture.image = UIImage(systemName: "music.note", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium))
+            picture.tintColor = .white
+        }
+
+        // The little microphone the reference tucks into the corner of the picture. Outlined in the
+        // bubble's own colour rather than seated in a disc of it: the shadow is cast from the glyph,
+        // so what it draws is a border following the microphone instead of a circle around it -
+        // the same sense of belonging to the bubble, without covering the picture.
+        micBadge.image = UIImage(systemName: "mic.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .regular))
+        micBadge.tintColor = incoming ? .mainColor : .gray
+        micBadge.contentMode = .scaleAspectFit
+        // Only a voice note has one: a file is not somebody speaking.
+        micBadge.isHidden = !isVoiceNote
+        micBadge.layer.shadowColor = bubbleColour.cgColor
+        micBadge.layer.shadowOpacity = 1
+        micBadge.layer.shadowRadius = 2.5
+        micBadge.layer.shadowOffset = .zero
+        micBadge.layer.masksToBounds = false
+        avatarBox.addSubview(micBadge)
+        micBadge.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            incoming
+                ? micBadge.leadingAnchor.constraint(equalTo: picture.leadingAnchor, constant: -2)
+                : micBadge.trailingAnchor.constraint(equalTo: picture.trailingAnchor, constant: 2),
+            micBadge.bottomAnchor.constraint(equalTo: picture.bottomAnchor, constant: 2),
+            micBadge.widthAnchor.constraint(equalToConstant: 18),
+            micBadge.heightAnchor.constraint(equalToConstant: 18)
+        ])
+
+        // The speed button that takes the picture's place while the note is being listened to.
+        // Measured off the reference: 42x24, fully rounded. Dark on a dark bubble and light on a
+        // light one, worked out from the bubble's own brightness, so the figure stays legible
+        // whichever side of the conversation the note is on.
+        var bubbleWhite: CGFloat = 1
+        bubbleColour.resolvedColor(with: traits).getWhite(&bubbleWhite, alpha: nil)
+        let onDarkBubble = bubbleWhite < 0.6
+        speedPill.backgroundColor = UIColor.black.withAlphaComponent(onDarkBubble ? 0.4 : 0.12)
+        speedPill.setTitleColor(onDarkBubble ? .white : .darkGray, for: .normal)
+        // Not systemFont(weight: .semibold): the app remaps that weight onto a bold italic face,
+        // and the figure would lean.
+        speedPill.titleLabel?.font = .boldSystemFont(ofSize: 12 + fontOffset)
+        speedPill.layer.cornerRadius = 12
+        speedPill.isHidden = true
+        addSubview(speedPill)
+        if incoming {
+            speedPill.anchor(right: rightAnchor, centerY: centerYAnchor, width: 42, height: 24)
+        } else {
+            speedPill.anchor(left: leftAnchor, centerY: centerYAnchor, width: 42, height: 24)
+        }
+
+        playButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+        playButton.tintColor = .gray
+        addSubview(playButton)
+        if incoming {
+            playButton.anchor(left: leftAnchor, paddingLeft: 12, centerY: centerYAnchor, width: 22, height: 22)
+        } else {
+            playButton.anchor(left: picture.rightAnchor, paddingLeft: 12, centerY: centerYAnchor, width: 22, height: 22)
+        }
+
+        slider.minimumValue = 0
+        slider.maximumValue = 1
+        slider.setThumbImage(UIImage(systemName: "circle.fill")?.withTintColor(UIColor.mainColor)
+            .resize(target: CGSize(width: 15, height: 15)), for: .normal)
+        wave.playedColor = .mainColor
+        wave.restColor = UIColor(white: 0.55, alpha: 0.55)
+        if isVoiceNote {
+            // The waveform is the track: the slider keeps the thumb and every bit of the seeking it
+            // already did, and simply stops drawing a line of its own.
+            addSubview(wave)
+            wave.anchor(left: playButton.rightAnchor, paddingLeft: 12, centerY: centerYAnchor, width: AudioBubbleContent.trackWidth, height: 26)
+            slider.minimumTrackTintColor = .clear
+            slider.maximumTrackTintColor = .clear
+        } else {
+            // With no line behind it the slider draws its own track again, 6pt and fully rounded
+            // off the reference, pitched light or dark against the bubble it is on.
+            slider.setMinimumTrackImage(Utils.sliderTrack(colour: onDarkBubble ? UIColor(white: 1, alpha: 0.75) : .mainColor), for: .normal)
+            slider.setMaximumTrackImage(Utils.sliderTrack(colour: onDarkBubble ? UIColor(white: 1, alpha: 0.18) : UIColor(white: 0, alpha: 0.15)), for: .normal)
+        }
+        addSubview(slider)
+        slider.anchor(left: playButton.rightAnchor, paddingLeft: 12, centerY: centerYAnchor, width: AudioBubbleContent.trackWidth, height: 26)
+        // Fix: the line used to be pinned to both ends of the row, which gave the row no width of
+        // its own at all - so how wide the bubble came out was decided by the message label behind
+        // it, which is hidden and has nothing to do with the audio. Two screens showing the same
+        // note therefore came out at two different widths. The track is a known length, and the row
+        // ends where its last piece ends, so the bubble hugs it and only it.
+        if incoming {
+            avatarBox.leadingAnchor.constraint(equalTo: slider.trailingAnchor, constant: 12).isActive = true
+            avatarBox.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+        } else {
+            trailingAnchor.constraint(equalTo: slider.trailingAnchor).isActive = true
+        }
+
+        timeLabel.text = "0:00"
+        timeLabel.font = .systemFont(ofSize: 10 + fontOffset)
+        timeLabel.textColor = .gray
+        addSubview(timeLabel)
+        timeLabel.anchor(top: slider.bottomAnchor, left: slider.leftAnchor, paddingTop: 4, width: 100, height: 12)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    /// The sender's picture, once it is known which sender that is.
+    public func setPicture(named thumb: String) {
+        guard isVoiceNote, !thumb.isEmpty else {
+            return
+        }
+        picture.setImage(name: thumb)
+    }
+}
+
+/// The filmstrip with a handle at each end, for choosing which part of a video is sent.
+public final class VideoTrimStrip: UIView {
+
+    private let frames = UIStackView()
+    private let leftHandle = UIView()
+    private let rightHandle = UIView()
+    private let leftShade = UIView()
+    private let rightShade = UIView()
+    private let border = UIView()
+
+    private let playhead = UIView()
+    private let playheadBar = UIView()
+    private let playheadKnob = UIView()
+    public static let playheadGrab: CGFloat = 36
+    private static let playheadBarWidth: CGFloat = 5
+    private static let playheadKnobSize: CGFloat = 14
+
+    /// The stretch the frames occupy, which is the whole of the video from end to end.
+    private var contentSpan: (from: CGFloat, width: CGFloat) {
+        let inset = VideoTrimStrip.handleWidth
+        return (inset, max(0, bounds.width - inset * 2))
+    }
+
+    private func place(_ fraction: CGFloat) -> CGFloat {
+        let span = contentSpan
+        return span.from + fraction * span.width
+    }
+
+    private func fraction(at x: CGFloat) -> CGFloat {
+        let span = contentSpan
+        guard span.width > 0 else {
+            return 0
+        }
+        return min(max((x - span.from) / span.width, 0), 1)
+    }
+
+    /// The marker may stand anywhere within the kept part, ends included - the handles are beside
+    /// the frames rather than over them, so there is nothing for it to hide behind.
+    private var playBounds: (CGFloat, CGFloat) {
+        return (leftFraction, rightFraction)
+    }
+    private var leftFraction: CGFloat = 0
+    private var rightFraction: CGFloat = 1
+    private var playFraction: CGFloat = 0
+    /// How long the whole video runs, so a shortest-allowed length in seconds can be turned into
+    /// the fraction of the strip that it occupies.
+    private var duration: Double = 0
+    /// Nothing shorter than this may be kept - a video trimmed away to nothing is not something to
+    /// send, and a fraction of a second is not something anybody meant to choose.
+    public static let shortestKept: Double = 1
+    /// Told the new ends whenever a handle is let go, as fractions of the whole.
+    public var onChange: ((Double, Double) -> Void)?
+    /// Told where the playhead has been dragged to, as it moves.
+    public var onScrub: ((Double) -> Void)?
+    /// Told once the finger comes off, which is when playing starts from there.
+    public var onScrubEnded: ((Double) -> Void)?
+
+    public static let handleWidth: CGFloat = 18
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+        layer.cornerRadius = 4
+        backgroundColor = UIColor(white: 0.1, alpha: 1)
+
+        frames.axis = .horizontal
+        frames.distribution = .fillEqually
+        frames.spacing = 0
+        addSubview(frames)
+        frames.translatesAutoresizingMaskIntoConstraints = false
+        // Fix: the frames ran the whole width while the marker could only reach between the
+        // handles - so the marker sat at its right-hand limit while the video still had a stretch
+        // to run, and the two read as disagreeing. The handles stand outside the frames now, and
+        // the frames occupy exactly the span the marker can travel: where the marker is on the
+        // strip is where the video is.
+        NSLayoutConstraint.activate([
+            frames.topAnchor.constraint(equalTo: topAnchor),
+            frames.leadingAnchor.constraint(equalTo: leadingAnchor, constant: VideoTrimStrip.handleWidth),
+            frames.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -VideoTrimStrip.handleWidth),
+            frames.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+
+        // Everything outside the chosen part is dimmed, which is what says where the cut is.
+        for shade in [leftShade, rightShade] {
+            shade.backgroundColor = UIColor(white: 0, alpha: 0.55)
+            shade.isUserInteractionEnabled = false
+            addSubview(shade)
+        }
+
+        border.layer.borderColor = UIColor.white.cgColor
+        border.layer.borderWidth = 2.5
+        border.isUserInteractionEnabled = false
+        addSubview(border)
+
+        // Fix: this was a thin white bar, and it starts life sitting exactly under the left
+        // handle - which is also white. It was not missing, it was invisible. It is given an
+        // outline and a knob of its own so it reads against both the filmstrip and the handles,
+        // and the part that takes the drag is made wide enough to actually catch a finger while
+        // the bar itself stays thin.
+        playhead.backgroundColor = .clear
+        addSubview(playhead)
+        playhead.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(playheadDragged(_:))))
+
+        playheadBar.backgroundColor = .white
+        playheadBar.layer.borderColor = UIColor.black.withAlphaComponent(0.65).cgColor
+        playheadBar.layer.borderWidth = 1
+        playheadBar.isUserInteractionEnabled = false
+        playhead.addSubview(playheadBar)
+
+        playheadKnob.backgroundColor = .white
+        playheadKnob.layer.borderColor = UIColor.black.withAlphaComponent(0.65).cgColor
+        playheadKnob.layer.borderWidth = 1
+        playheadKnob.layer.cornerRadius = VideoTrimStrip.playheadKnobSize / 2
+        playheadKnob.isUserInteractionEnabled = false
+        playhead.addSubview(playheadKnob)
+
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(strippedTapped(_:))))
+
+        for (handle, symbol) in [(leftHandle, "chevron.left"), (rightHandle, "chevron.right")] {
+            handle.backgroundColor = .white
+            addSubview(handle)
+            let chevron = UIImageView(image: UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .bold)))
+            chevron.tintColor = .black
+            chevron.contentMode = .center
+            handle.addSubview(chevron)
+            chevron.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                chevron.centerXAnchor.constraint(equalTo: handle.centerXAnchor),
+                chevron.centerYAnchor.constraint(equalTo: handle.centerYAnchor)
+            ])
+            handle.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(handleDragged(_:))))
+        }
+    }
+
+    public required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        positionHandles()
+    }
+
+    public func show(frames images: [UIImage], start: Double, end: Double, duration: Double) {
+        frames.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for image in images {
+            let view = UIImageView(image: image)
+            view.contentMode = .scaleAspectFill
+            view.clipsToBounds = true
+            frames.addArrangedSubview(view)
+        }
+        guard duration > 0 else {
+            return
+        }
+        self.duration = duration
+        leftFraction = CGFloat(start / duration)
+        rightFraction = CGFloat((end > 0 ? end : duration) / duration)
+        playFraction = leftFraction
+        positionHandles()
+    }
+
+    private func positionHandles() {
+        guard bounds.width > 0 else {
+            return
+        }
+        let side = VideoTrimStrip.handleWidth
+        let span = contentSpan
+        let left = place(leftFraction)
+        let right = place(rightFraction)
+        // Beside the kept part rather than over it, so neither the frames nor the marker are ever
+        // covered by a handle.
+        leftHandle.frame = CGRect(x: left - side, y: 0, width: side, height: bounds.height)
+        rightHandle.frame = CGRect(x: right, y: 0, width: side, height: bounds.height)
+        leftShade.frame = CGRect(x: span.from, y: 0, width: max(0, left - span.from), height: bounds.height)
+        rightShade.frame = CGRect(x: right, y: 0, width: max(0, span.from + span.width - right), height: bounds.height)
+        border.frame = CGRect(x: left, y: 0, width: max(0, right - left), height: bounds.height)
+        let allowed = playBounds
+        playFraction = min(max(allowed.0, playFraction), allowed.1)
+        let at = place(playFraction)
+        playhead.frame = CGRect(x: at - VideoTrimStrip.playheadGrab / 2, y: 0,
+                                width: VideoTrimStrip.playheadGrab, height: bounds.height)
+        playheadBar.frame = CGRect(x: (VideoTrimStrip.playheadGrab - VideoTrimStrip.playheadBarWidth) / 2, y: 0,
+                                   width: VideoTrimStrip.playheadBarWidth, height: bounds.height)
+        playheadKnob.frame = CGRect(x: (VideoTrimStrip.playheadGrab - VideoTrimStrip.playheadKnobSize) / 2, y: 1,
+                                    width: VideoTrimStrip.playheadKnobSize, height: VideoTrimStrip.playheadKnobSize)
+        bringSubviewToFront(playhead)
+    }
+
+    /// Follows playing, without telling anybody - this is the picture moving, not the reader.
+    ///
+    /// Fix: this asked for a layout pass rather than moving the marker, and a pass only comes when
+    /// something else makes the strip lay out again. Twenty times a second the marker was told
+    /// where to be and stayed where it was. It is put there directly.
+    public func movePlayhead(to fraction: Double) {
+        playFraction = CGFloat(min(max(fraction, 0), 1))
+        positionHandles()
+    }
+
+    /// A tap anywhere on the part being kept moves the marker there, and the video with it.
+    @objc private func strippedTapped(_ gesture: UITapGestureRecognizer) {
+        guard bounds.width > 0 else {
+            return
+        }
+        let at = fraction(at: gesture.location(in: self).x)
+        // Outside the trim there is nothing to start from, so a tap out there is left alone.
+        let allowed = playBounds
+        guard at >= leftFraction, at <= rightFraction else {
+            return
+        }
+        playFraction = min(max(allowed.0, at), allowed.1)
+        positionHandles()
+        onScrub?(Double(playFraction))
+        onScrubEnded?(Double(playFraction))
+    }
+
+    @objc private func playheadDragged(_ gesture: UIPanGestureRecognizer) {
+        guard bounds.width > 0 else {
+            return
+        }
+        let moved = gesture.translation(in: self).x / max(contentSpan.width, 1)
+        gesture.setTranslation(.zero, in: self)
+        // It belongs between the two ends: there is no sense in starting outside what is being kept.
+        let allowed = playBounds
+        playFraction = min(max(allowed.0, playFraction + moved), allowed.1)
+        setNeedsLayout()
+        onScrub?(Double(playFraction))
+        if gesture.state == .ended || gesture.state == .cancelled {
+            onScrubEnded?(Double(playFraction))
+        }
+    }
+
+    @objc private func handleDragged(_ gesture: UIPanGestureRecognizer) {
+        guard bounds.width > 0, let handle = gesture.view else {
+            return
+        }
+        let moved = gesture.translation(in: self).x / max(contentSpan.width, 1)
+        gesture.setTranslation(.zero, in: self)
+        // Fix: the two were only kept a couple of handle widths apart, which is a distance on the
+        // screen and says nothing about time - on a long video that is several seconds, and on a
+        // short one it is a fraction of one, so a video could be trimmed away to nothing. A second
+        // is the floor, in seconds, and the handles are kept that far apart on the strip. Anything
+        // shorter than a second to begin with cannot be trimmed at all.
+        let handWidth = VideoTrimStrip.handleWidth * 2 / max(contentSpan.width, 1)
+        let aSecond = duration > 0 ? CGFloat(VideoTrimStrip.shortestKept / duration) : handWidth
+        let closest = min(1, max(handWidth, aSecond))
+        if handle === leftHandle {
+            leftFraction = min(max(0, leftFraction + moved), rightFraction - closest)
+        } else {
+            rightFraction = max(min(1, rightFraction + moved), leftFraction + closest)
+        }
+        positionHandles()
+        // Reported as it moves, not only when the finger lifts: the length and the size beside it
+        // are what the reader is dragging against, and they have to keep up.
+        onChange?(Double(leftFraction), Double(rightFraction))
+    }
+}
+
+/// Re-encodes a video at a lower bitrate while leaving its size alone.
+///
+/// AVAssetExportSession only offers presets, and a preset settles the resolution and the bitrate
+/// together - which is why asking for a smaller file meant accepting a smaller picture. A reader
+/// and a writer let the one be lowered without touching the other: the frames go through at the
+/// size they were shot at, and only how many bits describe them changes.
+public final class VideoTranscoder {
+
+    private var reader: AVAssetReader?
+    private var writer: AVAssetWriter?
+    private var cancelled = false
+    private let queue = DispatchQueue(label: "nexilis.share.transcode")
+
+    /// Roughly a third of what the source runs at, and never more than two megabits - which is
+    /// more than enough for something watched on a phone - with a floor so a already-small video
+    /// is not made to look worse for nothing.
+    public static func targetBitrate(for track: AVAssetTrack) -> Int {
+        let source = Double(track.estimatedDataRate)
+        let wanted = source > 0 ? source * 0.35 : 1_500_000
+        return Int(min(max(wanted, 600_000), 2_000_000))
+    }
+
+    public init() {}
+
+    public func cancel() {
+        cancelled = true
+        reader?.cancelReading()
+        writer?.cancelWriting()
+    }
+
+    public func start(source: URL,
+               destination: URL,
+               timeRange: CMTimeRange?,
+               muted: Bool,
+               progress: @escaping (Double) -> Void,
+               completion: @escaping (Bool) -> Void) {
+        let asset = AVURLAsset(url: source)
+        guard let videoTrack = asset.tracks(withMediaType: .video).first,
+              let reader = try? AVAssetReader(asset: asset),
+              let writer = try? AVAssetWriter(outputURL: destination, fileType: .mp4) else {
+            completion(false)
+            return
+        }
+        self.reader = reader
+        self.writer = writer
+        let span = timeRange ?? CMTimeRange(start: .zero, duration: asset.duration)
+        reader.timeRange = span
+
+        let videoOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        ])
+        videoOutput.alwaysCopiesSampleData = false
+        guard reader.canAdd(videoOutput) else {
+            completion(false)
+            return
+        }
+        reader.add(videoOutput)
+
+        // The size the frames actually are, which is not the same as naturalSize once the camera's
+        // own rotation is taken into account.
+        let carried = videoTrack.naturalSize.applying(videoTrack.preferredTransform)
+        let width = abs(carried.width).rounded()
+        let height = abs(carried.height).rounded()
+        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: VideoTranscoder.targetBitrate(for: videoTrack),
+                AVVideoMaxKeyFrameIntervalKey: 60,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
+            ]
+        ])
+        videoInput.expectsMediaDataInRealTime = false
+        videoInput.transform = videoTrack.preferredTransform
+        guard writer.canAdd(videoInput) else {
+            completion(false)
+            return
+        }
+        writer.add(videoInput)
+
+        var audioOutput: AVAssetReaderTrackOutput?
+        var audioInput: AVAssetWriterInput?
+        if !muted, let audioTrack = asset.tracks(withMediaType: .audio).first {
+            let output = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: [
+                AVFormatIDKey: kAudioFormatLinearPCM
+            ])
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVNumberOfChannelsKey: 1,
+                AVSampleRateKey: 44100,
+                AVEncoderBitRateKey: 64_000
+            ])
+            input.expectsMediaDataInRealTime = false
+            if reader.canAdd(output), writer.canAdd(input) {
+                reader.add(output)
+                writer.add(input)
+                audioOutput = output
+                audioInput = input
+            }
+        }
+
+        // Puts the moov atom at the front, so the receiver can start playing before the whole file
+        // has arrived.
+        writer.shouldOptimizeForNetworkUse = true
+        guard reader.startReading(), writer.startWriting() else {
+            completion(false)
+            return
+        }
+        writer.startSession(atSourceTime: span.start)
+
+        let group = DispatchGroup()
+        let total = CMTimeGetSeconds(span.duration)
+        let started = CMTimeGetSeconds(span.start)
+
+        group.enter()
+        videoInput.requestMediaDataWhenReady(on: queue) { [weak self] in
+            guard let self = self else {
+                return
+            }
+            while videoInput.isReadyForMoreMediaData {
+                guard !self.cancelled, let buffer = videoOutput.copyNextSampleBuffer() else {
+                    videoInput.markAsFinished()
+                    group.leave()
+                    return
+                }
+                let at = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(buffer))
+                if total > 0 {
+                    DispatchQueue.main.async {
+                        progress(min(max((at - started) / total, 0), 1))
+                    }
+                }
+                videoInput.append(buffer)
+            }
+        }
+
+        if let audioInput = audioInput, let audioOutput = audioOutput {
+            group.enter()
+            audioInput.requestMediaDataWhenReady(on: queue) { [weak self] in
+                guard let self = self else {
+                    return
+                }
+                while audioInput.isReadyForMoreMediaData {
+                    guard !self.cancelled, let buffer = audioOutput.copyNextSampleBuffer() else {
+                        audioInput.markAsFinished()
+                        group.leave()
+                        return
+                    }
+                    audioInput.append(buffer)
+                }
+            }
+        }
+
+        group.notify(queue: queue) { [weak self] in
+            guard let self = self, !self.cancelled else {
+                completion(false)
+                return
+            }
+            writer.finishWriting {
+                let ok = writer.status == .completed
+                DispatchQueue.main.async {
+                    completion(ok)
+                }
+            }
+        }
+    }
+}
+
+public enum AudioWaveformStore {
+
+    private static var known: [String: [CGFloat]] = [:]
+    private static var asking: Set<String> = []
+    /// Everyone still waiting on a read that is already running, by file.
+    private static var waiting: [String: [([CGFloat]) -> Void]] = [:]
+    private static let queue = DispatchQueue(label: "nexilis.waveform", qos: .utility)
+
+    public static func levels(for key: String) -> [CGFloat]? {
+        return known[key]
+    }
+
+    /// Reads the file if it has not been read, then hands the answer back on the main thread.
+    public static func read(url: URL, key: String, completion: @escaping ([CGFloat]) -> Void) {
+        if let already = known[key] {
+            completion(already)
+            return
+        }
+        // Fix: a second asker arriving while the first read was still running was turned away with
+        // nothing - its completion was dropped, and only the first one was ever answered. A bubble
+        // rebuilt during the read, which a checkmark landing on a note just sent is enough to do,
+        // was left holding a blank line for a view that no longer existed. They queue up now, and
+        // all of them are answered.
+        waiting[key, default: []].append(completion)
+        guard !asking.contains(key) else {
+            return
+        }
+        asking.insert(key)
+        queue.async {
+            let found = measure(url: url)
+            DispatchQueue.main.async {
+                asking.remove(key)
+                let callers = waiting.removeValue(forKey: key) ?? []
+                guard !found.isEmpty else {
+                    return
+                }
+                known[key] = found
+                callers.forEach { $0(found) }
+            }
+        }
+    }
+
+    private static func measure(url: URL) -> [CGFloat] {
+        let asset = AVURLAsset(url: url)
+        guard let track = asset.tracks(withMediaType: .audio).first,
+              let reader = try? AVAssetReader(asset: asset) else {
+            return []
+        }
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ])
+        reader.add(output)
+        reader.startReading()
+
+        // Enough for any bar the bubble might draw, and no more - a voice note read at full
+        // resolution is hundreds of thousands of numbers to hold for nothing.
+        let wanted = 200
+        var loudest: [CGFloat] = []
+        var peak: Int16 = 0
+        var counted = 0
+        // Roughly how many samples belong to each bar, at the sample rate the file happens to use.
+        let rate = track.naturalTimeScale
+        let total = max(1, Int(CMTimeGetSeconds(asset.duration) * Double(rate)))
+        let per = max(1, total / wanted)
+
+        while reader.status == .reading, let buffer = output.copyNextSampleBuffer() {
+            guard let block = CMSampleBufferGetDataBuffer(buffer) else {
+                continue
+            }
+            var length = 0
+            var pointer: UnsafeMutablePointer<Int8>?
+            CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &pointer)
+            guard let start = pointer else {
+                continue
+            }
+            start.withMemoryRebound(to: Int16.self, capacity: length / 2) { samples in
+                for index in 0..<(length / 2) {
+                    let value = samples[index].magnitude
+                    if Int16(clamping: Int(value)) > peak {
+                        peak = Int16(clamping: Int(value))
+                    }
+                    counted += 1
+                    if counted >= per {
+                        loudest.append(CGFloat(peak) / CGFloat(Int16.max))
+                        peak = 0
+                        counted = 0
+                    }
+                }
+            }
+            CMSampleBufferInvalidate(buffer)
+        }
+        guard !loudest.isEmpty else {
+            return []
+        }
+        // Speech rarely reaches full scale, so the whole line is lifted until its loudest moment
+        // fills the height - otherwise every voice note looks like a whisper.
+        let top = loudest.max() ?? 1
+        let lift = top > 0.01 ? min(4, 0.95 / top) : 1
+        return loudest.map { min(1, max(0.07, $0 * lift)) }
     }
 }

@@ -865,6 +865,22 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     /// Shared by the selection session and by the viewer's delete button, for the same reason as
     /// the chooser above: which of the two offers appear depends on who sent the message, whether
     /// it is locked and whether it ever left the phone, and that belongs in one place.
+    /// WhatsApp's rule, and the one thing this was missing: a message can be taken back from
+    /// everybody for two days and twelve hours after it was sent, and no longer. Past that the
+    /// choice is simply not offered - it used to be offered on a message of any age, which is not
+    /// something the other side would honour anyway.
+    private static let deleteForEveryoneWindow: TimeInterval = 60 * 3600
+
+    private func withinDeleteForEveryoneWindow(_ message: [String: Any?]) -> Bool {
+        // No timestamp is no evidence that it is recent enough.
+        guard let stamp = message[TypeDataMessage.server_date] as? String,
+              let millis = Int64(stamp) else {
+            return false
+        }
+        let age = Date().timeIntervalSince1970 - TimeInterval(millis) / 1000
+        return age <= Self.deleteForEveryoneWindow
+    }
+
     func presentDeleteOptions(for messages: [[String: Any?]], from presenter: UIViewController? = nil) {
         let dataMessages = messages
         // Anything shown over the conversation is holding a message that is about to stop
@@ -891,7 +907,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         let dataFilterCall = dataMessages.filter({ $0[TypeDataMessage.message_scope_id] as? String == MessageScope.CALL || $0[TypeDataMessage.message_scope_id] as? String == MessageScope.MISSED_CALL })
 //            let statusDataRead = dataMessages.filter({ Int($0["status"]  as? String ?? "")! >= 4})
         let statusFailed = dataMessages.filter({ (Int($0["status"] as? String ?? "") ?? -1) == 0})
-        if dataFilterFpin.count == 0 && dataFilterLock.count == 0 && statusFailed.count == 0 && dataFilterCall.count == 0 {
+        let allRecentEnough = dataMessages.allSatisfy({ withinDeleteForEveryoneWindow($0) })
+        if dataFilterFpin.count == 0 && dataFilterLock.count == 0 && statusFailed.count == 0 && dataFilterCall.count == 0 && allRecentEnough {
             options.append(BottomChoiceSheet.Option(title: "Delete".localized() + " \(countSelected) " + "For Everyone".localized(), isDestructive: true) { [weak self] in
                 self?.performDelete(for: "everyone", dataMessages: dataMessages, onDone: onDeleted)
             })
@@ -1365,9 +1382,54 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var isBlackCancelButton = false
     let buttonSendEdit = UIButton(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
     
-    var audioPlayers: [IndexPath: AVAudioPlayer] = [:]
-    var timers: [IndexPath: Timer] = [:]
-    var playingIndexPath: IndexPath?
+    var audioPlayers: [String: AVAudioPlayer] = [:]
+    /// The line drawn for each audio bubble on screen, so whatever moves the slider can move it
+    /// too. Weakly held: a row scrolled away takes its own views with it.
+    var audioWaves: [String: AudioWaveformView] = [:]
+    /// Sender pictures already looked up, by pin. A bubble is drawn many times a second while the
+    /// conversation scrolls, and this is a query.
+    private var senderThumbs: [String: String] = [:]
+
+    /// Where a sender's picture is kept, for the bubble that shows who is speaking.
+    private func profileThumb(forPin pin: String, messageId: String) -> String {
+        return User.getData(pin: pin)?.thumb ?? ""
+    }
+
+    func senderThumb(forPin pin: String, messageId: String) -> String? {
+        guard !pin.isEmpty else {
+            return nil
+        }
+        if let known = senderThumbs[pin] {
+            return known
+        }
+        let found = profileThumb(forPin: pin, messageId: messageId)
+        senderThumbs[pin] = found
+        return found
+    }
+    /// The rest of each audio bubble's controls, alongside audioWaves. Kept for the same reason:
+    /// something that happens to the audio - it finishing, chiefly - has to be able to show on the
+    /// bubble without rebuilding the row underneath whoever is touching it.
+    var audioSliders: [String: UISlider] = [:]
+    var audioPlayButtons: [String: UIButton] = [:]
+    var audioTimeLabels: [String: UILabel] = [:]
+    /// The picture and the speed button that trade places in the left of the bubble.
+    var audioSpeedPills: [String: UIButton] = [:]
+    var audioAvatars: [String: UIView] = [:]
+    /// The reading speed chosen for each note, which notes are far enough into being listened to
+    /// that the speed button is showing instead of the picture, and the wait before the picture
+    /// comes back once the audio has run out.
+    var audioRates: [String: Float] = [:]
+    var audioSessions: Set<String> = []
+    var audioRestTimers: [String: Timer] = [:]
+    /// Notes whose audio ran out while the slider was still being held: the wait before the picture
+    /// returns cannot start until the finger comes off, or the button would go while it is in use.
+    var audioAwaitingRest: Set<String> = []
+    var timers: [String: Timer] = [:]
+    /// Fix: the players, their timers and the row that is playing were all keyed by index path.
+    /// A message arriving shifts every row below it, and the keys then point at bubbles they have
+    /// nothing to do with - audio carrying on under the wrong one, a pause that pauses somebody
+    /// else. A message does not move.
+    var playingAudioId: String?
     var timerSearch: Timer?
     
     var downloadList: [String: IndexPath] = [:]
@@ -1416,6 +1478,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     public override func viewDidDisappear(_ animated: Bool) {
+        // Nothing left playing, and no timer left running, behind a conversation that has
+        // been left - a repeating timer outlives the screen that made it.
+        stopAllAudio()
         if self.isMovingFromParent {
             removeAllObjectBeforeDismissVC()
         }
@@ -1523,6 +1588,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         
         buttonSendChat.circle()
         buttonSendChat.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
+        refreshSendOrRecordButton()
         buttonSendChat.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
         if isContactCenter {
             buttonAckConfidential.isHidden = true
@@ -4580,7 +4646,128 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         documentPicker.present()
     }
     
+    /// The button at the end of the input bar: a paper plane when there is something to send, a
+    /// microphone when there is not - which is how the reference decides between the two.
+    func refreshSendOrRecordButton() {
+        let hasText = !(textFieldSend.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && textFieldSend.textColor != .lightGray
+        wantsVoiceNote = !hasText
+        guard !hasText else {
+            buttonSendChat.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
+            return
+        }
+        let mic = UIImage(systemName: "mic.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold))
+        buttonSendChat.setImage(mic?.withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white, renderingMode: .alwaysOriginal), for: .normal)
+    }
+
+    /// True while the button is offering to record rather than to send.
+    var wantsVoiceNote: Bool {
+        get { return objc_getAssociatedObject(self, &EditorVoiceNoteKeys.wants) as? Bool ?? false }
+        set { objc_setAssociatedObject(self, &EditorVoiceNoteKeys.wants, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
+
+    var voiceNoteBar: VoiceNoteBar? {
+        get { return objc_getAssociatedObject(self, &EditorVoiceNoteKeys.bar) as? VoiceNoteBar }
+        set { objc_setAssociatedObject(self, &EditorVoiceNoteKeys.bar, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
+
+    /// Puts the recording bar over the input bar and starts listening.
+    func beginVoiceNote() {
+        guard voiceNoteBar == nil else {
+            return
+        }
+        let bar = VoiceNoteBar()
+        // Fix: this took the input bar's own colour, which is clear - so the field, its
+        // placeholder and the buttons behind carried on showing through the recording bar. It is
+        // meant to cover them, so it is given a colour of its own and put in front.
+        bar.backgroundColor = traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        // Reaching below the safe area as well, so nothing of the input bar shows under it.
+        bar.clipsToBounds = false
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        // Nothing else is being written or picked while a voice note is being recorded, so the
+        // keyboard is put away and the sticker sheet closed - otherwise the reader is left with
+        // two things asking for the same attention, and the bar covering neither.
+        textFieldSend.resignFirstResponder()
+        if viewSticker.isDescendant(of: view) {
+            // Fix: the sheet was taken away but the room made for it was not. Opening the stickers
+            // raises the input area by the height of the panel (constraintBottomAttachment = 200),
+            // and every other way of closing it puts that back - this one did not, so the bar was
+            // left floating 200pt off the bottom with nothing under it.
+            constraintBottomAttachment.constant = 0.0
+            viewSticker.removeConstraints(viewSticker.constraints)
+            viewSticker.removeFromSuperview()
+            view.layoutIfNeeded()
+        }
+
+        // Over the whole input area rather than inside the field: the bar is two rows tall, the
+        // field is one, and the row of attachment buttons below has to be covered as well.
+        view.addSubview(bar)
+        view.bringSubviewToFront(bar)
+        let foot = (viewButton.isDescendant(of: view) && !viewButton.isHidden)
+            ? viewButton.bottomAnchor
+            : viewTextfield.bottomAnchor
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: foot)
+        ])
+        voiceNoteBar = bar
+        bar.onCancel = { [weak self] in
+            self?.endVoiceNote()
+        }
+        bar.onSend = { [weak self] url, seconds in
+            self?.endVoiceNote()
+            self?.sendVoiceNote(at: url, seconds: seconds)
+        }
+        bar.begin { [weak self] started in
+            guard !started else {
+                return
+            }
+            self?.endVoiceNote()
+            self?.view.makeToast("Microphone access is needed to record".localized(), duration: 3)
+        }
+    }
+
+    func endVoiceNote() {
+        voiceNoteBar?.finish()
+        voiceNoteBar?.removeFromSuperview()
+        voiceNoteBar = nil
+    }
+
+    /// Sends what was recorded, as an audio message like any other.
+    ///
+    /// The shape is the one the rest of the app already speaks: the file copied into Documents
+    /// under a `Nexilis_` name and the original name ahead of the caption in the text, which is
+    /// what the bubble reads back when it draws the player. The flag is 60 rather than the 5 an
+    /// audio attachment normally travels under: 5 says only "there is audio here", and a client
+    /// reading it draws the plain file bubble - a music note on a disc - which is wrong for
+    /// somebody's voice. 60 says which of the two this is, on every client that receives it.
+    func sendVoiceNote(at url: URL, seconds: Int) {
+        let originalName = url.lastPathComponent
+        let renamed = "Nexilis_\(Date().currentTimeMillis())_\(originalName)"
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let destination = documents.appendingPathComponent(renamed)
+        do {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.moveItem(at: url, to: destination)
+        } catch {
+            view.makeToast("Failed to save the recording".localized(), duration: 3)
+            return
+        }
+        sendChat(message_text: "\(originalName)|",
+                 attachment_flag: "60",
+                 audio_id: renamed,
+                 viewController: self)
+    }
+
     @objc func sendTapped() {
+        // Nothing written means the button is a microphone, not a paper plane.
+        if wantsVoiceNote {
+            beginVoiceNote()
+            return
+        }
         sendChat(message_text: textFieldSend.text!, viewController: self)
     }
     
@@ -4933,7 +5120,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func sendChat(message_scope_id:String =  MessageScope.WHISPER, status:String =  "1", message_text:String =  "", credential:String = "0", attachment_flag: String = "0", ex_blog_id: String = "", message_large_text: String = "", ex_format: String = "", image_id: String = "", audio_id: String = "", video_id: String = "", file_id: String = "", thumb_id: String = "", reff_id: String = "", read_receipts: String = "4", chat_id: String = "", is_call_center: String = "0", call_center_id: String = "", viewController: UIViewController, isAutoSendCC : Bool = false, gif_id: String = "", is_forwarded: Int = 0, is_secret: Int = 0) {
-        if viewController is EditorPersonal && file_id == "" && dataMessageForward == nil && !isAutoSendCC{
+        // Fix: this refused an empty message unless it carried a file, and a file meant `file_id`
+        // and nothing else - so a voice note, which travels as `audio_id`, was turned away with
+        // "Write Messages" even though there was plainly something to send. What the guard is for
+        // is not sending nothing; anything attached is something.
+        let carriesAttachment = !file_id.isEmpty || !audio_id.isEmpty || !image_id.isEmpty
+            || !video_id.isEmpty || !gif_id.isEmpty
+        if viewController is EditorPersonal && !carriesAttachment && dataMessageForward == nil && !isAutoSendCC{
             if ((textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) == "Send message".localized() && textFieldSend.textColor == UIColor.lightGray && attachment_flag != "11") || textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ) {
                 dismissKeyboard()
                 viewController.view.makeToast("Write Messages".localized(), duration: 3)
@@ -6316,28 +6509,36 @@ extension EditorPersonal: PreviewAttachmentImageVideoDelegate, PHPickerViewContr
             return
         }
         picker.dismiss(animated: true, completion: { [weak self] in
-            Nexilis.showLoader(text: "Preparing...".localized())
+            // A spinner with a percentage in its text said how far along it was but gave no way
+            // out of it, and most of this wait is iCloud handing originals back - which on a slow
+            // link is a long time to be held. The same card the share sheet uses: how far along,
+            // and a way to stop.
+            var loading: Progress?
+            let heading = results.count > 1
+                ? "\("Preparing...".localized()) (\(results.count))"
+                : "Preparing...".localized()
+            PreparingOverlay.show(title: heading) {
+                loading?.cancel()
+            }
             // Fix: the loading itself moved to PickerAttachmentLoader - see the note there
             // for what was wrong with doing it here (items loaded one after another behind a
             // semaphore, failures that left the loader up for good, a full-size decode of
             // every camera photo).
-            PickerAttachmentLoader.load(results: results, onProgress: { fraction in
-                // Most of the wait on a camera photo or video is iCloud handing the original
-                // back, so it is worth saying how far along that is.
-                Nexilis.loadingAlert.message = "\("Preparing...".localized()) \(Int(fraction * 100))%"
+            loading = PickerAttachmentLoader.load(results: results, onProgress: { fraction in
+                PreparingOverlay.update(fraction: fraction)
             }, completion: { attachments in
-                guard let self = self else {
-                    Nexilis.hideLoader { }
+                guard let self = self, loading?.isCancelled != true else {
+                    PreparingOverlay.hide()
                     return
                 }
                 var attachments = attachments
                 guard !attachments.isEmpty else {
-                    // Nothing came back at all - still take the loader down rather than
-                    // leaving it on screen.
-                    Nexilis.hideLoader { }
+                    // Nothing came back at all - still take the card down rather than leaving it
+                    // on screen.
+                    PreparingOverlay.hide()
                     return
                 }
-                Nexilis.hideLoader {
+                PreparingOverlay.hide {
                     let previewImageVC = PreviewAttachmentImageVideo(nibName: "PreviewAttachmentImageVideo", bundle: Bundle.resourceBundle(for: Nexilis.self))
                     if (self.textFieldSend.textColor != .lightGray) {
                         previewImageVC.currentTextTextField = self.textFieldSend.text
@@ -6781,6 +6982,7 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     public func textViewDidChange(_ textView: UITextView) {
+        refreshSendOrRecordButton()
         if textView.text.count == 0 {
             isAlwaysHideLinkPreview = false
         }
@@ -10430,44 +10632,45 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         
         if !audioChat.isEmpty {
             messageText.isHidden = true
+            // Fix: hidden or not, the label is still laid out, and with a long file name behind it
+            // it demanded a width the audio row never asked for - which is how the same note came
+            // out at two different widths on two screens. It yields instead: the row has a width of
+            // its own now, and the bubble takes that.
+            messageText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            messageText.setContentHuggingPriority(.defaultLow, for: .horizontal)
             var padTop: CGFloat = 15
             if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 {
                 padTop = 35
             }
             
-            let contAudio = UIView()
-            contAudio.backgroundColor = .clear
+            let incomingAudio = (dataMessages[indexPath.row]["f_pin"] as? String) != idMe
+            // A voice note and an ordinary audio file are two different things, and the flag they
+            // travel under is what tells them apart - which is why a recording is sent as 60.
+            let isVoiceNoteAudio = (dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String) == "60"
+            // Fix: this row used to be built by hand here and by hand again in the message info
+            // screen, and the two had drifted into drawing the same voice note as two different
+            // things. It is one view now, and both places get whatever it says.
+            let contAudio = AudioBubbleContent(incoming: incomingAudio,
+                                               isVoiceNote: isVoiceNoteAudio,
+                                               bubbleColour: containerMessage.backgroundColor ?? .white,
+                                               traits: traitCollection,
+                                               fontOffset: offset())
             containerMessage.addSubview(contAudio)
-            contAudio.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: padTop, paddingLeft: 15, paddingBottom: 15, paddingRight: 15)
-            
-            let imageAudio = UIImageView()
-            imageAudio.image = UIImage(systemName: "music.note", withConfiguration: UIImage.SymbolConfiguration(pointSize: 35))
-            contAudio.addSubview(imageAudio)
-            imageAudio.anchor(top: contAudio.topAnchor, left: contAudio.leftAnchor, bottom: contAudio.bottomAnchor, centerY: contAudio.centerYAnchor)
-            imageAudio.tintColor = .mainColor
-            
-            let playButtonAudio = UIButton(type: .system)
-            playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
-            playButtonAudio.tintColor = .gray
-            contAudio.addSubview(playButtonAudio)
-            playButtonAudio.anchor(left: contAudio.leftAnchor, paddingLeft: 45, centerY: contAudio.centerYAnchor, width: 20, height: 20)
-            
-            let progressSliderAudio = UISlider()
-            progressSliderAudio.minimumValue = 0
-            progressSliderAudio.maximumValue = 1
-            let thumbImage = UIImage(systemName: "circle.fill")?.withTintColor(UIColor.mainColor)
-                .resize(target: CGSize(width: 15, height: 15))
-            progressSliderAudio.setThumbImage(thumbImage, for: .normal)
-            contAudio.addSubview(progressSliderAudio)
-            progressSliderAudio.anchor(left: playButtonAudio.rightAnchor, right: contAudio.rightAnchor, paddingLeft: 10, centerY: contAudio.centerYAnchor, height: 15)
-            
-            let timeLabelAudio = UILabel()
-            timeLabelAudio.text = "0:00"
-            timeLabelAudio.font = .systemFont(ofSize: 10 + offset())
-            timeLabelAudio.textColor = .gray
-            contAudio.addSubview(timeLabelAudio)
-            timeLabelAudio.anchor(top: playButtonAudio.bottomAnchor, left: playButtonAudio.rightAnchor, paddingLeft: 10, width: 100, height: 12)
-            
+            // Fix: the top was whatever the rest of the bubble needed and the bottom a flat 15,
+            // so the row never sat level in its own bubble. Measured off the reference instead:
+            // the picture is 44pt with 10pt clear above and below it.
+            contAudio.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: max(padTop, 10), paddingLeft: 10, paddingBottom: 10, paddingRight: 12)
+            contAudio.setPicture(named: senderThumb(forPin: dataMessages[indexPath.row]["f_pin"] as? String ?? "",
+                                                    messageId: messageIdChat) ?? "")
+
+            let avatarBoxAudio = contAudio.avatarBox
+            let imageAudio = contAudio.picture
+            let speedPillAudio = contAudio.speedPill
+            let playButtonAudio = contAudio.playButton
+            let progressSliderAudio = contAudio.slider
+            let waveAudio = contAudio.wave
+            let timeLabelAudio = contAudio.timeLabel
+
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -10518,32 +10721,108 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                             
                         }
                     }
-                    if audioPlayers[indexPath] == nil {
+                    if audioPlayers[messageIdChat] == nil {
                         do {
                             let audioPlayer = try AVAudioPlayer(contentsOf: url)
-                            audioPlayers[indexPath] = audioPlayer
+                            // Set before the first play or the rate is ignored, so it is set here
+                            // once rather than at the moment somebody asks for a faster reading.
+                            audioPlayer.enableRate = true
+                            audioPlayer.rate = audioRates[messageIdChat] ?? 1
+                            audioPlayers[messageIdChat] = audioPlayer
                             audioPlayer.delegate = self
-                            progressSliderAudio.maximumValue = Float(audioPlayer.duration)
-                            timeLabelAudio.text = formatTime(audioPlayer.duration)
                         } catch {
                             print("Error loading audio: \(error)")
                         }
                     }
-                    let audioPlayer = audioPlayers[indexPath]
-                    if playingIndexPath == indexPath, let player = audioPlayer, player.isPlaying {
+                    let audioPlayer = audioPlayers[messageIdChat]
+                    // Fix: the length and the reading under the line were written only on the pass
+                    // that first opened the file. A player now outlives its audio finishing (so a
+                    // drag in progress is not cut short), so a bubble scrolled back to would have
+                    // shown a bare 0:00 - they are taken from the player on every pass instead.
+                    if let player = audioPlayer {
+                        progressSliderAudio.maximumValue = Float(player.duration)
+                        progressSliderAudio.value = Float(player.currentTime)
+                        timeLabelAudio.text = formatTime(player.currentTime > 0 ? player.currentTime : player.duration)
+                    }
+                    if playingAudioId == messageIdChat, let player = audioPlayer, player.isPlaying {
                         playButtonAudio.setImage(UIImage(systemName: "pause.fill"), for: .normal)
                     } else {
                         playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
                     }
 
+                    // Drawn from what is already known about this file, so a bubble scrolled back
+                    // to shows its line at once rather than reading the file again.
+                    // Held so that audio running out on its own can put the bubble back to rest
+                    // where it stands, instead of rebuilding the row - see audioPlayerDidFinishPlaying.
+                    audioSliders[messageIdChat] = progressSliderAudio
+                    audioPlayButtons[messageIdChat] = playButtonAudio
+                    audioTimeLabels[messageIdChat] = timeLabelAudio
+                    if isVoiceNoteAudio {
+                        if let known = AudioWaveformStore.levels(for: audioChat) {
+                            waveAudio.levels = known
+                        } else {
+                            // Fix: the file was read only on the pass that first opened it, and the
+                            // answer went to whichever view happened to be on screen at the time. A
+                            // row rebuilt before the read landed - a checkmark arriving on a note
+                            // just sent, a push refreshing the bubble on the other side - was left
+                            // with an empty line, and nothing ever asked again; only closing the
+                            // conversation and coming back drew it. Asked for on any pass that has
+                            // no line yet, and answered to whichever view stands for the message by
+                            // the time the answer comes.
+                            AudioWaveformStore.read(url: url, key: audioChat) { [weak self] levels in
+                                guard let self = self, self.audioViewsAlive(messageIdChat) else {
+                                    return
+                                }
+                                self.audioWaves[messageIdChat]?.levels = levels
+                            }
+                        }
+                        waveAudio.progress = progressSliderAudio.maximumValue > 0
+                            ? CGFloat(progressSliderAudio.value / progressSliderAudio.maximumValue)
+                            : 0
+                        audioWaves[messageIdChat] = waveAudio
+                        audioSpeedPills[messageIdChat] = speedPillAudio
+                        audioAvatars[messageIdChat] = avatarBoxAudio
+
+                        // A bubble scrolled away and back comes back the way it was left: still
+                        // being listened to, and still at the speed that was chosen for it.
+                        let listeningAudio = audioSessions.contains(messageIdChat)
+                        speedPillAudio.setTitle(audioRateLabel(audioRates[messageIdChat] ?? 1), for: .normal)
+                        speedPillAudio.isHidden = !listeningAudio
+                        avatarBoxAudio.isHidden = listeningAudio
+
+                        speedPillAudio.addAction(UIAction { [weak self] _ in
+                            self?.cycleAudioRate(messageId: messageIdChat)
+                        }, for: .touchUpInside)
+                    } else {
+                        // Nothing trades places with the disc on a file, so neither the speed
+                        // button nor the drawn line is registered and showAudioSpeed, asked to
+                        // swap them, finds nothing to swap.
+                        audioWaves[messageIdChat] = nil
+                        audioSpeedPills[messageIdChat] = nil
+                        audioAvatars[messageIdChat] = nil
+                    }
+
                     // Play/Pause Button Action
                     playButtonAudio.addAction(UIAction { _ in
-                        self.playPauseAudio(indexPath: indexPath, playButton: playButtonAudio, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+                        self.playPauseAudio(messageId: messageIdChat, playButton: playButtonAudio, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
                     }, for: .touchUpInside)
                     
-                    progressSliderAudio.addAction(UIAction { _ in
-                        self.sliderChanged(indexPath: indexPath, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+                    // Fix: every twitch of the finger asked the player to seek, and seeking is
+                    // not free - a drag became a queue of seeks the player was still working
+                    // through, which is the lag. While the finger is down only the writing moves;
+                    // the player is sent to the new place once, when the finger lifts.
+                    progressSliderAudio.addAction(UIAction { [weak waveAudio] _ in
+                        timeLabelAudio.text = self.formatTime(TimeInterval(progressSliderAudio.value))
+                        if progressSliderAudio.maximumValue > 0 {
+                            waveAudio?.progress = CGFloat(progressSliderAudio.value / progressSliderAudio.maximumValue)
+                        }
                     }, for: .valueChanged)
+                    let seek = UIAction { _ in
+                        self.sliderChanged(messageId: messageIdChat, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+                    }
+                    progressSliderAudio.addAction(seek, for: .touchUpInside)
+                    progressSliderAudio.addAction(seek, for: .touchUpOutside)
+                    progressSliderAudio.addAction(seek, for: .touchCancel)
                 }
             }
         }
@@ -11029,7 +11308,20 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     VideoBubbleChrome.addUnavailable(to: imageThumb, sizeText: ChatTransferRing.sizeText(forFileNamed: videoChat))
                 }
                 if !videoChat.isEmpty {
-                    VideoBubbleChrome.addFooter(to: imageThumb, seconds: videoLength(ofMessage: dataMessages[indexPath.row]))
+                    let knownLength = videoLength(ofMessage: dataMessages[indexPath.row])
+                    let lengthLabel = VideoBubbleChrome.addFooter(to: imageThumb, seconds: knownLength)
+                    if knownLength == 0 {
+                        // Nothing has opened this one yet, so the database has no length for it -
+                        // which is every video arriving from the share sheet, among others. The
+                        // file is here, so it is asked directly and the answer kept.
+                        VideoDurationStore.read(fileNamed: videoChat, messageId: messageIdChat) { [weak self, weak lengthLabel] seconds in
+                            guard let self = self, self.audioViewsAlive(messageIdChat) else {
+                                return
+                            }
+                            self.videoLengths?[messageIdChat] = seconds
+                            lengthLabel?.text = String(format: "%d:%02d", seconds / 60, seconds % 60)
+                        }
+                    }
                 }
                 
                 if !copySession && !forwardSession && !deleteSession && !summarizeSession {
@@ -11469,6 +11761,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let image_chat = chatGroup[0].image
                 let video_chat = chatGroup[0].video
                 let file_chat = chatGroup[0].file
+                let audio_chat = chatGroup[0].audio
                 if (attachment_flag == "0" && thumb_chat == "") {
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
                     contentReply.attributedText = message_text.richText()
@@ -11489,8 +11782,18 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
                 } else if (attachment_flag == "11") {
                     contentReply.text = "❤️ Sticker"
+                } else if !audio_chat.isEmpty {
+                    // Fix: audio matched none of the branches above, so the line was left with no
+                    // text at all - a reply to a voice note quoted a blank.
+                    contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
+                    contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
+                                                                        audioName: audio_chat,
+                                                                        font: contentReply.font,
+                                                                        colour: .white.withAlphaComponent(0.8))
                 }
-                contentReply.textColor = .white.withAlphaComponent(0.8)
+                if contentReply.attributedText == nil {
+                    contentReply.textColor = .white.withAlphaComponent(0.8)
+                }
                 
                 if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
                     let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -11615,23 +11918,29 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         return cell
     }
     
-    func playPauseAudio(indexPath: IndexPath, playButton: UIButton, progressSlider: UISlider, timeLabel: UILabel) {
-        guard let audioPlayer = audioPlayers[indexPath] else { return }
+    func playPauseAudio(messageId: String, playButton: UIButton, progressSlider: UISlider, timeLabel: UILabel) {
+        guard let audioPlayer = audioPlayers[messageId] else { return }
 
         if audioPlayer.isPlaying {
             // Pause Audio
             audioPlayer.pause()
             playButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
-            timers[indexPath]?.invalidate()
+            timers[messageId]?.invalidate()
+            timers[messageId] = nil
+            playingAudioId = nil
         } else {
             // Stop other players if one is already playing
-            if let currentPlayingIndexPath = playingIndexPath, let currentAudioPlayer = audioPlayers[currentPlayingIndexPath] {
-                if currentPlayingIndexPath != indexPath {
-                    currentAudioPlayer.pause()
-                    timers[currentPlayingIndexPath]?.invalidate()
-                    timers[currentPlayingIndexPath] = nil
-                    audioPlayers[currentPlayingIndexPath] = nil
-                    tableChatView.reloadRows(at: [currentPlayingIndexPath], with: .none)
+            if let playing = playingAudioId, playing != messageId {
+                audioPlayers[playing]?.pause()
+                timers[playing]?.invalidate()
+                timers[playing] = nil
+                audioPlayers[playing] = nil
+                // Another note taking over ends the first one's turn, so its picture comes back.
+                endAudioSession(playing)
+                // Fix: the row was reloaded by the index path this had been holding, which by then
+                // may belong to another message or to no row at all. Looked up from the message.
+                if let at = indexPath(forMessageId: playing) {
+                    tableChatView.reloadRows(at: [at], with: .none)
                 }
             }
             
@@ -11643,22 +11952,152 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
 
             // Play new audio
+            audioPlayer.enableRate = true
+            audioPlayer.rate = audioRates[messageId] ?? 1
             audioPlayer.play()
             playButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
-            playingIndexPath = indexPath
+            playingAudioId = messageId
+            beginAudioSession(messageId)
 
-            // Start timer to update progress
-            timers[indexPath] = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-                progressSlider.value = Float(audioPlayer.currentTime)
-                timeLabel.text = self.formatTime(audioPlayer.currentTime)
+            // Fix: half a second apart, the head jumped rather than travelled, and the line drawn
+            // behind it never moved at all - the timer only knew about the slider. Also `[weak
+            // self]`: a repeating timer holding the conversation keeps it alive after it is closed,
+            // and keeps firing.
+            timers[messageId]?.invalidate()
+            timers[messageId] = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self, weak audioPlayer, weak progressSlider, weak timeLabel] _ in
+                guard let self = self, let audioPlayer = audioPlayer else {
+                    return
+                }
+                // Fix: this wrote the thumb back into place ten times a second, including while
+                // the reader was dragging it - so the finger and the timer pulled against each
+                // other and the thumb stuttered. While it is being held, it is theirs.
+                guard progressSlider?.isTracking != true else {
+                    return
+                }
+                // Fix: the bubble these belong to may have scrolled away and had its cell handed to
+                // another message by now, in which case this was drawing one note's progress across
+                // somebody else's bubble.
+                guard self.audioViewsAlive(messageId) else {
+                    return
+                }
+                progressSlider?.value = Float(audioPlayer.currentTime)
+                timeLabel?.text = self.formatTime(audioPlayer.currentTime)
+                if audioPlayer.duration > 0 {
+                    self.audioWaves[messageId]?.progress = CGFloat(audioPlayer.currentTime / audioPlayer.duration)
+                }
             }
         }
     }
     
-    func sliderChanged(indexPath: IndexPath, progressSlider: UISlider, timeLabel: UILabel) {
-        guard let audioPlayer = audioPlayers[indexPath] else { return }
+    func sliderChanged(messageId: String, progressSlider: UISlider, timeLabel: UILabel) {
+        guard let audioPlayer = audioPlayers[messageId] else { return }
         audioPlayer.currentTime = TimeInterval(progressSlider.value)
         timeLabel.text = formatTime(audioPlayer.currentTime)
+        // The audio had already run out while this drag was going on, so the wait for the picture
+        // to come back was held off until now.
+        if audioAwaitingRest.remove(messageId) != nil {
+            endAudioSession(messageId, after: 2.5)
+        }
+    }
+
+    /// The views held for a message are only good while its bubble is on screen: the cell is handed
+    /// to a different message the moment it scrolls away, and writing through a stale handle draws
+    /// one note's progress onto another note's bubble. Anything reaching for them asks first.
+    func audioViewsAlive(_ messageId: String) -> Bool {
+        guard let at = indexPath(forMessageId: messageId) else {
+            return false
+        }
+        return tableChatView.indexPathsForVisibleRows?.contains(at) == true
+    }
+
+    func audioRateLabel(_ rate: Float) -> String {
+        return rate == rate.rounded() ? "\(Int(rate))\u{00D7}" : "\(rate)\u{00D7}"
+    }
+
+    /// While a note is being listened to, the sender's picture gives way to the speed button - the
+    /// reference does the same, and it is the only place in the bubble with room for one.
+    func beginAudioSession(_ messageId: String) {
+        audioRestTimers[messageId]?.invalidate()
+        audioRestTimers[messageId] = nil
+        audioAwaitingRest.remove(messageId)
+        audioSessions.insert(messageId)
+        showAudioSpeed(true, for: messageId)
+    }
+
+    /// The picture comes back, after a pause when one is asked for: the reference leaves the speed
+    /// button up for a moment once the audio has run out, in case they want to hear it again.
+    func endAudioSession(_ messageId: String, after delay: TimeInterval = 0) {
+        audioRestTimers[messageId]?.invalidate()
+        audioRestTimers[messageId] = nil
+        guard delay > 0 else {
+            audioSessions.remove(messageId)
+            showAudioSpeed(false, for: messageId)
+            return
+        }
+        audioRestTimers[messageId] = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self = self else {
+                return
+            }
+            self.audioRestTimers[messageId] = nil
+            self.audioSessions.remove(messageId)
+            self.showAudioSpeed(false, for: messageId)
+        }
+    }
+
+    func showAudioSpeed(_ shown: Bool, for messageId: String) {
+        guard audioViewsAlive(messageId),
+              let pill = audioSpeedPills[messageId],
+              let avatar = audioAvatars[messageId] else {
+            return
+        }
+        pill.setTitle(audioRateLabel(audioRates[messageId] ?? 1), for: .normal)
+        guard pill.isHidden == shown else {
+            return
+        }
+        let appearing: UIView = shown ? pill : avatar
+        let leaving: UIView = shown ? avatar : pill
+        appearing.alpha = 0
+        appearing.isHidden = false
+        UIView.animate(withDuration: 0.2, animations: {
+            appearing.alpha = 1
+            leaving.alpha = 0
+        }, completion: { _ in
+            leaving.isHidden = true
+            leaving.alpha = 1
+        })
+    }
+
+    /// The speeds the reference offers, in the order it offers them.
+    func cycleAudioRate(messageId: String) {
+        let next: Float
+        switch audioRates[messageId] ?? 1 {
+        case 1: next = 1.5
+        case 1.5: next = 2
+        default: next = 1
+        }
+        audioRates[messageId] = next
+        audioPlayers[messageId]?.rate = next
+        audioSpeedPills[messageId]?.setTitle(audioRateLabel(next), for: .normal)
+    }
+
+    /// Everything playing, stopped. Called when the conversation goes away, so no timer is left
+    /// running and no player left holding the audio session.
+    func stopAllAudio() {
+        timers.values.forEach { $0.invalidate() }
+        timers.removeAll()
+        audioRestTimers.values.forEach { $0.invalidate() }
+        audioRestTimers.removeAll()
+        audioPlayers.values.forEach { $0.stop() }
+        audioPlayers.removeAll()
+        audioWaves.removeAll()
+        audioSliders.removeAll()
+        audioPlayButtons.removeAll()
+        audioTimeLabels.removeAll()
+        audioSpeedPills.removeAll()
+        audioAvatars.removeAll()
+        audioSessions.removeAll()
+        audioAwaitingRest.removeAll()
+        playingAudioId = nil
     }
     
     func formatTime(_ time: TimeInterval) -> String {
@@ -11669,14 +12108,35 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     }
     
     public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        if let finishedIndexPath = audioPlayers.first(where: { $0.value == player })?.key {
-           DispatchQueue.main.async {
-               self.timers[finishedIndexPath]?.invalidate()
-               self.timers[finishedIndexPath] = nil
-               self.playingIndexPath = nil
-               self.audioPlayers[finishedIndexPath] = nil
-               self.tableChatView.reloadRows(at: [finishedIndexPath], with: .none)
-           }
+        guard let finished = audioPlayers.first(where: { $0.value === player })?.key else {
+            return
+        }
+        DispatchQueue.main.async {
+            self.timers[finished]?.invalidate()
+            self.timers[finished] = nil
+            self.playingAudioId = nil
+            // Fix: this rebuilt the row. Audio reaching its end while the reader still had hold of
+            // the slider therefore tore the control out from under their finger, and threw the
+            // player away with it, so the drag died where it was. The bubble is put back to rest
+            // in place instead, and the player is kept: letting go still seeks, and playing again
+            // carries on from wherever they left it.
+            let alive = self.audioViewsAlive(finished)
+            if alive {
+                self.audioPlayButtons[finished]?.setImage(UIImage(systemName: "play.fill"), for: .normal)
+            }
+            // Rewound only if nobody is holding it - a finger on the slider outranks the end of
+            // the file, and the seek it is heading for is the one that should win.
+            if self.audioSliders[finished]?.isTracking == true {
+                self.audioAwaitingRest.insert(finished)
+            } else {
+                player.currentTime = 0
+                if alive {
+                    self.audioSliders[finished]?.value = 0
+                    self.audioWaves[finished]?.progress = 0
+                    self.audioTimeLabels[finished]?.text = self.formatTime(player.duration)
+                }
+                self.endAudioSession(finished, after: 2.5)
+            }
         }
     }
     
@@ -12874,6 +13334,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         let image_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["image_id"] as? String ?? "") : chatGroup[0].image
         let video_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["video_id"] as? String ?? "") : chatGroup[0].video
         let file_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["file_id"] as? String ?? "") : chatGroup[0].file
+        let audio_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["audio_id"] as? String ?? "") : chatGroup[0].audio
         if (attachment_flag == "0" && thumb_chat == "") {
             contentReply.attributedText = message_text.richText()
         } else if (attachment_flag == "1" || image_chat != "") {
@@ -12892,8 +13353,15 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
         } else if (attachment_flag == "11") {
             contentReply.text = "❤️ Sticker"
+        } else if !audio_chat.isEmpty {
+            contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
+                                                                 audioName: audio_chat,
+                                                                 font: contentReply.font,
+                                                                 colour: self.traitCollection.userInterfaceStyle == .dark ? .white : .gray)
         }
-        contentReply.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .gray
+        if contentReply.attributedText == nil {
+            contentReply.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .gray
+        }
         
         let buttonCancelReply = UIButton(type: .custom)
         self.containerPreviewReply.addSubview(buttonCancelReply)

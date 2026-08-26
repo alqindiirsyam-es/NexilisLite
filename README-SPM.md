@@ -70,8 +70,8 @@ NexilisLite/
     └── Popover/                        Popover 1.3.0
 ```
 
-`nuSDKService` lives in its own package at `../nuSDKService`, shared with
-StreamShield — see that package's `README.md` for why.
+`nuSDKService` lives in its own package at `../nuSDKService` — see that
+package's `README.md` for why.
 
 ### Why `SPMSupport/` exists
 
@@ -152,9 +152,6 @@ Keep the tag in step with `spec.version` in the podspec so CocoaPods and SPM
 consumers get the same code for a given version number.
 
 To publish updates later, re-run `git subtree split` and push again.
-
-StreamShield needs the same treatment and shares the same `nuSDKService`
-package — see `../StreamShield/README-SPM.md`.
 
 ---
 

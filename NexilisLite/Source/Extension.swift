@@ -606,28 +606,44 @@ extension URL {
     }
 
     func detectFileType(from data: Data) -> FileTypeSignature? {
-        let hexString = data.prefix(4).map { String(format: "%02X", $0) }.joined()
-        let extUploadedFile = self.absoluteString.split(separator: ".").last ?? ""
+        // Fix: this read a flat four bytes and asked the whitelist to contain exactly that string,
+        // so only signatures that happen to be four bytes long could ever match. An mp3 announces
+        // itself with a three-byte ID3 tag - 494433 - and a file starting 49 44 33 03 was compared
+        // as "49443303", found nothing, and came back as an unrecognised type despite mp3 being
+        // right there in the list. The same was true of aac (two bytes), txt, and the six-byte mp4
+        // family, which only got through at all because of the ftyp fallback below. Enough bytes
+        // are read to cover the longest signature, and each one is matched over its own length.
+        let head = data.prefix(16).map { String(format: "%02X", $0) }.joined()
+        // Fix: the extension was taken from the whole URL string, split on dots - which picks up
+        // whatever follows the last dot anywhere in it, query string included, and returns the
+        // entire string for a file that has no extension at all. doesFileMatchExtension compares
+        // the answer against pathExtension, so the two could disagree and fail a good file.
+        let extUploadedFile = (self.pathExtension.split(separator: "?").first.map(String.init) ?? "").lowercased()
         let dataPrefs = Utils.getWhitelistFileExt()
-//        print("HOHOHO: \(extUploadedFile) <><>> \(hexString) <><><> \(dataPrefs)")
         guard !dataPrefs.isEmpty,
               let jsonData = dataPrefs.data(using: .utf8) else {
             return nil
         }
         do {
             if let jsonArray = try JSONSerialization.jsonObject(with: jsonData, options: []) as? [[String: Any]] {
-                guard let _ = jsonArray.firstIndex(where: { $0["ext"] as? String ?? "" == extUploadedFile.lowercased() }) else {
+                guard let idxRealFile = jsonArray.firstIndex(where: { ($0["ext"] as? String)?.lowercased() == extUploadedFile }) else {
                     return nil
                 }
-                
-                if let idxRealFile = jsonArray.firstIndex(where: { $0["ext"] as? String == extUploadedFile.lowercased()} ) {
-                    let jsonRealFile = jsonArray[idxRealFile]
-                    let magic = jsonRealFile["magic"] as! [String]
-                    if magic.contains(hexString) || magic.contains(where: { $0.components(separatedBy: "~").contains(hexString) }) {
-                        return FileTypeSignature(magic: jsonRealFile["magic"] as? [String] ?? [], extensions: jsonRealFile["ext"] as? String ?? "")
-                    } else if isMP4File(data) {
-                        return FileTypeSignature(magic: jsonRealFile["magic"] as? [String] ?? [], extensions: jsonRealFile["ext"] as? String ?? "")
-                    }
+                let jsonRealFile = jsonArray[idxRealFile]
+                // Fix: force-cast. A whitelist that arrives with anything else under "magic"
+                // brought the app down rather than failing the file.
+                let magic = jsonRealFile["magic"] as? [String] ?? []
+                let signature = FileTypeSignature(magic: magic, extensions: jsonRealFile["ext"] as? String ?? "")
+                if magic.contains(where: { URL.signature($0, matches: head) }) {
+                    return signature
+                }
+                // The box length in front of an mp4-family header is not fixed, so the exact
+                // signature in the list often does not match a real file. Whether "ftyp" is where
+                // it should be answers the question - but only for the formats that are built that
+                // way, taken from the list itself rather than assumed. It used to be asked for
+                // every extension, which let anything at all through as long as it was an mp4.
+                if magic.contains(where: { $0.uppercased().contains("66747970") }), isMP4File(data) {
+                    return signature
                 }
             }
         } catch {
@@ -635,6 +651,23 @@ extension URL {
         }
         
         return nil
+    }
+
+    /// Whether one whitelist signature describes the bytes a file starts with.
+    ///
+    /// A signature is as long as it needs to be, and is matched over that length. The `~` form is
+    /// for the container formats - `52494646~57454250` means RIFF at the front and WEBP after the
+    /// four-byte length that follows it, which is what tells a .webp from an .avi.
+    static func signature(_ signature: String, matches head: String) -> Bool {
+        let parts = signature.uppercased().components(separatedBy: "~")
+        guard let front = parts.first, !front.isEmpty, head.hasPrefix(front) else {
+            return false
+        }
+        guard parts.count > 1 else {
+            return true
+        }
+        let rest = parts.dropFirst().joined()
+        return head.count > 16 && head.dropFirst(16).hasPrefix(rest)
     }
     
     func isMP4File(_ data: Data) -> Bool {

@@ -445,6 +445,7 @@
 "Link" = "Tautan";
 "Profile Info" = "Info Profil";
 "Audio" = "Audio";
+"Voice Message" = "Pesan Suara";
 "Friend" = "Tambah Teman";
 "Unfriend" = "Hapus Teman";
 "Media, links and docs" = "Media, tautan, dan dokumen";
@@ -453,3 +454,5 @@
 "Friend Info" = "Info Teman";
 "Status" = "Status";
 "Write a status" = "Tulis status";
+"Microphone access is needed to record" = "Izin mikrofon diperlukan untuk merekam";
+"Failed to save the recording" = "Gagal menyimpan rekaman";

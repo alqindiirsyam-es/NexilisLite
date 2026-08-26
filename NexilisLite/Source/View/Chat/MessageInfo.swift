@@ -28,6 +28,11 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         super.viewDidLoad()
 
         title = "Message Info".localized()
+        // The screen sits below the navigation bar rather than under it, so where its content
+        // begins is settled by its own frame and does not have to wait for a safe-area inset to be
+        // worked out - which, during an interactive push, does not happen until the very end.
+        edgesForExtendedLayout = []
+        extendedLayoutIncludesOpaqueBars = false
         view.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
         navigationController?.navigationBar.titleTextAttributes = [NSAttributedString.Key.foregroundColor: UIColor.white]
         navigationController?.navigationBar.topItem?.backButtonTitle = ""
@@ -43,17 +48,34 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         // which is where the squashed and overlapping bubbles came from.
         tableStatus.rowHeight = UITableView.automaticDimension
         tableStatus.estimatedRowHeight = 80
+        // Fix: with an estimate in play, a grouped table lays its headers out at the estimate first
+        // and corrects them on a later pass - which is the date arriving a beat after the bubble
+        // and everything shifting down. There is nothing to estimate: heightForHeaderInSection
+        // knows both heights outright, so it is asked directly.
+        tableStatus.estimatedSectionHeaderHeight = 0
+        tableStatus.estimatedSectionFooterHeight = 0
         
         getData()
         dateMessage = chatDate(stringDate: data["server_date"] as? String ?? "")
-        
+
+        // Fix: the table was filled while it still had no frame at all, and only put on screen
+        // afterwards. It goes up first, and is filled once it has somewhere to draw.
+        view.addSubview(tableStatus)
+        // Fix: the table ran the full height of the screen and relied on the system inseting its
+        // content under the navigation bar. That inset is settled as a transition progresses, so on
+        // an interactive push - dragging the screen in from the edge - the first passes had no
+        // inset at all: the content sat under the bar with the date hidden behind it, and when the
+        // inset finally landed everything shifted down and the date appeared to arrive late. A push
+        // from the Info menu settles before anything is drawn, which is why it only showed up one
+        // way round. The table is placed below the bar to begin with, so there is nothing to wait
+        // for and nothing to shift.
+        tableStatus.contentInsetAdjustmentBehavior = .never
+        tableStatus.anchor(top: view.topAnchor, left: view.leftAnchor, bottom: view.bottomAnchor, right: view.rightAnchor)
+        tableStatus.tableHeaderView = buildDateHeader()
         tableStatus.reloadData()
         DispatchQueue.global().async{
             self.getAllLocationDesc()
         }
-        
-        view.addSubview(tableStatus)
-        tableStatus.anchor(top: view.topAnchor, left: view.leftAnchor, bottom: view.bottomAnchor, right: view.rightAnchor)
         NotificationCenter.default.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
     }
     
@@ -159,6 +181,61 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         }
     }
     
+    /// Fix: with no height given, a grouped table has to measure each header by laying it out -
+    /// which does not happen until the table itself has been laid out, so the date only turned up
+    /// after everything else had settled while the bubble was there from the first pass. Both
+    /// heights are known: 30 for the date, and 50, which is what the status header builds itself at.
+    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        return section == 0 ? 0 : 50
+    }
+
+    /// The date, as the table's own header rather than section zero's.
+    ///
+    /// Fix: a section header is built when the table lays out its sections, and opening this screen
+    /// by dragging it in from the edge is an interactive push - the view controller is created and
+    /// loaded at the start of the gesture, long before it has the size it will end up with. The
+    /// rows were drawn at the first pass and the header only at the pass after, which is the date
+    /// turning up a beat late and the bubble jumping down to make room for it. Opening it from the
+    /// Info menu is a plain push, where the size is settled before anything is drawn, so the same
+    /// screen behaved differently depending on how it was opened. A table header is part of the
+    /// table's own content and goes up with it, whichever way the screen arrives.
+    private func buildDateHeader() -> UIView {
+        // 46 tall with the pill inset 26 from the top, which leaves the pill at 20 - the height it
+        // is in the conversation, and the same 26pt of air above it. Measured off the two screens
+        // side by side rather than guessed: the conversation's first row sits under a grouped
+        // table's own top padding as well as the header's 10, which is where the extra comes from.
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 46))
+        containerView.backgroundColor = .clear
+
+        let dateView = UIView()
+        containerView.addSubview(dateView)
+        dateView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 26),
+            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
+        ])
+        dateView.backgroundColor = .orangeColor
+        dateView.layer.cornerRadius = 8.0
+        dateView.clipsToBounds = true
+
+        let labelDate = UILabel()
+        dateView.addSubview(labelDate)
+        labelDate.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            labelDate.centerYAnchor.constraint(equalTo: dateView.centerYAnchor),
+            labelDate.centerXAnchor.constraint(equalTo: dateView.centerXAnchor),
+            labelDate.leadingAnchor.constraint(equalTo: dateView.leadingAnchor, constant: 10),
+            labelDate.trailingAnchor.constraint(equalTo: dateView.trailingAnchor, constant: -10)
+        ])
+        labelDate.textAlignment = .center
+        labelDate.textColor = .secondaryColor
+        labelDate.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
+        labelDate.text = dateMessage
+        return containerView
+    }
+
     func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         let containerViewStatus = UIView()
         containerViewStatus.backgroundColor = .darkGray
@@ -178,41 +255,8 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         textStatus.anchor(left: imageStatus.rightAnchor, bottom: viewStatus.bottomAnchor, paddingLeft: 5.0, paddingBottom: 5.0)
         
         if section == 0 {
-            let containerView = UIView()
-            containerView.backgroundColor = .clear
-            
-            let dateView = UIView()
-            containerView.addSubview(dateView)
-            dateView.translatesAutoresizingMaskIntoConstraints = false
-            var topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor)
-            if section == 0 {
-                topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10.0)
-            }
-            NSLayoutConstraint.activate([
-                topAnchor,
-                dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-                dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-                dateView.heightAnchor.constraint(equalToConstant: 30),
-                dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
-            ])
-            dateView.backgroundColor = .orangeColor
-            dateView.layer.cornerRadius = 15.0
-            dateView.clipsToBounds = true
-            
-            let labelDate = UILabel()
-            dateView.addSubview(labelDate)
-            labelDate.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                labelDate.centerYAnchor.constraint(equalTo: dateView.centerYAnchor),
-                labelDate.centerXAnchor.constraint(equalTo: dateView.centerXAnchor),
-                labelDate.leadingAnchor.constraint(equalTo: dateView.leadingAnchor, constant: 10),
-                labelDate.trailingAnchor.constraint(equalTo: dateView.trailingAnchor, constant: -10),
-            ])
-            labelDate.textAlignment = .center
-            labelDate.textColor = .secondaryColor
-            labelDate.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
-            labelDate.text = dateMessage
-            return containerView
+            // The date lives in the table's own header now - see buildDateHeader.
+            return nil
         } else if section == 1 {
             if !data.isEmpty && data["read_receipts"] as? String == "8" {
                 imageStatus.image = UIImage(named: "message_status_ack", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
@@ -534,6 +578,9 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             let imageChat = (data["image_id"] as? String) ?? ""
             let videoChat = (data["video_id"] as? String) ?? ""
             let fileChat = (data["file_id"] as? String) ?? ""
+            // Fix: audio was never read here, so a voice note matched no branch at all and the
+            // bubble fell through to printing its own raw message text - "Nexilis_1756...m4a|".
+            let audioChat = (data["audio_id"] as? String) ?? ""
             let reffChat = (data["reff_id"] as? String) ?? ""
             
             cell.backgroundColor = .clear
@@ -650,9 +697,9 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     imageLS.centerYAnchor.constraint(equalTo: containerMessage.centerYAnchor),
                     imageLS.heightAnchor.constraint(equalToConstant: 60.0)
                 ])
-                if data["attachment_flag"] as! String == "26" {
+                if (data["attachment_flag"] as? String) == "26" {
                     imageLS.image = UIImage(named: "pb_seminar_wpr", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                } else if data["attachment_flag"] as! String == "27" {
+                } else if (data["attachment_flag"] as? String) == "27" {
                     imageLS.image = UIImage(named: "pb_live_tv", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 } else if data["message_scope_id"] as? String == "18" {
                     imageLS.image = UIImage(systemName: "doc.richtext.fill")
@@ -686,11 +733,23 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 }
             }
             
+            if !audioChat.isEmpty {
+                // The conversation trims the name off the front of an audio message's text before
+                // it goes into the label. The label is hidden either way, but it is what the bubble
+                // takes its width from - so leaving the whole string in made the bubble here far
+                // wider than the same message in the conversation.
+                textChat = textChat.components(separatedBy: "|")[0]
+            }
+
             let imageSticker = UIImageView()
             if let attachmentFlag = data["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
                 if attachmentFlag == "27" || attachmentFlag == "26" { // live streaming
+                    // Fix: force try and force unwrap. A message of this kind whose text is not
+                    // valid JSON - a truncated payload, or one from an older sender - took the
+                    // whole screen down rather than simply not drawing its details.
                     let data = textChat
-                    if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                    if let payload = data.data(using: .utf8),
+                       let json = (try? JSONSerialization.jsonObject(with: payload, options: [])) as? [String: Any] {
                         Database.shared.database?.inTransaction({ fmdb, rollback in
                             let title = json["title"] as? String ?? ""
                             let description = json["description"] as? String ?? ""
@@ -711,8 +770,12 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     }
                 }
                 else if attachmentFlag == "25" {
+                    // Fix: force try and force unwrap. A message of this kind whose text is not
+                    // valid JSON - a truncated payload, or one from an older sender - took the
+                    // whole screen down rather than simply not drawing its details.
                     let data = textChat
-                    if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
+                    if let payload = data.data(using: .utf8),
+                       let json = (try? JSONSerialization.jsonObject(with: payload, options: [])) as? [String: Any] {
                         Database.shared.database?.inTransaction({ fmdb, rollback in
                             var stringLS = ""
                             let title = json["title"] as? String ?? ""
@@ -776,7 +839,29 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             
             let imageThumb = UIImageView()
             let containerViewFile = UIView()
-            
+
+            // Fix: audio was drawn here as a document card of its own making, which is not what a
+            // voice note looks like anywhere else in the app. It is the conversation's own row now,
+            // built from the same view, so the two cannot say different things about one note.
+            if !audioChat.isEmpty {
+                messageText.isHidden = true
+                // Hidden or not, the label is still laid out, and it must not be what decides how
+                // wide the bubble comes out - the audio row is.
+                messageText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                messageText.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                let incomingAudio = (data["f_pin"] as? String) != idMe
+                let isVoiceNoteAudio = (data["attachment_flag"] as? String) == "60"
+                let contAudio = AudioBubbleContent(incoming: incomingAudio,
+                                                   isVoiceNote: isVoiceNoteAudio,
+                                                   bubbleColour: containerMessage.backgroundColor ?? .white,
+                                                   traits: traitCollection,
+                                                   fontOffset: offset())
+                containerMessage.addSubview(contAudio)
+                contAudio.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: 15, paddingLeft: 10, paddingBottom: 10, paddingRight: 12)
+                contAudio.setPicture(named: profileThumb(forPin: data["f_pin"] as? String ?? ""))
+                describeAudio(in: contAudio, named: audioChat)
+            }
+
             if (!thumbChat.isEmpty) {
                 // One measurement, not two: the width and the height come from the same look
                 // at the file.
@@ -873,16 +958,18 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 }
             }
             
-            if (fileChat != "") && data["message_scope_id"] as! String != "18" {
+            let attachmentName = fileChat
+            if !attachmentName.isEmpty, (data["message_scope_id"] as? String) != "18" {
                 topMarginText.constant = topMarginText.constant + 55
                 
                 let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                 let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                let arrExtFile = (textChat.components(separatedBy: "|")[0]).split(separator: ".")
-                let finalExtFile = arrExtFile[arrExtFile.count - 1]
+                // Fix: an empty name splits into nothing, and this then read element -1 of it.
+                let arrExtFile = (textChat.components(separatedBy: "|").first ?? "").split(separator: ".")
+                let finalExtFile = arrExtFile.last ?? Substring(URL(fileURLWithPath: attachmentName).pathExtension)
                 if let dirPath = paths.first {
-                    let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(fileChat)
+                    let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(attachmentName)
                     if FileManager.default.fileExists(atPath: fileURL.path) {
                         if let dataFile = try? Data(contentsOf: fileURL) {
                             var sizeOfFile = Int(dataFile.count / 1000000)
@@ -904,8 +991,8 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                             messageText.text = ""
                         }
                     }
-                    else if FileEncryption.shared.isSecureExists(filename: fileChat) {
-                        if var dataFile = try? FileEncryption.shared.readSecure(filename: fileChat) {
+                    else if FileEncryption.shared.isSecureExists(filename: attachmentName) {
+                        if var dataFile = try? FileEncryption.shared.readSecure(filename: attachmentName) {
                             let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: dataFile)
                             if dataDecrypt != nil {
                                 dataFile = dataDecrypt!
@@ -963,9 +1050,11 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
                 nameFile.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
                 nameFile.textColor = .white
-                nameFile.text = textChat.components(separatedBy: "|")[0]
+                nameFile.text = textChat.components(separatedBy: "|").first ?? ""
                 
-                if (data["progress"] as! Double != 100.0) {
+                // Fix: force cast. A row that carries no progress at all - which is any message
+                // that did not come from a transfer - brought the screen down.
+                if ((data["progress"] as? Double) ?? 100.0) != 100.0 {
                     let containerLoading = UIView()
                     containerViewFile.addSubview(containerLoading)
                     containerLoading.translatesAutoresizingMaskIntoConstraints = false
@@ -1003,7 +1092,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 }
             }
             
-            if (reffChat != "" && data["message_scope_id"] as! String != "18") {
+            if reffChat != "", (data["message_scope_id"] as? String) != "18" {
                 let dataReply = queryMessageReply(message_id: reffChat)
                 if dataReply.count != 0 {
                     topMarginText.constant = topMarginText.constant + 55
@@ -1069,12 +1158,15 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                     contentReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor, constant: -10).isActive = true
                     contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
-                    let message_text = data["message_text"] as! String
-                    let attachment_flag = data["attachment_flag"] as! String
-                    let thumb_chat = data["thumb_id"] as! String
-                    let image_chat = data["image_id"] as! String
-                    let video_chat = data["video_id"] as! String
-                    let file_chat = data["file_id"] as! String
+                    // Fix: force casts on values that come straight out of the database, where a
+                    // NULL column arrives as nil. Any of the six could bring the screen down.
+                    let message_text = (data["message_text"] as? String) ?? ""
+                    let attachment_flag = (data["attachment_flag"] as? String) ?? ""
+                    let thumb_chat = (data["thumb_id"] as? String) ?? ""
+                    let image_chat = (data["image_id"] as? String) ?? ""
+                    let video_chat = (data["video_id"] as? String) ?? ""
+                    let file_chat = (data["file_id"] as? String) ?? ""
+                    let audio_chat = (data["audio_id"] as? String) ?? ""
                     if (attachment_flag == "0" && thumb_chat == "") {
                         contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
                         contentReply.attributedText = message_text.richText()
@@ -1095,8 +1187,16 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
                     } else if (attachment_flag == "11") {
                         contentReply.text = "❤️ Sticker"
+                    } else if !audio_chat.isEmpty {
+                        contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
+                        contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
+                                                                            audioName: audio_chat,
+                                                                            font: contentReply.font,
+                                                                            colour: .white.withAlphaComponent(0.8))
                     }
-                    contentReply.textColor = .white.withAlphaComponent(0.8)
+                    if contentReply.attributedText == nil {
+                        contentReply.textColor = .white.withAlphaComponent(0.8)
+                    }
                     
                     if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
                         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -1225,10 +1325,46 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         return nil
     }
     
+    private func profileThumb(forPin pin: String) -> String {
+        guard !pin.isEmpty else {
+            return ""
+        }
+        return User.getData(pin: pin)?.thumb ?? ""
+    }
+
+    /// What a piece of audio says for itself when nothing can be done to it: how long it runs, and
+    /// the shape of the sound. This screen is a record of what happened to a message, not a place
+    /// to listen to it or open it, so nothing here responds to a touch.
+    private func describeAudio(in content: AudioBubbleContent, named name: String) {
+        content.isUserInteractionEnabled = false
+        if let seconds = AudioDurationStore.seconds(forFileNamed: name) {
+            content.timeLabel.text = String(format: "%d:%02d", seconds / 60, seconds % 60)
+            content.slider.maximumValue = Float(seconds)
+        }
+        guard content.isVoiceNote else {
+            return
+        }
+        if let known = AudioWaveformStore.levels(for: name) {
+            content.wave.levels = known
+            return
+        }
+        // Only the plain file is read. Decrypting one whole just to draw a line on a screen that
+        // cannot play it is not work worth starting.
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let candidates = [documents.appendingPathComponent(name), caches.appendingPathComponent(name)]
+        guard let url = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+            return
+        }
+        AudioWaveformStore.read(url: url, key: name) { [weak content] levels in
+            content?.wave.levels = levels
+        }
+    }
+
     private func queryMessageReply(message_id: String) -> [String: Any?] {
         var dataQuery: [String: Any] = [:]
         Database.shared.database?.inTransaction({ fmdb, rollback in
-            if let c = Database().getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, message_text, attachment_flag, thumb_id, image_id, video_id, file_id FROM MESSAGE where message_id='\(message_id)'"), c.next() {
+            if let c = Database().getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, message_text, attachment_flag, thumb_id, image_id, video_id, file_id, audio_id FROM MESSAGE where message_id='\(message_id)'"), c.next() {
                 dataQuery["message_id"] = c.string(forColumnIndex: 0)
                 dataQuery["f_pin"] = c.string(forColumnIndex: 1)
                 dataQuery["message_text"] = c.string(forColumnIndex: 2)
@@ -1237,6 +1373,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 dataQuery["image_id"] = c.string(forColumnIndex: 5)
                 dataQuery["video_id"] = c.string(forColumnIndex: 6)
                 dataQuery["file_id"] = c.string(forColumnIndex: 7)
+                dataQuery["audio_id"] = c.string(forColumnIndex: 8)
                 c.close()
             }
         })

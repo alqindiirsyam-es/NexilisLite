@@ -20,7 +20,7 @@ import WebKit
 import CommonCrypto
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.15"
+    public static var cpaasVersion = "5.1.16"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -420,8 +420,19 @@ public class Nexilis: NSObject {
                 if Utils.getSetProfile() {
                     if Utils.getSecureFolderOffline() != "0" || !userId.isEmpty || !withInit {
 //                        print("MASUK OPEN DB")
-                        while FileEncryption.shared.aesKey == nil {
-                            Thread.sleep(forTimeInterval: 1)
+                        // Fix: this waited for the key and not the IV, while openDatabase() needs
+                        // both - with only half of it in hand openDatabase() skips the open
+                        // entirely and every statement after it runs against a nil database, doing
+                        // nothing and reporting nothing. It also polled on a one-second beat for
+                        // something ensureKeyLoaded() can hand over at once.
+                        var waitedForKey: TimeInterval = 0
+                        while waitedForKey < 60 {
+                            FileEncryption.shared.ensureKeyLoaded()
+                            if FileEncryption.shared.aesKey != nil, FileEncryption.shared.aesIV != nil {
+                                break
+                            }
+                            Thread.sleep(forTimeInterval: 0.05)
+                            waitedForKey += 0.05
                         }
                         _ = Database.shared.openDatabase()
                     }

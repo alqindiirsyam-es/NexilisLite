@@ -124,12 +124,16 @@ final class PickerAttachmentLoader {
     private static let movieType = "public.movie"
     private static let quickTimeType = "com.apple.quicktime-movie"
 
+    /// Returns the Progress covering the whole batch, so a caller that put a Cancel in front of the
+    /// reader has something to cancel: cancelling it cancels the loads underneath, each of which
+    /// then finishes with nothing and lets the batch complete rather than hanging.
+    @discardableResult
     static func load(results: [PHPickerResult],
                      onProgress: @escaping (Double) -> Void,
-                     completion: @escaping ([AttachmentItem]) -> Void) {
+                     completion: @escaping ([AttachmentItem]) -> Void) -> Progress {
         guard !results.isEmpty else {
             completion([])
-            return
+            return Progress(totalUnitCount: 0)
         }
         // Slots, not appends: the items finish in whatever order they finish, and the order
         // they were picked in is the order they have to be sent in.
@@ -201,8 +205,9 @@ final class PickerAttachmentLoader {
         group.notify(queue: .main) {
             observation?.invalidate()
             observation = nil
-            completion(loaded.compactMap({ $0 }))
+            completion(overall.isCancelled ? [] : loaded.compactMap({ $0 }))
         }
+        return overall
     }
 
     private static func loadQuickTimeFallback(provider: NSItemProvider, finish: @escaping (AttachmentItem?) -> Void) {

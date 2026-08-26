@@ -10,6 +10,7 @@ import QuickLook
 //import Zip
 import NotificationBannerSwift
 import ZIPFoundation
+import FMDB
 
 public class BackupRestoreView: UIViewController, UITableViewDataSource, UITableViewDelegate {
     private var tableView: UITableView!
@@ -66,9 +67,36 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
     }
     
     public override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
         self.navigationController?.navigationBar.topItem?.title = "Backup & Restore".localized()
         self.navigationController?.navigationBar.setNeedsLayout()
         self.title = "Backup & Restore".localized()
+        // The screen is here, so the strip is not needed - it is only for while the reader is
+        // somewhere else.
+        RestoreProgressManager.shared.hide()
+    }
+
+    public override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // A restore takes minutes and carries on whether or not this screen is on show - the work
+        // is dispatched with a strong reference to it, deliberately, so leaving does not stop it.
+        // What leaving used to do was take away every sign that it was still running.
+        guard RestoreProgressManager.shared.isRunning else {
+            return
+        }
+        RestoreProgressManager.shared.onTap = { [weak self] in
+            guard let self = self, self.navigationController == nil,
+                  let top = UIApplication.shared.visibleViewController else {
+                return
+            }
+            let restore = BackupRestoreView()
+            if let navigation = top as? UINavigationController ?? top.navigationController {
+                navigation.pushViewController(restore, animated: true)
+            } else {
+                top.present(UINavigationController(rootViewController: restore), animated: true)
+            }
+        }
+        RestoreProgressManager.shared.show()
     }
     
     @objc private func backupAvailability(notification: NSNotification) {
@@ -477,190 +505,142 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
         }
     }
     
-    private func restoreMessage(nameColumn: [String], message: [String]) {
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                var cValues: [String: Any] = [:]
-                var columnNameMessage: [String] = []
-                if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(MESSAGE)") {
-                    while tableInfo.next() {
-                        columnNameMessage.append(tableInfo.string(forColumn: "name")!)
-                    }
-                    tableInfo.close()
+    // MARK: - Restore
+
+    /// How many rows go into one transaction.
+    ///
+    /// Fix: every single row used to open a transaction of its own - one commit, one disk sync,
+    /// per message. A backup of thirty thousand messages meant thirty thousand transactions, and
+    /// because they all run on the one database queue, everything else in the app queued behind
+    /// them: a message arriving over push could not be written, and any screen that reads went with
+    /// it. That is the freeze. Five hundred rows to a transaction is three orders of magnitude
+    /// fewer commits, and the gap between batches is where everything else gets its turn.
+    private static let restoreBatchSize = 500
+
+    /// The columns a table actually has, read once per table instead of once per row.
+    ///
+    /// Fix: `PRAGMA table_info` ran for every record restored - a query per row, to learn something
+    /// that cannot change while the restore is running.
+    private var restoreColumns: [String: Set<String>] = [:]
+
+    private func columnNames(of table: String, fmdb: FMDatabase) -> Set<String> {
+        if let known = restoreColumns[table] {
+            return known
+        }
+        var found: Set<String> = []
+        if let tableInfo = Database.shared.getRecords(fmdb: fmdb, query: "PRAGMA table_info(\(table))") {
+            while tableInfo.next() {
+                if let name = tableInfo.string(forColumn: "name") {
+                    found.insert(name)
                 }
-                for i in 0..<message.count {
-                    if i > nameColumn.count - 1 {
-                        continue
-                    }
-                    if columnNameMessage.contains(nameColumn[i]) {
-                        cValues[nameColumn[i]] = message[i] == "<empty>" || message[i] == "null" ? "" : message[i]
-                    }
-                }
-                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE", cvalues: cValues, replace: true)
-                recordSizeRestore += 1
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
             }
-        })
+            tableInfo.close()
+        }
+        restoreColumns[table] = found
+        return found
     }
-    
-    private func restoreUcList(dataUcList: [String]) {
-        if dataUcList.count < 2 {
+
+    private func values(from row: [String], columns nameColumn: [String], of table: String, fmdb: FMDatabase) -> [String: Any] {
+        let known = columnNames(of: table, fmdb: fmdb)
+        var cValues: [String: Any] = [:]
+        for i in 0..<row.count where i < nameColumn.count {
+            guard known.contains(nameColumn[i]) else {
+                continue
+            }
+            cValues[nameColumn[i]] = row[i] == "<empty>" || row[i] == "null" ? "" : row[i]
+        }
+        return cValues
+    }
+
+    /// UC_LIST is the one that is not a plain insert: it has to look up who the conversation is
+    /// with before it can write a summary row for it.
+    private func restoreUcList(_ dataUcList: [String], fmdb: FMDatabase) throws {
+        guard dataUcList.count >= 2 else {
             return
         }
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                var pin = dataUcList[0]
-                var lastMessageId = ""
-                if pin == User.getMyPin() {
-                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin from MESSAGE where message_id = '\(dataUcList[1])'"), cursor.next() {
-                        if cursor.next() {
-                            let fPin = cursor.string(forColumnIndex: 0) ?? ""
-                            let lPin = cursor.string(forColumnIndex: 1) ?? ""
-                            if fPin == User.getMyPin() {
-                                pin = lPin
-                            } else {
-                                pin = fPin
-                            }
-                        }
-                        cursor.close()
-                    }
-                } else {
-                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
-                        lastMessageId = cursor.string(forColumnIndex: 0) ?? ""
-                    }
+        var pin = dataUcList[0]
+        var lastMessageId = ""
+        if pin == User.getMyPin() {
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, l_pin from MESSAGE where message_id = '\(dataUcList[1])'"), cursor.next() {
+                if cursor.next() {
+                    let fPin = cursor.string(forColumnIndex: 0) ?? ""
+                    let lPin = cursor.string(forColumnIndex: 1) ?? ""
+                    pin = fPin == User.getMyPin() ? lPin : fPin
                 }
-                if lastMessageId.isEmpty && pin != User.getMyPin() {
-                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
-                        "l_pin" : pin,
-                        "message_id" : dataUcList[1],
-                        "counter" : 0,
-                        "pinned" : 0,
-                        "archived" : 0
-                    ], replace: true)
-                }
-                recordSizeRestore += 1
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
+                cursor.close()
             }
-        })
-    }
-    
-    private func restoreFormData(nameColumn: [String], data: [String]) {
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                var cValues: [String: Any] = [:]
-                var columnNameMessage: [String] = []
-                if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(FORM_DATA)") {
-                    while tableInfo.next() {
-                        columnNameMessage.append(tableInfo.string(forColumn: "name")!)
-                    }
-                    tableInfo.close()
-                }
-                for i in 0..<data.count {
-                    if columnNameMessage.contains(nameColumn[i]) {
-                        cValues[nameColumn[i]] = data[i] == "<empty>" || data[i] == "null" ? "" : data[i]
-                    }
-                }
-                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "FORM_DATA", cvalues: cValues, replace: true)
-                recordSizeRestore += 1
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
+        } else {
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
+                lastMessageId = cursor.string(forColumnIndex: 0) ?? ""
+                // Fix: this cursor was never closed.
+                cursor.close()
             }
-        })
+        }
+        guard lastMessageId.isEmpty, pin != User.getMyPin() else {
+            return
+        }
+        _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
+            "l_pin": pin,
+            "message_id": dataUcList[1],
+            "counter": 0,
+            "pinned": 0,
+            "archived": 0
+        ], replace: true)
     }
-    
-    private func restoreTaskPIC(nameColumn: [String], data: [String]) {
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                var cValues: [String: Any] = [:]
-                var columnNameMessage: [String] = []
-                if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(TASK_PIC)") {
-                    while tableInfo.next() {
-                        columnNameMessage.append(tableInfo.string(forColumn: "name")!)
-                    }
-                    tableInfo.close()
-                }
-                for i in 0..<data.count {
-                    if columnNameMessage.contains(nameColumn[i]) {
-                        cValues[nameColumn[i]] = data[i] == "<empty>" || data[i] == "null" ? "" : data[i]
-                    }
-                }
-                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "TASK_PIC", cvalues: cValues, replace: true)
-                recordSizeRestore += 1
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
-            }
-        })
+
+    /// One row waiting to be written: which table it belongs to, what its columns are called, and
+    /// what it holds.
+    private struct RestoreRow {
+        let table: String
+        let columns: [String]
+        let values: [String]
     }
-    
-    private func restoreTaskDetail(nameColumn: [String], data: [String]) {
+
+    private func flush(_ pending: inout [RestoreRow]) {
+        guard !pending.isEmpty else {
+            return
+        }
+        let batch = pending
+        pending.removeAll(keepingCapacity: true)
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                var cValues: [String: Any] = [:]
-                var columnNameMessage: [String] = []
-                if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(TASK_DETAIL)") {
-                    while tableInfo.next() {
-                        columnNameMessage.append(tableInfo.string(forColumn: "name")!)
-                    }
-                    tableInfo.close()
-                }
-                for i in 0..<data.count {
-                    if columnNameMessage.contains(nameColumn[i]) {
-                        cValues[nameColumn[i]] = data[i] == "<empty>" || data[i] == "null" ? "" : data[i]
-                    }
-                }
-                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "TASK_DETAIL", cvalues: cValues, replace: true)
-                recordSizeRestore += 1
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
-            }
-        })
-    }
-    
-    private func restoreMessageStatus(nameColumn: [String], message: [String]) {
-        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            do {
-                var cValues: [String: Any] = [:]
-                var columnNameMessage: [String] = []
-                if let tableInfo = Database.shared.getRecords(fmdb: fmdb,query: "PRAGMA table_info(MESSAGE_STATUS)") {
-                    while tableInfo.next() {
-                        columnNameMessage.append(tableInfo.string(forColumn: "name")!)
-                    }
-                    tableInfo.close()
-                }
-                for i in 0..<message.count {
-                    if i > nameColumn.count - 1 {
+            for row in batch {
+                do {
+                    if row.table == "UC_LIST" {
+                        try restoreUcList(row.values, fmdb: fmdb)
                         continue
                     }
-                    if columnNameMessage.contains(nameColumn[i]) {
-                        cValues[nameColumn[i]] = message[i] == "<empty>" || message[i] == "null" ? "" : message[i]
+                    let cValues = values(from: row.values, columns: row.columns, of: row.table, fmdb: fmdb)
+                    guard !cValues.isEmpty else {
+                        continue
                     }
+                    _ = try Database.shared.insertRecord(fmdb: fmdb, table: row.table, cvalues: cValues, replace: true)
+                } catch {
+                    // One bad row is not a reason to throw away the four hundred good ones beside
+                    // it - it used to roll the whole transaction back. It is skipped and noted.
+                    print("Restore skipped a \(row.table) row: \(error.localizedDescription)")
                 }
-                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: cValues, replace: true)
-                recordSizeRestore += 1
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
             }
         })
+        // The database queue is serial, so a restore that never lets go of it starves everything
+        // else. Standing back between batches is what lets a message arriving over push be written
+        // while this is still running.
+        Thread.sleep(forTimeInterval: 0.02)
     }
-    
+
     private func restoreData(file: URL, dirPath: String, indexPath: IndexPath) {
         recordSizeRestore = 0
+        restoreColumns.removeAll()
+        RestoreProgressManager.shared.begin()
+        let expected = Int64(recordSizeBackup) ?? 0
         let fileManager = FileManager()
         var destinationURL = URL(fileURLWithPath: dirPath)
         destinationURL.appendPathComponent("unzipItem\(Date().currentTimeMillis())")
         do {
             try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true, attributes: nil)
             try fileManager.unzipItem(at: file, to: destinationURL)
-            
+
             let files = try fileManager.contentsOfDirectory(at: destinationURL, includingPropertiesForKeys: nil)
+            var pending: [RestoreRow] = []
             for fileURL in files {
                 let nameFile = fileURL.deletingPathExtension().lastPathComponent
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -668,8 +648,11 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                 if !fileManager.fileExists(atPath: newFileURL.path) {
                     try fileManager.moveItem(at: fileURL, to: newFileURL)
                 }
-                guard let reader = LineReader(url: newFileURL) else { continue }
-                var headerColumns:[String] = []
+                guard ["MESSAGE", "UC_LIST", "FORM_DATA", "TASK_PIC", "TASK_DETAIL", "MESSAGE_STATUS"].contains(nameFile),
+                      let reader = LineReader(url: newFileURL) else {
+                    continue
+                }
+                var headerColumns: [String] = []
                 var isHeader = true
                 for line in reader {
                     if line.isEmpty { continue }
@@ -691,63 +674,40 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
                             .replacingOccurrences(of: "<NL>", with: "\n")
                             .replacingOccurrences(of: "<CR>", with: "\r")
                     }
-                    switch nameFile {
-
-                    case "MESSAGE":
-                        restoreMessage(nameColumn: headerColumns, message: data)
-                    case "UC_LIST":
-                        restoreUcList(dataUcList: data)
-                    case "FORM_DATA":
-                        restoreFormData(nameColumn: headerColumns, data: data)
-                    case "TASK_PIC":
-                        restoreTaskPIC(nameColumn: headerColumns, data: data)
-                    case "TASK_DETAIL":
-                        restoreTaskDetail(nameColumn: headerColumns, data: data)
-                    case "MESSAGE_STATUS":
-                        restoreMessageStatus(nameColumn: headerColumns, message: data)
-                    default:
-                        break
-                    }
+                    pending.append(RestoreRow(table: nameFile, columns: headerColumns, values: data))
+                    // Fix: counted twice - once here and once inside each of the per-table
+                    // functions - so the percentage ran to double and the "corrupted" check below
+                    // was comparing a doubled count against the real one.
                     recordSizeRestore += 1
-                    if recordSizeRestore % 100 == 0 {
-                        let percent = formatPercentage(
-                            numerator: recordSizeRestore,
-                            denominator: Int64(recordSizeBackup) ?? 0
-                        )
-                        DispatchQueue.main.async {
-                            if percent.replacingOccurrences(of: " ", with: " ") == "100,0 %" {
-                                self.labelRestoring.text = "Finalizing data restore...".localized()
-                            } else {
-                                self.labelRestoring.text =
-                                "Restoring...".localized() + " \(percent)"
-                            }
-                        }
+                    if pending.count >= Self.restoreBatchSize {
+                        flush(&pending)
+                        reportRestore(done: recordSizeRestore, of: expected)
                     }
                 }
             }
-            if recordSizeRestore < Int64(recordSizeBackup) ?? 0 {
-                DispatchQueue.main.async { [self] in
-                    labelRestoring.text = "Backup files are corrupted".localized()
+            flush(&pending)
+            reportRestore(done: recordSizeRestore, of: expected)
+
+            let corrupted = recordSizeRestore < expected
+            RestoreProgressManager.shared.finish()
+            DispatchQueue.main.async { [self] in
+                labelRestoring.text = corrupted
+                    ? "Backup files are corrupted".localized()
+                    : "Successfully Restored Data".localized()
+                if corrupted {
                     tableView.reloadSections(IndexSet(integer: 3), with: .none)
                 }
-            } else {
-                DispatchQueue.main.async { [self] in
-                    labelRestoring.text = "Successfully Restored Data".localized()
-                }
             }
-//            DispatchQueue.global().async { [self] in
-//                _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupRestored(option: optionBackup, fileid: fileIdBackup))
-//            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
                 isRestoreStart = false
                 tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1), IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
                 tableView.reloadSections(IndexSet(integer: 3), with: .none)
             })
         } catch {
-            self.view.makeToast("Backup files are corrupted".localized(), duration: 3)
-//            DispatchQueue.global().async { [self] in
-//                _ = Nexilis.write(message: CoreMessage_TMessageBank.getBackupRestored(option: optionBackup, fileid: fileIdBackup))
-//            }
+            RestoreProgressManager.shared.finish()
+            DispatchQueue.main.async { [self] in
+                view.makeToast("Backup files are corrupted".localized(), duration: 3)
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: { [self] in
                 isRestoreStart = false
                 tableView.reloadRows(at: [indexPath, IndexPath(row: 1, section: 1), IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 2)], with: .none)
@@ -755,7 +715,22 @@ public class BackupRestoreView: UIViewController, UITableViewDataSource, UITable
             })
         }
     }
-    
+
+    /// Says where the restore has got to, on the screen and on the strip alike - the strip is what
+    /// carries it once the reader has moved on to something else.
+    private func reportRestore(done: Int64, of expected: Int64) {
+        let percent = formatPercentage(numerator: done, denominator: expected)
+        let finishing = percent.replacingOccurrences(of: "\u{00A0}", with: " ") == "100,0 %"
+        let text = finishing
+            ? "Finalizing data restore...".localized()
+            : "Restoring...".localized() + " \(percent)"
+        RestoreProgressManager.shared.report(text: text,
+                                             fraction: expected > 0 ? Double(done) / Double(expected) : 0)
+        DispatchQueue.main.async {
+            self.labelRestoring.text = text
+        }
+    }
+
     private func backupData(indexPath: IndexPath) {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {

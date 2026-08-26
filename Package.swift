@@ -6,9 +6,9 @@
 //  Swift Package Manager manifest. Mirrors NexilisLite.podspec so the library
 //  can be consumed either via CocoaPods or via SPM.
 //
-//  nuSDKService lives in its own package (../nuSDKService) because StreamShield
-//  needs it too, and SwiftPM requires target names to be unique across the
-//  package graph. See that package's Package.swift for the details.
+//  nuSDKService lives in its own package (../nuSDKService), kept separate so a
+//  consumer that also depends on it directly does not collide with this package
+//  on a duplicate target name. See that package's Package.swift for the details.
 //
 //  NOTE: nuSDKService is shipped as a device-only (ios-arm64) binary framework.
 //  Building for the iOS Simulator is therefore not supported — same limitation
@@ -40,8 +40,8 @@ let package = Package(
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", from: "11.14.0"),
         // Provides the SQLCipher-enabled sqlite3 that FMDB is compiled against.
         .package(url: "https://github.com/sqlcipher/SQLCipher.swift.git", from: "4.11.0"),
-        // Shared with StreamShield so an app can depend on both without the
-        // two colliding on a duplicate nuSDKService target.
+        // Its own package, so an app that also depends on nuSDKService directly
+        // does not collide with this one on a duplicate target name.
         .package(url: "https://github.com/alqindiirsyam-es/nuSDKService.git", from: "5.0.2")
     ],
     targets: [

@@ -18,14 +18,27 @@ public class Database {
         if FileManager.default.fileExists(atPath: databasePath) && database == nil {
             DispatchQueue.global().async {
                 _ = FileEncryption.shared.encryptFileToServer(data: Data())
-                while FileEncryption.shared.aesKey == nil {
-                    Thread.sleep(forTimeInterval: 1)
+                // Fix: this polled once a second for key material that ensureKeyLoaded() can
+                // produce on the spot, from values already in the keychain. So on a cold start the
+                // database opened up to a second after it could have - and that second is the whole
+                // of the first screen's life: it queries, finds no database, shows nothing, and
+                // never hears otherwise. The key is asked for outright, and the wait that remains
+                // is a fine one, since whatever might still be deriving it does not work to a
+                // one-second beat either.
+                var waited: TimeInterval = 0
+                while waited < 60 {
+                    FileEncryption.shared.ensureKeyLoaded()
+                    if FileEncryption.shared.aesKey != nil, FileEncryption.shared.aesIV != nil {
+                        self.setDBInstance()
+                        return
+                    }
+                    Thread.sleep(forTimeInterval: 0.05)
+                    waited += 0.05
                 }
-                self.setDBInstance()
             }
         }
     }
-    
+
     public static func recreateInstance() {
         Database.shared = Database()
     }
@@ -78,7 +91,7 @@ public class Database {
                 return
             }
             FileEncryption.shared.ensureKeyLoaded()
-            guard FileEncryption.shared.aesKey != nil else {
+            guard FileEncryption.shared.aesKey != nil, FileEncryption.shared.aesIV != nil else {
                 print("Cannot reopen DB for background write: no key material available")
                 return
             }
@@ -113,22 +126,39 @@ public class Database {
         guard database != nil, !schemaVerified else {
             return
         }
-        if hasCoreTables() {
+        switch schemaState(of: database) {
+        case .present:
             schemaVerified = true
             return
+        case .unreadable:
+            // Fix: an unreadable database used to be indistinguishable from an empty one, and the
+            // recovery below then DELETED THE FILE. Unreadable does not mean empty - it means this
+            // connection has the wrong key, and everything the person owns is still in there. The
+            // connection is dropped so the next caller opens a properly keyed one; the file is not
+            // touched.
+            print("DB cannot be read with this key - dropping the connection, not the file")
+            database = nil
+            schemaVerified = false
+            return
+        case .missing:
+            break
         }
         print("Reopened DB has no schema - creating it")
         // openDatabase() rather than createDatabase() alone: it also runs the column
         // migrations, which a database created by an older version still needs.
         _ = openDatabase()
-        if hasCoreTables() {
+        if schemaState(of: database) == .present {
             schemaVerified = true
             return
         }
-        // Still nothing after being asked to create it. That means the file cannot be written
-        // with the key material this session has - an empty database left behind by an earlier
-        // run that opened it too early, keyed with something else. There is nothing in it to
-        // lose (it has no tables at all), so it is thrown away and built again properly.
+        // Still nothing after being asked to create it, and it reads cleanly as an empty file -
+        // a database left behind by a run that opened it too early. There is nothing in it to
+        // lose, so it is thrown away and built again properly.
+        guard schemaState(of: database) == .missing else {
+            database = nil
+            schemaVerified = false
+            return
+        }
         print("DB has no schema and cannot be created - rebuilding the file")
         database = nil
         let path = Database.databasePath
@@ -136,18 +166,35 @@ public class Database {
             try? FileManager.default.removeItem(atPath: path + suffix)
         }
         _ = openDatabase()
-        schemaVerified = hasCoreTables()
+        schemaVerified = schemaState(of: database) == .present
     }
 
-    private func hasCoreTables() -> Bool {
-        var found = false
-        database?.inDatabase({ fmdb in
-            if let cursor = try? fmdb.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'MESSAGE_SUMMARY'", values: nil) {
-                found = cursor.next()
-                cursor.close()
+    private enum SchemaState {
+        /// The app's tables are there.
+        case present
+        /// The file reads, and has no tables in it.
+        case missing
+        /// The file cannot be read at all - the wrong key, or none.
+        case unreadable
+    }
+
+    /// Asking whether the tables are there also answers whether the connection can read the file:
+    /// a query that fails outright is SQLCipher saying it cannot decrypt the header, which is a
+    /// different thing entirely from a database that happens to be empty.
+    private func schemaState(of queue: FMDatabaseQueue?) -> SchemaState {
+        guard let queue = queue else {
+            return .unreadable
+        }
+        var state = SchemaState.unreadable
+        queue.inDatabase({ fmdb in
+            guard let cursor = try? fmdb.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'MESSAGE_SUMMARY'", values: nil) else {
+                state = .unreadable
+                return
             }
+            state = cursor.next() ? .present : .missing
+            cursor.close()
         })
-        return found
+        return state
     }
 
     private func scheduleBackgroundAutoClose() {
@@ -190,10 +237,32 @@ public class Database {
     }
     
     func setDBInstance() {
+        // Fix: two threads could be in here at once - Database.init's waiter, openDatabase() and
+        // ensureOpenForBackgroundWrite() all call it - and they shared one `openedWithoutKey` flag
+        // between them. One run could clear the flag the other had just set, and the run whose key
+        // material was incomplete would then keep its unkeyed connection installed as `database`.
+        // Everything afterwards read as "file is not a database (26)", followed by "cannot commit -
+        // no transaction is active" from every statement queued behind it. One at a time now, and
+        // the flag is a local, not shared state.
+        openLock.lock()
+        defer { openLock.unlock() }
+
         let databasePath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] + "/encrypted_db_es.db"
-        schemaVerified = false
-        database = setupDatabaseQueue(withPath: databasePath)
-        database?.inDatabase({(fmdb) in
+        // The connection is built here, keyed, and only then handed over - anything that asks
+        // whether `database` is nil, which is most of the app, must never be able to take one that
+        // has not been keyed yet.
+        //
+        // Fix: `schemaVerified = false` used to be set right here, at the top. This is called more
+        // than once on a cold start - Database.init's waiter and Nexilis's openDatabase() both do
+        // it - so the second pass marked a database that was open and working as unverified for as
+        // long as it took to build a second connection, and `isReady` said no for the whole of it.
+        // Nothing about the connection that is currently installed changes until there is a better
+        // one to put in its place.
+        guard let opened = setupDatabaseQueue(withPath: databasePath) else {
+            return
+        }
+        var keyed = false
+        opened.inDatabase({(fmdb) in
             let p = Utils.getPassEncDB()
             if p.isEmpty {
                 let pragmas = [
@@ -209,17 +278,20 @@ public class Database {
                         print("Failed to set pragma: \(pragma)")
                     }
                 }
-                let key = FileEncryption.shared.aesKey?.withUnsafeBytes { Data($0) }
-                let keyIv = FileEncryption.shared.aesIV
-                var keyString = ""
-                if key != nil {
-                    keyString = key!.base64EncodedString()
+                // Fix: the key is the two halves together, and this used to take whichever of
+                // them happened to be in hand - so an IV that had not been derived yet, or had
+                // been cleared on backgrounding, produced half a key. SQLCipher cannot read the
+                // header with it and reports the file as not being a database at all: the
+                // "file is not a database (26)" run, followed by "cannot commit - no transaction
+                // is active" from every statement behind it. Half a key is not a key.
+                guard let key = FileEncryption.shared.aesKey?.withUnsafeBytes({ Data($0) }),
+                      let keyIv = FileEncryption.shared.aesIV else {
+                    print("Refusing to open the database with incomplete key material")
+                    return
                 }
-                if keyIv != nil {
-                    keyString += keyIv!.base64EncodedString()
-                }
-                fmdb.setKey(keyString)
+                fmdb.setKey(key.base64EncodedString() + keyIv.base64EncodedString())
             }
+            keyed = true
             // Fix: default rollback-journal mode locks the whole DB file during a write,
             // so an Editor SELECT and an incoming-push UPDATE/INSERT fully block each other.
             // WAL lets readers proceed while a writer is committing, and busy_timeout makes
@@ -232,15 +304,31 @@ public class Database {
             }
             fmdb.maxBusyRetryTimeInterval = 3.0
         })
+        // A connection that never got its key would answer every query with "not a database", and
+        // worse, would look open to everything that only asks whether it is nil. It is let go
+        // without ever being installed, so the next caller tries again once the key is in hand.
+        //
+        // Fix: this used to clear `database` as well, which is what emptied the chat list on a
+        // cold start. The key material can be cleared underneath a second pass - backgrounding
+        // does exactly that - and the pass that then failed to key its own connection threw away
+        // the working one the first pass had already installed, leaving the app with no database
+        // and no "databaseOpened" to tell anything to try again. A failed open now costs nothing.
+        guard keyed else {
+            print("Refusing to install a database connection without a key")
+            return
+        }
         // Checked, never created, here: openDatabase() calls this before it creates anything,
         // and creating from here would call back into it.
-        schemaVerified = hasCoreTables()
+        database = opened
+        schemaVerified = schemaState(of: opened) == .present
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "databaseOpened"), object: nil, userInfo: nil)
     }
 
+    private let openLock = NSRecursiveLock()
+
     
     func openDatabase() -> Int {
-        if FileEncryption.shared.aesKey != nil {
+        if FileEncryption.shared.aesKey != nil, FileEncryption.shared.aesIV != nil {
             setDBInstance()
         }
         var result = 0
@@ -286,7 +374,7 @@ public class Database {
             }
         })
         // The tables are in now - anything waiting for the database to be usable can go.
-        schemaVerified = hasCoreTables()
+        schemaVerified = schemaState(of: database) == .present
         return result
     }
     

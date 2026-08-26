@@ -57,6 +57,25 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     // showCompressionProgress(for:).
     private var compressionProgressTimer: Timer?
     var currPage = 0
+
+    // The row of things that can be decided about a video before it is sent - the same set the
+    // share sheet offers, so a video sent from either place is edited the same way.
+    private var videoTrimStrip: VideoTrimStrip?
+    private var videoMuteButton: UIButton?
+    private var videoInfoPill: UILabel?
+    private var videoFormatToggle: UIStackView?
+    private var videoModeButton: UIButton?
+    private var gifModeButton: UIButton?
+    private var lastVideoStripIndex = -1
+    /// Follows the video as it plays and carries the marker along the strip with it. A display link
+    /// rather than the player's own observer: it is tied to the screen refreshing, so it either
+    /// runs or it does not, and there is no token to be dropped without anybody noticing.
+    private var videoTicker: CADisplayLink?
+    private var activeTranscoder: VideoTranscoder?
+    /// Set while the marker is being dragged. Playing writes the marker's position twenty times a
+    /// second, and the finger writes it too - so without this the two pull against each other and
+    /// the marker stutters between where it is being dragged and where the video has got to.
+    private var isScrubbingVideo = false
     let const: CGFloat = 50
     var minWidth: CGFloat!
     var maxWidth: CGFloat!
@@ -169,6 +188,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         let dismissKeyboard = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         dismissKeyboard.cancelsTouchesInView = false
         previewCollection.addGestureRecognizer(dismissKeyboard)
+        buildVideoControls()
         
         buttonCancel.circle()
         buttonCancel.backgroundColor = .secondaryColor.withAlphaComponent(0.4)
@@ -848,20 +868,47 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             writeVideoAttachment(att, sourceURL: nil, completion: completion)
             return
         }
+        // Asked for as an animated picture instead, so it is drawn rather than encoded.
+        if att.asGIF {
+            makeGIF(from: att) { [weak self] converted in
+                guard let self = self, let converted = converted else {
+                    completion()
+                    return
+                }
+                self.writeVideoAttachment(converted, sourceURL: nil, completion: completion)
+            }
+            return
+        }
         let compressedURL = URL(fileURLWithPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
-        // Returns straight away: AVFoundation encodes on its own thread and calls back when
-        // it is done, so no thread of ours is blocked in the meantime.
-        let session = compressVideo(inputURL: videoURL, outputURL: compressedURL) { [weak self] exportSession in
+        // Fix: this went through an export preset, and a preset settles the resolution and the
+        // bitrate together - so the only way to a smaller file was a smaller picture, and the size
+        // shown beside the length could never be the size actually sent. The video keeps the size
+        // it was shot at and it is the bitrate that comes down, at exactly the rate the figure on
+        // screen was worked out from. Trim and sound are handled in the same pass.
+        var span: CMTimeRange?
+        if att.duration > 0 {
+            let range = att.trimmedRange
+            if range.lowerBound > 0 || range.upperBound < att.duration {
+                span = CMTimeRange(start: CMTime(seconds: range.lowerBound, preferredTimescale: 600),
+                                   end: CMTime(seconds: range.upperBound, preferredTimescale: 600))
+            }
+        }
+        let transcoder = VideoTranscoder()
+        activeTranscoder = transcoder
+        transcoder.start(source: videoURL,
+                         destination: compressedURL,
+                         timeRange: span,
+                         muted: !att.carriesAudio,
+                         progress: { fraction in
+            Nexilis.loadingAlert.message = "\("Compressing".localized()) \(Int(fraction * 100))%"
+        }, completion: { [weak self] ok in
             guard let self = self else {
                 return
             }
-            self.stopCompressionProgress()
-            let usable = exportSession?.status == .completed && FileManager.default.fileExists(atPath: compressedURL.path)
+            self.activeTranscoder = nil
+            let usable = ok && FileManager.default.fileExists(atPath: compressedURL.path)
             self.writeVideoAttachment(att, sourceURL: usable ? compressedURL : videoURL, completion: completion)
-        }
-        if let session = session {
-            showCompressionProgress(for: session)
-        }
+        })
     }
 
     // Fix: this used to run on the MAIN queue, and it read the whole video into memory with
@@ -915,66 +962,60 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         }
     }
 
-    // Fix: a long compression used to sit behind a "Sending..." alert that never changed,
-    // which is what made it read as a freeze even while it was making progress.
-    private func showCompressionProgress(for session: AVAssetExportSession) {
-        DispatchQueue.main.async { [weak self] in
-            self?.compressionProgressTimer?.invalidate()
-            self?.compressionProgressTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { timer in
-                guard session.status == .exporting || session.status == .waiting else {
-                    timer.invalidate()
-                    return
+    /// Turns the chosen part of a video into an animated gif, which then travels the way a gif
+    /// picked from the keyboard does.
+    private func makeGIF(from att: AttachmentItem, completion: @escaping (AttachmentItem?) -> Void) {
+        guard let source = att.videoURL else {
+            completion(nil)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let asset = AVURLAsset(url: source)
+            let whole = CMTimeGetSeconds(asset.duration)
+            let from = att.trimStart
+            let to = att.trimEnd > 0 ? att.trimEnd : whole
+            let length = max(0.1, to - from)
+            // Ten frames a second is what a gif is usually worth; more only makes the file larger
+            // without looking better.
+            let perSecond = 10.0
+            let count = max(2, min(150, Int(length * perSecond)))
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
+            generator.maximumSize = CGSize(width: 480, height: 480)
+
+            let data = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(data, "com.compuserve.gif" as CFString, count, nil) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            CGImageDestinationSetProperties(destination, [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
+            ] as CFDictionary)
+            let frameProperties = [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 1.0 / perSecond]
+            ] as CFDictionary
+            for step in 0..<count {
+                let at = CMTime(seconds: from + length * Double(step) / Double(count), preferredTimescale: 600)
+                guard let frame = try? generator.copyCGImage(at: at, actualTime: nil) else {
+                    continue
                 }
-                Nexilis.loadingAlert.message = "\("Compressing".localized()) \(Int(session.progress * 100))%"
+                CGImageDestinationAddImage(destination, frame, frameProperties)
+            }
+            guard CGImageDestinationFinalize(destination) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            var converted = att
+            converted.type = .gif
+            converted.gif = data as Data
+            DispatchQueue.main.async {
+                completion(converted)
             }
         }
     }
 
-    private func stopCompressionProgress() {
-        DispatchQueue.main.async { [weak self] in
-            self?.compressionProgressTimer?.invalidate()
-            self?.compressionProgressTimer = nil
-            Nexilis.loadingAlert.message = "Sending...".localized()
-        }
-    }
-
-
-    // Fix: the preset was AVAssetExportPresetHighestQuality, which asks for the source's own
-    // quality back - re-encoding a clip straight off the iPhone camera (4K, tens of Mbps)
-    // at essentially the bitrate it already had. The "compressed" file routinely came out no
-    // smaller than the original, which is why sending a camera video took so long and
-    // uploaded so much. Sizing the output to the resolution a chat video is actually watched
-    // at is where the saving is: 720p takes a 4K clip down by roughly an order of magnitude,
-    // and the preset only ever scales down, so a video that is already smaller is left at
-    // its own size.
-    @discardableResult
-    func compressVideo(inputURL: URL,
-                       outputURL: URL,
-                       handler:@escaping (_ exportSession: AVAssetExportSession?) -> Void) -> AVAssetExportSession? {
-        let urlAsset = AVURLAsset(url: inputURL, options: nil)
-        let compatible = AVAssetExportSession.exportPresets(compatibleWith: urlAsset)
-        let preset = [AVAssetExportPreset1280x720,
-                      AVAssetExportPreset960x540,
-                      AVAssetExportPresetMediumQuality].first(where: { compatible.contains($0) })
-            ?? AVAssetExportPresetMediumQuality
-        guard let exportSession = AVAssetExportSession(asset: urlAsset,
-                                                       presetName: preset) else {
-            handler(nil)
-            
-            return nil
-        }
-        
-        exportSession.outputURL = outputURL
-        exportSession.outputFileType = .mp4
-        // Puts the moov atom at the front, so the receiver can start playing while the rest
-        // is still arriving instead of having to download the whole file first.
-        exportSession.shouldOptimizeForNetworkUse = true
-        exportSession.exportAsynchronously {
-            handler(exportSession)
-        }
-        return exportSession
-    }
-    
     func compressImageLikeWhatsApp(_ image: UIImage, maxFileSizeMB: Double = 1.0, maxDimension: CGFloat = 1280) -> Data? {
         let resizedImage = resizeImage(image: image, maxDimension: maxDimension)
         var compressedData = resizedImage.jpegData(compressionQuality: 0.7) ?? Data()
@@ -1153,6 +1194,314 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         }
     }
     
+    private func buildVideoControls() {
+        let trim = VideoTrimStrip()
+        trim.onChange = { [weak self] start, end in
+            self?.videoTrimChanged(startFraction: start, endFraction: end)
+        }
+        trim.onScrub = { [weak self] fraction in
+            self?.videoPlayheadMoved(to: fraction)
+        }
+        trim.onScrubEnded = { [weak self] fraction in
+            self?.videoPlayheadMoved(to: fraction)
+            self?.isScrubbingVideo = false
+            self?.currentVideoCell()?.playPause()
+        }
+        view.addSubview(trim)
+        trim.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            // Fix: hung from the top of the screen, which is where the close button already is -
+            // so the strip lay over it and there was no way out of the screen. It hangs from the
+            // button instead.
+            trim.topAnchor.constraint(equalTo: buttonCancel.bottomAnchor, constant: 12),
+            trim.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            trim.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+            trim.heightAnchor.constraint(equalToConstant: 40)
+        ])
+        videoTrimStrip = trim
+
+        let mute = UIButton(type: .system)
+        mute.tintColor = .white
+        mute.backgroundColor = UIColor(white: 0.15, alpha: 0.9)
+        mute.layer.cornerRadius = 15
+        mute.addTarget(self, action: #selector(toggleVideoMute), for: .touchUpInside)
+        view.addSubview(mute)
+        mute.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            mute.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            mute.topAnchor.constraint(equalTo: trim.bottomAnchor, constant: 8),
+            mute.widthAnchor.constraint(equalToConstant: 46),
+            mute.heightAnchor.constraint(equalToConstant: 30)
+        ])
+        videoMuteButton = mute
+
+        let info = UILabel()
+        info.font = .systemFont(ofSize: 12, weight: .semibold)
+        info.textColor = .white
+        info.textAlignment = .center
+        info.backgroundColor = UIColor(white: 0.15, alpha: 0.9)
+        info.layer.cornerRadius = 15
+        info.clipsToBounds = true
+        view.addSubview(info)
+        info.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            info.leadingAnchor.constraint(equalTo: mute.trailingAnchor, constant: 8),
+            info.centerYAnchor.constraint(equalTo: mute.centerYAnchor),
+            info.heightAnchor.constraint(equalToConstant: 30),
+            info.widthAnchor.constraint(greaterThanOrEqualToConstant: 108)
+        ])
+        videoInfoPill = info
+
+        let asVideo = UIButton(type: .system)
+        asVideo.setImage(UIImage(systemName: "video.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)), for: .normal)
+        asVideo.addTarget(self, action: #selector(chooseVideoFormat), for: .touchUpInside)
+        let asGIF = UIButton(type: .system)
+        asGIF.setTitle("GIF", for: .normal)
+        asGIF.titleLabel?.font = .systemFont(ofSize: 12, weight: .bold)
+        asGIF.addTarget(self, action: #selector(chooseGIFFormat), for: .touchUpInside)
+        let toggle = UIStackView(arrangedSubviews: [asVideo, asGIF])
+        toggle.axis = .horizontal
+        toggle.distribution = .fillEqually
+        toggle.backgroundColor = UIColor(white: 0.15, alpha: 0.9)
+        toggle.layer.cornerRadius = 15
+        toggle.clipsToBounds = true
+        view.addSubview(toggle)
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            toggle.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            toggle.leadingAnchor.constraint(greaterThanOrEqualTo: info.trailingAnchor, constant: 8),
+            toggle.centerYAnchor.constraint(equalTo: mute.centerYAnchor),
+            toggle.widthAnchor.constraint(equalToConstant: 96),
+            toggle.heightAnchor.constraint(equalToConstant: 30)
+        ])
+        videoFormatToggle = toggle
+        videoModeButton = asVideo
+        gifModeButton = asGIF
+        refreshVideoControls()
+    }
+
+    /// Everything here belongs to one video, so it is put away whenever the attachment being looked
+    /// at is anything else.
+    func refreshVideoControls() {
+        let item = attachments.indices.contains(currPage) ? attachments[currPage] : nil
+        let isVideo = item?.type == .video
+        [videoTrimStrip, videoMuteButton, videoInfoPill, videoFormatToggle].forEach { $0?.isHidden = !isVideo }
+        guard let item = item, isVideo else {
+            return
+        }
+        // A gif carries no sound at all, so there is nothing to decide: the button shows what is
+        // going to happen and stops taking taps.
+        let silent = item.isMuted || item.asGIF
+        videoMuteButton?.setImage(UIImage(systemName: silent ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                                          withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)), for: .normal)
+        videoMuteButton?.isEnabled = !item.asGIF
+        videoMuteButton?.alpha = item.asGIF ? 0.45 : 1
+        videoModeButton?.tintColor = item.asGIF ? UIColor(white: 1, alpha: 0.45) : .white
+        videoModeButton?.backgroundColor = item.asGIF ? .clear : UIColor(white: 0.35, alpha: 1)
+        gifModeButton?.setTitleColor(item.asGIF ? .white : UIColor(white: 1, alpha: 0.45), for: .normal)
+        gifModeButton?.backgroundColor = item.asGIF ? UIColor(white: 0.35, alpha: 1) : .clear
+        updateVideoInfoPill()
+        bindVideoPlayback()
+        if lastVideoStripIndex != currPage {
+            lastVideoStripIndex = currPage
+            loadVideoStrip()
+        }
+    }
+
+    private func updateVideoInfoPill() {
+        guard attachments.indices.contains(currPage) else {
+            return
+        }
+        let item = attachments[currPage]
+        let seconds = Int(item.trimmedDuration.rounded())
+        var text = String(format: "%d:%02d", seconds / 60, seconds % 60)
+        // Fix: this was a share of the file as it arrived, which is not what is going to be sent -
+        // the video is re-encoded first, and at a lower rate. What is shown is worked out from the
+        // rate it is being encoded at, which is a figure this app decides rather than reads, and it
+        // is the same one handed to the encoder.
+        if item.targetBitrate > 0 {
+            let carried = item.targetBitrate + (item.carriesAudio ? 64_000 : 0)
+            text += "  \u{00B7}  " + ByteCountFormatter.string(fromByteCount: Int64(carried / 8 * item.trimmedDuration), countStyle: .file)
+        } else if let url = item.videoURL {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let whole = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+            let share = item.duration > 0 ? item.trimmedDuration / item.duration : 1
+            text += "  \u{00B7}  " + ByteCountFormatter.string(fromByteCount: Int64(Double(whole) * share), countStyle: .file)
+        }
+        videoInfoPill?.text = "  " + text + "  "
+    }
+
+    /// The frames along the strip, read off the video on a background queue and kept, so coming
+    /// back to it is instant.
+    private func loadVideoStrip() {
+        guard attachments.indices.contains(currPage), let url = attachments[currPage].videoURL,
+              let strip = videoTrimStrip else {
+            return
+        }
+        let item = attachments[currPage]
+        if !item.stripFrames.isEmpty {
+            strip.show(frames: item.stripFrames, start: item.trimStart, end: item.trimEnd, duration: item.duration)
+            return
+        }
+        let page = currPage
+        let asset = AVURLAsset(url: url)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let seconds = CMTimeGetSeconds(asset.duration)
+            let videoTrack = asset.tracks(withMediaType: .video).first
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 120, height: 120)
+            var images: [UIImage] = []
+            let wanted = 12
+            for step in 0..<wanted {
+                let at = CMTime(seconds: seconds * Double(step) / Double(wanted), preferredTimescale: 600)
+                if let frame = try? generator.copyCGImage(at: at, actualTime: nil) {
+                    images.append(UIImage(cgImage: frame))
+                }
+            }
+            DispatchQueue.main.async {
+                guard let self = self, self.attachments.indices.contains(page), self.currPage == page else {
+                    return
+                }
+                if seconds.isFinite, self.attachments[page].duration == 0 {
+                    self.attachments[page].duration = seconds
+                }
+                self.attachments[page].videoBitrate = Double(videoTrack?.estimatedDataRate ?? 0)
+                self.attachments[page].audioBitrate = Double(asset.tracks(withMediaType: .audio).first?.estimatedDataRate ?? 0)
+                self.attachments[page].targetBitrate = videoTrack.map { Double(VideoTranscoder.targetBitrate(for: $0)) } ?? 0
+                self.attachments[page].stripFrames = images
+                let ready = self.attachments[page]
+                strip.show(frames: images, start: ready.trimStart, end: ready.trimEnd, duration: ready.duration)
+                self.updateVideoInfoPill()
+            }
+        }
+    }
+
+    /// Fix: the cell is bound to the strip in refreshVideoControls, and on the way into this
+    /// screen that runs before the collection view has made any cells - so cellForItem answered
+    /// nil, nothing was bound, and playing the very first video moved no marker. It came right
+    /// only after moving to another attachment and back, which is when the binding finally found a
+    /// cell. Binding happens as a cell appears as well, which is the moment there is one to bind.
+    public func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard collectionView == previewCollection, indexPath.item == currPage else {
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.bindVideoPlayback()
+        }
+    }
+
+    private func currentVideoCell() -> PreviewCell? {
+        guard attachments.indices.contains(currPage), attachments[currPage].type == .video else {
+            return nil
+        }
+        return previewCollection.cellForItem(at: IndexPath(item: currPage, section: 0)) as? PreviewCell
+    }
+
+    /// Hands the cell what the strip has decided, and starts following it while it plays.
+    private func bindVideoPlayback() {
+        guard attachments.indices.contains(currPage), let cell = currentVideoCell() else {
+            stopFollowingPlayback()
+            return
+        }
+        let item = attachments[currPage]
+        cell.keptRange = item.duration > 0 ? item.trimmedRange : nil
+        cell.startFrom = item.trimStart
+        // The speaker button decided this, and it should be true of what is being previewed as
+        // well as of what is sent - otherwise the preview says one thing and the message another.
+        cell.player?.isMuted = !item.carriesAudio
+        cell.onPlaybackChanged = { [weak self] playing in
+            if playing {
+                self?.startFollowingPlayback()
+            } else {
+                self?.stopFollowingPlayback()
+            }
+        }
+    }
+
+    private func startFollowingPlayback() {
+        videoTicker?.invalidate()
+        let link = CADisplayLink(target: self, selector: #selector(followVideoPlayback))
+        link.add(to: .main, forMode: .common)
+        videoTicker = link
+    }
+
+    private func stopFollowingPlayback() {
+        videoTicker?.invalidate()
+        videoTicker = nil
+    }
+
+    @objc private func followVideoPlayback() {
+        // While the marker is being held it belongs to the finger, not to the video.
+        guard !isScrubbingVideo else {
+            return
+        }
+        guard attachments.indices.contains(currPage),
+              let cell = currentVideoCell(), let player = cell.player else {
+            stopFollowingPlayback()
+            return
+        }
+        let whole = attachments[currPage].duration
+        let at = CMTimeGetSeconds(player.currentTime())
+        guard whole > 0, at.isFinite else {
+            return
+        }
+        videoTrimStrip?.movePlayhead(to: at / whole)
+        cell.stopIfPastTrim()
+    }
+
+    private func videoPlayheadMoved(to fraction: Double) {
+        guard attachments.indices.contains(currPage), attachments[currPage].duration > 0 else {
+            return
+        }
+        let whole = attachments[currPage].duration
+        attachments[currPage].trimStart = min(max(attachments[currPage].trimStart, 0), whole)
+        // The video stops the moment the marker is taken hold of: it carries on running otherwise,
+        // and what is on screen then has nothing to do with where the marker is being put.
+        if !isScrubbingVideo {
+            isScrubbingVideo = true
+            currentVideoCell()?.pauseVideo()
+        }
+        let at = whole * fraction
+        currentVideoCell()?.startFrom = at
+        currentVideoCell()?.showFrame(at: at)
+    }
+
+    private func videoTrimChanged(startFraction: Double, endFraction: Double) {
+        guard attachments.indices.contains(currPage), attachments[currPage].duration > 0 else {
+            return
+        }
+        let whole = attachments[currPage].duration
+        attachments[currPage].trimStart = whole * startFraction
+        attachments[currPage].trimEnd = whole * endFraction
+        updateVideoInfoPill()
+        bindVideoPlayback()
+    }
+
+    @objc private func toggleVideoMute() {
+        guard attachments.indices.contains(currPage) else {
+            return
+        }
+        attachments[currPage].isMuted.toggle()
+        refreshVideoControls()
+    }
+
+    @objc private func chooseVideoFormat() {
+        setVideoAsGIF(false)
+    }
+
+    @objc private func chooseGIFFormat() {
+        setVideoAsGIF(true)
+    }
+
+    private func setVideoAsGIF(_ wanted: Bool) {
+        guard attachments.indices.contains(currPage) else {
+            return
+        }
+        attachments[currPage].asGIF = wanted
+        refreshVideoControls()
+    }
+
     @objc func cellTapped(_ sender: UITapGestureRecognizer) {
         guard let cell = sender.view as? UICollectionViewCell,
                   let indexPath = thumbnailCollection.indexPath(for: cell)
@@ -1257,6 +1606,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 currPage = page
                 
                 DispatchQueue.main.async { [self] in
+                    refreshVideoControls()
                     self.textFieldSend.text = attachments[page].text
                     handleRichText(self.textFieldSend)
                     
@@ -1466,6 +1816,35 @@ struct AttachmentItem {
     var specFileString: String = ""
     var isAck: Bool = false
     var isConfidential: Bool = false
+
+    // What has been decided about a video before it is sent. Kept on the attachment so that moving
+    // between them and coming back finds the same choices.
+    var duration: Double = 0
+    var trimStart: Double = 0
+    /// Zero until the far handle is moved, and then it means the same as "all of it".
+    var trimEnd: Double = 0
+    var isMuted = false
+    var asGIF = false
+    var videoBitrate: Double = 0
+    var audioBitrate: Double = 0
+    /// What the video will be encoded at when it is sent, which is the figure worth showing.
+    var targetBitrate: Double = 0
+    var stripFrames: [UIImage] = []
+
+    /// Sound goes unless it has been turned off - and a gif has none to begin with.
+    var carriesAudio: Bool {
+        return !isMuted && !asGIF
+    }
+
+    var trimmedRange: ClosedRange<Double> {
+        let end = trimEnd > 0 ? trimEnd : duration
+        return trimStart...max(trimStart, end)
+    }
+
+    var trimmedDuration: Double {
+        let range = trimmedRange
+        return max(0, range.upperBound - range.lowerBound)
+    }
 }
 
 class PreviewCell: UICollectionViewCell, UIScrollViewDelegate {
@@ -1481,6 +1860,13 @@ class PreviewCell: UICollectionViewCell, UIScrollViewDelegate {
     var data: Data?
     var animatedImageView: SDAnimatedImageView!
     var webView: WKWebView?
+    /// The part of the video that is being kept, if any. Playing stays inside it, so what is heard
+    /// and seen is what is going to be sent.
+    var keptRange: ClosedRange<Double>?
+    /// Where playing starts from, which the strip above decides.
+    var startFrom: Double = 0
+    /// Told whenever playing starts or stops, so the marker on the strip can follow.
+    var onPlaybackChanged: ((Bool) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1583,27 +1969,83 @@ class PreviewCell: UICollectionViewCell, UIScrollViewDelegate {
         }
     }
     
+    func playPause() {
+        playPauseTapped()
+    }
+
     @objc private func playPauseTapped() {
         guard let player = player else { return }
         if !isPlaying {
+            // Fix: nothing could be heard even with the sound left on. The session is on whatever
+            // category was last set - ambient, most of the time - and ambient is silenced by the
+            // ring switch, so on a phone set to silent the video played to nobody. Playback is
+            // what this is, and saying so is what makes it audible either way.
+            if !player.isMuted {
+                try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+                try? AVAudioSession.sharedInstance().setActive(true)
+            }
+            player.seek(to: CMTime(seconds: max(startFrom, keptRange?.lowerBound ?? 0), preferredTimescale: 600),
+                        toleranceBefore: .zero, toleranceAfter: .zero)
             player.play()
             playPauseButton.isHidden = true
             isPlaying.toggle()
+            onPlaybackChanged?(true)
         }
+    }
+
+    /// Stops where it is, without moving back to the beginning.
+    func pauseVideo() {
+        guard isPlaying else {
+            return
+        }
+        player?.pause()
+        isPlaying = false
+        playPauseButton.isHidden = false
+        onPlaybackChanged?(false)
+    }
+
+    /// Seeks without starting, so the picture can follow the marker being dragged.
+    func showFrame(at seconds: Double) {
+        player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
+                     toleranceBefore: CMTime(seconds: 0.15, preferredTimescale: 600),
+                     toleranceAfter: CMTime(seconds: 0.15, preferredTimescale: 600))
     }
     
     @objc private func videoDidEnd() {
+        // Fix: this started the video again the moment it finished, so it never stopped - which is
+        // not something anybody asked it to do, and it left the marker running in circles. It ends
+        // where the trim begins, ready to be played again if that is wanted.
         guard let player = player else { return }
-        player.seek(to: .zero)
-        player.play()
-        isPlaying = true
+        player.pause()
+        player.seek(to: CMTime(seconds: keptRange?.lowerBound ?? 0, preferredTimescale: 600))
+        isPlaying = false
+        playPauseButton.isHidden = false
+        onPlaybackChanged?(false)
+    }
+
+    /// Called as the video runs. Stops it where the trim says to, rather than letting it run on
+    /// into the part being cut away.
+    func stopIfPastTrim() {
+        guard isPlaying, let player = player, let range = keptRange else {
+            return
+        }
+        guard CMTimeGetSeconds(player.currentTime()) >= range.upperBound else {
+            return
+        }
+        player.pause()
+        player.seek(to: CMTime(seconds: range.lowerBound, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero)
+        isPlaying = false
+        playPauseButton.isHidden = false
+        onPlaybackChanged?(false)
     }
     
     func stopVideo() {
         player?.pause()
-        player?.seek(to: .zero)
+        player?.seek(to: CMTime(seconds: keptRange?.lowerBound ?? 0, preferredTimescale: 600))
         isPlaying = false
         playPauseButton.isHidden = false
+        onPlaybackChanged?(false)
     }
     
     @objc func doubleTapZoom(_ gesture: UITapGestureRecognizer) {

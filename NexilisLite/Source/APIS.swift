@@ -2514,14 +2514,82 @@ public class APIS: NSObject {
         let badge = badgeTargetForNewMessage()
         content.badge = NSNumber(value: badge)
         let request = UNNotificationRequest(identifier: messageId, content: content, trigger: nil)
-        center.add(request) { error in
-            if let error = error {
-                print("Error scheduling notification: \(error.localizedDescription)")
+        // Fix: the server sends two pushes for every message - an alert one, which iOS shows by
+        // itself, and a silent one carrying the message to be saved. This banner was put up for
+        // the second of those, so the reader saw the same message announced twice. It is only put
+        // up when the system has not already announced it.
+        //
+        // The badge is set either way, below: it is this app that works the number out, since the
+        // server does not send one, and suppressing the banner must not suppress the count.
+        systemAlreadyAnnounced(messageId: messageId) { announced in
+            guard !announced else {
+                return
+            }
+            center.add(request) { error in
+                if let error = error {
+                    print("Error scheduling notification: \(error.localizedDescription)")
+                }
             }
         }
         // And straight away as well, for the case where the banner is suppressed (the reader is
         // already in the app) but the count still went up.
         setApplicationBadge(badge)
+    }
+
+    /// Whether iOS has already put a notification up for this message - the server's own alert.
+    ///
+    /// The two pushes are sent together and may land in either order, so a message not found on
+    /// the first look is given a moment and looked for again. Not finding it is the safe answer:
+    /// the banner is put up, and at worst the reader sees what they would have seen before.
+    private static func systemAlreadyAnnounced(messageId: String, completion: @escaping (Bool) -> Void) {
+        guard !messageId.isEmpty else {
+            completion(false)
+            return
+        }
+        lookForDeliveredNotification(messageId: messageId) { found in
+            if found {
+                completion(true)
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                lookForDeliveredNotification(messageId: messageId, completion: completion)
+            }
+        }
+    }
+
+    private static func lookForDeliveredNotification(messageId: String, completion: @escaping (Bool) -> Void) {
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            if delivered.contains(where: { mentions(messageId: messageId, in: $0.request) }) {
+                completion(true)
+                return
+            }
+            center.getPendingNotificationRequests { pending in
+                completion(pending.contains { mentions(messageId: messageId, in: $0) })
+            }
+        }
+    }
+
+    /// The server's alert carries the message somewhere in its payload; where exactly is the
+    /// server's business, so the whole of it is searched rather than one agreed-upon key.
+    private static func mentions(messageId: String, in request: UNNotificationRequest) -> Bool {
+        if request.identifier == messageId {
+            return true
+        }
+        return contains(messageId: messageId, in: request.content.userInfo)
+    }
+
+    private static func contains(messageId: String, in value: Any?) -> Bool {
+        switch value {
+        case let text as String:
+            return text == messageId
+        case let list as [Any]:
+            return list.contains { contains(messageId: messageId, in: $0) }
+        case let map as [AnyHashable: Any]:
+            return map.values.contains { contains(messageId: messageId, in: $0) }
+        default:
+            return false
+        }
     }
     
     private static func copySoundToLocalPath(_ nameSound: String, _ fromPref: Bool) {
@@ -3031,6 +3099,11 @@ public class APIS: NSObject {
             FileEncryption.shared.aesIV = nil
         }
         FloatingButton.datePull = nil
+        // Decoded pictures are the largest thing this app holds, and a suspended app is chosen to
+        // be killed on how much it is holding - which is what makes a long spell in the background
+        // end in a cold start rather than a resume. The cache is on disk as well, so nothing is
+        // lost by letting go of the decoded copies; they are read back when they are next drawn.
+        Nexilis.imageCache.removeAllObjects()
     }
     
     public static var notifTimer = Timer()
@@ -3103,6 +3176,14 @@ public class APIS: NSObject {
     }
 
     public static func enterForeground() {
+        // Called first, and given a fresh budget of attempts: every time the app comes to the
+        // front is a new chance for something shared to be waiting, whether or not the last window
+        // of looking ran out. It costs nothing here - checkDataForShareExtension does its own work
+        // on a background queue.
+        shareLock.lock()
+        shareRetryAttempts = 0
+        shareLock.unlock()
+        checkDataForShareExtension()
         APIS.checkNotificationPermission(completion: { isAllowed in
             if !isAllowed {
                 showEnableNotificationsAlert()
@@ -3151,7 +3232,6 @@ public class APIS: NSObject {
                 let _ = Nexilis.write(message: CoreMessage_TMessageBank.getBatchBuddiesInfos(p_f_pin: me, last_update: 0))
             }
         }
-        checkDataForShareExtension()
 //        UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         if Utils.getSecureFolderOffline() == "0" && afterEnterBackground && Database.shared.database == nil && Utils.getSetProfile() && !Utils.isHSAMode() {
@@ -3399,23 +3479,139 @@ public class APIS: NSObject {
     }
     
     private static var isCheckingDataForShare = false
+    private static var shareRetryAttempts = 0
+    private static var shareRetryScheduled = false
+    /// Guards those three together. They are read and written from the app coming to the front,
+    /// from the Darwin notification the sheet posts, from the database opening, and from the retry.
+    private static let shareLock = NSLock()
+
+    /// Lets go of the claim, so the next trigger can take it up.
+    private static func releaseSharedPayload() {
+        shareLock.lock()
+        isCheckingDataForShare = false
+        shareRetryAttempts = 0
+        shareLock.unlock()
+    }
+
+    /// The app was not ready to send yet. Nothing has been taken from the shared container, so this
+    /// simply comes back to it - for a couple of minutes, which covers a cold launch and a login,
+    /// after which the payload waits for the next time the app comes to the front.
+    private static func retryShareExtensionLater() {
+        watchForDatabaseToSendShare()
+        // Fix: one chain, not one per trigger. Every source that asked used to start a timer of its
+        // own, so the retries multiplied with each foreground and each notification until several
+        // were arriving at once - which is what let several of them claim the same payload.
+        shareLock.lock()
+        guard !shareRetryScheduled, shareRetryAttempts < 60 else {
+            shareLock.unlock()
+            return
+        }
+        // Close together at first, since what is being waited for is a cold start finishing and
+        // that is a matter of a second or two; further apart afterwards, when whatever is missing
+        // is clearly not about to arrive.
+        let comeBackIn: TimeInterval = shareRetryAttempts < 20 ? 0.3 : 2
+        shareRetryAttempts += 1
+        shareRetryScheduled = true
+        shareLock.unlock()
+        DispatchQueue.global().asyncAfter(deadline: .now() + comeBackIn) {
+            shareLock.lock()
+            shareRetryScheduled = false
+            shareLock.unlock()
+            checkDataForShareExtension()
+        }
+    }
+
+    private static var shareWatchToken: NSObjectProtocol?
+
+    /// Fix: waiting for something to be ready by asking again every two seconds is a guess about
+    /// how long a cold start takes, and on a slow one it ran out - the payload then sat there until
+    /// the app was backgrounded and brought forward again, which is exactly the "only sends after I
+    /// minimise and reopen" case. The database announces itself when it opens, and that is the
+    /// moment the app becomes able to send: it is listened for instead of guessed at. The polling
+    /// stays as a second line, for the case where the database was already open and something else
+    /// was missing.
+    private static func watchForDatabaseToSendShare() {
+        guard shareWatchToken == nil else {
+            return
+        }
+        shareWatchToken = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name(rawValue: "databaseOpened"),
+            object: nil,
+            queue: nil
+        ) { _ in
+            checkDataForShareExtension()
+        }
+    }
+
+    private enum ShareClaim {
+        /// Ours to process, and nobody else can now take it.
+        case claimed(UserDefaults, String)
+        /// Nothing to take yet - either nothing was shared, or the app cannot act on it yet. On a
+        /// cold start those look identical from here, and both mean the same thing: come back.
+        case notYet
+        /// Somebody else already has it. Not something to come back for - they will finish it.
+        case busy
+    }
+
+    /// Fix: deciding whether to act used to be a check of the flag, then a read from disk, then two
+    /// more guards, and only then the flag being set. Everything that can start this off - the app
+    /// coming to the front, the Darwin notification from the sheet, the database opening, and the
+    /// retry - could get through that gap at the same moment, and every one of them would claim the
+    /// same payload. One file was scanned and sent three times over, with a "Scanning File..." for
+    /// each. The whole decision is one step now, and only one caller can ever win it.
+    private static func claimSharedPayload() -> ShareClaim {
+        shareLock.lock()
+        defer { shareLock.unlock() }
+        guard !isCheckingDataForShare else {
+            return .busy
+        }
+        guard let userDefaults = UserDefaults(suiteName: nameGroupShared) else {
+            return .notYet
+        }
+        // A process that has only just started has not necessarily read the shared container yet.
+        // Asking for it explicitly costs nothing and settles the question.
+        userDefaults.synchronize()
+        // Finding nothing here is not proof that nothing was shared - on a cold start it may only
+        // mean this process cannot see it yet - and a database that is not open yet is no reason to
+        // throw the payload away either. Both are "not now", and nothing is taken in either case.
+        guard let value = userDefaults.string(forKey: "sharedItem"), !value.isEmpty,
+              Database.shared.isReady,
+              let mePin = User.getMyPin(), !mePin.isEmpty else {
+            return .notYet
+        }
+        isCheckingDataForShare = true
+        shareRetryAttempts = 0
+        return .claimed(userDefaults, value)
+    }
 
     public static func checkDataForShareExtension() {
+        // Arranged before anything is read, not after a read has failed: the database opening is
+        // the moment the app becomes able to send, and that can happen either side of this call.
+        watchForDatabaseToSendShare()
         DispatchQueue.global().async {
 
-            guard let userDefaults = UserDefaults(suiteName: nameGroupShared),
-                  let value = userDefaults.string(forKey: "sharedItem"),
-                  !value.isEmpty,
-                  !isCheckingDataForShare else {
+            let userDefaults: UserDefaults
+            let value: String
+            switch claimSharedPayload() {
+            case .claimed(let defaults, let payload):
+                userDefaults = defaults
+                value = payload
+            case .notYet:
+                retryShareExtensionLater()
+                return
+            case .busy:
                 return
             }
 
-            isCheckingDataForShare = true
+            if let token = shareWatchToken {
+                NotificationCenter.default.removeObserver(token)
+                shareWatchToken = nil
+            }
 
             guard let jsonData = value.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
                 print("Error parsing JSON")
-                isCheckingDataForShare = false
+                releaseSharedPayload()
                 return
             }
 
@@ -3485,21 +3681,34 @@ public class APIS: NSObject {
             // MARK: - Unified copy function
             func safeCopy(from: URL?, to: URL?) {
                 guard let from = from, let to = to else { return }
-                guard FileManager.default.fileExists(atPath: from.path),
-                      !FileManager.default.fileExists(atPath: to.path) else { return }
-                try? FileManager.default.copyItem(at: from, to: to)
+                guard FileManager.default.fileExists(atPath: from.path) else { return }
+                if !FileManager.default.fileExists(atPath: to.path) {
+                    try? FileManager.default.copyItem(at: from, to: to)
+                }
+                // The shared container is the sheet's drop-off point, not storage: what is left
+                // there is never read again, and nothing was clearing it, so every picture ever
+                // shared stayed on the device twice.
+                try? FileManager.default.removeItem(at: from)
             }
 
             // MARK: - Message Sender
+            // Every id is passed in rather than read from the one set of variables the payload used
+            // to carry: the sheet can now hand over several attachments at once, and each of them
+            // has its own file, its own thumbnail and its own caption.
             func sendIt(attachmentFlag: String,
+                        messageText: String,
+                        imageId: String = "",
+                        videoId: String = "",
+                        thumbId: String = "",
                         renamedFileId: String = "",
-                        renamedAudioId: String = "") {
+                        renamedAudioId: String = "",
+                        gifId: String = "") {
 
                 let message = CoreMessage_TMessageBank.sendMessage(
                     l_pin: groupId.isEmpty ? idContact : groupId,
                     message_scope_id: SCOPE,
                     status: SCOPE == "3" ? "1" : "2",
-                    message_text: data,
+                    message_text: messageText,
                     credential: "0",
                     attachment_flag: attachmentFlag,
                     ex_blog_id: "",
@@ -3509,22 +3718,26 @@ public class APIS: NSObject {
                     audio_id: renamedAudioId,
                     video_id: videoId,
                     file_id: renamedFileId,
-                    thumb_id: thumb,
+                    thumb_id: thumbId,
                     reff_id: "",
                     read_receipts: "4",
                     chat_id: chatId,
                     is_call_center: "0",
                     call_center_id: "",
                     opposite_pin: SCOPE == "3" ? (User.getMyPin() ?? "") : idContact,
-                    gif_id: "",
+                    gif_id: gifId,
                     isForwarded: "0",
                     isSecret: "0",
                     specFile: ""
                 )
 
                 Nexilis.addQueueMessage(message: message)
-                resetPrefs()
+            }
 
+            /// Called once the whole batch has gone, not once per attachment - opening the editor
+            /// after each one would have it fighting itself for the screen.
+            func finishShare() {
+                resetPrefs()
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: NSNotification.Name("reloadTabChats"), object: nil)
                 }
@@ -3537,7 +3750,7 @@ public class APIS: NSObject {
             func resetPrefs() {
                 userDefaults.set("", forKey: "sharedItem")
                 userDefaults.synchronize()
-                isCheckingDataForShare = false
+                releaseSharedPayload()
             }
 
             // MARK: - Open editor if needed
@@ -3587,80 +3800,140 @@ public class APIS: NSObject {
                 }
             }
 
-            // MARK: - Switch by typeShare
-            guard let appURL = appGroupURL else { return }
-            guard let doc = documentDir else { return }
-
-            switch typeShare {
-
-            // -------------------- IMAGE --------------------
-            case 2:
-                let sharedURL = appURL.appendingPathComponent(imageId)
-                let thumbURL = appURL.appendingPathComponent(thumb)
-
-                validateIfNeeded(url: sharedURL) { ok in
-                    guard ok else { return }
-
-                    let toImage = doc.appendingPathComponent(imageId)
-                    let toThumb = doc.appendingPathComponent(thumb)
-
-                    safeCopy(from: sharedURL, to: toImage)
-                    safeCopy(from: thumbURL, to: toThumb)
-
-                    sendIt(attachmentFlag: "1")
-                }
-
-            // -------------------- VIDEO --------------------
-            case 3:
-                let sharedURL = appURL.appendingPathComponent(videoId)
-                let thumbURL = appURL.appendingPathComponent(thumb)
-
-                validateIfNeeded(url: sharedURL) { ok in
-                    guard ok else { return }
-
-                    safeCopy(from: sharedURL,
-                             to: doc.appendingPathComponent(videoId))
-                    safeCopy(from: thumbURL,
-                             to: doc.appendingPathComponent(thumb))
-
-                    sendIt(attachmentFlag: "2")
-                }
-
-            // -------------------- FILE --------------------
-            case 4:
-                let renamed = "Nexilis_\(Date().currentTimeMillis())_\(fileId)"
-                let sharedURL = appURL.appendingPathComponent(fileId)
-
-                validateIfNeeded(url: sharedURL) { ok in
-                    guard ok else { return }
-
-                    let dest = doc.appendingPathComponent(renamed)
-                    safeCopy(from: sharedURL, to: dest)
-
-                    data = "\(fileId)|\(data)"
-
-                    sendIt(attachmentFlag: "6", renamedFileId: renamed)
-                }
-
-            // -------------------- AUDIO --------------------
-            case 5:
-                let renamed = "Nexilis_\(Date().currentTimeMillis())_\(audioId)"
-                let sharedURL = appURL.appendingPathComponent(audioId)
-
-                validateIfNeeded(url: sharedURL) { ok in
-                    guard ok else { return }
-
-                    let dest = doc.appendingPathComponent(renamed)
-                    safeCopy(from: sharedURL, to: dest)
-                    data = "\(audioId)|\(data)"
-
-                    sendIt(attachmentFlag: "5", renamedAudioId: renamed)
-                }
-
-            // -------------------- TEXT ONLY --------------------
-            default:
-                sendIt(attachmentFlag: "0")
+            // MARK: - What is being sent
+            // Fix: both of these returned with isCheckingDataForShare left set, which blocks every
+            // later check for the rest of the session - so one failure here meant nothing shared
+            // could be picked up again until the app was restarted.
+            guard let appURL = appGroupURL, let doc = documentDir else {
+                releaseSharedPayload()
+                return
             }
+
+            // The sheet writes a list now, one entry per attachment. A payload from a build that
+            // only knew how to send one is read from the flat keys it used instead, so an app
+            // updated ahead of its extension still works.
+            var queue = json["items"] as? [[String: Any]] ?? []
+            if queue.isEmpty {
+                var legacy: [String: Any] = ["type": typeShare]
+                if !imageId.isEmpty { legacy["image"] = imageId }
+                if !videoId.isEmpty { legacy["video"] = videoId }
+                if !fileId.isEmpty { legacy["file"] = fileId }
+                if !audioId.isEmpty { legacy["audio"] = audioId }
+                if !thumb.isEmpty { legacy["thumb"] = thumb }
+                if let gif = json["gif"] as? String, !gif.isEmpty { legacy["gif"] = gif }
+                queue = [legacy]
+            }
+
+            /// One attachment at a time, each starting the next once it has been scanned, copied
+            /// and queued - the scan puts a modal loader up, so they cannot overlap.
+            func process(_ index: Int) {
+                guard index < queue.count else {
+                    finishShare()
+                    return
+                }
+                let entry = queue[index]
+                let type = entry["type"] as? Int ?? typeShare
+                // The caption belongs to the first attachment; the rest carry only their own names.
+                let caption = index == 0 ? data : ""
+                let entryImage = entry["image"] as? String ?? ""
+                let entryVideo = entry["video"] as? String ?? ""
+                let entryFile = entry["file"] as? String ?? ""
+                let entryAudio = entry["audio"] as? String ?? ""
+                let entryThumb = entry["thumb"] as? String ?? ""
+                let entryGif = entry["gif"] as? String ?? ""
+
+                switch type {
+
+                // -------------------- IMAGE --------------------
+                case 2:
+                    let sharedURL = appURL.appendingPathComponent(entryImage)
+                    let thumbURL = appURL.appendingPathComponent(entryThumb)
+
+                    validateIfNeeded(url: sharedURL) { ok in
+                        guard ok else { return }
+
+                        safeCopy(from: sharedURL, to: doc.appendingPathComponent(entryImage))
+                        safeCopy(from: thumbURL, to: doc.appendingPathComponent(entryThumb))
+
+                        sendIt(attachmentFlag: "1", messageText: caption, imageId: entryImage, thumbId: entryThumb)
+                        process(index + 1)
+                    }
+
+                // -------------------- VIDEO --------------------
+                case 3:
+                    let sharedURL = appURL.appendingPathComponent(entryVideo)
+                    let thumbURL = appURL.appendingPathComponent(entryThumb)
+
+                    validateIfNeeded(url: sharedURL) { ok in
+                        guard ok else { return }
+
+                        safeCopy(from: sharedURL, to: doc.appendingPathComponent(entryVideo))
+                        safeCopy(from: thumbURL, to: doc.appendingPathComponent(entryThumb))
+
+                        sendIt(attachmentFlag: "2", messageText: caption, videoId: entryVideo, thumbId: entryThumb)
+                        process(index + 1)
+                    }
+
+                // -------------------- GIF --------------------
+                // A video the sheet turned into an animated picture. It travels as a video does -
+                // same flag, same slot, same thumbnail - with the gif slot filled in as well, which
+                // is what tells the bubble to animate it rather than draw a still.
+                case 7:
+                    let sharedURL = appURL.appendingPathComponent(entryGif)
+                    let thumbURL = appURL.appendingPathComponent(entryThumb)
+
+                    validateIfNeeded(url: sharedURL) { ok in
+                        guard ok else { return }
+
+                        safeCopy(from: sharedURL, to: doc.appendingPathComponent(entryGif))
+                        safeCopy(from: thumbURL, to: doc.appendingPathComponent(entryThumb))
+
+                        sendIt(attachmentFlag: "2",
+                               messageText: caption,
+                               videoId: entryGif,
+                               thumbId: entryThumb,
+                               gifId: entryGif)
+                        process(index + 1)
+                    }
+
+                // -------------------- FILE --------------------
+                case 4:
+                    let renamed = "Nexilis_\(Date().currentTimeMillis())_\(entryFile)"
+                    let sharedURL = appURL.appendingPathComponent(entryFile)
+
+                    validateIfNeeded(url: sharedURL) { ok in
+                        guard ok else { return }
+
+                        safeCopy(from: sharedURL, to: doc.appendingPathComponent(renamed))
+
+                        sendIt(attachmentFlag: "6", messageText: "\(entryFile)|\(caption)", renamedFileId: renamed)
+                        process(index + 1)
+                    }
+
+                // -------------------- AUDIO --------------------
+                case 5:
+                    let renamed = "Nexilis_\(Date().currentTimeMillis())_\(entryAudio)"
+                    let sharedURL = appURL.appendingPathComponent(entryAudio)
+
+                    validateIfNeeded(url: sharedURL) { ok in
+                        guard ok else { return }
+
+                        safeCopy(from: sharedURL, to: doc.appendingPathComponent(renamed))
+
+                        // Flag 5, not 60: this is an audio file somebody chose to send, not a
+                        // recording of their voice, and the bubble draws the two differently.
+                        sendIt(attachmentFlag: "5", messageText: "\(entryAudio)|\(caption)", renamedAudioId: renamed)
+                        process(index + 1)
+                    }
+
+                // -------------------- TEXT ONLY --------------------
+                default:
+                    sendIt(attachmentFlag: "0", messageText: caption)
+                    process(index + 1)
+                }
+            }
+
+            process(0)
         }
     }
     

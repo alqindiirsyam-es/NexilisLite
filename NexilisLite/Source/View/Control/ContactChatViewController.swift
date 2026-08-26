@@ -370,6 +370,13 @@ class ContactChatViewController: UITableViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(onReloadTab(notification:)), name: NSNotification.Name(rawValue: "onTopic"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onDisconnected(notification:)), name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(onDatabaseOpened(notification:)), name: NSNotification.Name(rawValue: "databaseOpened"), object: nil)
+        // A screen that starts listening after the database has already opened has missed that
+        // notification for good, and on a cold start it is a race which of the two happens first -
+        // which is why the list came up empty sometimes and filled normally other times. The state
+        // it was waiting to be told about is simply asked for instead.
+        if Database.shared.isReady {
+            onDatabaseOpened(notification: Notification(name: NSNotification.Name(rawValue: "databaseOpened")) as NSNotification)
+        }
         
         setUpTagSearch()
         tableView.tableFooterView = UIView()
