@@ -1492,32 +1492,75 @@ private class LocationFetcher: NSObject, CLLocationManagerDelegate {
         }
     }
     
+    /// Fix: this asked `CLLocationManager.locationServicesEnabled()` before requesting anything.
+    /// That call reaches the location daemon and can sit there, which on the main thread is a
+    /// frozen screen - the runtime issue "This method can cause UI unresponsiveness if invoked on
+    /// the main thread". Both callers hand this work to the main queue, so it was being asked in
+    /// exactly the place Apple warns about.
+    ///
+    /// Nothing needs to be asked up front. Setting the delegate makes the system report the
+    /// current authorization through `locationManagerDidChangeAuthorization`, which is where the
+    /// request starts from now; the services-off case that this used to catch arrives there as
+    /// denied, or through `didFailWithError` if authorization is held but the services are not on.
     func getCurrentLocation(completion: @escaping (CLLocationCoordinate2D?, Int) -> Void) {
-        self.completion = completion
-        self.manager = CLLocationManager()
-        self.manager?.delegate = self
-        self.manager?.desiredAccuracy = kCLLocationAccuracyBest
-        self.manager?.requestWhenInUseAuthorization()
-        
-        if CLLocationManager.locationServicesEnabled() {
-            self.manager?.requestLocation()
+        let start = {
+            self.completion = completion
+            let manager = CLLocationManager()
+            self.manager = manager
+            manager.desiredAccuracy = kCLLocationAccuracyBest
+            manager.delegate = self
+            manager.requestWhenInUseAuthorization()
+        }
+        // A CLLocationManager wants a thread with a run loop, or its delegate is never called.
+        if Thread.isMainThread {
+            start()
         } else {
-            completion(nil, 0)
+            DispatchQueue.main.async(execute: start)
         }
     }
-    
+
+    /// Hands the result over once and once only - the authorization callback and a failure can
+    /// both land for the same request.
+    private func finish(_ coordinate: CLLocationCoordinate2D?, _ score: Int) {
+        guard let completion = self.completion else {
+            return
+        }
+        self.completion = nil
+        completion(coordinate, score)
+    }
+
     // MARK: - CLLocationManagerDelegate
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .denied, .restricted:
+            finish(nil, 0)
+            cleanup()
+        case .notDetermined:
+            // The prompt is on screen; this is called again with whatever the user answers.
+            break
+        @unknown default:
+            finish(nil, 0)
+            cleanup()
+        }
+    }
+
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         motionSnapshot { snap in
-            let (gpsScore, _) = FakeGps.movementAndAccuracy(prev: locations.first, curr: locations.last!, motion: snap)
-            self.completion?(locations.last?.coordinate, gpsScore)
+            guard let last = locations.last else {
+                self.finish(nil, 0)
+                return
+            }
+            let (gpsScore, _) = FakeGps.movementAndAccuracy(prev: locations.first, curr: last, motion: snap)
+            self.finish(last.coordinate, gpsScore)
         }
 //        cleanup()
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("Error: \(error.localizedDescription)")
-        completion?(nil, 0)
+        finish(nil, 0)
         cleanup()
     }
     

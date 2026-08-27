@@ -415,7 +415,9 @@ public class Nexilis: NSObject {
             sendVersionToBE()
             getPullPrefs()
             getFeatureAccess()
-            
+
+            startSecurityShield(apiKey: apiKey)
+
             if let me = User.getMyPin() {
                 if Utils.getSetProfile() {
                     if Utils.getSecureFolderOffline() != "0" || !userId.isEmpty || !withInit {
@@ -491,8 +493,35 @@ public class Nexilis: NSObject {
         }
     }
     
+    private static var securityShieldStarted = false
+    private static let securityShieldLock = NSLock()
+
+    /// Starts the security checks from inside the library, the way Android does it.
+    ///
+    /// On Android the check belongs to the library, not to the app that hosts it: `API.startInit`
+    /// (io.nexilis.dm) fires `SecurityShield.getInstance().check(...)` on a thread of its own right
+    /// after `initService` and `getFeatureAccess`, and the app host's own call in `MainActivity` is
+    /// commented out. Ours sat in the host's `AppDelegate.onSuccess`, which left the checks out of
+    /// any other app embedding NexilisLite and tied them to a delegate callback that only fires
+    /// once a pin exists. Same spot in the sequence as Android now, so every host gets them.
+    ///
+    /// Runs alongside the app - nothing here waits on the result. A device that fails is told so by
+    /// SecurityShield itself, through an alert it puts up on a window of its own.
+    static func startSecurityShield(apiKey: String) {
+        // startConnect runs again on reconnect and re-login; the checks are meant to happen once
+        // per launch, and starting a second chain would stack a second alert on top of the first.
+        securityShieldLock.lock()
+        let alreadyStarted = securityShieldStarted
+        securityShieldStarted = true
+        securityShieldLock.unlock()
+        guard !alreadyStarted else {
+            return
+        }
+        SecurityShield.check(appName: APIS.getAppNm(), apiKey: apiKey)
+    }
+
     private static var ringtoneID: SystemSoundID = 0
-    
+
     public static func playRingtoneCall() {
         var ringtonePath = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_call_in_ios", withExtension: "mp3")
         if ringtonePath == nil {

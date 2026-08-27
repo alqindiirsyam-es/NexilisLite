@@ -10268,7 +10268,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
                 minHeightConstraint.priority = .defaultHigh
                 minHeightConstraint.isActive = true
-                containerReply.backgroundColor = .black.withAlphaComponent(0.2)
+                containerReply.backgroundColor = .black.withAlphaComponent(0.3)
                 containerReply.layer.cornerRadius = 5
                 containerReply.clipsToBounds = true
                 
@@ -10296,13 +10296,6 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 titleReply.font = UIFont.systemFont(ofSize: 12 + offset()).bold
                 if (data["f_pin"] as? String == idMe) {
                     titleReply.text = "You".localized()
-                    if dataMessages[indexPath.row]["f_pin"] as? String == idMe {
-                        titleReply.textColor = .white
-                        leftReply.backgroundColor = .white
-                    } else {
-                        titleReply.textColor = .mainColor
-                        leftReply.backgroundColor = .mainColor
-                    }
                 } else {
                     if data["f_pin"] as? String != "-999" {
                         let dataProfile = getDataProfile(f_pin: data["f_pin"]  as? String ?? "", message_id: data["message_id"]  as? String ?? "")
@@ -10310,25 +10303,34 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     } else {
                         titleReply.text = "Bot"
                     }
-                    if dataMessages[indexPath.row]["f_pin"] as? String == idMe {
-                        titleReply.textColor = .white
-                        leftReply.backgroundColor = .white
-                    } else {
-                        titleReply.textColor = .mainColor
-                        leftReply.backgroundColor = .mainColor
-                    }
+                }
+                if dataMessages[indexPath.row]["f_pin"] as? String == idMe {
+                    titleReply.textColor = .white
+                    leftReply.backgroundColor = .white
+                } else {
+                    titleReply.textColor = .mainColor
+                    leftReply.backgroundColor = .mainColor
                 }
                 
                 let contentReply = UILabel()
-                contentReply.numberOfLines = 2
+                contentReply.numberOfLines = 3
+                // The box has to be allowed to grow for the extra lines: the constraint holding the
+                // message text below it sits at defaultHigh, the same as a label's default resistance
+                // to being squeezed, and a tie there is settled either way.
+                contentReply.setContentCompressionResistancePriority(.required, for: .vertical)
+                titleReply.setContentCompressionResistancePriority(.required, for: .vertical)
                 containerReply.addSubview(contentReply)
                 contentReply.translatesAutoresizingMaskIntoConstraints = false
                 contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                 contentReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor, constant: -10).isActive = true
-                let topConstraintContent = contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor)
-                topConstraintContent.priority = .defaultHigh
+                // Required, and a minimum rather than an equality. At defaultHigh this was the
+                // cheapest constraint in the box to break, so a quote too tall for the space left
+                // for it was resolved by dropping the text on top of the name instead of making
+                // the box taller. Required, the box has to grow and the constraint holding the
+                // message text below it - which is the one meant to give way - does.
+                let topConstraintContent = contentReply.topAnchor.constraint(greaterThanOrEqualTo: titleReply.bottomAnchor)
                 topConstraintContent.isActive = true
-                contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
+                contentReply.font = UIFont.systemFont(ofSize: 11 + offset())
                 let message_text = data["message_text"] as? String ?? ""
                 let attachment_flag = data["attachment_flag"] as? String  ?? ""
                 let thumb_chat = data["thumb_id"] as? String ?? ""
@@ -10338,18 +10340,18 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 let audio_chat = data["audio_id"] as? String ?? ""
                 if (attachment_flag == "0" && thumb_chat == "") {
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                    contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+                    contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: self.dataGroup["group_id"]  as? String ?? "")
                 } else if (attachment_flag == "1" || image_chat != "") {
                     if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                         contentReply.text = "📷 Photo".localized()
                     } else {
-                        contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: self.dataGroup["group_id"]  as? String ?? "")
                     }
                 } else if (attachment_flag == "2" || video_chat != "") {
                     if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                         contentReply.text = "📹 Video".localized()
                     } else {
-                        contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: self.dataGroup["group_id"]  as? String ?? "")
                     }
                 } else if (attachment_flag == "6" || file_chat != ""){
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
@@ -10369,11 +10371,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
                                                                         audioName: audio_chat,
                                                                         font: contentReply.font,
-                                                                        colour: .white.withAlphaComponent(0.8))
+                                                                        colour: .white.withAlphaComponent(0.6))
                 }
-                if contentReply.attributedText == nil {
-                    contentReply.textColor = .white.withAlphaComponent(0.8)
-                }
+                // The quoted body is white at 60%, which is what WhatsApp uses for it
+                // (--quoted-message-text, hsla(0,0%,100%,0.6)). The name above it keeps the
+                // accent colour, so the two read as heading and quote rather than one block.
+                contentReply.textColor = .white.withAlphaComponent(0.6)
                 
                 if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
                     let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -11684,7 +11687,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         titleReply.textColor = .orangeColor
-        
+
+        let quotedTextColour: UIColor = self.traitCollection.userInterfaceStyle == .dark
+            ? .white.withAlphaComponent(0.6)
+            : .black.withAlphaComponent(0.6)
+
         let contentReply = UILabel()
         self.containerPreviewReply.addSubview(contentReply)
         contentReply.translatesAutoresizingMaskIntoConstraints = false
@@ -11725,11 +11732,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
                                                                  audioName: audio_chat,
                                                                  font: contentReply.font,
-                                                                 colour: .gray)
+                                                                 colour: quotedTextColour)
         }
-        if contentReply.attributedText == nil {
-            contentReply.textColor = .gray
-        }
+        // Same treatment as the quote inside a bubble - 60% of the text colour, which is what
+        // WhatsApp uses (--quoted-message-text). Fix: this was a flat .gray, so in dark mode it
+        // was grey on near-black.
+        contentReply.textColor = quotedTextColour
         
         let buttonCancelReply = UIButton(type: .custom)
         self.containerPreviewReply.addSubview(buttonCancelReply)

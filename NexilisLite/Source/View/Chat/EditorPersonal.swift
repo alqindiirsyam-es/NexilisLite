@@ -11689,7 +11689,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
                 minHeightConstraint.priority = .defaultHigh
                 minHeightConstraint.isActive = true
-                containerReply.backgroundColor = .black.withAlphaComponent(0.2)
+                containerReply.backgroundColor = .black.withAlphaComponent(0.3)
                 containerReply.layer.cornerRadius = 5
                 containerReply.clipsToBounds = true
                 
@@ -11744,17 +11744,26 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     titleReply.textColor = .mainColor
                     leftReply.backgroundColor = .mainColor
                 }
-                
+
                 let contentReply = UILabel()
-                contentReply.numberOfLines = 2
+                contentReply.numberOfLines = 3
+                // The box has to be allowed to grow for the extra lines: the constraint holding the
+                // message text below it sits at defaultHigh, the same as a label's default resistance
+                // to being squeezed, and a tie there is settled either way.
+                contentReply.setContentCompressionResistancePriority(.required, for: .vertical)
+                titleReply.setContentCompressionResistancePriority(.required, for: .vertical)
                 containerReply.addSubview(contentReply)
                 contentReply.translatesAutoresizingMaskIntoConstraints = false
                 contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                 contentReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor, constant: -10).isActive = true
-                let topConstraintContent = contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor)
-                topConstraintContent.priority = .defaultHigh
+                // Required, and a minimum rather than an equality. At defaultHigh this was the
+                // cheapest constraint in the box to break, so a quote too tall for the space left
+                // for it was resolved by dropping the text on top of the name instead of making
+                // the box taller. Required, the box has to grow and the constraint holding the
+                // message text below it - which is the one meant to give way - does.
+                let topConstraintContent = contentReply.topAnchor.constraint(greaterThanOrEqualTo: titleReply.bottomAnchor)
                 topConstraintContent.isActive = true
-                contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
+                contentReply.font = UIFont.systemFont(ofSize: 11 + offset())
                 let message_text = chatGroup[0].messageText
                 let attachment_flag = chatGroup[0].attachmentFlag
                 let thumb_chat = chatGroup[0].thumb
@@ -11764,18 +11773,18 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let audio_chat = chatGroup[0].audio
                 if (attachment_flag == "0" && thumb_chat == "") {
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                    contentReply.attributedText = message_text.richText()
+                    contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
                 } else if (attachment_flag == "1" || image_chat != "") {
                     if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                         contentReply.text = "📷 Photo".localized()
                     } else {
-                        contentReply.attributedText = message_text.richText()
+                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
                     }
                 } else if (attachment_flag == "2" || video_chat != "") {
                     if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                         contentReply.text = "📹 Video".localized()
                     } else {
-                        contentReply.attributedText = message_text.richText()
+                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
                     }
                 } else if (attachment_flag == "6" || file_chat != ""){
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
@@ -11789,11 +11798,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
                                                                         audioName: audio_chat,
                                                                         font: contentReply.font,
-                                                                        colour: .white.withAlphaComponent(0.8))
+                                                                        colour: .white.withAlphaComponent(0.6))
                 }
-                if contentReply.attributedText == nil {
-                    contentReply.textColor = .white.withAlphaComponent(0.8)
-                }
+                // The quoted body is white at 60%, which is what WhatsApp uses for it
+                // (--quoted-message-text, hsla(0,0%,100%,0.6)). The name above it keeps the
+                // accent colour, so the two read as heading and quote rather than one block.
+                contentReply.textColor = .white.withAlphaComponent(0.6)
                 
                 if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
                     let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -13321,6 +13331,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
         titleReply.textColor = .orangeColor
         
+        let quotedTextColour: UIColor = self.traitCollection.userInterfaceStyle == .dark
+            ? .white.withAlphaComponent(0.6)
+            : .black.withAlphaComponent(0.6)
+
         let contentReply = UILabel()
         self.containerPreviewReply.addSubview(contentReply)
         contentReply.translatesAutoresizingMaskIntoConstraints = false
@@ -13357,11 +13371,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
                                                                  audioName: audio_chat,
                                                                  font: contentReply.font,
-                                                                 colour: self.traitCollection.userInterfaceStyle == .dark ? .white : .gray)
+                                                                 colour: quotedTextColour)
         }
-        if contentReply.attributedText == nil {
-            contentReply.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .gray
-        }
+        // Same treatment as the quote inside a bubble - 60% of the text colour, which is what
+        // WhatsApp uses (--quoted-message-text). This strip sits on a light background in light
+        // mode, so the colour it is 60% of flips with the theme.
+        contentReply.textColor = quotedTextColour
         
         let buttonCancelReply = UIButton(type: .custom)
         self.containerPreviewReply.addSubview(buttonCancelReply)

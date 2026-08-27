@@ -1196,7 +1196,7 @@ extension String {
             applyTextFormatting(to: finalText, sign: sign, attributes: attributes, isEditing: isEditing, boldItalicFont: boldItalicFont)
         }
         
-        processMentions(in: finalText, groupID: group_id, isEditing: isEditing, listMentionInTextField: listMentionInTextField)
+        processMentions(in: finalText, groupID: group_id, isEditing: isEditing, fontSize: fontSize, listMentionInTextField: listMentionInTextField)
         
         if isSearching {
             highlightSearchText(in: finalText, searchText: textSearch)
@@ -1371,7 +1371,11 @@ extension String {
         text.setAttributedString(result)
     }
 
-    private func processMentions(in text: NSMutableAttributedString, groupID: String, isEditing: Bool, listMentionInTextField: [User] = []) {
+    /// - Parameter fontSize: Fix: a mention was drawn at a hardcoded `12 + offset()` whatever the
+    ///   rest of the string was set to, so wherever richText is asked for a different size - the
+    ///   quote in a reply, for one - the mention came out at its own size in the middle of the
+    ///   line. It follows the size it is given now.
+    private func processMentions(in text: NSMutableAttributedString, groupID: String, isEditing: Bool, fontSize: CGFloat, listMentionInTextField: [User] = []) {
         let regex = try? NSRegularExpression(pattern: "@([\\w-]+)", options: [])
         let matches = regex?.matches(in: text.string, options: [], range: NSRange(location: 0, length: text.length)) ?? []
 
@@ -1385,7 +1389,7 @@ extension String {
                     if lower >= 0 {
                         text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: lower, length: 1))
                         text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: lower + 1, length: mention.fullName.count))
-                        text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: NSRange(location: lower, length: mention.fullName.count + 1))
+                        text.addAttribute(.font, value: UIFont.systemFont(ofSize: fontSize, weight: .medium), range: NSRange(location: lower, length: mention.fullName.count + 1))
                     }
                 }
             } else {
@@ -1395,7 +1399,7 @@ extension String {
                         let newRange = (text.string as NSString).range(of: "@\(fullName)")
                         text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: newRange.lowerBound, length: 1))
                         text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: newRange.lowerBound + 1, length: fullName.count))
-                        text.addAttribute(.font, value: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium), range: newRange)
+                        text.addAttribute(.font, value: UIFont.systemFont(ofSize: fontSize, weight: .medium), range: newRange)
                     }
                 }
             }
@@ -2680,29 +2684,66 @@ private class LocationFetcher: NSObject, CLLocationManagerDelegate {
     private var manager: CLLocationManager?
     private var completion: ((CLLocationCoordinate2D?) -> Void)?
     
+    /// Fix: `CLLocationManager.locationServicesEnabled()` was asked here before requesting
+    /// anything. It reaches the location daemon and can sit there - on the main thread, where the
+    /// caller puts this, that is a frozen screen, and the runtime reports it as "This method can
+    /// cause UI unresponsiveness if invoked on the main thread".
+    ///
+    /// Nothing needs asking up front. Setting the delegate makes the system report the current
+    /// authorization through `locationManagerDidChangeAuthorization`, and the services-off case
+    /// this used to catch arrives there as denied, or through `didFailWithError`.
     func getCurrentLocation(completion: @escaping (CLLocationCoordinate2D?) -> Void) {
-        self.completion = completion
-        self.manager = CLLocationManager()
-        self.manager?.delegate = self
-        self.manager?.desiredAccuracy = kCLLocationAccuracyBest
-        self.manager?.requestWhenInUseAuthorization()
-        
-        if CLLocationManager.locationServicesEnabled() {
-            self.manager?.requestLocation()
+        let start = {
+            self.completion = completion
+            let manager = CLLocationManager()
+            self.manager = manager
+            manager.desiredAccuracy = kCLLocationAccuracyBest
+            manager.delegate = self
+            manager.requestWhenInUseAuthorization()
+        }
+        // A CLLocationManager wants a thread with a run loop, or its delegate is never called.
+        if Thread.isMainThread {
+            start()
         } else {
-            completion(nil)
+            DispatchQueue.main.async(execute: start)
         }
     }
-    
+
+    /// Hands the result over once and once only - the authorization callback and a failure can
+    /// both land for the same request.
+    private func finish(_ coordinate: CLLocationCoordinate2D?) {
+        guard let completion = self.completion else {
+            return
+        }
+        self.completion = nil
+        completion(coordinate)
+    }
+
     // MARK: - CLLocationManagerDelegate
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .denied, .restricted:
+            finish(nil)
+            cleanup()
+        case .notDetermined:
+            // The prompt is on screen; this is called again with whatever the user answers.
+            break
+        @unknown default:
+            finish(nil)
+            cleanup()
+        }
+    }
+
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        completion?(locations.last?.coordinate)
+        finish(locations.last?.coordinate)
         cleanup()
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("Error: \(error.localizedDescription)")
-        completion?(nil)
+        finish(nil)
         cleanup()
     }
     

@@ -684,6 +684,10 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             containerMessage.addSubview(messageText)
             messageText.translatesAutoresizingMaskIntoConstraints = false
             let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
+            // The editors hold this at defaultHigh so anything above the text - a quote that runs
+            // to three lines, say - can push the text down instead of fighting a required
+            // constraint. Same here, so the bubble matches.
+            topMarginText.priority = .defaultHigh
             topMarginText.isActive = true
             messageText.textColor = .black
             if data["attachment_flag"] as? String == "27" || data["attachment_flag"] as? String == "26" || data["attachment_flag"] as? String == "25" || data["message_scope_id"] as? String == "18" {
@@ -1112,8 +1116,12 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         containerReply.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                     }
                     containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                    containerReply.heightAnchor.constraint(equalToConstant: 50).isActive = true
-                    containerReply.backgroundColor = .black.withAlphaComponent(0.2)
+                    // A fixed 50 pinned the quote to roughly two lines whatever it held. The
+                    // editors give it a floor and let it grow, which is what the third line needs.
+                    let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
+                    minHeightConstraint.priority = .defaultHigh
+                    minHeightConstraint.isActive = true
+                    containerReply.backgroundColor = .black.withAlphaComponent(0.3)
                     containerReply.layer.cornerRadius = 5
                     containerReply.clipsToBounds = true
                     
@@ -1135,52 +1143,75 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     titleReply.topAnchor.constraint(equalTo: containerReply.topAnchor, constant: 10).isActive = true
                     titleReply.trailingAnchor.constraint(lessThanOrEqualTo: containerReply.trailingAnchor, constant: -20).isActive = true
                     titleReply.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-                    if (data["f_pin"] as? String == idMe) {
+                    // Fix: every field in this quote was read from `data` - the message being
+                    // inspected - and not from dataReply, which is the message it replies to and
+                    // the whole reason queryMessageReply was called just above. The quote showed
+                    // the message its own text and its own attachment back, never the one quoted.
+                    let replyPin = (dataReply["f_pin"] as? String) ?? ""
+                    if replyPin == idMe {
                         titleReply.text = "You".localized()
-                        if data["f_pin"] as? String == idMe {
-                            titleReply.textColor = .white
-                            leftReply.backgroundColor = .white
-                        } else {
-                            titleReply.textColor = .mainColor
-                            leftReply.backgroundColor = .mainColor
-                        }
+                    } else if isPersonal {
+                        // Fix: `dataPerson["name"]!!` - a double force unwrap on a dictionary that
+                        // is only filled in for personal chats.
+                        titleReply.text = (dataPerson["name"] ?? "") ?? ""
                     } else {
-                        titleReply.text = dataPerson["name"]!!
-                        if data["f_pin"] as? String == idMe {
-                            titleReply.textColor = .white
-                            leftReply.backgroundColor = .white
-                        }
+                        titleReply.text = getDataProfile(f_pin: replyPin,
+                                                         message_id: (dataReply["message_id"] as? String) ?? "")["name"]
+                    }
+                    // The accent follows the bubble the quote sits in, not the quoted author -
+                    // same rule as the editors.
+                    if data["f_pin"] as? String == idMe {
+                        titleReply.textColor = .white
+                        leftReply.backgroundColor = .white
+                    } else {
+                        titleReply.textColor = .mainColor
+                        leftReply.backgroundColor = .mainColor
                     }
                     
                     let contentReply = UILabel()
+                    contentReply.numberOfLines = 3
+                    // The quote sits between two required pins - the top of the bubble and the top
+                    // of the message text - so its height is whatever those leave it, and the 55
+                    // points reserved above the text only ever left room for one line. The label
+                    // has to outrank the constraint holding the text in place (defaultHigh) for
+                    // the box to grow to the second and third line.
+                    contentReply.setContentCompressionResistancePriority(.required, for: .vertical)
+                    titleReply.setContentCompressionResistancePriority(.required, for: .vertical)
                     containerReply.addSubview(contentReply)
                     contentReply.translatesAutoresizingMaskIntoConstraints = false
                     contentReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
                     contentReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor, constant: -10).isActive = true
-                    contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
+                    // Required, and a minimum rather than an equality. At defaultHigh this was the
+                    // cheapest constraint in the box to break, so a quote too tall for the space left
+                    // for it was resolved by dropping the text on top of the name instead of making
+                    // the box taller. Required, the box has to grow and the constraint holding the
+                    // message text below it - which is the one meant to give way - does.
+                    let topConstraintContent = contentReply.topAnchor.constraint(greaterThanOrEqualTo: titleReply.bottomAnchor)
+                    topConstraintContent.isActive = true
+                    contentReply.font = UIFont.systemFont(ofSize: 11 + offset())
                     // Fix: force casts on values that come straight out of the database, where a
                     // NULL column arrives as nil. Any of the six could bring the screen down.
-                    let message_text = (data["message_text"] as? String) ?? ""
-                    let attachment_flag = (data["attachment_flag"] as? String) ?? ""
-                    let thumb_chat = (data["thumb_id"] as? String) ?? ""
-                    let image_chat = (data["image_id"] as? String) ?? ""
-                    let video_chat = (data["video_id"] as? String) ?? ""
-                    let file_chat = (data["file_id"] as? String) ?? ""
-                    let audio_chat = (data["audio_id"] as? String) ?? ""
+                    let message_text = (dataReply["message_text"] as? String) ?? ""
+                    let attachment_flag = (dataReply["attachment_flag"] as? String) ?? ""
+                    let thumb_chat = (dataReply["thumb_id"] as? String) ?? ""
+                    let image_chat = (dataReply["image_id"] as? String) ?? ""
+                    let video_chat = (dataReply["video_id"] as? String) ?? ""
+                    let file_chat = (dataReply["file_id"] as? String) ?? ""
+                    let audio_chat = (dataReply["audio_id"] as? String) ?? ""
                     if (attachment_flag == "0" && thumb_chat == "") {
                         contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                        contentReply.attributedText = message_text.richText()
+                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
                     } else if (attachment_flag == "1" || image_chat != "") {
                         if (message_text == "") {
                             contentReply.text = "📷 Photo".localized()
                         } else {
-                            contentReply.attributedText = message_text.richText()
+                            contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
                         }
                     } else if (attachment_flag == "2" || video_chat != "") {
                         if (message_text == "") {
                             contentReply.text = "📹 Video".localized()
                         } else {
-                            contentReply.attributedText = message_text.richText()
+                            contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
                         }
                     } else if (attachment_flag == "6" || file_chat != ""){
                         contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
@@ -1192,11 +1223,12 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
                                                                             audioName: audio_chat,
                                                                             font: contentReply.font,
-                                                                            colour: .white.withAlphaComponent(0.8))
+                                                                            colour: .white.withAlphaComponent(0.6))
                     }
-                    if contentReply.attributedText == nil {
-                        contentReply.textColor = .white.withAlphaComponent(0.8)
-                    }
+                    // The quoted body is white at 60%, which is what WhatsApp uses for it
+                    // (--quoted-message-text, hsla(0,0%,100%,0.6)). The name above it keeps the
+                    // accent colour, so the two read as heading and quote rather than one block.
+                    contentReply.textColor = .white.withAlphaComponent(0.6)
                     
                     if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
                         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
