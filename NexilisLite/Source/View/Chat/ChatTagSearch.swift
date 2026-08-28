@@ -768,7 +768,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
                             }
                             timeView.text = formatter.string(from: date)
                         } else {
-                            let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "M/dd/yy", localeIdentifier: "id")
+                            let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "dd/MM/yy", localeIdentifier: "id")
                             timeView.text = stringFormat
                         }
                     }

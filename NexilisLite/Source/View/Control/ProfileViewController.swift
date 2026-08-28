@@ -142,6 +142,10 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
     var publicBanner = FloatingNotificationBanner()
     
     var fromAPI = false
+    /// The two rows that carry a figure, kept so the figures can be written again when they
+    /// change - unstarring something and coming back should not leave the old number standing.
+    weak var conversationMediaRow: ProfileCardRow?
+    weak var conversationStarredRow: ProfileCardRow?
     var timerSwitchPA = Timer()
     var timerSwitchAC = Timer()
     
@@ -284,6 +288,9 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
         if let me = User.getMyPin(), me == data || flag == Flag.me || flag == Flag.friend {
             reload()
         }
+        // Written again on the way back in: the reader may have just unstarred something in the
+        // list this row opens.
+        refreshConversationCounts()
     }
     
     public override func viewDidLoad() {
@@ -1343,16 +1350,21 @@ extension ProfileViewController {
         // cannot live on this view: a shadow is drawn outside the bounds it is clipped to.
         card.clipsToBounds = true
 
-        card.addArrangedSubview(cardRow(symbol: "photo.on.rectangle",
-                                        title: "Media, links and docs".localized(),
-                                        action: #selector(tapConversationMedia)))
+        let mediaRow = cardRow(symbol: "photo.on.rectangle",
+                               title: "Media, links and docs".localized(),
+                               action: #selector(tapConversationMedia))
+        conversationMediaRow = mediaRow
+        card.addArrangedSubview(mediaRow)
         let divider = UIView()
         divider.backgroundColor = .separator
         divider.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
         card.addArrangedSubview(divider)
-        card.addArrangedSubview(cardRow(symbol: "star",
-                                        title: "Starred Messages".localized(),
-                                        action: #selector(tapStarred)))
+        let starredRow = cardRow(symbol: "star",
+                                 title: "Starred Messages".localized(),
+                                 action: #selector(tapStarred))
+        conversationStarredRow = starredRow
+        card.addArrangedSubview(starredRow)
+        refreshConversationCounts()
         let lifted = UIView()
         card.translatesAutoresizingMaskIntoConstraints = false
         lifted.addSubview(card)
@@ -1713,9 +1725,38 @@ extension ProfileViewController {
         navigationController?.pushViewController(browser, animated: true)
     }
 
+    /// Whose conversation this profile is showing.
+    ///
+    /// Fix: this used to read user?.pin, but the card is built in viewDidLoad and the user is
+    /// only fetched in viewDidAppear - so at the moment the figures were worked out there was
+    /// nobody to work them out for, and both rows came out blank. `data` carries the pin from
+    /// whoever pushed this screen and is set before it is presented.
+    private var conversationPin: String {
+        let pin = user?.pin ?? ""
+        return pin.isEmpty ? data : pin
+    }
+
+    func refreshConversationCounts() {
+        let pin = conversationPin
+        guard !pin.isEmpty else {
+            return
+        }
+        let scope = EditorStarMessages.personalScope(personPin: pin)
+        conversationMediaRow?.value.text = EditorStarMessages.countLabel(
+            EditorStarMessages.conversationCount(scope: scope, and: EditorStarMessages.mediaCountCondition))
+        conversationStarredRow?.value.text = EditorStarMessages.countLabel(
+            EditorStarMessages.conversationCount(scope: scope, and: EditorStarMessages.starredCountCondition))
+    }
+
     /// Everything of this conversation the reader has kept.
     @objc func tapStarred() {
-        navigationController?.pushViewController(Nexilis.getEditorStarMessage(), animated: true)
+        let starred = Nexilis.getEditorStarMessage()
+        // Scoped to this person, the same way the media entry beside it is (personalMessageRows).
+        // Without a pin there is no conversation to narrow to, so the whole list stands.
+        if !conversationPin.isEmpty {
+            starred.conversationWhereClause = EditorStarMessages.personalScope(personPin: conversationPin)
+        }
+        navigationController?.pushViewController(starred, animated: true)
     }
 
     /// The attachments of this conversation, read straight from the database.

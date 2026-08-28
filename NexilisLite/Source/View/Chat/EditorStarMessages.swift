@@ -14,11 +14,75 @@ import SwiftLinkPreview
 import nuSDKService
 import NotificationBannerSwift
 import SDWebImage
+import FMDB
 
 public class EditorStarMessages: UIViewController, UITableViewDataSource, UITableViewDelegate, UIContextMenuInteractionDelegate, QLPreviewControllerDataSource, UITextViewDelegate, AVAudioPlayerDelegate, UIGestureRecognizerDelegate, ChatBubbleContextMenuPresenting {
     @IBOutlet var tableChatView: UITableView!
     var dataMessages: [[String: Any?]] = []
     var dataDates: [String] = []
+    /// What the reader has typed into the search field, if anything.
+    /// When set, only starred messages of this one conversation are listed.
+    ///
+    /// The clause is built by the screen that opened this one, from the very rule that
+    /// conversation uses to pick its own messages out of MESSAGE - see groupScope and
+    /// personalScope - so the two can never disagree about what belongs to it.
+    public var conversationWhereClause: String?
+
+    /// What picks one group conversation's messages, matching EditorGroup.messageWhereClause.
+    /// A topic is keyed by its own chat_id; the group's Lounge is the messages with no chat_id.
+    public static func groupScope(groupId: String, topicChatId: String) -> String {
+        if !topicChatId.isEmpty {
+            return "chat_id='\(topicChatId)'"
+        }
+        return "chat_id='' AND l_pin='\(groupId)'"
+    }
+
+    /// What picks one personal conversation's messages, matching EditorPersonal.messageWhereClause.
+    public static func personalScope(personPin: String) -> String {
+        return "(f_pin='\(personPin)' or l_pin='\(personPin)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0"
+    }
+
+    /// How many messages of one conversation answer a condition.
+    ///
+    /// Lives here beside groupScope and personalScope so the figure a screen prints and the list
+    /// that opens when it is tapped are counted by the same rule.
+    public static func conversationCount(scope: String, and condition: String) -> Int {
+        var total = 0
+        Database.shared.database?.inTransaction({ fmdb, _ in
+            if let c = Database.shared.getRecords(fmdb: fmdb, query: "SELECT COUNT(*) FROM MESSAGE where (\(scope)) AND \(condition)"), c.next() {
+                total = Int(c.int(forColumnIndex: 0))
+                c.close()
+            }
+        })
+        return total
+    }
+
+    /// Pictures and videos only - the browser also holds links and documents, but the figure
+    /// beside it counts what can be looked at.
+    public static let mediaCountCondition =
+        "((image_id IS NOT NULL AND image_id <> '') OR (video_id IS NOT NULL AND video_id <> '')) AND (lock IS NULL OR lock <> '1')"
+
+    public static let starredCountCondition = "is_stared = 1"
+
+    /// A count as the rows print it, with thousands grouped the way the rest of the app formats,
+    /// or nil when there is nothing to count - a row saying 0 is a row saying nothing.
+    public static func countLabel(_ value: Int) -> String? {
+        guard value > 0 else {
+            return nil
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "id")
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private var starSearchText = ""
+    /// True from the moment a bubble's context menu starts appearing until it has finished going
+    /// away. Unlike the conversations, a row on this screen is itself a button - it opens the
+    /// message where it lives - so the long press that summons the menu and the tap that
+    /// navigates are the same touch, and one of them has to stand down.
+    private var bubbleMenuVisible = false
+    private let starSearchBar = UISearchBar()
     var previewItem = NSURL()
     var fromNotification = false
     var timerCheckLink: Timer?
@@ -40,9 +104,29 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     var downloadList: [String: IndexPath] = [:]
     var transitioningDelegateRef: ZoomTransitioningDelegate?
     
-    var audioPlayers: [IndexPath: AVAudioPlayer] = [:]
-    var timers: [IndexPath: Timer] = [:]
-    var playingIndexPath: IndexPath?
+    // Fix: the players, their timers and the row that is playing were all keyed by index path.
+    // A row shifts whenever the list is filtered or reloaded, and the keys then point at bubbles
+    // they have nothing to do with - audio carrying on under the wrong one, a pause that pauses
+    // somebody else. A message does not move. Same keying as EditorPersonal.
+    var audioPlayers: [String: AVAudioPlayer] = [:]
+    var timers: [String: Timer] = [:]
+    var playingAudioId: String?
+    /// The controls of each audio bubble on screen, so something happening to the audio - it
+    /// finishing, chiefly - can show on the bubble without rebuilding the row underneath whoever
+    /// is touching it.
+    var audioWaves: [String: AudioWaveformView] = [:]
+    var audioSliders: [String: UISlider] = [:]
+    var audioPlayButtons: [String: UIButton] = [:]
+    var audioTimeLabels: [String: UILabel] = [:]
+    /// The picture and the speed button that trade places in the left of the bubble.
+    var audioSpeedPills: [String: UIButton] = [:]
+    var audioAvatars: [String: UIView] = [:]
+    /// The reading speed chosen for each note, which notes are being listened to, and the wait
+    /// before the picture comes back once the audio has run out.
+    var audioRates: [String: Float] = [:]
+    var audioSessions: Set<String> = []
+    var audioRestTimers: [String: Timer] = [:]
+    var audioAwaitingRest: Set<String> = []
     var timerSearch: Timer?
     
     func offset() -> CGFloat{
@@ -50,9 +134,28 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         return CGFloat(fontSize)
     }
 
+    public override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // A recording carried in on the strip belongs to a bubble here again. Asked for now, and
+        // once more a moment later: the screen being left tears its players down after this one
+        // has already drawn, so the strip may not have been handed anything yet.
+        reclaimPlayingAudioIfMine()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.reclaimPlayingAudioIfMine()
+        }
+    }
+
+    public override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Nothing left playing, and no timer left running, behind a screen that has been left - a
+        // repeating timer outlives the screen that made it. Anything still playing goes to the
+        // strip rather than being cut off.
+        stopAllAudio()
+    }
+
     public override func viewDidLoad() {
         super.viewDidLoad()
-        
+
         if fromNotification {
             let imageButton = UIImageView(frame: CGRect(x: -16, y: 0, width: 20, height: 44))
             imageButton.image = UIImage(systemName: "chevron.backward", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular, scale: .default))?.withTintColor(.white)
@@ -95,6 +198,58 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         navigationItem.rightBarButtonItem = moreIcon
         navigationItem.rightBarButtonItem?.tintColor = UIColor.secondaryColor
         
+        // A search field across the top, as the reference has it: starred messages pile up, and
+        // the list is only useful if the one being looked for can be found in it.
+        starSearchBar.placeholder = "Search".localized()
+        starSearchBar.delegate = self
+        starSearchBar.searchBarStyle = .minimal
+        starSearchBar.autocapitalizationType = .none
+        // The Cancel button takes its colour from here, and the field sits on the chat wallpaper
+        // rather than on a bar, so the system's default tint has nothing to stand out against.
+        starSearchBar.tintColor = .mainColor
+        // A header view keeps whatever frame it is handed and does not follow the table's width,
+        // and in viewDidLoad the table is still at the width the storyboard drew it at. An
+        // autoresizing mask settles it once: the header is stretched with the table from then on,
+        // and the header never has to be handed to the table a second time.
+        starSearchBar.frame = CGRect(x: 0, y: 0, width: tableChatView.bounds.width, height: 56)
+        starSearchBar.autoresizingMask = [.flexibleWidth]
+        tableChatView.tableHeaderView = starSearchBar
+
+        // A line between rows: without one, two messages from the same person run together.
+        // Fix: the table's own separators skipped rows - the last of each day among them, and any
+        // row whose bubble shadow washed the hairline out. Each row draws its own now, so every
+        // row has one and they all sit in the same place.
+        tableChatView.separatorStyle = .none
+
+        tableChatView.rowHeight = UITableView.automaticDimension
+        // Must not be 0: a row sizes itself to its contents only while the table has an estimate
+        // to start from, and 0 turns that off - every bubble collapses to the default 44pt.
+        //
+        // Fix: this used to be 72, refined per row by an estimatedHeightForRowAt that answered
+        // from heights recorded in willDisplay. Those recordings came from cell.frame.height, and
+        // with bubble reuse the cell handed back can still be carrying the height of the row it
+        // held before - so rows were remembered taller than they are. The moment such a row
+        // scrolls off, the table goes back to the estimate and adds that error into contentSize,
+        // which is why the dead space at the end grew as the list was scrolled (138 on opening,
+        // 204 after). No per-row estimate at all now, and a flat figure near the real average of
+        // these rows, so there is nothing left to drift.
+        tableChatView.estimatedRowHeight = 140
+        // A plain-style table pads above every section header on its own account, and a header of
+        // no height still gets the padding - so each new day began lower than the rows within it.
+        if #available(iOS 15.0, *) {
+            tableChatView.sectionHeaderTopPadding = 0
+        }
+        // Fix: these four were set to 0, and 0 on a section height is not zero - UITableView reads
+        // it as "no preference" and falls back to the storyboard's 28pt. So the table sized its
+        // content for a 28pt header and a 28pt footer on each of the four days, then laid those
+        // out at the delegate's near-zero height: 4 x 56 of content that nothing occupies, all of
+        // it ending up past the last row. leastNormalMagnitude is the value that actually means
+        // zero here, and it is what the delegate returns, so the two now agree.
+        tableChatView.estimatedSectionHeaderHeight = .leastNormalMagnitude
+        tableChatView.estimatedSectionFooterHeight = .leastNormalMagnitude
+        tableChatView.sectionHeaderHeight = .leastNormalMagnitude
+        tableChatView.sectionFooterHeight = .leastNormalMagnitude
+        tableChatView.register(UITableViewCell.self, forCellReuseIdentifier: "cellEditorStarMessages")
         tableChatView.delegate = self
         tableChatView.dataSource = self
         tableChatView.reloadData()
@@ -119,45 +274,28 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         self.dismiss(animated: true, completion: nil)
     }
     
+    // The floating date pill is gone from this screen. It belongs to a conversation, where it
+    // says which day the messages under it were sent; here every row carries its own date at the
+    // top right, so the pill only repeated what the rows already said.
     public func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        let containerView = UIView()
-        containerView.backgroundColor = .clear
-        
-        let dateView = UIView()
-        containerView.addSubview(dateView)
-        dateView.translatesAutoresizingMaskIntoConstraints = false
-        var topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor)
-        topAnchor = dateView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10)
-        NSLayoutConstraint.activate([
-            topAnchor,
-            dateView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-            dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
-        ])
-        dateView.backgroundColor = .orangeColor
-        dateView.layer.cornerRadius = 8.0
-        dateView.clipsToBounds = true
-        
-        let labelDate = UILabel()
-        dateView.addSubview(labelDate)
-        labelDate.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            labelDate.centerYAnchor.constraint(equalTo: dateView.centerYAnchor),
-            labelDate.centerXAnchor.constraint(equalTo: dateView.centerXAnchor),
-            labelDate.leadingAnchor.constraint(equalTo: dateView.leadingAnchor, constant: 10),
-            labelDate.trailingAnchor.constraint(equalTo: dateView.trailingAnchor, constant: -10),
-        ])
-        labelDate.textAlignment = .center
-        labelDate.textColor = .secondaryColor
-        labelDate.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
-        labelDate.text = dataDates[section]
-        return containerView
+        return nil
     }
-    
+
     public func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return 30
+        return .leastNormalMagnitude
     }
-    
+
+    // Fix: only the header was silenced. A section still carried the storyboard's 28pt footer,
+    // and a footer under one day is space above the first row of the next - which is exactly
+    // where the gap showed. Nothing is drawn under a day either, so it goes the same way.
+    public func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
+        return nil
+    }
+
+    public func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
+        return .leastNormalMagnitude
+    }
+
     public func numberOfSections(in tableView: UITableView) -> Int {
         dataDates.count
     }
@@ -188,6 +326,51 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
     }
     
+    /// Group names already looked up, by group id. A bubble is drawn many times while the list
+    /// scrolls, and this is a query.
+    private var groupNames: [String: String] = [:]
+
+    /// The group a starred message came from and the topic within it, as "Group (Topic)".
+    ///
+    /// Mirrors how EditorGroup works out what conversation it is showing (see getDataGroup), and
+    /// for the same reason: a topic is not a group. An id that names a GROUPZ row is the group's
+    /// own conversation, which the app calls the Lounge. An id that names none is a topic, and
+    /// topics live in DISCUSSION_FORUM keyed by chat_id, carrying both their own title and the
+    /// group they belong to.
+    private func groupAndTopic(forConversationId id: String) -> String {
+        guard !id.isEmpty else {
+            return ""
+        }
+        if let known = groupNames[id] {
+            return known
+        }
+        var groupTitle = ""
+        var topicTitle = ""
+        Database.shared.database?.inTransaction({ fmdb, _ in
+            if let c = Database().getRecords(fmdb: fmdb, query: "SELECT f_name FROM GROUPZ WHERE group_id = '\(id)'"), c.next() {
+                groupTitle = c.string(forColumnIndex: 0) ?? ""
+                topicTitle = "Lounge".localized()
+                c.close()
+            } else if let c = Database().getRecords(fmdb: fmdb, query: "SELECT group_id, title FROM DISCUSSION_FORUM WHERE chat_id = '\(id)'"), c.next() {
+                let owningGroup = c.string(forColumnIndex: 0) ?? ""
+                topicTitle = c.string(forColumnIndex: 1) ?? ""
+                c.close()
+                if let g = Database().getRecords(fmdb: fmdb, query: "SELECT f_name FROM GROUPZ WHERE group_id = '\(owningGroup)'"), g.next() {
+                    groupTitle = g.string(forColumnIndex: 0) ?? ""
+                    g.close()
+                }
+            }
+        })
+        guard !groupTitle.isEmpty else {
+            // Not remembered: an id that names nothing today may simply be one this screen asked
+            // about before the group list had been read, and a remembered blank never retries.
+            return ""
+        }
+        let composed = topicTitle.isEmpty ? groupTitle : groupTitle + " (" + topicTitle + ")"
+        groupNames[id] = composed
+        return composed
+    }
+
     private func queryMessageReply(message_id: String) -> [String: Any?] {
         var dataQuery: [String: Any] = [:]
         Database.shared.database?.inTransaction({ fmdb, rollback in
@@ -206,15 +389,90 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         return dataQuery
     }
     
+    // MARK: - Bubble reuse
+
+    /// Bumped whenever a file arrives, so a bubble drawn against "not downloaded yet" is not
+    /// mistaken for one that is still current.
+    private static var transferTick = 0
+
+    private static var bubbleSignatureKey: UInt8 = 0
+
+    /// Everything the drawing of one bubble depends on, in one string.
+    ///
+    /// The whole message goes in, not a chosen few of its fields. Choosing which fields matter is
+    /// exactly how a bubble ends up showing yesterday's state, and a field costs nothing to
+    /// include - where the answer is "something changed", the bubble is simply built as before.
+    private func bubbleSignature(for message: [String: Any?], at indexPath: IndexPath) -> String {
+        let messageId = message["message_id"] as? String ?? ""
+        var parts: [String] = ["\(indexPath.section).\(indexPath.row)"]
+        for key in message.keys.sorted() {
+            parts.append("\(key)=" + (message[key].map { String(describing: $0) } ?? "nil"))
+        }
+        // ...and the state of the screen around it, which the drawing reads just as much.
+        parts.append("search=\(starSearchText)")
+        // A long message folded or opened is the same message drawn two ways.
+        parts.append("folded=\(LongMessage.isFolded(messageId, text: message["message_text"] as? String ?? ""))")
+        parts.append("font=\(offset())")
+        // Width decides how wide a picture is drawn and where a bubble ends; appearance decides
+        // half the colours. Neither is in the message, and both change under the reader.
+        parts.append("width=\(Int(view.frame.size.width))")
+        parts.append("appearance=\(traitCollection.userInterfaceStyle.rawValue)")
+        parts.append("files=\(EditorStarMessages.transferTick)")
+        // What the audio is doing is not in the message either, and reclaiming a recording from
+        // the strip asks for the row to be drawn again - which it would not be if this did not
+        // change with it.
+        parts.append("audio=\(playingAudioId == messageId)|\(audioSessions.contains(messageId))|\(audioRates[messageId] ?? 1)")
+        return parts.joined(separator: ";")
+    }
+
+    /// What the cell in hand was last built for, or nil when it holds nothing built.
+    private func builtSignature(of cell: UITableViewCell) -> String? {
+        return objc_getAssociatedObject(cell, &EditorStarMessages.bubbleSignatureKey) as? String
+    }
+
+    private func setBuiltSignature(_ signature: String?, on cell: UITableViewCell) {
+        objc_setAssociatedObject(cell, &EditorStarMessages.bubbleSignatureKey, signature, .OBJC_ASSOCIATION_COPY_NONATOMIC)
+    }
+
+    /// Takes a cell back to empty, ready to be built into. Taking a view out of the hierarchy
+    /// already breaks the constraints that cross its edge, and the ones wholly inside it go when
+    /// it does, so there is nothing else to undo.
+    private func emptyBubbleCell(_ cell: UITableViewCell) {
+        setBuiltSignature(nil, on: cell)
+        cell.contentView.subviews.forEach({ $0.removeFromSuperview() })
+    }
+
     public func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let idMe = User.getMyPin() as String?
         let dataMessages = dataMessages.filter({$0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         
-        let cellMessage = UITableViewCell()
+        let cellMessage = tableView.dequeueReusableCell(withIdentifier: "cellEditorStarMessages", for: indexPath)
         cellMessage.backgroundColor = .clear
         cellMessage.selectionStyle = .none
-        cellMessage.contentView.subviews.forEach({ $0.removeConstraints($0.constraints) })
-        cellMessage.contentView.subviews.forEach({ $0.removeFromSuperview() })
+        // A bubble used to be emptied and built again from nothing every time this ran - dozens of
+        // views and hundreds of constraints - and it runs for every row of every redraw, not only
+        // for rows new to the screen. When the cell in hand was built for this message in this
+        // state, it is already the answer.
+        let signature = bubbleSignature(for: dataMessages[indexPath.row], at: indexPath)
+        if builtSignature(of: cellMessage) == signature {
+            return cellMessage
+        }
+        emptyBubbleCell(cellMessage)
+        setBuiltSignature(signature, on: cellMessage)
+
+        let rowSeparator = UIView()
+        // .separator is a 29%-alpha hairline meant to sit on a plain white table; over the chat
+        // wallpaper, and next to a bubble that now casts its own shadow, it read as nothing.
+        rowSeparator.backgroundColor = .systemGray2
+        cellMessage.contentView.addSubview(rowSeparator)
+        rowSeparator.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            rowSeparator.leadingAnchor.constraint(equalTo: cellMessage.contentView.leadingAnchor, constant: 16),
+            rowSeparator.trailingAnchor.constraint(equalTo: cellMessage.contentView.trailingAnchor, constant: -16),
+            rowSeparator.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor),
+            rowSeparator.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale)
+        ])
+
         
         let profileMessage = UIImageView()
         profileMessage.frame.size = CGSize(width: 35, height: 35)
@@ -225,7 +483,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         profileMessage.isUserInteractionEnabled = true
         profileMessage.addGestureRecognizer(tapGestureRecognizer)
         
-        var containerMessage = UIView()
+        var containerMessage: UIView = BubbleView()
         if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             containerMessage = SecureField().secureContainer!
         }
@@ -246,6 +504,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             containerMessage.anchor(top: cellMessage.contentView.topAnchor, bottom: cellMessage.contentView.bottomAnchor, paddingTop: 5, paddingBottom: 5, centerX: cellMessage.contentView.centerXAnchor, minWidth: 40, maxWidth: UIScreen.main.bounds.width - 40)
             containerMessage.layer.cornerRadius = 8
             containerMessage.clipsToBounds = true
+            (containerMessage as? BubbleView)?.lift()
             
             let textMessage = UILabel()
             containerMessage.addSubview(textMessage)
@@ -261,15 +520,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         timeMessage.numberOfLines = 0
         cellMessage.contentView.addSubview(timeMessage)
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
-        if ((dataMessages[indexPath.row]["read_receipts"] as? String) == "8" ||
-            (dataMessages[indexPath.row]["credential"] as? String) == "1" ||
-            !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty) &&
-            (dataMessages[indexPath.row]["lock"] as? String) != "2" &&
-            (dataMessages[indexPath.row]["lock"] as? String) != "1" {
-            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
-        } else {
-            timeMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
-        }
+        // The date is placed with the name, at the top of the row.
         
         let messageText = UITextView()
         messageText.isEditable = false
@@ -295,169 +546,201 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
 
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
-        var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32)
+        // 32 was the room the sender's name took inside the bubble; the name is above the
+        // bubble now, so the text starts where a personal chat starts it.
+        // The bubble's own top inset, kept in a constant because two decisions further down have
+        // to recognise it again: whether the text has been pushed down by something above it, and
+        // where the "Forwarded" strip goes. Both used to test against a hardcoded 32, which is
+        // what this margin was before the row was redesigned - so both silently stopped matching.
+        let baseTopMarginText: CGFloat = 15
+        var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: baseTopMarginText)
+        // Parity with EditorPersonal and EditorGroup: at required priority a bubble that also has
+        // a quote above the text has no satisfiable layout at all, and Auto Layout resolves that
+        // by dropping whichever constraint it likes.
+        topMarginText.priority = .defaultHigh
         
         let dataProfile = getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"]  as? String ?? "")
-        
-        if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-            profileMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
-            profileMessage.trailingAnchor.constraint(equalTo: cellMessage.contentView.trailingAnchor, constant: -15).isActive = true
-            profileMessage.heightAnchor.constraint(equalToConstant: 37).isActive = true
-            profileMessage.widthAnchor.constraint(equalToConstant: 35).isActive = true
-            profileMessage.circle()
-            profileMessage.clipsToBounds = true
-            profileMessage.backgroundColor = .lightGray
-            profileMessage.image = UIImage(systemName: "person")
-            profileMessage.tintColor = .white
-            profileMessage.contentMode = .scaleAspectFit
-            
-            let pictureImage = dataProfile["image_id"]
-            if (pictureImage != "" && pictureImage != nil) {
-                profileMessage.setImage(name: pictureImage!)
-                profileMessage.contentMode = .scaleAspectFill
-            }
-            
-            containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
-            containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cellMessage.contentView.leadingAnchor, constant: 60).isActive = true
-            containerMessage.trailingAnchor.constraint(equalTo: profileMessage.leadingAnchor, constant: -5).isActive = true
-            containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
-            containerMessage.layer.cornerRadius = 10.0
-            containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner, .layerMinXMinYCorner]
-            containerMessage.clipsToBounds = true
-            
-            timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
-            
-            let nameSender = UILabel()
-            containerMessage.addSubview(nameSender)
-            nameSender.translatesAutoresizingMaskIntoConstraints = false
-            nameSender.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
-            nameSender.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-            nameSender.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            nameSender.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-            nameSender.text = dataProfile["name"]
-            nameSender.textAlignment = .right
-            if (dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "") {
-                containerMessage.backgroundColor = .clear
-                nameSender.textColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .lightGray : .mainColor
-            } else {
-                containerMessage.backgroundColor = .blueBubbleColor
-                nameSender.textColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .lightGray : .mainColor
-            }
-            
-        } else {
-            profileMessage.leadingAnchor.constraint(equalTo: cellMessage.contentView.leadingAnchor, constant: 15).isActive = true
-            profileMessage.heightAnchor.constraint(equalToConstant: 37).isActive = true
-            profileMessage.widthAnchor.constraint(equalToConstant: 35).isActive = true
-            profileMessage.circle()
-            profileMessage.clipsToBounds = true
-            profileMessage.backgroundColor = .lightGray
-            profileMessage.image = UIImage(systemName: "person")
-            profileMessage.tintColor = .white
-            profileMessage.contentMode = .scaleAspectFit
-            
-            let pictureImage = dataProfile["image_id"]
-            if dataMessages[indexPath.row]["f_pin"] as? String == "-999" {
-                if !Utils.getIconDock().isEmpty {
-                    let dataImage = try? Data(contentsOf: URL(string: Utils.getUrlDock()!)!) //make sure your image in this url does exist, otherwise unwrap in a if let check / try-catch
-                    if dataImage != nil {
-                        profileMessage.image = UIImage(data: dataImage!)
-                    }
-                } else {
-                    profileMessage.image = UIImage(named: "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        let isMine = dataMessages[indexPath.row]["f_pin"] as? String == idMe
+
+        // Fix: this row used to be the conversation's own layout - the reader's messages on the
+        // right, everybody else's on the left, the name inside the bubble. Starred messages are a
+        // list, not a conversation: every row reads the same way, left to right, so they can be
+        // scanned. Picture and name across the top with the date at the far end, the bubble under
+        // the name, and a chevron saying the row leads back to where the message came from.
+        profileMessage.leadingAnchor.constraint(equalTo: cellMessage.contentView.leadingAnchor, constant: 16).isActive = true
+        // Matched to the space under the bubble, so a row sits the same distance off the
+        // separator above it as off the one below.
+        profileMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 10).isActive = true
+        profileMessage.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        profileMessage.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        profileMessage.circle()
+        profileMessage.clipsToBounds = true
+        profileMessage.backgroundColor = .lightGray
+        profileMessage.image = UIImage(systemName: "person")
+        profileMessage.tintColor = .white
+        profileMessage.contentMode = .scaleAspectFit
+
+        let pictureImage = dataProfile["image_id"]
+        if dataMessages[indexPath.row]["f_pin"] as? String == "-999" {
+            if !Utils.getIconDock().isEmpty {
+                let dataImage = try? Data(contentsOf: URL(string: Utils.getUrlDock()!)!)
+                if dataImage != nil {
+                    profileMessage.image = UIImage(data: dataImage!)
                 }
-                profileMessage.contentMode = .scaleAspectFill
+            } else {
+                profileMessage.image = UIImage(named: "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
             }
-            else if dataMessages[indexPath.row]["f_pin"] as? String == "-997" {
-                if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
-                    profileMessage.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
-                        if error == nil {
-                            profileMessage.animationImages = image?.images
-                            profileMessage.animationDuration = image?.duration ?? 0.0
-                            profileMessage.animationRepeatCount = 0
-                            profileMessage.startAnimating()
-                        }
-                    }
-                } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
-                    profileMessage.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
-                        if error == nil {
-                            profileMessage.animationImages = image?.images
-                            profileMessage.animationDuration = image?.duration ?? 0.0
-                            profileMessage.animationRepeatCount = 0
-                            profileMessage.startAnimating()
-                        }
+            profileMessage.contentMode = .scaleAspectFill
+        } else if dataMessages[indexPath.row]["f_pin"] as? String == "-997" {
+            if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif")
+                ?? Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif") {
+                profileMessage.sd_setImage(with: urlGif) { (image, error, cacheType, imageURL) in
+                    if error == nil {
+                        profileMessage.animationImages = image?.images
+                        profileMessage.animationDuration = image?.duration ?? 0.0
+                        profileMessage.animationRepeatCount = 0
+                        profileMessage.startAnimating()
                     }
                 }
             }
-            else if (pictureImage != "" && pictureImage != nil) {
-                profileMessage.setImage(name: pictureImage!)
-                profileMessage.contentMode = .scaleAspectFill
-            }
-            
-            profileMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
-            containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
-            
-            containerMessage.leadingAnchor.constraint(equalTo: profileMessage.trailingAnchor, constant: 5).isActive = true
-            containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cellMessage.contentView.trailingAnchor, constant: -60).isActive = true
-            containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
-            if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "" {
-                containerMessage.backgroundColor = .clear
-            } else {
-                containerMessage.backgroundColor = .whiteBubbleColor
-            }
-            containerMessage.layer.cornerRadius = 10.0
-            containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
-            containerMessage.clipsToBounds = true
-            
-            timeMessage.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: 8).isActive = true
-            
-            let nameSender = UILabel()
-            containerMessage.addSubview(nameSender)
-            nameSender.translatesAutoresizingMaskIntoConstraints = false
-            nameSender.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
-            nameSender.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-            nameSender.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            nameSender.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-            if dataMessages[indexPath.row]["f_pin"] as? String == "-999" {
-                nameSender.text = "Bot"
-            }
-            else if dataMessages[indexPath.row]["f_pin"] as? String == "-997" {
-                nameSender.text = Utils.getGPTBotName()
-            }
-            else {
-                nameSender.text = dataProfile["name"]
-            }
-            nameSender.textAlignment = .left
-            nameSender.textColor = .mainColor
+        } else if (pictureImage != "" && pictureImage != nil) {
+            profileMessage.setImage(name: pictureImage!)
+            profileMessage.contentMode = .scaleAspectFill
         }
+
+        // The chevron, and the date, live at the far end of the row.
+        let chevron = UIImageView(image: UIImage(systemName: "chevron.right"))
+        chevron.tintColor = .tertiaryLabel
+        chevron.contentMode = .scaleAspectFit
+        cellMessage.contentView.addSubview(chevron)
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        chevron.trailingAnchor.constraint(equalTo: cellMessage.contentView.trailingAnchor, constant: -16).isActive = true
+        chevron.widthAnchor.constraint(equalToConstant: 12).isActive = true
+        chevron.heightAnchor.constraint(equalToConstant: 18).isActive = true
+
+        // A moving line rather than a label: sender, group and topic together run past what is
+        // left of the row once the date has taken its place, and a label answers that by cutting
+        // off the end - which is where the group and the topic are.
+        let nameSender = MarqueeLabel()
+        cellMessage.contentView.addSubview(nameSender)
+        nameSender.translatesAutoresizingMaskIntoConstraints = false
+        nameSender.leadingAnchor.constraint(equalTo: profileMessage.trailingAnchor, constant: 10).isActive = true
+        nameSender.centerYAnchor.constraint(equalTo: profileMessage.centerYAnchor).isActive = true
+        nameSender.font = UIFont.systemFont(ofSize: 14 + offset()).bold
+        nameSender.textColor = .label
+        if isMine {
+            nameSender.text = "You".localized()
+        } else if dataMessages[indexPath.row]["f_pin"] as? String == "-999" {
+            nameSender.text = "Bot"
+        } else if dataMessages[indexPath.row]["f_pin"] as? String == "-997" {
+            nameSender.text = Utils.getGPTBotName()
+        } else {
+            nameSender.text = dataProfile["name"]
+        }
+
+        // Who sent it is not enough to place a starred message: this list gathers them from every
+        // conversation at once, so the same person appears under several groups. The group's own
+        // name goes beside theirs, quieter than the name so the name still reads first.
+        let scopeOfMessage = dataMessages[indexPath.row]["message_scope_id"] as? String ?? ""
+        // WHISPER is the one-to-one chat, which is exactly how didSelectRowAt decides whether a
+        // row opens a personal editor or a group one. Anything else is looked up as a group, and
+        // a scope that has no GROUPZ row simply comes back empty.
+        if scopeOfMessage != MessageScope.WHISPER {
+            // Fix: this took chat_id and only fell back to l_pin when chat_id was empty - so a
+            // message carrying a chat_id that is not a GROUPZ row (which is what the reader's own
+            // messages were doing) found nothing and gave up, with l_pin holding the answer all
+            // along. Both are tried now, in that order.
+            let chatIdOfMessage = dataMessages[indexPath.row]["chat_id"] as? String ?? ""
+            let lPinOfMessage = dataMessages[indexPath.row]["l_pin"] as? String ?? ""
+            var groupTitle = groupAndTopic(forConversationId: chatIdOfMessage)
+            if groupTitle.isEmpty {
+                groupTitle = groupAndTopic(forConversationId: lPinOfMessage)
+            }
+            if !groupTitle.isEmpty {
+                // One run of plain text rather than two styled ones: the group reads in the same
+                // size, weight and colour as the name, so there is nothing left for an attributed
+                // string to say that the label's own font and colour do not.
+                nameSender.text = (nameSender.text ?? "") + " \u{00B7} " + groupTitle
+            }
+        }
+
+        // The day this message was sent, at the far end of the name's line. This is what the
+        // floating orange pill used to say, and saying it on the row itself means the list can be
+        // read straight down without a banner interrupting every few messages.
+        let dateMessage = UILabel()
+        cellMessage.contentView.addSubview(dateMessage)
+        dateMessage.translatesAutoresizingMaskIntoConstraints = false
+        dateMessage.trailingAnchor.constraint(equalTo: cellMessage.contentView.trailingAnchor, constant: -16).isActive = true
+        dateMessage.centerYAnchor.constraint(equalTo: nameSender.centerYAnchor).isActive = true
+        dateMessage.font = UIFont.systemFont(ofSize: 12 + offset())
+        dateMessage.textColor = .secondaryLabel
+        dateMessage.textAlignment = .right
+        dateMessage.setContentCompressionResistancePriority(.required, for: .horizontal)
+        dateMessage.text = dataMessages[indexPath.row]["chat_date"] as? String ?? ""
+        nameSender.trailingAnchor.constraint(lessThanOrEqualTo: dateMessage.leadingAnchor, constant: -8).isActive = true
+
+        // The time and the star stay beside the bubble, and on the same side for every row - the
+        // reader's own messages included, which used to put them on the far side because the
+        // bubble was over there.
+        timeMessage.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: 8).isActive = true
+        timeMessage.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
+        timeMessage.textAlignment = .left
+        // Fix: this label used to refuse to shrink (required) and to be barred from reaching the
+        // chevron (required). Its leading edge is tied to the bubble's trailing edge by an
+        // equality, so the only way to obey both was to drag the bubble's trailing edge leftwards
+        // - and the text inside the bubble, being a text view at ordinary priority, lost every
+        // time. The bubble collapsed to its 46pt minimum and the message wrapped one letter per
+        // line. EditorPersonal never showed this because it has no chevron for the label to be
+        // pushed away from. The bar is gone - the bubble's own 100pt reserve already leaves the
+        // label 64pt of clear room - and the label yields before the message does.
+        timeMessage.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
+        let imageStared = UIImageView(image: UIImage(systemName: "star.fill"))
+        imageStared.tintColor = .systemYellow
+        imageStared.backgroundColor = .clear
+        cellMessage.contentView.addSubview(imageStared)
+        imageStared.translatesAutoresizingMaskIntoConstraints = false
+        imageStared.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: 8).isActive = true
+        imageStared.bottomAnchor.constraint(equalTo: timeMessage.topAnchor, constant: -2).isActive = true
+        imageStared.widthAnchor.constraint(equalToConstant: 13).isActive = true
+        imageStared.heightAnchor.constraint(equalToConstant: 13).isActive = true
+
+        // The bubble sits under the name, and keeps the conversation's own colours so a starred
+        // message still looks like the message it is.
+        containerMessage.topAnchor.constraint(equalTo: profileMessage.bottomAnchor, constant: 8).isActive = true
+        containerMessage.leadingAnchor.constraint(equalTo: profileMessage.trailingAnchor, constant: 10).isActive = true
+        // The room the time, the star and the chevron need is a fixed amount, so it is reserved as
+        // one rather than by pointing the bubble at the label beside it: 16 margin + 12 chevron +
+        // 8 + 36 of time + 8. It was 100, which held back 20pt nobody was using - the bubble now
+        // runs on until it is nearly under the chevron.
+        containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cellMessage.contentView.trailingAnchor, constant: -80).isActive = true
+        containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
+        // Centred on the row, not on the bubble: a long message makes a bubble tall enough that
+        // the chevron would drift into the middle of the text.
+        chevron.centerYAnchor.constraint(equalTo: cellMessage.contentView.centerYAnchor).isActive = true
+        if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"] as? String == "" {
+            containerMessage.backgroundColor = .clear
+        } else {
+            containerMessage.backgroundColor = isMine ? .blueBubbleColor : .whiteBubbleColor
+        }
+        containerMessage.layer.cornerRadius = 10.0
+        // Every bubble is on the left here, so they all take the left-hand shape.
+        containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+        containerMessage.clipsToBounds = true
+        (containerMessage as? BubbleView)?.lift()
         
         if ((dataMessages[indexPath.row]["read_receipts"] as? String) == "8" ||
             (dataMessages[indexPath.row]["credential"] as? String) == "1" ||
             !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty) &&
             (dataMessages[indexPath.row]["lock"] as? String) != "2" &&
             (dataMessages[indexPath.row]["lock"] as? String) != "1" {
-            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -40).isActive = true
+            // 10 of room, plus the 35 the spec-file badge takes below the bubble.
+            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -45).isActive = true
         } else {
-            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -5).isActive = true
+            containerMessage.bottomAnchor.constraint(equalTo: cellMessage.contentView.bottomAnchor, constant: -10).isActive = true
         }
         
-        let imageStared = UIImageView()
-        if dataMessages[indexPath.row]["is_stared"] as? String == "1" {
-            cellMessage.contentView.addSubview(imageStared)
-            imageStared.translatesAutoresizingMaskIntoConstraints = false
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                imageStared.bottomAnchor.constraint(equalTo: timeMessage.topAnchor).isActive = true
-                imageStared.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
-            } else {
-                imageStared.bottomAnchor.constraint(equalTo: timeMessage.topAnchor).isActive = true
-                imageStared.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: 8).isActive = true
-            }
-            imageStared.widthAnchor.constraint(equalToConstant: 15).isActive = true
-            imageStared.heightAnchor.constraint(equalToConstant: 15).isActive = true
-            imageStared.image = UIImage(systemName: "star.fill")
-            imageStared.backgroundColor = .clear
-            imageStared.tintColor = .systemYellow
-        }
-        
+        // Every message on this screen is starred, so a star on each row said nothing.
         if !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             let imageSpecFileView = UIImageView()
             let imageSpecFile = UIImage(named: "pb_ic_attach_spc", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withRenderingMode(.alwaysOriginal)
@@ -467,11 +750,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             imageSpecFileView.widthAnchor.constraint(equalToConstant: 30).isActive = true
             imageSpecFileView.heightAnchor.constraint(equalToConstant: 30).isActive = true
             imageSpecFileView.topAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: 5).isActive = true
-            if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                imageSpecFileView.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 30).isActive = true
-            } else {
-                imageSpecFileView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
-            }
+            // The reader's own messages used to sit on the right, so this hung off the other edge
+            // for them. Every row is on the left now, so there is only one edge to hang from.
+            imageSpecFileView.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -30).isActive = true
         }
         
         if dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "27" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "26" {
@@ -495,7 +776,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         } else {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
         }
-        messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15).isActive = true
+        // Parity with EditorPersonal and EditorGroup: required, this fights whatever else claims
+        // the bottom of the bubble - the audio player, a quote's minimum height - and Auto Layout
+        // settles the fight by dropping a constraint of its own choosing.
+        let bottomConstraint = messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15)
+        bottomConstraint.priority = .defaultHigh
+        bottomConstraint.isActive = true
         messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
         
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
@@ -552,7 +838,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageSticker.translatesAutoresizingMaskIntoConstraints = false
                 let data = queryMessageReply(message_id: reffChat)
                 if reffChat.isEmpty || data.count == 0 {
-                    imageSticker.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32).isActive = true
+                    imageSticker.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
                     imageSticker.widthAnchor.constraint(equalToConstant: 80).isActive = true
                 } else {
                     imageSticker.widthAnchor.constraint(greaterThanOrEqualToConstant: 80).isActive = true
@@ -568,11 +854,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageSticker.contentMode = .scaleAspectFit
             }
             else {
-                messageText.attributedText = textChat.richText()
+                applyReadMore(to: messageText, text: textChat, messageId: messageIdChat)
                 modifyText(at: indexPath)
             }
         } else {
-            messageText.attributedText = textChat.richText()
+            applyReadMore(to: messageText, text: textChat, messageId: messageIdChat)
             modifyText(at: indexPath)
         }
         
@@ -583,7 +869,10 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 return
             }
 
-            var text = textChat
+            // The fold has to survive this: it rebuilds the whole attributed string to add link
+            // attributes, so working from the full text here would hand the message its whole
+            // self back and throw the "Read more" away.
+            var text = LongMessage.visibleText(textChat, messageId: messageIdChat)
             let messageData = dataMessages[indexPath.row]
 
             // Remove segment after separator
@@ -626,6 +915,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 ], range: range)
             }
 
+            if LongMessage.isFolded(messageIdChat, text: textChat) {
+                finalAttributed.append(LongMessage.suffix(fontSize: 12 + offset()))
+            }
             messageText.attributedText = finalAttributed
             messageText.delegate = self
         }
@@ -634,9 +926,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         containerMessage.addInteraction(interaction)
         containerMessage.isUserInteractionEnabled = true
         
-//        if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String != "11" {
-//            messageText.attributedText = textChat.richText(isSearching: true, textSearch: textSearch, group_id: self.dataGroup["group_id"]  as? String ?? "")
-//        }
+        // Last, once every path that writes into the bubble has had its turn.
+        highlightSearchMatches(in: messageText)
         
         let stringDate = (dataMessages[indexPath.row]["server_date"]  as? String ?? "")
         if !stringDate.isEmpty {
@@ -658,44 +949,39 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         
         if !audioChat.isEmpty {
             messageText.isHidden = true
-            var padTop: CGFloat = 32
+            // Hidden or not, the label is still laid out, and with a long file name behind it it
+            // demanded a width the audio row never asked for - which is how the same note came out
+            // at two different widths on two screens. It yields instead.
+            messageText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            messageText.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            // The sender's name sits above the bubble on this screen, so nothing inside it
+            // needs to hold room for a name any more.
+            var padTop: CGFloat = 15
             if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int != 0 {
-                padTop = 52
+                padTop = 35
             }
-            
-            let contAudio = UIView()
-            contAudio.backgroundColor = .clear
+
+            // A voice note and an ordinary audio file are two different things, and the flag they
+            // travel under is what tells them apart - a recording is sent as 60.
+            let isVoiceNoteAudio = (dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String) == "60"
+            // Not mirrored by sender the way a conversation mirrors it: every row on this screen
+            // reads left to right, so the picture stays on the left for everybody.
+            let contAudio = AudioBubbleContent(incoming: false,
+                                               isVoiceNote: isVoiceNoteAudio,
+                                               bubbleColour: containerMessage.backgroundColor ?? .white,
+                                               traits: traitCollection,
+                                               fontOffset: offset())
             containerMessage.addSubview(contAudio)
-            contAudio.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: padTop, paddingLeft: 15, paddingBottom: 15, paddingRight: 15)
-            
-            let imageAudio = UIImageView()
-            imageAudio.image = UIImage(systemName: "music.note", withConfiguration: UIImage.SymbolConfiguration(pointSize: 35))
-            contAudio.addSubview(imageAudio)
-            imageAudio.anchor(top: contAudio.topAnchor, left: contAudio.leftAnchor, bottom: contAudio.bottomAnchor, centerY: contAudio.centerYAnchor)
-            imageAudio.tintColor = .mainColor
-            
-            let playButtonAudio = UIButton(type: .system)
-            playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
-            playButtonAudio.tintColor = .gray
-            contAudio.addSubview(playButtonAudio)
-            playButtonAudio.anchor(left: contAudio.leftAnchor, paddingLeft: 45, centerY: contAudio.centerYAnchor, width: 20, height: 20)
-            
-            let progressSliderAudio = UISlider()
-            progressSliderAudio.minimumValue = 0
-            progressSliderAudio.maximumValue = 1
-            let thumbImage = UIImage(systemName: "circle.fill")?.withTintColor(UIColor.mainColor)
-                .resize(target: CGSize(width: 15, height: 15))
-            progressSliderAudio.setThumbImage(thumbImage, for: .normal)
-            contAudio.addSubview(progressSliderAudio)
-            progressSliderAudio.anchor(left: playButtonAudio.rightAnchor, right: contAudio.rightAnchor, paddingLeft: 10, centerY: contAudio.centerYAnchor, height: 15)
-            
-            let timeLabelAudio = UILabel()
-            timeLabelAudio.text = "0:00"
-            timeLabelAudio.font = .systemFont(ofSize: 10 + offset())
-            timeLabelAudio.textColor = .gray
-            contAudio.addSubview(timeLabelAudio)
-            timeLabelAudio.anchor(top: playButtonAudio.bottomAnchor, left: playButtonAudio.rightAnchor, paddingLeft: 10, width: 100, height: 12)
-            
+            contAudio.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: max(padTop, 10), paddingLeft: 10, paddingBottom: 10, paddingRight: 12)
+            contAudio.setPicture(named: dataProfile["image_id"] ?? "")
+
+            let avatarBoxAudio = contAudio.avatarBox
+            let speedPillAudio = contAudio.speedPill
+            let playButtonAudio = contAudio.playButton
+            let progressSliderAudio = contAudio.slider
+            let waveAudio = contAudio.wave
+            let timeLabelAudio = contAudio.timeLabel
+
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
             let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -743,35 +1029,112 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                 url = tempPath
                             }
                         } catch {
-                            
+
                         }
                     }
-                    if audioPlayers[indexPath] == nil {
-                        do {
-                            let audioPlayer = try AVAudioPlayer(contentsOf: url)
-                            audioPlayers[indexPath] = audioPlayer
-                            audioPlayer.delegate = self
-                            progressSliderAudio.maximumValue = Float(audioPlayer.duration)
-                            timeLabelAudio.text = formatTime(audioPlayer.duration)
-                        } catch {
-                            print("Error loading audio: \(error)")
+                    // One player per recording, kept by the service - never opened here. A bubble
+                    // that opened its own would be a second player for a recording that may already
+                    // be playing somewhere else, which is what let a starred note and a note in a
+                    // conversation talk over each other.
+                    let audioPlayer = AudioMiniPlayer.shared.player(for: messageIdChat,
+                                                                    openingFrom: url,
+                                                                    rate: audioRates[messageIdChat] ?? 1)
+                    if let audioPlayer = audioPlayer, audioPlayers[messageIdChat] !== audioPlayer {
+                        audioPlayers[messageIdChat] = audioPlayer
+                        audioPlayer.delegate = self
+                        if audioPlayer.isPlaying {
+                            // Still running from before this screen was opened - the strip comes
+                            // down and this bubble shows it from here on.
+                            _ = AudioMiniPlayer.shared.reclaim(messageId: messageIdChat)
+                            playingAudioId = messageIdChat
+                            beginAudioSession(messageIdChat)
                         }
                     }
-                    let audioPlayer = audioPlayers[indexPath]
-                    if playingIndexPath == indexPath, let player = audioPlayer, player.isPlaying {
+                    // Taken from the player on every pass, not only the one that opened the file:
+                    // a bubble scrolled back to would otherwise show a bare 0:00.
+                    if let player = audioPlayer {
+                        progressSliderAudio.maximumValue = Float(player.duration)
+                        progressSliderAudio.value = Float(player.currentTime)
+                        timeLabelAudio.text = formatTime(player.currentTime > 0 ? player.currentTime : player.duration)
+                    }
+                    // What the player is doing is the only thing that decides which button shows.
+                    if let player = audioPlayer, player.isPlaying {
                         playButtonAudio.setImage(UIImage(systemName: "pause.fill"), for: .normal)
                     } else {
                         playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
                     }
 
+                    // Held so that audio running out on its own can put the bubble back to rest
+                    // where it stands, instead of rebuilding the row under a finger.
+                    audioSliders[messageIdChat] = progressSliderAudio
+                    audioPlayButtons[messageIdChat] = playButtonAudio
+                    audioTimeLabels[messageIdChat] = timeLabelAudio
+                    // Already playing when the bubble was built - taken back from the strip, or
+                    // scrolled away from and returned to - so the row needs its own ticker or the
+                    // line would sit still while the recording ran.
+                    if let running = audioPlayer, running.isPlaying, timers[messageIdChat] == nil {
+                        startAudioTicker(messageId: messageIdChat,
+                                         progressSlider: progressSliderAudio,
+                                         timeLabel: timeLabelAudio,
+                                         wave: isVoiceNoteAudio ? waveAudio : nil)
+                    }
+                    if isVoiceNoteAudio {
+                        if let known = AudioWaveformStore.levels(for: audioChat) {
+                            waveAudio.levels = known
+                        } else {
+                            // Asked for on any pass that has no line yet, and answered to whichever
+                            // view stands for the message by the time the answer comes.
+                            AudioWaveformStore.read(url: url, key: audioChat) { [weak self] levels in
+                                guard let self = self, self.audioViewsAlive(messageIdChat) else {
+                                    return
+                                }
+                                self.audioWaves[messageIdChat]?.levels = levels
+                            }
+                        }
+                        waveAudio.progress = progressSliderAudio.maximumValue > 0
+                            ? CGFloat(progressSliderAudio.value / progressSliderAudio.maximumValue)
+                            : 0
+                        audioWaves[messageIdChat] = waveAudio
+                        audioSpeedPills[messageIdChat] = speedPillAudio
+                        audioAvatars[messageIdChat] = avatarBoxAudio
+
+                        // A bubble scrolled away and back comes back the way it was left: still
+                        // being listened to, and still at the speed that was chosen for it.
+                        let listeningAudio = audioSessions.contains(messageIdChat)
+                        speedPillAudio.setTitle(audioRateLabel(audioRates[messageIdChat] ?? 1), for: .normal)
+                        speedPillAudio.isHidden = !listeningAudio
+                        avatarBoxAudio.isHidden = listeningAudio
+
+                        speedPillAudio.addAction(UIAction { [weak self] _ in
+                            self?.cycleAudioRate(messageId: messageIdChat)
+                        }, for: .touchUpInside)
+                    } else {
+                        // Nothing trades places with the disc on a file, so neither the speed
+                        // button nor the drawn line is registered.
+                        audioWaves[messageIdChat] = nil
+                        audioSpeedPills[messageIdChat] = nil
+                        audioAvatars[messageIdChat] = nil
+                    }
+
                     // Play/Pause Button Action
                     playButtonAudio.addAction(UIAction { _ in
-                        self.playPauseAudio(indexPath: indexPath, playButton: playButtonAudio, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+                        self.playPauseAudio(messageId: messageIdChat, playButton: playButtonAudio, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
                     }, for: .touchUpInside)
-                    
-                    progressSliderAudio.addAction(UIAction { _ in
-                        self.sliderChanged(indexPath: indexPath, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+
+                    // While the finger is down only the writing moves; the player is sent to the
+                    // new place once, when the finger lifts - seeking on every twitch is the lag.
+                    progressSliderAudio.addAction(UIAction { [weak waveAudio] _ in
+                        timeLabelAudio.text = self.formatTime(TimeInterval(progressSliderAudio.value))
+                        if progressSliderAudio.maximumValue > 0 {
+                            waveAudio?.progress = CGFloat(progressSliderAudio.value / progressSliderAudio.maximumValue)
+                        }
                     }, for: .valueChanged)
+                    let seek = UIAction { _ in
+                        self.sliderChanged(messageId: messageIdChat, progressSlider: progressSliderAudio, timeLabel: timeLabelAudio)
+                    }
+                    progressSliderAudio.addAction(seek, for: .touchUpInside)
+                    progressSliderAudio.addAction(seek, for: .touchUpOutside)
+                    progressSliderAudio.addAction(seek, for: .touchCancel)
                 }
             }
         }
@@ -782,22 +1145,37 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             let thumbSize = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)
             let getHeightImage: CGFloat = thumbSize.height
             let getWidthImage: CGFloat = thumbSize.width
-            topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 40 : getHeightImage)
+            topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 45 : getHeightImage + 5)
             
             containerMessage.addSubview(imageThumb)
             imageThumb.translatesAutoresizingMaskIntoConstraints = false
             imageThumb.frame = CGRect(x: 0, y: 0, width: getWidthImage, height: getHeightImage)
             let data = queryMessageReply(message_id: reffChat)
             if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
-                imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 37).isActive = true
+                imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
             }
             imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
             imageThumb.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
             imageThumb.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage).isActive = true
+            // The picture asks for its own width, but never past what the bubble is allowed to be:
+            // required, the ask alone contradicts the bubble's maximum width and there is no
+            // layout that satisfies both.
+            let imgWidthConstraint = imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage)
+            imgWidthConstraint.priority = .defaultHigh
+            imgWidthConstraint.isActive = true
+            let imgMaxWidthConstraint = imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerMessage.widthAnchor, constant: -30)
+            imgMaxWidthConstraint.priority = .required
+            imgMaxWidthConstraint.isActive = true
             imageThumb.layer.cornerRadius = 5.0
             imageThumb.clipsToBounds = true
             imageThumb.contentMode = .scaleAspectFill
+            // An image view carries the size of the picture inside it, and this one is held
+            // between the top of the bubble and the text below rather than by a height of its
+            // own. Without this, an arriving thumbnail's own size pushes the bubble open.
+            imageThumb.setContentHuggingPriority(.defaultLow, for: .vertical)
+            imageThumb.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            imageThumb.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+            imageThumb.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             
             let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
             let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
@@ -954,12 +1332,17 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 }
             }
             
-            if (dataMessages[indexPath.row]["progress"] as! Double != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+            // Progress read back from the database starts at 0, so "not 100" marked every picture
+            // this phone had ever sent as still uploading. The message's own status settles it:
+            // still being sent (1) means a transfer really is running. The force cast went with
+            // it - a row without a progress column used to be a crash.
+            let sendingNow = (dataMessages[indexPath.row]["status"] as? String ?? "") == "1"
+            if (sendingNow && dataMessages[indexPath.row]["progress"] as? Double ?? 0.0 != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
                 let container = UIView()
                 imageThumb.addSubview(container)
                 container.translatesAutoresizingMaskIntoConstraints = false
-                container.bottomAnchor.constraint(equalTo: imageThumb.bottomAnchor, constant: -10).isActive = true
-                container.leadingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: 10).isActive = true
+                container.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
+                container.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
                 container.widthAnchor.constraint(equalToConstant: 30).isActive = true
                 container.heightAnchor.constraint(equalToConstant: 30).isActive = true
                 container.backgroundColor = .white.withAlphaComponent(0.1)
@@ -982,8 +1365,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageupload.tintColor = .white
                 container.addSubview(imageupload)
                 imageupload.translatesAutoresizingMaskIntoConstraints = false
-                imageupload.bottomAnchor.constraint(equalTo: imageThumb.bottomAnchor, constant: -10).isActive = true
-                imageupload.leadingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: 10).isActive = true
+                imageupload.centerXAnchor.constraint(equalTo: container.centerXAnchor).isActive = true
+                imageupload.centerYAnchor.constraint(equalTo: container.centerYAnchor).isActive = true
                 imageupload.widthAnchor.constraint(equalToConstant: 20).isActive = true
                 imageupload.heightAnchor.constraint(equalToConstant: 20).isActive = true
                 // Fix: the same caption as the download ring - how much of the file has gone up
@@ -1078,7 +1461,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             containerViewFile.translatesAutoresizingMaskIntoConstraints = false
             let data = queryMessageReply(message_id: reffChat)
             if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
-                containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 37).isActive = true
+                containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
             } else {
                 containerViewFile.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
             }
@@ -1361,11 +1744,30 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             let data = queryMessageReply(message_id: reffChat)
             if data.count != 0 {
                 
+                // Measured off a WhatsApp bubble: the bubble is #D6E8FC and the quote inside it is
+                // #D3E1F2 - the bubble lifted toward grey, not darkened with black, which is a
+                // light grey at 22%. Taken as an overlay it holds on any bubble colour, and the
+                // text on it is the foreground held back rather than a colour of its own: that
+                // #303237 quote is black at 77%.
+                //
+                // Dark mode turns the overlay over. WhatsApp's dark bubble is a deep green, so
+                // lifting it still leaves somewhere dark to write on; ours is a bright blue
+                // (#367dd9), and lifting that leaves white text at 2.2:1 - unreadable. Darkening
+                // instead moves the quote away from the bubble the same way, and the text goes to
+                // 87% for the same reason WhatsApp can afford 60% and we cannot.
+                let isDarkQuote = self.traitCollection.userInterfaceStyle == .dark
+                let quoteOverlay: UIColor = isDarkQuote
+                    ? .black.withAlphaComponent(0.22)
+                    : UIColor(white: 0.784, alpha: 0.22)
+                let quotedTextColour: UIColor = isDarkQuote
+                    ? .white.withAlphaComponent(0.87)
+                    : .black.withAlphaComponent(0.77)
+
                 let containerReply = UIView()
                 containerMessage.addSubview(containerReply)
                 containerReply.translatesAutoresizingMaskIntoConstraints = false
                 containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-                containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32).isActive = true
+                containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
                 if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                     containerReply.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
                 } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
@@ -1381,7 +1783,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
                 minHeightConstraint.priority = .defaultHigh
                 minHeightConstraint.isActive = true
-                containerReply.backgroundColor = .black.withAlphaComponent(0.3)
+                containerReply.backgroundColor = quoteOverlay
                 containerReply.layer.cornerRadius = 5
                 containerReply.clipsToBounds = true
                 
@@ -1417,13 +1819,25 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         titleReply.text = "Bot"
                     }
                 }
-                if dataMessages[indexPath.row]["f_pin"] as? String == idMe {
-                    titleReply.textColor = .white
-                    leftReply.backgroundColor = .white
-                } else {
-                    titleReply.textColor = .mainColor
-                    leftReply.backgroundColor = .mainColor
-                }
+                // The name and the bar take the colour of whoever is being quoted, the way
+                // WhatsApp gives everyone in a group one of their own. White only worked here
+                // while the quote sat on a black overlay; on the bubble's own colour it went.
+                // Starred messages come from every conversation at once, so the conversation a
+                // quote belongs to has to be read off the message. l_pin is the group for a group
+                // message; in a one-to-one chat it is whoever received it, so the other party is
+                // the sender when that was not me.
+                let quoteScope = dataMessages[indexPath.row]["message_scope_id"] as? String ?? ""
+                let quoteLPin = dataMessages[indexPath.row]["l_pin"] as? String ?? ""
+                let quoteFPin = dataMessages[indexPath.row]["f_pin"] as? String ?? ""
+                let conversationOfQuote = quoteScope == MessageScope.GROUP
+                    ? quoteLPin
+                    : (quoteFPin == idMe ? quoteLPin : quoteFPin)
+                let quoteGround = UIColor.composite(quoteOverlay, over: containerMessage.backgroundColor ?? .white)
+                let quoteAccent = UIColor.participant(pin: data["f_pin"] as? String ?? "", conversation: conversationOfQuote,
+                                                      members: quoteScope == MessageScope.GROUP ? [] : [conversationOfQuote],
+                                                      on: quoteGround)
+                titleReply.textColor = quoteAccent
+                leftReply.backgroundColor = quoteAccent
                 
                 let contentReply = UILabel()
                 contentReply.numberOfLines = 3
@@ -1477,10 +1891,10 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
                     contentReply.text = "📄 " + "Seminar".localized()
                 }
-                // The quoted body is white at 60%, which is what WhatsApp uses for it
-                // (--quoted-message-text, hsla(0,0%,100%,0.6)). The name above it keeps the
-                // accent colour, so the two read as heading and quote rather than one block.
-                contentReply.textColor = .white.withAlphaComponent(0.6)
+// WhatsApp writes the quote in the foreground colour held back a little, not in a
+                // colour of its own: #303237 on that #D3E1F2 quote is black at 77%. Its dark
+                // theme does the same the other way round, white at 60%.
+                contentReply.textColor = quotedTextColour
                 
                 if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
                     let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -1557,10 +1971,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             containerMessage.addSubview(containerForwarded)
             containerForwarded.translatesAutoresizingMaskIntoConstraints = false
             containerForwarded.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-            containerForwarded.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32).isActive = true
+            containerForwarded.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: baseTopMarginText).isActive = true
             containerForwarded.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
             containerForwarded.heightAnchor.constraint(equalToConstant: 20).isActive = true
-            if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
+            if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
+                containerForwarded.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
+            } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                 containerForwarded.bottomAnchor.constraint(equalTo: containerViewFile.topAnchor, constant: -5).isActive = true
             } else if containerMessage.subviews.contains(containerLinkMessage) {
                 containerForwarded.bottomAnchor.constraint(equalTo: containerLinkMessage.topAnchor, constant: -5).isActive = true
@@ -1586,7 +2002,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             var addTopMargin = true
             if !reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM {
                 let data = queryMessageReply(message_id: reffChat)
-                if data.count != 0 && (topMarginText.constant == 32.0 || topMarginText.constant == 100.0) {
+                if data.count != 0 && (topMarginText.constant == baseTopMarginText || topMarginText.constant == 100.0) {
                     addTopMargin = false
                 }
             }
@@ -1616,52 +2032,303 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         return nil
     }
     
-    func playPauseAudio(indexPath: IndexPath, playButton: UIButton, progressSlider: UISlider, timeLabel: UILabel) {
-        guard let audioPlayer = audioPlayers[indexPath] else { return }
+    func playPauseAudio(messageId: String, playButton: UIButton, progressSlider: UISlider, timeLabel: UILabel) {
+        // Pressing the button is this screen saying the recording is its own now, so it takes it
+        // off the strip before doing anything with it.
+        guard let audioPlayer = adoptFromMiniPlayerIfNeeded(messageId) else { return }
 
         if audioPlayer.isPlaying {
-            // Pause Audio
             audioPlayer.pause()
             playButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
-            timers[indexPath]?.invalidate()
+            timers[messageId]?.invalidate()
+            timers[messageId] = nil
+            playingAudioId = nil
         } else {
-            // Stop other players if one is already playing
-            if let currentPlayingIndexPath = playingIndexPath, let currentAudioPlayer = audioPlayers[currentPlayingIndexPath] {
-                if currentPlayingIndexPath != indexPath {
-                    currentAudioPlayer.pause()
-                    timers[currentPlayingIndexPath]?.invalidate()
-                    timers[currentPlayingIndexPath] = nil
-                    audioPlayers[currentPlayingIndexPath] = nil
-                    tableChatView.reloadRows(at: [currentPlayingIndexPath], with: .none)
+            // One recording at a time, everywhere - including one still running in a conversation
+            // that was left, which this screen cannot see. The service knows about every one of
+            // them and stops the rest.
+            for stopped in AudioMiniPlayer.shared.pauseAllExcept(messageId) {
+                timers[stopped]?.invalidate()
+                timers[stopped] = nil
+                if playingAudioId == stopped {
+                    playingAudioId = nil
+                }
+                endAudioSession(stopped)
+                if let at = indexPath(forMessageId: stopped) {
+                    tableChatView.reloadRows(at: [at], with: .none)
                 }
             }
-            
+
             do {
                 try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
                 try AVAudioSession.sharedInstance().setActive(true)
             } catch {
-                
+
             }
 
-            // Play new audio
+            audioPlayer.enableRate = true
+            audioPlayer.rate = audioRates[messageId] ?? 1
             audioPlayer.play()
             playButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
-            playingIndexPath = indexPath
+            playingAudioId = messageId
+            beginAudioSession(messageId)
+            startAudioTicker(messageId: messageId, progressSlider: progressSlider, timeLabel: timeLabel)
+        }
+    }
 
-            // Start timer to update progress
-            timers[indexPath] = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-                progressSlider.value = Float(audioPlayer.currentTime)
-                timeLabel.text = self.formatTime(audioPlayer.currentTime)
+    /// Keeps a bubble's line, head and reading moving while its recording plays.
+    func startAudioTicker(messageId: String,
+                          progressSlider: UISlider,
+                          timeLabel: UILabel,
+                          wave: AudioWaveformView? = nil) {
+        timers[messageId]?.invalidate()
+        timers[messageId] = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self, weak progressSlider, weak timeLabel, weak wave] _ in
+            guard let self = self, let audioPlayer = self.livePlayer(for: messageId) else {
+                return
+            }
+            // Where it has got to is kept as it goes, so leaving at any moment leaves the bubble
+            // knowing where it was.
+            AudioPositionStore.remember(audioPlayer.currentTime, for: messageId)
+            // While the thumb is being held, it is theirs - writing to it from here makes the
+            // finger and the timer pull against each other.
+            guard progressSlider?.isTracking != true else {
+                return
+            }
+            // The bubble these belong to may have scrolled away and had its cell handed to another
+            // message by now.
+            guard self.audioViewsAlive(messageId) else {
+                return
+            }
+            progressSlider?.value = Float(audioPlayer.currentTime)
+            timeLabel?.text = self.formatTime(audioPlayer.currentTime)
+            if audioPlayer.duration > 0 {
+                let line = wave ?? self.audioWaves[messageId]
+                line?.progress = CGFloat(audioPlayer.currentTime / audioPlayer.duration)
             }
         }
     }
-    
-    func sliderChanged(indexPath: IndexPath, progressSlider: UISlider, timeLabel: UILabel) {
-        guard let audioPlayer = audioPlayers[indexPath] else { return }
+
+    func sliderChanged(messageId: String, progressSlider: UISlider, timeLabel: UILabel) {
+        guard let audioPlayer = adoptFromMiniPlayerIfNeeded(messageId) else { return }
         audioPlayer.currentTime = TimeInterval(progressSlider.value)
         timeLabel.text = formatTime(audioPlayer.currentTime)
+        // The audio had already run out while this drag was going on, so the wait for the picture
+        // to come back was held off until now.
+        if audioAwaitingRest.remove(messageId) != nil {
+            endAudioSession(messageId, after: 2.5)
+        }
     }
-    
+
+    /// Where a message sits in the table, or nil when it is not in the list - which it may not be,
+    /// since a search narrows what the list holds.
+    private func indexPath(forMessageId messageId: String) -> IndexPath? {
+        guard let message = dataMessages.first(where: { $0["message_id"] as? String == messageId }),
+              let section = dataDates.firstIndex(of: message["chat_date"] as? String ?? ""),
+              let row = dataMessages
+                  .filter({ ($0["chat_date"] as? String ?? "") == dataDates[section] })
+                  .firstIndex(where: { $0["message_id"] as? String == messageId }) else {
+            return nil
+        }
+        return IndexPath(row: row, section: section)
+    }
+
+    /// The views held for a message are only good while its bubble is on screen: the cell is handed
+    /// to a different message the moment it scrolls away, and writing through a stale handle draws
+    /// one note's progress onto another note's bubble.
+    func audioViewsAlive(_ messageId: String) -> Bool {
+        guard let at = indexPath(forMessageId: messageId) else {
+            return false
+        }
+        return tableChatView.indexPathsForVisibleRows?.contains(at) == true
+    }
+
+    func audioRateLabel(_ rate: Float) -> String {
+        return rate == rate.rounded() ? "\(Int(rate))\u{00D7}" : "\(rate)\u{00D7}"
+    }
+
+    /// While a note is being listened to, the sender's picture gives way to the speed button.
+    func beginAudioSession(_ messageId: String) {
+        audioRestTimers[messageId]?.invalidate()
+        audioRestTimers[messageId] = nil
+        audioAwaitingRest.remove(messageId)
+        audioSessions.insert(messageId)
+        showAudioSpeed(true, for: messageId)
+    }
+
+    /// The picture comes back, after a pause when one is asked for.
+    func endAudioSession(_ messageId: String, after delay: TimeInterval = 0) {
+        audioRestTimers[messageId]?.invalidate()
+        audioRestTimers[messageId] = nil
+        guard delay > 0 else {
+            audioSessions.remove(messageId)
+            showAudioSpeed(false, for: messageId)
+            return
+        }
+        audioRestTimers[messageId] = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self = self else {
+                return
+            }
+            self.audioRestTimers[messageId] = nil
+            self.audioSessions.remove(messageId)
+            self.showAudioSpeed(false, for: messageId)
+        }
+    }
+
+    func showAudioSpeed(_ shown: Bool, for messageId: String) {
+        guard audioViewsAlive(messageId),
+              let pill = audioSpeedPills[messageId],
+              let avatar = audioAvatars[messageId] else {
+            return
+        }
+        pill.setTitle(audioRateLabel(audioRates[messageId] ?? 1), for: .normal)
+        guard pill.isHidden == shown else {
+            return
+        }
+        let appearing: UIView = shown ? pill : avatar
+        let leaving: UIView = shown ? avatar : pill
+        appearing.alpha = 0
+        appearing.isHidden = false
+        UIView.animate(withDuration: 0.2, animations: {
+            appearing.alpha = 1
+            leaving.alpha = 0
+        }, completion: { _ in
+            leaving.isHidden = true
+            leaving.alpha = 1
+        })
+    }
+
+    /// The speeds the reference offers, in the order it offers them.
+    func cycleAudioRate(messageId: String) {
+        let next: Float
+        switch audioRates[messageId] ?? 1 {
+        case 1: next = 1.5
+        case 1.5: next = 2
+        default: next = 1
+        }
+        audioRates[messageId] = next
+        audioPlayers[messageId]?.rate = next
+        audioSpeedPills[messageId]?.setTitle(audioRateLabel(next), for: .normal)
+    }
+
+    /// Gives a recording that is still playing to the strip at the top of the screen, so leaving
+    /// this list carries on listening instead of cutting it off.
+    @discardableResult
+    func handOverPlayingAudio() -> String? {
+        guard let id = playingAudioId,
+              let player = audioPlayers[id],
+              player.isPlaying else {
+            return nil
+        }
+        let message = dataMessages.first { ($0["message_id"] as? String) == id }
+        let isVoiceNote = (message?["attachment_flag"] as? String) == "60"
+        let pin = (message?["f_pin"] as? String) ?? ""
+        // Every sender is a different person on this screen, so the name comes from the message
+        // rather than from one profile the whole screen belongs to.
+        let name = pin == User.getMyPin() ? "You".localized() : (getDataProfile(f_pin: pin)["name"] ?? "")
+        let avatar = audioAvatars[id]?.subviews.compactMap { $0 as? UIImageView }.first?.image
+        AudioMiniPlayer.shared.takeOver(player: player,
+                                        messageId: id,
+                                        name: name,
+                                        avatar: isVoiceNote ? avatar : nil,
+                                        isVoiceNote: isVoiceNote)
+        return id
+    }
+
+    /// Takes back a recording that is still playing on the strip, now that this list is on screen.
+    ///
+    /// The bubble asks for it too as it is built, but that can be too early: UIKit builds the
+    /// screen being opened before it tears down the screen being left.
+    func reclaimPlayingAudioIfMine() {
+        guard let id = AudioMiniPlayer.shared.currentMessageId,
+              let at = indexPath(forMessageId: id),
+              adoptFromMiniPlayerIfNeeded(id) != nil else {
+            return
+        }
+        tableChatView.reloadRows(at: [at], with: .none)
+    }
+
+    /// The player behind a recording, wherever it currently lives. One place keeps the players, so
+    /// there is only ever one answer here.
+    func livePlayer(for messageId: String) -> AVAudioPlayer? {
+        return AudioMiniPlayer.shared.player(for: messageId)
+    }
+
+    /// Takes ownership of a recording still held by the strip, so this screen drives it from now
+    /// on. Does nothing when the recording is already this screen's.
+    @discardableResult
+    func adoptFromMiniPlayerIfNeeded(_ messageId: String) -> AVAudioPlayer? {
+        guard let player = AudioMiniPlayer.shared.reclaim(messageId: messageId) else {
+            return audioPlayers[messageId]
+        }
+        // The idle stand-in built while the strip still had the recording is thrown away; the one
+        // that is actually playing takes its place.
+        if let standIn = audioPlayers[messageId], standIn !== player {
+            standIn.stop()
+        }
+        player.delegate = self
+        audioPlayers[messageId] = player
+        playingAudioId = messageId
+        beginAudioSession(messageId)
+        return player
+    }
+
+    /// Everything this screen was driving, let go of. Called when the list goes away, so no timer
+    /// is left running behind it.
+    func stopAllAudio() {
+        timers.values.forEach { $0.invalidate() }
+        timers.removeAll()
+        audioRestTimers.values.forEach { $0.invalidate() }
+        audioRestTimers.removeAll()
+        for (id, player) in audioPlayers {
+            AudioPositionStore.remember(player.currentTime, for: id)
+        }
+        handOverPlayingAudio()
+        // Only this screen's references go. The players themselves belong to the service, and a
+        // paused one is where the reader left it - stopping it would throw that away.
+        audioPlayers.removeAll()
+        audioWaves.removeAll()
+        audioSliders.removeAll()
+        audioPlayButtons.removeAll()
+        audioTimeLabels.removeAll()
+        audioSpeedPills.removeAll()
+        audioAvatars.removeAll()
+        audioSessions.removeAll()
+        audioAwaitingRest.removeAll()
+        playingAudioId = nil
+    }
+
+    // MARK: - Long messages
+
+    /// Puts a long message in the bubble folded, with "Read more" after it. The rule itself is in
+    /// LongMessage, shared with the conversations and message info.
+    private func applyReadMore(to textView: UITextView, text: String, messageId: String) {
+        guard LongMessage.isFolded(messageId, text: text) else {
+            textView.attributedText = text.richText()
+            return
+        }
+        let body = NSMutableAttributedString(attributedString: LongMessage.folded(text).richText())
+        body.append(LongMessage.suffix(fontSize: 12 + offset()))
+        textView.attributedText = body
+        textView.isUserInteractionEnabled = true
+        textView.addGestureRecognizer(ReadMoreTap(messageId: messageId, target: self, action: #selector(readMoreTapped(_:))))
+    }
+
+    @objc private func readMoreTapped(_ sender: UITapGestureRecognizer) {
+        guard let tap = sender as? ReadMoreTap else {
+            return
+        }
+        LongMessage.expand(tap.messageId)
+        // Fix: this took the message's place in the flat list and reloaded that row of section 0.
+        // The list is in sections by date, so anything below the first date reloaded the wrong row
+        // - or a row that does not exist.
+        if let at = indexPath(forMessageId: tap.messageId) {
+            tableChatView.reloadRows(at: [at], with: .none)
+        } else {
+            tableChatView.reloadData()
+        }
+    }
+
+
     func formatTime(_ time: TimeInterval) -> String {
         let roundedTime = time.rounded(.up)
         let minutes = Int(roundedTime) / 60
@@ -1670,14 +2337,36 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     }
     
     public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        if let finishedIndexPath = audioPlayers.first(where: { $0.value == player })?.key {
-           DispatchQueue.main.async {
-               self.timers[finishedIndexPath]?.invalidate()
-               self.timers[finishedIndexPath] = nil
-               self.playingIndexPath = nil
-               self.audioPlayers[finishedIndexPath] = nil
-               self.tableChatView.reloadRows(at: [finishedIndexPath], with: .none)
-           }
+        guard let finished = audioPlayers.first(where: { $0.value === player })?.key else {
+            return
+        }
+        DispatchQueue.main.async {
+            self.timers[finished]?.invalidate()
+            self.timers[finished] = nil
+            self.playingAudioId = nil
+            // Played to the end, so there is no part-way point to come back to.
+            AudioPositionStore.forget(finished)
+            AudioMiniPlayer.shared.player(for: finished)?.currentTime = 0
+            // Fix: this rebuilt the row. Audio reaching its end while the reader still had hold of
+            // the slider therefore tore the control out from under their finger. The bubble is put
+            // back to rest in place instead, and the player is kept.
+            let alive = self.audioViewsAlive(finished)
+            if alive {
+                self.audioPlayButtons[finished]?.setImage(UIImage(systemName: "play.fill"), for: .normal)
+            }
+            // Rewound only if nobody is holding it - a finger on the slider outranks the end of
+            // the file, and the seek it is heading for is the one that should win.
+            if self.audioSliders[finished]?.isTracking == true {
+                self.audioAwaitingRest.insert(finished)
+            } else {
+                player.currentTime = 0
+                if alive {
+                    self.audioSliders[finished]?.value = 0
+                    self.audioWaves[finished]?.progress = 0
+                    self.audioTimeLabels[finished]?.text = self.formatTime(player.duration)
+                }
+                self.endAudioSession(finished, after: 2.5)
+            }
         }
     }
     
@@ -1743,10 +2432,104 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         LinkOpener.open(urlString: sender.message_id)
     }
     
+    /// Whether a starred message answers what is being searched for.
+    ///
+    /// Matches the message itself and who sent it, which is how somebody looks for a starred
+    /// message: either they remember a word of it, or they remember who wrote it.
+    private func matchesStarSearch(_ row: [String: Any?], fmdb: FMDatabase) -> Bool {
+        let query = starSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return true
+        }
+        let text = (row["message_text"] as? String) ?? ""
+        if text.range(of: query, options: .caseInsensitive) != nil {
+            return true
+        }
+        let sender = senderName(forPin: (row["f_pin"] as? String) ?? "", fmdb: fmdb)
+        return sender.range(of: query, options: .caseInsensitive) != nil
+    }
+
+    /// Paints what is being searched for wherever it shows in a bubble.
+    ///
+    /// Applied over the finished text rather than woven into the building of it: a message may
+    /// have come out of any of several paths - folded behind a "Read more", carrying mentions,
+    /// with links already marked - and the highlight has to survive all of them.
+    private func highlightSearchMatches(in textView: UITextView) {
+        let query = starSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty,
+              let existing = textView.attributedText,
+              existing.length > 0 else {
+            return
+        }
+        let painted = NSMutableAttributedString(attributedString: existing)
+        let haystack = painted.string
+        var from = haystack.startIndex
+        while from < haystack.endIndex,
+              let found = haystack.range(of: query, options: .caseInsensitive, range: from..<haystack.endIndex) {
+            // The colour of the writing is pinned too: the bubble's own text is white in the dark
+            // theme, and white on yellow cannot be read.
+            painted.addAttributes([
+                .backgroundColor: UIColor.systemYellow,
+                .foregroundColor: UIColor.black
+            ], range: NSRange(found, in: haystack))
+            from = found.upperBound
+        }
+        textView.attributedText = painted
+    }
+
+    /// Names already looked up while searching, by pin. This runs once per starred message per
+    /// keystroke, and it is a query.
+    private var searchSenderNames: [String: String] = [:]
+
+    /// Who sent a message, read on a transaction that is already open.
+    ///
+    /// Fix: this went through getDataProfile, which opens a transaction of its own. Called from
+    /// inside getData's transaction, that is a dispatch_sync onto the queue this thread already
+    /// holds - which libdispatch treats as a client bug and traps on, so every search crashed.
+    /// The handle already in hand is passed down instead.
+    private func senderName(forPin pin: String, fmdb: FMDatabase) -> String {
+        guard !pin.isEmpty else {
+            return ""
+        }
+        if pin == "-999" {
+            return "Bot".localized()
+        }
+        if let known = searchSenderNames[pin] {
+            return known
+        }
+        var found = ""
+        if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || ifnull(last_name, '') from BUDDY where f_pin = '\(pin)'"), c.next() {
+            found = (c.string(forColumnIndex: 0) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            c.close()
+        }
+        searchSenderNames[pin] = found
+        return found
+    }
+
+
+    /// Narrows the list to one conversation when this screen was opened from inside one, and to
+    /// nothing when it was opened from the menu. The column names are prefixed because the query
+    /// this joins onto aliases MESSAGE as m.
+    private func starredScopeClause() -> String {
+        guard let clause = conversationWhereClause, !clause.isEmpty else {
+            return ""
+        }
+        let qualified = clause
+            .replacingOccurrences(of: "chat_id=", with: "m.chat_id=")
+            .replacingOccurrences(of: "l_pin=", with: "m.l_pin=")
+            .replacingOccurrences(of: "f_pin=", with: "m.f_pin=")
+            .replacingOccurrences(of: "message_scope_id =", with: "m.message_scope_id =")
+            .replacingOccurrences(of: "is_call_center =", with: "m.is_call_center =")
+        return "AND (\(qualified))"
+    }
+
     func getData() {
         if !dataMessages.isEmpty {
             dataMessages.removeAll()
         }
+        // The sections are rebuilt from what is read, so yesterday's list of dates cannot be
+        // carried into a narrower search.
+        dataDates.removeAll()
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 // Fix: MESSAGE_STATUS used to be queried once per starred message inside the
@@ -1754,7 +2537,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 // that loop did (it kept the last one it read). A subquery rather than a join
                 // on purpose: a message can have several status rows, and a join would hand
                 // back the message once per row.
-                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT m.message_id, m.f_pin, m.l_pin, m.message_scope_id, m.server_date, ifnull((SELECT s.status FROM MESSAGE_STATUS s WHERE s.message_id = m.message_id ORDER BY s._id DESC LIMIT 1), m.status), m.message_text, m.audio_id, m.video_id, m.image_id, m.thumb_id, m.read_receipts, m.chat_id, m.file_id, m.attachment_flag, m.reff_id, m.lock, m.is_stared, m.blog_id, m.attachment_speciality FROM MESSAGE m where m.is_stared=1 order by m.server_date asc") {
+                if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: "SELECT m.message_id, m.f_pin, m.l_pin, m.message_scope_id, m.server_date, ifnull((SELECT s.status FROM MESSAGE_STATUS s WHERE s.message_id = m.message_id ORDER BY s._id DESC LIMIT 1), m.status), m.message_text, m.audio_id, m.video_id, m.image_id, m.thumb_id, m.read_receipts, m.chat_id, m.file_id, m.attachment_flag, m.reff_id, m.lock, m.is_stared, m.blog_id, m.attachment_speciality FROM MESSAGE m where m.is_stared=1 \(self.starredScopeClause()) order by m.server_date desc") {
                     while cursorData.next() {
                         var row: [String: Any?] = [:]
                         row["message_id"] = cursorData.string(forColumnIndex: 0)
@@ -1797,6 +2580,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                 }
                             }
                         }
+                        // Filtered before the date is worked out: a date section is only added
+                        // when a message actually lands in it, so a search that matches nothing
+                        // from Tuesday must not leave Tuesday standing empty in the list.
+                        guard matchesStarSearch(row, fmdb: fmdb) else {
+                            continue
+                        }
                         row["chat_date"] = chatDate(stringDate: row["server_date"] as! String, messageId: row["message_id"] as! String)
                         dataMessages.append(row)
                     }
@@ -1828,6 +2617,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         return formatter
     }
 
+    /// Worded exactly as the conversations word it - "Today", "Yesterday", then the day's name,
+    /// then "Mon, 18 Aug". A starred message opens the conversation it came from, and the two
+    /// screens sitting either side of that jump should not name the same day two different ways.
     private func chatDate(stringDate: String, messageId: String) -> String {
         let date = Date(milliseconds: Int64(stringDate)!)
         let calendar = Calendar.current
@@ -2230,7 +3022,20 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         ChatTransferRing.setProgress(progress, in: cell)
     }
 
+    public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willDisplayMenuFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
+        bubbleMenuVisible = true
+    }
+
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willEndFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
+        // Lowered only once the menu has finished dismissing: the touch that dismisses it lands
+        // on the row underneath, and a row that is still listening would open the conversation.
+        if let animator = animator {
+            animator.addCompletion { [weak self] in
+                self?.bubbleMenuVisible = false
+            }
+        } else {
+            bubbleMenuVisible = false
+        }
         // The menu is going away and its UIActions own their handlers anyway - keeping the
         // duplicates here would just be a strong reference back to self that outlives it.
         contextMenuActionHandlers.removeAll()
@@ -2255,7 +3060,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         contextMenuActionHandlers.removeAll()
         let indexPath = self.tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: self.tableChatView))
         let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath!.section]})
-        let star = chatMenuAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash.fill"), handler: {(_) in
+        let star = chatMenuAction(title: "Unstar".localized(), image: UIImage(systemName: "star.slash"), handler: {(_) in
             DispatchQueue.global().async {
                 Database.shared.database?.inTransaction({ (fmdb, rollback) in
                     do {
@@ -2280,10 +3085,17 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
             self.tableChatView.reloadData()
         })
-        let forward = chatMenuAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right.fill"), handler: {(_) in
+        let forward = chatMenuAction(title: "Forward".localized(), image: UIImage(systemName: "arrowshape.turn.up.right"), handler: {(_) in
             let navigationController = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "contactChatNav") as! UINavigationController
             Utils.addBackground(view: navigationController.view)
-            navigationController.modalPresentationStyle = .custom
+            // A card that slides up over the list rather than a full-screen takeover, the same as
+            // the conversations and the media viewer present it.
+            navigationController.modalPresentationStyle = .pageSheet
+            if let sheet = navigationController.sheetPresentationController {
+                sheet.detents = [.large()]
+                sheet.prefersGrabberVisible = true
+                sheet.preferredCornerRadius = 20
+            }
             navigationController.navigationBar.tintColor = .white
             navigationController.navigationBar.barTintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
             navigationController.navigationBar.isTranslucent = false
@@ -2310,7 +3122,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
             self.present(navigationController, animated: true, completion: nil)
         })
-        let copy = chatMenuAction(title: "Copy".localized(), image: UIImage(systemName: "doc.on.doc.fill"), handler: {(_) in
+        let copy = chatMenuAction(title: "Copy".localized(), image: UIImage(systemName: "doc.on.doc"), handler: {(_) in
             if (dataMessages[indexPath!.row]["attachment_flag"] as! String == "0") {
                 DispatchQueue.main.async {
                     var text = ""
@@ -2377,6 +3189,14 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         // Fix: the menu is ours, not UIKit's - see presentBubbleContextMenu(for:elements:).
         if let bubble = interaction.view,
            presentBubbleContextMenu(for: bubble, elements: children) {
+            // That path puts up its own overlay and never reports back through this delegate, so
+            // the row has to be told to stand down here, and told again when the overlay goes.
+            bubbleMenuVisible = true
+            let previousDismiss = longBubbleContextMenu?.onDismiss
+            longBubbleContextMenu?.onDismiss = { [weak self] in
+                previousDismiss?()
+                self?.bubbleMenuVisible = false
+            }
             return nil
         }
         return UIContextMenuConfiguration(identifier: nil,
@@ -2461,7 +3281,16 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         return self.previewItem as QLPreviewItem
     }
     
+    public func tableView(_ tableView: UITableView, shouldHighlightRowAt indexPath: IndexPath) -> Bool {
+        return !bubbleMenuVisible
+    }
+
     public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        // The long press that opened the menu is the same touch that would open the conversation.
+        guard !bubbleMenuVisible else {
+            tableView.deselectRow(at: indexPath, animated: false)
+            return
+        }
         let dataMessages = self.dataMessages.filter({ $0["chat_date"]  as? String ?? "" == dataDates[indexPath.section]})
         let message = dataMessages[indexPath.row]
         if let attachmentFlag = message["attachment_flag"], let attachmentFlag = attachmentFlag as? String {
@@ -2550,7 +3379,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             editorPersonalVC.hidesBottomBarWhenPushed = true
             editorPersonalVC.unique_l_pin = pin
             editorPersonalVC.referenceMessageId = message[TypeDataMessage.message_id] as? String ?? ""
-            editorPersonalVC.referenceChatDate = message[TypeDataMessage.chat_date] as? String ?? ""
+            // Fix: this used to hand over the date this screen prints on the row, and the editor
+            // looks the message up by matching that string against its own section titles. The two
+            // screens word their dates differently - this one says "Monday" or "18/08/26", a
+            // conversation says "Today" or "Mon, 18 Aug" - so the lookup found nothing and the
+            // jump landed wherever it landed. Left empty, the editor works the date out from the
+            // message's own server_date in its own wording, which is always right.
             navigationController?.show(editorPersonalVC, sender: nil)
         } else {
             var pin = message[TypeDataMessage.chat_id] as? String ?? ""
@@ -2561,7 +3395,6 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             editorGroupVC.hidesBottomBarWhenPushed = true
             editorGroupVC.unique_l_pin = pin
             editorGroupVC.referenceMessageId = message[TypeDataMessage.message_id] as? String ?? ""
-            editorGroupVC.referenceChatDate = message[TypeDataMessage.chat_date] as? String ?? ""
             navigationController?.show(editorGroupVC, sender: nil)
         }
     }
@@ -2802,11 +3635,48 @@ extension EditorStarMessages {
     // Reloads the row a transfer belongs to, if it is still on screen at all. Safe to call
     // from a download that outlived the screen which started it.
     func reloadMessageRow(withFileNamed name: String) {
+        // The bubble is drawn differently once the file is there, and nothing in the message says
+        // so - without this the row would be redrawn into exactly what it already was.
+        EditorStarMessages.transferTick += 1
         guard let indexPath = indexPathForMessage(withFileNamed: name),
               indexPath.section < tableChatView.numberOfSections,
               indexPath.row < tableChatView.numberOfRows(inSection: indexPath.section) else {
             return
         }
         tableChatView.reloadRows(at: [indexPath], with: .none)
+    }
+}
+
+
+extension EditorStarMessages: UISearchBarDelegate {
+
+    public func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
+        searchBar.setShowsCancelButton(true, animated: true)
+    }
+
+    public func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
+        // Kept while a search is still narrowing the list, even though the keyboard has gone -
+        // dismissing it by scrolling would otherwise leave a filtered list with no way back.
+        let stillFiltering = !(searchBar.text ?? "").isEmpty
+        searchBar.setShowsCancelButton(stillFiltering, animated: true)
+    }
+
+    public func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        starSearchText = searchText
+        getData()
+        tableChatView.reloadData()
+    }
+
+    public func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.resignFirstResponder()
+    }
+
+    public func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.text = ""
+        starSearchText = ""
+        searchBar.setShowsCancelButton(false, animated: true)
+        searchBar.resignFirstResponder()
+        getData()
+        tableChatView.reloadData()
     }
 }

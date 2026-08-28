@@ -346,7 +346,13 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
             if indexPath.row == 0 {
                 showTopicMedia()
             } else {
-                navigationController?.pushViewController(Nexilis.getEditorStarMessage(), animated: true)
+                // Everything kept from *this* conversation, not from every conversation there is:
+                // the reader arrived here from one topic (or from the group's Lounge), and that is
+                // the context the list should answer for.
+                let starred = Nexilis.getEditorStarMessage()
+                starred.conversationWhereClause = EditorStarMessages.groupScope(groupId: data,
+                                                                               topicChatId: openedTopicChatId)
+                navigationController?.pushViewController(starred, animated: true)
             }
         case .profile:
             if isAdmin {
@@ -906,16 +912,38 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
         case .attachments:
             let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
             var content = cell.defaultContentConfiguration()
+            let scope = EditorStarMessages.groupScope(groupId: data, topicChatId: openedTopicChatId)
+            let count: Int
             if indexPath.row == 0 {
                 content.text = "Media, links and docs".localized()
                 content.image = UIImage(systemName: "photo.on.rectangle")
+                count = EditorStarMessages.conversationCount(scope: scope,
+                                                             and: EditorStarMessages.mediaCountCondition)
             } else {
                 content.text = "Starred Messages".localized()
                 content.image = UIImage(systemName: "star")
+                count = EditorStarMessages.conversationCount(scope: scope,
+                                                             and: EditorStarMessages.starredCountCondition)
             }
             content.imageProperties.tintColor = .secondaryLabel
             cell.contentConfiguration = content
+            cell.accessoryView = nil
             cell.accessoryType = .disclosureIndicator
+            // The figure sits between the caption and the chevron, which is where the row's own
+            // accessory already is - so it goes in a label of its own alongside it. Nothing to
+            // count, nothing drawn.
+            if let text = EditorStarMessages.countLabel(count) {
+                let countLabel = UILabel()
+                countLabel.text = text
+                countLabel.font = .systemFont(ofSize: 15)
+                countLabel.textColor = .secondaryLabel
+                cell.contentView.addSubview(countLabel)
+                countLabel.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    countLabel.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
+                    countLabel.centerYAnchor.constraint(equalTo: cell.contentView.centerYAnchor)
+                ])
+            }
             return cell
         case .profile:
             let cell = tableView.dequeueReusableCell(withIdentifier: "profileCell", for: indexPath) as! ProfileCell

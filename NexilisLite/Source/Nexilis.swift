@@ -20,7 +20,7 @@ import WebKit
 import CommonCrypto
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.16"
+    public static var cpaasVersion = "5.1.17"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1678,6 +1678,37 @@ public class Nexilis: NSObject {
     private static var waitQueue = [String: TMessage]()
     private static let syncQueue = DispatchQueue(label: "io.nexilis.syncQueue")
     
+    /// Whether a request sent now would actually leave the device.
+    ///
+    /// `write` drops the message and returns nil when this is false, but `writeAndWait` has no
+    /// way of knowing that and waits its full timeout for an answer to a question nobody asked.
+    /// Worth asking before a blocking round trip.
+    public static var isLinkUp: Bool {
+        return API.bInetConnAvailable() && API.nGetCLXConnState() != 0
+    }
+
+    /// Waits, briefly, for the link to come up.
+    ///
+    /// The moments right after launch or after a resume are exactly when a screen asks for its
+    /// data and exactly when the socket is not up yet. A few seconds here turn a request that
+    /// would have been thrown away into one that goes out.
+    ///
+    /// - Returns: whether the link came up within the time given. Call from a background queue.
+    @discardableResult
+    public static func waitForLink(upTo seconds: TimeInterval) -> Bool {
+        if isLinkUp {
+            return true
+        }
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.25)
+            if isLinkUp {
+                return true
+            }
+        }
+        return false
+    }
+
     public static func writeAndWait(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
         if message.getStatus().isEmpty {
             return nil

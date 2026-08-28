@@ -687,7 +687,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                         }
                         timeView.text = formatter.string(from: date)
                     } else {
-                        let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "M/dd/yy", localeIdentifier: "id")
+                        let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "dd/MM/yy", localeIdentifier: "id")
                         timeView.text = stringFormat
                     }
                 }
@@ -1099,7 +1099,7 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                         }
                         timeView.text = formatter.string(from: date)
                     } else {
-                        let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "M/dd/yy", localeIdentifier: "id")
+                        let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "dd/MM/yy", localeIdentifier: "id")
                         timeView.text = stringFormat
                     }
                 }

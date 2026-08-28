@@ -19,6 +19,37 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     var isPersonal = true
     let geocoder = CLGeocoder()
     
+    // MARK: - Long messages
+
+    /// Puts a long message in the bubble folded, with "Read more" after it. The rule is in
+    /// LongMessage, shared with the conversations and starred messages.
+    ///
+    /// This screen shows one message and nothing else, so opening it is the only interaction it
+    /// has - and the fold is what stops a pasted document from burying the delivery details
+    /// underneath it.
+    private func applyReadMore(to label: UILabel, text: String) {
+        let messageId = (data["message_id"] as? String) ?? ""
+        label.numberOfLines = 0
+        guard LongMessage.isFolded(messageId, text: text) else {
+            label.attributedText = text.richText()
+            return
+        }
+        let body = NSMutableAttributedString(attributedString: LongMessage.folded(text).richText())
+        body.append(LongMessage.suffix(fontSize: 12 + offset()))
+        label.attributedText = body
+        label.isUserInteractionEnabled = true
+        label.addGestureRecognizer(ReadMoreTap(messageId: messageId, target: self, action: #selector(readMoreTapped(_:))))
+    }
+
+    @objc private func readMoreTapped(_ sender: UITapGestureRecognizer) {
+        guard let tap = sender as? ReadMoreTap else {
+            return
+        }
+        LongMessage.expand(tap.messageId)
+        tableStatus.reloadData()
+    }
+
+
     func offset() -> CGFloat{
         guard let fontSize = Int(SecureUserDefaults.shared.value(forKey: "font_size") ?? "0") else { return 0 }
         return CGFloat(fontSize)
@@ -586,7 +617,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             cell.backgroundColor = .clear
             cell.selectionStyle = .none
             
-            let containerMessage = UIView()
+            let containerMessage = BubbleView()
             cell.contentView.addSubview(containerMessage)
             containerMessage.translatesAutoresizingMaskIntoConstraints = false
             
@@ -617,6 +648,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             containerMessage.layer.cornerRadius = 10.0
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner, .layerMinXMinYCorner]
             containerMessage.clipsToBounds = true
+            (containerMessage as? BubbleView)?.lift()
             
             timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
             // Fix: the timestamp only had a right edge, tied to the bubble - so a wide one grew
@@ -827,10 +859,10 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     }
                 }
                 else {
-                    messageText.attributedText = textChat.richText()
+                    applyReadMore(to: messageText, text: textChat)
                 }
             } else {
-                messageText.attributedText = textChat.richText()
+                applyReadMore(to: messageText, text: textChat)
             }
             
             let stringDate = (data["server_date"] as? String) ?? ""
@@ -1101,6 +1133,25 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 if dataReply.count != 0 {
                     topMarginText.constant = topMarginText.constant + 55
                     
+                    // Measured off a WhatsApp bubble: the bubble is #D6E8FC and the quote inside it is
+                    // #D3E1F2 - the bubble lifted toward grey, not darkened with black, which is a
+                    // light grey at 22%. Taken as an overlay it holds on any bubble colour, and the
+                    // text on it is the foreground held back rather than a colour of its own: that
+                    // #303237 quote is black at 77%.
+                    //
+                    // Dark mode turns the overlay over. WhatsApp's dark bubble is a deep green, so
+                    // lifting it still leaves somewhere dark to write on; ours is a bright blue
+                    // (#367dd9), and lifting that leaves white text at 2.2:1 - unreadable. Darkening
+                    // instead moves the quote away from the bubble the same way, and the text goes to
+                    // 87% for the same reason WhatsApp can afford 60% and we cannot.
+                    let isDarkQuote = self.traitCollection.userInterfaceStyle == .dark
+                    let quoteOverlay: UIColor = isDarkQuote
+                        ? .black.withAlphaComponent(0.22)
+                        : UIColor(white: 0.784, alpha: 0.22)
+                    let quotedTextColour: UIColor = isDarkQuote
+                        ? .white.withAlphaComponent(0.87)
+                        : .black.withAlphaComponent(0.77)
+
                     let containerReply = UIView()
                     containerMessage.addSubview(containerReply)
                     containerReply.translatesAutoresizingMaskIntoConstraints = false
@@ -1121,7 +1172,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
                     minHeightConstraint.priority = .defaultHigh
                     minHeightConstraint.isActive = true
-                    containerReply.backgroundColor = .black.withAlphaComponent(0.3)
+                    containerReply.backgroundColor = quoteOverlay
                     containerReply.layer.cornerRadius = 5
                     containerReply.clipsToBounds = true
                     
@@ -1160,13 +1211,15 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     }
                     // The accent follows the bubble the quote sits in, not the quoted author -
                     // same rule as the editors.
-                    if data["f_pin"] as? String == idMe {
-                        titleReply.textColor = .white
-                        leftReply.backgroundColor = .white
-                    } else {
-                        titleReply.textColor = .mainColor
-                        leftReply.backgroundColor = .mainColor
-                    }
+                    // The name and the bar take the colour of whoever is being quoted, the way
+                    // WhatsApp gives everyone in a group one of their own. White only worked here
+                    // while the quote sat on a black overlay; on the bubble's own colour it went.
+                    let quoteGround = UIColor.composite(quoteOverlay, over: containerMessage.backgroundColor ?? .white)
+                    let quoteAccent = UIColor.participant(pin: replyPin, conversation: (isPersonal ? (dataPerson["f_pin"] ?? "") ?? "" : (dataGroup["group_id"] as? String ?? "")),
+                                                              members: isPersonal ? [(dataPerson["f_pin"] ?? "") ?? ""] : [],
+                                                              on: quoteGround)
+                    titleReply.textColor = quoteAccent
+                    leftReply.backgroundColor = quoteAccent
                     
                     let contentReply = UILabel()
                     contentReply.numberOfLines = 3
@@ -1223,12 +1276,12 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
                                                                             audioName: audio_chat,
                                                                             font: contentReply.font,
-                                                                            colour: .white.withAlphaComponent(0.6))
+                                                                            colour: quotedTextColour)
                     }
-                    // The quoted body is white at 60%, which is what WhatsApp uses for it
-                    // (--quoted-message-text, hsla(0,0%,100%,0.6)). The name above it keeps the
-                    // accent colour, so the two read as heading and quote rather than one block.
-                    contentReply.textColor = .white.withAlphaComponent(0.6)
+// WhatsApp writes the quote in the foreground colour held back a little, not in a
+                    // colour of its own: #303237 on that #D3E1F2 quote is black at 77%. Its dark
+                    // theme does the same the other way round, white at 60%.
+                    contentReply.textColor = quotedTextColour
                     
                     if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
                         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory

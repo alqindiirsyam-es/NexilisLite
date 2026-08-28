@@ -8762,6 +8762,146 @@ public final class AudioBubbleContent: UIView {
     }
 }
 
+/// One line of text that walks itself across and back when there is more of it than there is room.
+///
+/// A label would truncate instead, and on a starred row the part that gets cut is the end - which
+/// is where the group and the topic are, the very thing the line was widened to say.
+public final class MarqueeLabel: UIView {
+
+    private let label = UILabel()
+    /// How far the text has to travel, worked out afresh whenever the line is given a size.
+    private var travelled: CGFloat = -1
+
+    public var text: String? {
+        get { return label.text }
+        set { label.text = newValue; invalidateIntrinsicContentSize(); restart() }
+    }
+
+    public var font: UIFont! {
+        get { return label.font }
+        set { label.font = newValue; invalidateIntrinsicContentSize(); restart() }
+    }
+
+    public var textColor: UIColor! {
+        get { return label.textColor }
+        set { label.textColor = newValue }
+    }
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+        label.numberOfLines = 1
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        // Asks to be as wide as its text, but gives way before anything else does: the line shares
+        // its row with a date that must not be pushed off, so being squeezed is the normal case
+        // and is exactly what starts the text moving.
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    public override var intrinsicContentSize: CGSize {
+        return label.intrinsicContentSize
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        let overflow = max(0, label.intrinsicContentSize.width - bounds.width)
+        guard overflow != travelled else {
+            return
+        }
+        travelled = overflow
+        restart()
+    }
+
+    private func restart() {
+        label.layer.removeAllAnimations()
+        label.transform = .identity
+        let overflow = max(0, label.intrinsicContentSize.width - bounds.width)
+        guard overflow > 0, bounds.width > 0 else {
+            return
+        }
+        // Slow enough to read - roughly 30pt a second - and it waits a moment at each end so the
+        // beginning and the end can both be taken in.
+        let duration = TimeInterval(max(overflow / 30, 1))
+        UIView.animate(withDuration: duration,
+                       delay: 1.5,
+                       options: [.curveEaseInOut, .autoreverse, .repeat, .allowUserInteraction],
+                       animations: { [weak self] in
+            self?.label.transform = CGAffineTransform(translationX: -overflow, y: 0)
+        })
+    }
+}
+
+/// A chat bubble that casts a soft shadow, so it still reads as a bubble when the wallpaper
+/// behind it happens to be the colour the bubble is.
+///
+/// A view of its own rather than a shadow set on any plain UIView, for one reason: the shadow is
+/// drawn from `shadowPath`, and a path can only be worked out once the bubble has a size. Taking
+/// it from the layer's own contents instead would cost an offscreen pass per bubble on every
+/// frame of a scroll.
+public final class BubbleView: UIView {
+
+    /// Off until `lift()` is called: an unlifted bubble behaves exactly like the UIView it
+    /// replaced.
+    private var lifted = false
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        guard lifted else {
+            return
+        }
+        let corners = BubbleView.rectCorners(layer.maskedCorners)
+        layer.shadowPath = UIBezierPath(roundedRect: bounds,
+                                        byRoundingCorners: corners,
+                                        cornerRadii: CGSize(width: layer.cornerRadius,
+                                                            height: layer.cornerRadius)).cgPath
+    }
+
+    /// Lifts the bubble off the background behind it.
+    ///
+    /// Call after the colour and the corners are settled: a bubble holding nothing but a sticker
+    /// has no colour of its own, and a shadow under one would be a shadow cast by nothing.
+    public func lift() {
+        guard let ground = backgroundColor, ground.cgColor.alpha > 0 else {
+            return
+        }
+        // A layer that masks to its bounds cannot draw anything outside them, shadow included.
+        // Nothing in a bubble reaches its edge - the closest, the audio row, stops 10pt short,
+        // and a 10pt corner cuts less than 3pt into the rectangle - so the clipping was not
+        // holding anything in.
+        clipsToBounds = false
+        layer.masksToBounds = false
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOffset = CGSize(width: 0, height: 1)
+        layer.shadowRadius = 3
+        // Black on a dark wallpaper barely registers, and the same weight that reads as a lift in
+        // the dark reads as grime in the light.
+        layer.shadowOpacity = traitCollection.userInterfaceStyle == .dark ? 0.45 : 0.18
+        lifted = true
+        setNeedsLayout()
+    }
+
+    private static func rectCorners(_ mask: CACornerMask) -> UIRectCorner {
+        guard !mask.isEmpty else {
+            return .allCorners
+        }
+        var corners: UIRectCorner = []
+        if mask.contains(.layerMinXMinYCorner) { corners.insert(.topLeft) }
+        if mask.contains(.layerMaxXMinYCorner) { corners.insert(.topRight) }
+        if mask.contains(.layerMinXMaxYCorner) { corners.insert(.bottomLeft) }
+        if mask.contains(.layerMaxXMaxYCorner) { corners.insert(.bottomRight) }
+        return corners
+    }
+}
+
 /// The filmstrip with a handle at each end, for choosing which part of a video is sent.
 public final class VideoTrimStrip: UIView {
 
@@ -9290,5 +9430,752 @@ public enum AudioWaveformStore {
         let top = loudest.max() ?? 1
         let lift = top > 0.01 ? min(4, 0.95 / top) : 1
         return loudest.map { min(1, max(0.07, $0 * lift)) }
+    }
+}
+
+// MARK: - Where each recording was left off
+
+/// The point every audio bubble was last listened up to.
+///
+/// A conversation tears its players down when it is left, and a player is where the position
+/// lived, so coming back used to start every recording again from nothing. The position outlives
+/// the player here, and a bubble built afresh picks up where its own listening stopped.
+public enum AudioPositionStore {
+
+    /// How far into a recording somebody had got, and when they were last there.
+    ///
+    /// The date is what makes pruning possible: the list would otherwise grow by one entry for
+    /// every voice note ever half-listened to and never shrink.
+    private struct Mark: Codable {
+        let time: TimeInterval
+        let at: Date
+    }
+
+    private static let storeKey = "audio_positions_nexilis"
+    /// Enough to cover anything anybody will scroll back to; the oldest fall off beyond it.
+    private static let maximumKept = 300
+    /// Written at most this often. The bubble reports its position ten times a second, and each
+    /// write is an encode and an encrypt of the whole list - doing that on every report would
+    /// cost far more than the thing it is recording.
+    private static let flushInterval: TimeInterval = 2
+
+    private static var marks: [String: Mark] = {
+        return SecureUserDefaults.shared.value(forKey: storeKey) ?? [:]
+    }()
+    private static var lastFlush = Date.distantPast
+    private static let lock = NSLock()
+
+    /// Written out when the app is put away, whatever the clock says: there may be no later.
+    private static let watches: [NSObjectProtocol] = {
+        let flushNow: (Notification) -> Void = { _ in
+            AudioPositionStore.flush(force: true)
+        }
+        return [
+            NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+                                                   object: nil, queue: .main, using: flushNow),
+            NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification,
+                                                   object: nil, queue: .main, using: flushNow)
+        ]
+    }()
+
+    public static func remember(_ time: TimeInterval, for messageId: String) {
+        guard !messageId.isEmpty else {
+            return
+        }
+        _ = watches
+        lock.lock()
+        // A recording played to the end is at rest, not part-way through; remembering the end
+        // would leave the bubble showing a full line that cannot be played without rewinding.
+        if time > 0.25 {
+            marks[messageId] = Mark(time: time, at: Date())
+        } else {
+            marks.removeValue(forKey: messageId)
+        }
+        lock.unlock()
+        flush()
+    }
+
+    public static func position(for messageId: String) -> TimeInterval {
+        _ = watches
+        lock.lock()
+        defer { lock.unlock() }
+        return marks[messageId]?.time ?? 0
+    }
+
+    public static func forget(_ messageId: String) {
+        lock.lock()
+        marks.removeValue(forKey: messageId)
+        lock.unlock()
+        // Rare, and worth writing at once: a recording heard to the end that came back at its old
+        // position after a restart would be the one thing nobody would think to look for.
+        flush(force: true)
+    }
+
+    /// Puts the list on disk, no more often than it needs to be.
+    private static func flush(force: Bool = false) {
+        lock.lock()
+        guard force || Date().timeIntervalSince(lastFlush) >= flushInterval else {
+            lock.unlock()
+            return
+        }
+        lastFlush = Date()
+        if marks.count > maximumKept {
+            let keep = marks.sorted { $0.value.at > $1.value.at }.prefix(maximumKept)
+            marks = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+        }
+        let snapshot = marks
+        lock.unlock()
+        SecureUserDefaults.shared.set(snapshot, forKey: storeKey)
+    }
+}
+
+// MARK: - The strip a recording keeps playing under
+
+/// The window the minimised player floats in.
+///
+/// Same reasoning as the call banner's: over every page of the app, and every touch outside the
+/// strip itself belongs to whatever is underneath.
+final class AudioMiniPlayerWindow: UIWindow {
+
+    /// Fix: touching a window makes it the key window, and `visibleViewController` finds the top
+    /// screen by looking at whichever window is key. Tapping the strip therefore made this window
+    /// the answer to "what is on screen", so the conversation was presented on top of the strip's
+    /// own host - and then torn away with it the moment the strip went, which is the bouncing.
+    /// This window is a strip, never a place to put a screen, so it never takes the key.
+    override var canBecomeKey: Bool {
+        return false
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hit = super.hitTest(point, with: event) else {
+            return nil
+        }
+        return hit === self || hit === rootViewController?.view ? nil : hit
+    }
+}
+
+/// The strip itself: pause, who it is from, and a line showing how far along it is.
+final class AudioMiniPlayerBanner: UIView {
+
+    static let height: CGFloat = 45
+    static let progressHeight: CGFloat = 3
+    static var totalHeight: CGFloat { height + progressHeight }
+
+    private let playButton = UIButton(type: .system)
+    private let avatarView = UIImageView()
+    private let glyphView = UIImageView()
+    private let nameLabel = UILabel()
+    private let closeButton = UIButton(type: .system)
+    private let progressTrack = UIView()
+    private let progressFill = UIView()
+    private var progressWidth: NSLayoutConstraint!
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        build()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        build()
+    }
+
+    private func build() {
+        backgroundColor = .secondarySystemBackground
+
+        [playButton, avatarView, nameLabel, closeButton, progressTrack].forEach {
+            addSubview($0)
+            $0.translatesAutoresizingMaskIntoConstraints = false
+        }
+        progressTrack.addSubview(progressFill)
+        progressFill.translatesAutoresizingMaskIntoConstraints = false
+        avatarView.addSubview(glyphView)
+        glyphView.translatesAutoresizingMaskIntoConstraints = false
+
+        playButton.tintColor = .label
+        playButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .medium), forImageIn: .normal)
+
+        avatarView.contentMode = .scaleAspectFill
+        avatarView.clipsToBounds = true
+        avatarView.layer.cornerRadius = 15
+
+        glyphView.tintColor = .white
+        glyphView.contentMode = .scaleAspectFit
+
+        nameLabel.font = .systemFont(ofSize: 15)
+        nameLabel.textColor = .label
+
+        closeButton.tintColor = .secondaryLabel
+        closeButton.setImage(UIImage(systemName: "xmark.circle"), for: .normal)
+        closeButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .regular), forImageIn: .normal)
+
+        progressTrack.backgroundColor = UIColor.label.withAlphaComponent(0.12)
+        progressFill.backgroundColor = UIColor.label.withAlphaComponent(0.55)
+
+        progressWidth = progressFill.widthAnchor.constraint(equalToConstant: 0)
+        let body = AudioMiniPlayerBanner.height
+
+        // Measured off the reference: the picture and the name sit together in the middle of the
+        // strip, with the two buttons out at the edges - not tucked in beside the pause button.
+        let middle = UILayoutGuide()
+        addLayoutGuide(middle)
+
+        NSLayoutConstraint.activate([
+            playButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            playButton.centerYAnchor.constraint(equalTo: topAnchor, constant: body / 2),
+            playButton.widthAnchor.constraint(equalToConstant: 28),
+            playButton.heightAnchor.constraint(equalToConstant: 28),
+
+            middle.centerXAnchor.constraint(equalTo: centerXAnchor),
+            middle.leadingAnchor.constraint(equalTo: avatarView.leadingAnchor),
+            middle.trailingAnchor.constraint(equalTo: nameLabel.trailingAnchor),
+            middle.leadingAnchor.constraint(greaterThanOrEqualTo: playButton.trailingAnchor, constant: 12),
+            middle.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -12),
+
+            avatarView.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
+            avatarView.widthAnchor.constraint(equalToConstant: 30),
+            avatarView.heightAnchor.constraint(equalToConstant: 30),
+
+            glyphView.centerXAnchor.constraint(equalTo: avatarView.centerXAnchor),
+            glyphView.centerYAnchor.constraint(equalTo: avatarView.centerYAnchor),
+            glyphView.widthAnchor.constraint(equalToConstant: 15),
+            glyphView.heightAnchor.constraint(equalToConstant: 15),
+
+            nameLabel.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: 10),
+            nameLabel.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
+
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
+            closeButton.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 28),
+            closeButton.heightAnchor.constraint(equalToConstant: 28),
+
+            progressTrack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            progressTrack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            progressTrack.topAnchor.constraint(equalTo: topAnchor, constant: body),
+            progressTrack.heightAnchor.constraint(equalToConstant: AudioMiniPlayerBanner.progressHeight),
+
+            progressFill.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
+            progressFill.topAnchor.constraint(equalTo: progressTrack.topAnchor),
+            progressFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
+            progressWidth
+        ])
+    }
+
+    func configure(name: String, avatar: UIImage?, isVoiceNote: Bool) {
+        nameLabel.text = name
+        if let avatar = avatar {
+            avatarView.image = avatar
+            avatarView.backgroundColor = .clear
+            glyphView.isHidden = true
+        } else {
+            // No picture to show, so the bubble's own stand-in is used: a mic for a voice note,
+            // a note on a salmon disc for anything else.
+            avatarView.image = nil
+            avatarView.backgroundColor = isVoiceNote ? .mainColor : UIColor.renderColor(hex: "#D98878")
+            glyphView.image = UIImage(systemName: isVoiceNote ? "mic.fill" : "music.note")
+            glyphView.isHidden = false
+        }
+    }
+
+    func setPlaying(_ playing: Bool) {
+        playButton.setImage(UIImage(systemName: playing ? "pause.fill" : "play.fill"), for: .normal)
+    }
+
+    func setProgress(_ fraction: CGFloat) {
+        progressWidth.constant = max(0, min(1, fraction)) * bounds.width
+    }
+
+    func onPlayPause(_ target: Any, action: Selector) {
+        playButton.addTarget(target, action: action, for: .touchUpInside)
+    }
+
+    func onClose(_ target: Any, action: Selector) {
+        closeButton.addTarget(target, action: action, for: .touchUpInside)
+    }
+
+    /// The strip itself leads back to the conversation the recording is in.
+    func onTap(_ target: Any, action: Selector) {
+        isUserInteractionEnabled = true
+        addGestureRecognizer(UITapGestureRecognizer(target: target, action: action))
+    }
+}
+
+/// Keeps a recording playing after the conversation it belongs to has been left.
+///
+/// Leaving a chat used to stop whatever was playing, which is not what anybody means by leaving a
+/// chat. The player is handed over here instead and carries on, with a strip at the top of the
+/// screen to pause it or put it away. Walking back into the conversation takes the player back,
+/// so the bubble picks the recording up live rather than starting a second one over the top.
+public final class AudioMiniPlayer: NSObject, AVAudioPlayerDelegate {
+
+    public static let shared = AudioMiniPlayer()
+
+    /// Every recording that has been opened, held here rather than by whichever screen happened
+    /// to open it.
+    ///
+    /// This is the whole point of the class now. Screens used to open their own players and hand
+    /// them back and forth as conversations came and went, and handing an object between two
+    /// screens whose lifetimes overlap - UIKit builds the incoming one before tearing down the
+    /// outgoing one - meant a bubble could open a second player for a recording the first one was
+    /// still playing. Two players, one recording: the one making the sound somewhere else, the
+    /// silent one answering every question the bubble asked. No amount of reordering the handover
+    /// fixes that; there simply has to be one player per recording, and one place that keeps it.
+    private var players: [String: AVAudioPlayer] = [:]
+    /// The recording the strip is showing, if the strip is up.
+    private var messageId: String = ""
+
+    /// The player the strip is showing, if any.
+    private var player: AVAudioPlayer? {
+        return messageId.isEmpty ? nil : players[messageId]
+    }
+    private var banner: AudioMiniPlayerBanner?
+    private var window: AudioMiniPlayerWindow?
+    private var ticker: Timer?
+    /// The screens that have been moved down to make room, held weakly - a screen that goes away
+    /// while the strip is up takes its own inset with it.
+    private let insetControllers = NSHashTable<UIViewController>.weakObjects()
+    private var insetTimer: Timer?
+
+    public var isShowing: Bool {
+        return banner != nil
+    }
+
+    /// The recording on the strip, if there is one.
+    public var currentMessageId: String? {
+        return player == nil ? nil : messageId
+    }
+
+    /// The player behind a given recording, while the strip still holds it.
+    ///
+    /// A bubble can read its button, its reading and its line straight off this without taking
+    /// ownership. Ownership moving is a separate thing that can be early, late, or - if the row
+    /// was never built while the strip held it - not happen at all; what the bubble shows should
+    /// not wait on any of that.
+    public func player(for messageId: String) -> AVAudioPlayer? {
+        return players[messageId]
+    }
+
+    /// The player for a recording, opened once and kept.
+    ///
+    /// Every bubble asks here instead of opening the file itself, so a recording can only ever
+    /// have one player however many screens draw it.
+    ///
+    /// - Parameters:
+    ///   - messageId: the message the recording belongs to.
+    ///   - url: where the file is, used only if it has not been opened yet.
+    ///   - rate: the reading speed chosen for this bubble.
+    public func player(for messageId: String, openingFrom url: URL, rate: Float = 1) -> AVAudioPlayer? {
+        if let existing = players[messageId] {
+            return existing
+        }
+        guard let made = try? AVAudioPlayer(contentsOf: url) else {
+            return nil
+        }
+        // Set before the first play or the rate is ignored.
+        made.enableRate = true
+        made.rate = rate
+        // Picked up where this bubble was last listened to.
+        let left = AudioPositionStore.position(for: messageId)
+        if left > 0, left < made.duration - 0.05 {
+            made.currentTime = left
+        }
+        players[messageId] = made
+        return made
+    }
+
+    /// Pauses every recording except the one named, so only one is ever running.
+    ///
+    /// One recording at a time is a rule about the app, not about a screen: the other one may be
+    /// another bubble in this conversation, or one still playing on the strip from a conversation
+    /// that was left. Only this object can see both, so the rule lives here.
+    ///
+    /// - Returns: the recordings it paused, so a screen showing any of them can put those bubbles
+    ///   back to rest.
+    @discardableResult
+    public func pauseAllExcept(_ messageId: String) -> [String] {
+        var paused: [String] = []
+        for (id, player) in players where id != messageId && player.isPlaying {
+            player.pause()
+            AudioPositionStore.remember(player.currentTime, for: id)
+            paused.append(id)
+        }
+        // The strip stands for something that is playing. If that is what just stopped, it goes.
+        if paused.contains(self.messageId) {
+            stop()
+        }
+        return paused
+    }
+
+    /// Forgets a recording that has been played to the end, so the next listen opens it afresh.
+    public func release(_ messageId: String) {
+        if self.messageId == messageId {
+            stop()
+        }
+        players[messageId]?.stop()
+        players.removeValue(forKey: messageId)
+    }
+
+    private override init() {
+        super.init()
+    }
+
+    // MARK: - Handing over and taking back
+
+    /// Takes a playing recording off a conversation that is being left.
+    ///
+    /// Nothing happens for a player that is not actually playing - a paused bubble has no reason
+    /// to follow the reader around.
+    public func takeOver(player: AVAudioPlayer,
+                         messageId: String,
+                         name: String,
+                         avatar: UIImage?,
+                         isVoiceNote: Bool) {
+        guard player.isPlaying else {
+            return
+        }
+        // Nothing changes hands: the player was already this object's. All that happens is that
+        // the strip goes up, because there is no longer a bubble on screen showing it.
+        players[messageId] = player
+        // Fix: this used to refuse a handover that arrived just after the recording had been
+        // given back, on the grounds that it could only be the screen being left tearing down
+        // late. It could also be somebody pressing back a second after walking in - and refusing
+        // that left the player with nobody holding it at all, so it was released and the sound
+        // stopped. Always accepted now; a conversation that already has the recording takes it
+        // straight back in reclaimPlayingAudioIfMine, and the strip goes with it.
+        self.messageId = messageId
+        player.delegate = self
+        show(name: name, avatar: avatar, isVoiceNote: isVoiceNote)
+        startTicking()
+    }
+
+    /// Gives the player back to the conversation the recording belongs to.
+    public func reclaim(messageId: String) -> AVAudioPlayer? {
+        guard let player = players[messageId] else {
+            return nil
+        }
+        // The player stays exactly where it is; only the strip goes, because a bubble is showing
+        // the recording again and two things showing the same recording is one too many.
+        if self.messageId == messageId {
+            self.messageId = ""
+            player.delegate = nil
+            dismiss()
+        }
+        return player
+    }
+
+    /// Stops whatever is on the strip and takes it away.
+    public func stop() {
+        stopPlayback(keepPosition: true)
+        dismiss()
+    }
+
+    private func stopPlayback(keepPosition: Bool) {
+        if let player = player {
+            if keepPosition {
+                AudioPositionStore.remember(player.currentTime, for: messageId)
+            }
+            player.pause()
+        }
+        messageId = ""
+    }
+
+    // MARK: - The strip
+
+    private func show(name: String, avatar: UIImage?, isVoiceNote: Bool) {
+        if let banner = banner {
+            banner.configure(name: name, avatar: avatar, isVoiceNote: isVoiceNote)
+            banner.setPlaying(true)
+            return
+        }
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+            return
+        }
+        let banner = AudioMiniPlayerBanner()
+        banner.configure(name: name, avatar: avatar, isVoiceNote: isVoiceNote)
+        banner.setPlaying(true)
+        banner.onPlayPause(self, action: #selector(playPauseTapped))
+        banner.onClose(self, action: #selector(closeTapped))
+        banner.onTap(self, action: #selector(bannerTapped))
+
+        let host = UIViewController()
+        host.view.backgroundColor = .clear
+        host.view.addSubview(banner)
+        banner.translatesAutoresizingMaskIntoConstraints = false
+
+        let window = AudioMiniPlayerWindow(windowScene: scene)
+        window.backgroundColor = .clear
+        window.windowLevel = .statusBar + 1
+        window.rootViewController = host
+        window.isHidden = false
+
+        let total = AudioMiniPlayerBanner.height + AudioMiniPlayerBanner.progressHeight
+        NSLayoutConstraint.activate([
+            banner.leadingAnchor.constraint(equalTo: host.view.leadingAnchor),
+            banner.trailingAnchor.constraint(equalTo: host.view.trailingAnchor),
+            banner.topAnchor.constraint(equalTo: host.view.safeAreaLayoutGuide.topAnchor),
+            banner.heightAnchor.constraint(equalToConstant: total)
+        ])
+        window.layoutIfNeeded()
+
+        self.window = window
+        self.banner = banner
+
+        banner.transform = CGAffineTransform(translationX: 0, y: -(total + window.safeAreaInsets.top))
+        UIView.animate(withDuration: 0.28, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0.4) {
+            banner.transform = .identity
+        }
+        // Fix: the strip was laid over the top of whatever was on screen, so it sat on the
+        // navigation bar and hid it. Everything underneath is moved down by exactly its height
+        // instead - the same thing the minimised call does.
+        refreshInsetsIfShowing()
+        startInsetWatch()
+    }
+
+    // MARK: - Making room rather than covering
+
+    /// Moves down anything on screen that has not been moved down yet: the window's root, and
+    /// every screen presented on top of it. Their own children - tabs, navigation stacks, the
+    /// screens inside them - inherit it, so only the outermost of each is touched.
+    private func refreshInsetsIfShowing() {
+        guard isShowing, let root = appWindow()?.rootViewController else {
+            return
+        }
+        var chain: [UIViewController] = []
+        var next: UIViewController? = root
+        // Presentation only ever nests a few deep; the count is here so a broken hierarchy
+        // cannot spin this forever.
+        for _ in 0..<20 {
+            guard let current = next else {
+                break
+            }
+            chain.append(current)
+            next = current.presentedViewController
+        }
+        // Alerts and action sheets place themselves; moving their safe area only moves them
+        // somewhere they were never meant to be.
+        for controller in chain where !(controller is UIAlertController)
+            && !insetControllers.contains(controller) {
+            insetControllers.add(controller)
+            UIView.animate(withDuration: 0.25) {
+                controller.additionalSafeAreaInsets.top += AudioMiniPlayerBanner.totalHeight
+                controller.view.layoutIfNeeded()
+            }
+        }
+    }
+
+    private func clearInsets() {
+        for controller in insetControllers.allObjects {
+            let restored = max(0, controller.additionalSafeAreaInsets.top - AudioMiniPlayerBanner.totalHeight)
+            UIView.animate(withDuration: 0.25) {
+                controller.additionalSafeAreaInsets.top = restored
+                controller.view.layoutIfNeeded()
+            }
+        }
+        insetControllers.removeAllObjects()
+    }
+
+    /// Screens come and go while a recording plays, and most of the ones in this project never
+    /// call super in viewDidAppear - so there is no notification to rely on. Looking every half
+    /// second costs a walk down a handful of controllers and covers every route.
+    private func startInsetWatch() {
+        insetTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.refreshInsetsIfShowing()
+        }
+        timer.tolerance = 0.2
+        RunLoop.main.add(timer, forMode: .common)
+        insetTimer = timer
+    }
+
+    private func stopInsetWatch() {
+        insetTimer?.invalidate()
+        insetTimer = nil
+    }
+
+    /// The app's own window, never one of the strips'.
+    private func appWindow() -> UIWindow? {
+        return UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { !($0 is AudioMiniPlayerWindow) && !($0 is MiniCallBannerWindow)
+                && !$0.isHidden && $0.rootViewController != nil })
+    }
+
+    private func dismiss() {
+        ticker?.invalidate()
+        ticker = nil
+        stopInsetWatch()
+        clearInsets()
+        guard let banner = banner, let window = window else {
+            return
+        }
+        self.banner = nil
+        self.window = nil
+        let total = AudioMiniPlayerBanner.height + AudioMiniPlayerBanner.progressHeight
+        UIView.animate(withDuration: 0.22, animations: {
+            banner.transform = CGAffineTransform(translationX: 0, y: -(total + window.safeAreaInsets.top))
+        }, completion: { _ in
+            window.isHidden = true
+            window.rootViewController = nil
+        })
+    }
+
+    private func startTicking() {
+        ticker?.invalidate()
+        let ticker = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self = self, let player = self.player else {
+                return
+            }
+            AudioPositionStore.remember(player.currentTime, for: self.messageId)
+            let fraction = player.duration > 0 ? CGFloat(player.currentTime / player.duration) : 0
+            self.banner?.setProgress(fraction)
+            self.banner?.setPlaying(player.isPlaying)
+        }
+        RunLoop.main.add(ticker, forMode: .common)
+        self.ticker = ticker
+    }
+
+    // MARK: - Buttons
+
+    @objc private func playPauseTapped() {
+        guard let player = player else {
+            return
+        }
+        if player.isPlaying {
+            player.pause()
+            AudioPositionStore.remember(player.currentTime, for: messageId)
+        } else {
+            // Same rule from here as from a bubble: starting one stops the rest.
+            pauseAllExcept(messageId)
+            player.play()
+        }
+        banner?.setPlaying(player.isPlaying)
+    }
+
+    @objc private func closeTapped() {
+        stop()
+    }
+
+    /// Back to the conversation the recording is in. The bubble takes its player back as it is
+    /// built, so the reader lands on it still playing rather than on a recording started afresh.
+    @objc private func bannerTapped() {
+        guard !messageId.isEmpty else {
+            return
+        }
+        let id = messageId
+        // Opened on the next turn of the run loop, once the tap - and whatever the system does
+        // about windows because of it - is finished with.
+        DispatchQueue.main.async {
+            APIS.openChatForLocalMessage(id)
+        }
+    }
+
+    // MARK: - AVAudioPlayerDelegate
+
+    public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        let finished = messageId
+        AudioPositionStore.forget(finished)
+        messageId = ""
+        dismiss()
+        players[finished]?.currentTime = 0
+    }
+}
+
+
+/// A tap that remembers which message it belongs to.
+///
+/// The label it sits on is handed to a different message the moment its row scrolls away, so the
+/// message cannot be looked up from the view when the tap arrives - it is carried here instead.
+final class ReadMoreTap: UITapGestureRecognizer {
+
+    let messageId: String
+
+    init(messageId: String, target: Any?, action: Selector?) {
+        self.messageId = messageId
+        super.init(target: target, action: action)
+    }
+}
+
+// MARK: - Folding a very long message
+
+/// The rule for folding a long message behind "Read more", in one place.
+///
+/// Four screens draw a message bubble - the two conversations, starred messages and message info -
+/// and the rule has to be the same in all of them. It was written twice before this and the two
+/// copies would have drifted at the first change to the limit.
+public enum LongMessage {
+
+    /// How many lines of a long message are shown before the rest is folded away.
+    ///
+    /// WhatsApp folds a long message rather than letting it run down the screen. The figure they
+    /// publish is five lines, but that is for marketing messages, where cutting a stranger's
+    /// advert short is the point of it; in a conversation it would fold perfectly ordinary
+    /// messages. Fifty is about four screens of text - long enough that nothing anybody actually
+    /// types gets folded, and short enough that a pasted document does.
+    public static let lineLimit = 50
+    /// Roughly what one line of a bubble holds. Only used to tell, without measuring anything,
+    /// whether a message is certainly longer than the limit.
+    private static let charactersPerLine = 34
+
+    /// Messages the reader has asked to see in full. Kept here rather than on a screen so that
+    /// opening a message on one screen leaves it open on the others.
+    private static var expandedIds = Set<String>()
+    private static let lock = NSLock()
+
+    public static func expand(_ messageId: String) {
+        lock.lock()
+        expandedIds.insert(messageId)
+        lock.unlock()
+    }
+
+    public static func isExpanded(_ messageId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return expandedIds.contains(messageId)
+    }
+
+    /// Whether this message is long enough to be worth folding.
+    ///
+    /// Either it holds more characters than the limit could possibly show, or it already has that
+    /// many line breaks in it - a short message written as fifty one-word lines is long on the
+    /// screen even though it is nothing on the character count.
+    public static func needsFolding(_ text: String) -> Bool {
+        if text.count > lineLimit * charactersPerLine {
+            return true
+        }
+        return text.filter({ $0 == "\n" }).count >= lineLimit
+    }
+
+    /// Whether this message is being shown folded at the moment.
+    public static func isFolded(_ messageId: String, text: String) -> Bool {
+        return !messageId.isEmpty && !isExpanded(messageId) && needsFolding(text)
+    }
+
+    /// The part of a long message that is shown while it is folded, cut at a word.
+    public static func folded(_ text: String) -> String {
+        let budget = lineLimit * charactersPerLine
+        var cut = String(text.prefix(budget))
+        // A cut in the middle of a word reads as a typo; back up to the last space or line break.
+        if let breakPoint = cut.lastIndex(where: { $0 == " " || $0 == "\n" }),
+           cut.distance(from: cut.startIndex, to: breakPoint) > budget / 2 {
+            cut = String(cut[cut.startIndex..<breakPoint])
+        }
+        // Folding at a line break would otherwise leave a blank line under the text.
+        return cut.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The text to put in the bubble: the whole of it, or as much as the fold allows.
+    public static func visibleText(_ text: String, messageId: String) -> String {
+        return isFolded(messageId, text: text) ? folded(text) : text
+    }
+
+    /// The "Read more" that closes a folded message.
+    public static func suffix(fontSize: CGFloat) -> NSAttributedString {
+        return NSAttributedString(string: "\u{2026} " + "Read more".localized(),
+                                  attributes: [.foregroundColor: UIColor.mainColor,
+                                               .font: UIFont.systemFont(ofSize: fontSize, weight: .medium)])
     }
 }

@@ -40,6 +40,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     @IBOutlet weak var contraintBottomMention: NSLayoutConstraint!
     public var dataGroup: [String: Any?] = [:]
     public var dataTopic: [String: Any?] = [:]
+
+    /// The conversation participant colours are dealt for.
+    ///
+    /// A topic is its own conversation with its own member list, so it takes the chat id rather
+    /// than the group's - which is the same thing a message carries in l_pin when it is sent
+    /// into a topic.
+    func conversationScope() -> String {
+        let topic = self.dataTopic["chat_id"] as? String ?? ""
+        return topic.isEmpty ? (self.dataGroup["group_id"] as? String ?? "") : topic
+    }
     var dataMessages: [[String: Any?]] = []
     var dataDates: [String] = []
 
@@ -1606,6 +1616,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     public override func viewDidAppear(_ animated: Bool) {
         prepareNavigationBar()
         updateProfile()
+        // A recording carried in on the strip belongs to a bubble here again. Asked for now, and
+        // once more a moment later: the conversation being left tears its players down after this
+        // one has already drawn, so the strip may not have been handed anything yet.
+        reclaimPlayingAudioIfMine()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.reclaimPlayingAudioIfMine()
+        }
         // The first page only covers the screen; topping it up now means the reader's first
         // flick upwards does not immediately run out of messages.
         DispatchQueue.main.async { [weak self] in
@@ -2545,18 +2562,36 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         guard unread > 0 else {
             return nil
         }
-        let position = countMessages() - Int64(unread)
-        guard position >= 0 else {
-            return nil
-        }
         var messageId: String?
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id FROM MESSAGE where \(self.messageWhereClause()) order by server_date asc LIMIT 1 OFFSET \(position)"), cursor.next() {
+            var total: Int64 = 0
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT COUNT(*) FROM MESSAGE where \(self.readableMessageWhereClause())"), cursor.next() {
+                total = cursor.longLongInt(forColumnIndex: 0)
+                cursor.close()
+            }
+            let position = total - Int64(unread)
+            guard position >= 0 else {
+                return
+            }
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id FROM MESSAGE where \(self.readableMessageWhereClause()) order by server_date asc LIMIT 1 OFFSET \(position)"), cursor.next() {
                 messageId = cursor.string(forColumnIndex: 0)
                 cursor.close()
             }
         })
         return messageId
+    }
+
+    /// The same conversation, but only the messages that can be unread.
+    ///
+    /// Fix: counting back `unread` places from the total used the total of *everything* the
+    /// conversation holds, and not everything in it is a message somebody reads. A group keeps
+    /// its own notices in the same table - "pinned a message" is written here as an NTFPIN row,
+    /// by this screen and by IncomingThread - and they never count towards the unread number,
+    /// which is the same reason no read receipt is ever sent for them (conditionSendRead). One
+    /// of those among the newest messages pushed the count a place too far and the marker landed
+    /// past the first unread message, leaving it above the top of the screen.
+    private func readableMessageWhereClause() -> String {
+        return "\(messageWhereClause()) AND message_id NOT LIKE 'NTFPIN%'"
     }
 
     /// Whether there are older messages left in the database.
@@ -4440,22 +4475,43 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         row[TypeDataMessage.spec_file] = specFileString
         specFileString = ""
         lastTextLength = 0
-        if !dataDates.contains("Today".localized()){
+        // Fix: the section, the row and a forced layout used to be three separate transactions,
+        // so the table animated twice and was measured in between - and on a long history that
+        // measurement moves the offset under the reader, which is the jump. One update, one
+        // settling, and the slide to the newest message starts only once it is over.
+        let opensNewDay = !dataDates.contains("Today".localized())
+        if opensNewDay {
             dataDates.append("Today".localized())
-            tableChatView.insertSections(IndexSet(integer: dataDates.count - 1), with: .fade)
         }
         row["chat_date"] = "Today".localized()
         // One more of the conversation's messages is now in the loaded window.
         loadedCount += 1
-        if let collageRow = foldIntoImageGroup(row) {
-            // Part of the run above it: no new row goes in, the row that draws the
-            // collage is redrawn to take it.
-            tableChatView.reloadRows(at: [collageRow], with: .none)
-        } else {
-            dataMessages.append(row)
-            tableChatView.insertRows(at: [IndexPath(row: messages(onDate: dataDates[dataDates.count - 1]).count - 1, section: dataDates.count - 1)], with: .fade)
-        }
-        tableChatView.layoutIfNeeded()
+        let newRow = row
+        tableChatView.performBatchUpdates({
+            if opensNewDay {
+                self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
+            }
+            if let collageRow = self.foldIntoImageGroup(newRow) {
+                // Part of the run above it: no new row goes in, the row that draws the
+                // collage is redrawn to take it.
+                self.tableChatView.reloadRows(at: [collageRow], with: .none)
+            } else {
+                self.dataMessages.append(newRow)
+                self.tableChatView.insertRows(at: [IndexPath(row: self.messages(onDate: self.dataDates[self.dataDates.count - 1]).count - 1, section: self.dataDates.count - 1)], with: .none)
+            }
+        }, completion: { [weak self] _ in
+            guard let self = self else {
+                return
+            }
+            let lastSection = self.tableChatView.numberOfSections - 1
+            if lastSection >= 0 {
+                let lastRow = self.tableChatView.numberOfRows(inSection: lastSection) - 1
+                if lastRow >= 0 {
+                    self.playBubbleArrival(at: IndexPath(row: lastRow, section: lastSection), outgoing: true)
+                }
+            }
+            self.slideToNewestMessage()
+        })
         if credential == "1" {
             var timer = Timer()
             var minute = 60
@@ -4503,7 +4559,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         deleteLinkPreview()
         listMentionInTextField.removeAll()
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
-        self.tableChatView.scrollToBottom()
+        // The slide happens when the insert has settled - see the batch update above. Chasing the
+        // row with a second, animated scroll from here was the other half of the bouncing.
         if self.markerCounter != nil {
             let lastMarkerCounter = self.markerCounter
             self.markerCounter = nil
@@ -6944,7 +7001,12 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 self.tableChatView.reloadRows(at: [collageRow], with: .none)
             } else {
                 self.dataMessages.append(row)
-                self.tableChatView.insertRows(at: [IndexPath(row: self.messages(onDate: self.dataDates[self.dataDates.count - 1]).count - 1, section: self.dataDates.count - 1)], with: .none)
+                let arrived = IndexPath(row: self.messages(onDate: self.dataDates[self.dataDates.count - 1]).count - 1, section: self.dataDates.count - 1)
+                self.tableChatView.insertRows(at: [arrived], with: .none)
+                self.tableChatView.layoutIfNeeded()
+                // A message that arrives grows out of the side it came from, the way one that is
+                // sent grows out of ours.
+                self.playBubbleArrival(at: arrived, outgoing: false)
             }
             self.tableChatView.layoutIfNeeded()
         }
@@ -8489,7 +8551,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         profileMessage.isUserInteractionEnabled = true
         profileMessage.addGestureRecognizer(tapGestureRecognizer)
         
-        var containerMessage = UIView()
+        var containerMessage: UIView = BubbleView()
+        containerMessage.tag = EditorGroup.bubbleTag
         if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
             containerMessage = SecureField().secureContainer!
         }
@@ -8512,6 +8575,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerMessage.anchor(top: cellMessage.contentView.topAnchor, bottom: cellMessage.contentView.bottomAnchor, paddingTop: 5, paddingBottom: 5, centerX: cellMessage.contentView.centerXAnchor, minWidth: 40, maxWidth: UIScreen.main.bounds.width - 40)
             containerMessage.layer.cornerRadius = 8
             containerMessage.clipsToBounds = true
+            (containerMessage as? BubbleView)?.lift()
             
             let textMessage = UILabel()
             containerMessage.addSubview(textMessage)
@@ -8584,7 +8648,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
 
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
-        var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32)
+        // Your own messages carry neither your picture nor your name - you know who you are, and
+        // WhatsApp leaves both off for the same reason. The name is what the 32 points at the top
+        // of a bubble were held for, so without it the content starts at 15 like a personal chat.
+        let isOwnMessage = dataMessages[indexPath.row]["f_pin"] as? String == idMe
+        // Own messages carry no name inside the bubble, so their text starts higher. The check
+        // further down has to recognise whichever of the two applies, which is why this is a
+        // variable rather than the literal 32 that check used to compare against.
+        let baseTopMarginText: CGFloat = isOwnMessage ? 15 : 32
+        var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: baseTopMarginText)
         topMarginText.priority = .defaultHigh
         
         let dataProfile = getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"]  as? String ?? "", message_id: dataMessages[indexPath.row]["message_id"]  as? String ?? "")
@@ -8653,30 +8725,17 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         }
         
         if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-            profileMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
-            profileMessage.trailingAnchor.constraint(equalTo: cellMessage.contentView.trailingAnchor, constant: -15).isActive = true
-            profileMessage.heightAnchor.constraint(equalToConstant: 37).isActive = true
-            profileMessage.widthAnchor.constraint(equalToConstant: 35).isActive = true
-            profileMessage.circle()
-            profileMessage.clipsToBounds = true
-            profileMessage.backgroundColor = .lightGray
-            profileMessage.image = UIImage(systemName: "person")
-            profileMessage.tintColor = .white
-            profileMessage.contentMode = .scaleAspectFit
-            
-            let pictureImage = dataProfile["image_id"]
-            if (pictureImage != "" && pictureImage != nil) {
-                profileMessage.setImage(name: pictureImage!)
-                profileMessage.contentMode = .scaleAspectFill
-            }
-            
+            // No picture on your own messages, so the bubble takes the room it used to leave.
+            profileMessage.removeFromSuperview()
+
             containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
             containerMessage.leadingAnchor.constraint(greaterThanOrEqualTo: cellMessage.contentView.leadingAnchor, constant: 60).isActive = true
-            containerMessage.trailingAnchor.constraint(equalTo: profileMessage.leadingAnchor, constant: -5).isActive = true
+            containerMessage.trailingAnchor.constraint(equalTo: cellMessage.contentView.trailingAnchor, constant: -15).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
             containerMessage.layer.cornerRadius = 10.0
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner, .layerMinXMinYCorner]
             containerMessage.clipsToBounds = true
+            (containerMessage as? BubbleView)?.lift()
             
             timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
             
@@ -8711,21 +8770,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 }
             }
             
-            let nameSender = UILabel()
-            containerMessage.addSubview(nameSender)
-            nameSender.translatesAutoresizingMaskIntoConstraints = false
-            nameSender.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
-            nameSender.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-            nameSender.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            nameSender.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-            nameSender.text = dataProfile["name"]
-            nameSender.textAlignment = .right
+            // Your own name is not shown here; only the bubble colour is still needed.
             if (dataMessages[indexPath.row]["attachment_flag"] as? String == "11" && dataMessages[indexPath.row]["reff_id"]as? String == "") {
                 containerMessage.backgroundColor = .clear
-                nameSender.textColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .lightGray : .mainColor
             } else {
                 containerMessage.backgroundColor = .blueBubbleColor
-                nameSender.textColor = UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? .lightGray : .mainColor
             }
             
         } else {
@@ -8829,6 +8878,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerMessage.layer.cornerRadius = 10.0
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
             containerMessage.clipsToBounds = true
+            (containerMessage as? BubbleView)?.lift()
             
             timeMessage.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: 8).isActive = true
             
@@ -8849,7 +8899,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 nameSender.text = dataProfile["name"]
             }
             nameSender.textAlignment = .left
-            nameSender.textColor = .mainColor
+            nameSender.textColor = UIColor.participant(
+                pin: dataMessages[indexPath.row]["f_pin"] as? String ?? "",
+                conversation: self.conversationScope(),
+                on: containerMessage.backgroundColor ?? .whiteBubbleColor)
         }
         
         if ((dataMessages[indexPath.row]["read_receipts"] as? String) == "8" ||
@@ -9073,7 +9126,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 imageSticker.translatesAutoresizingMaskIntoConstraints = false
                 let data = queryMessageReply(message_id: reffChat)
                 if reffChat.isEmpty || data.count == 0 {
-                    imageSticker.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32).isActive = true
+                    imageSticker.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: isOwnMessage ? 15 : 32).isActive = true
                     imageSticker.widthAnchor.constraint(equalToConstant: 80).isActive = true
                 } else {
                     imageSticker.widthAnchor.constraint(greaterThanOrEqualToConstant: 80).isActive = true
@@ -9089,11 +9142,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 imageSticker.contentMode = .scaleAspectFit
             }
             else {
-                messageText.attributedText = textChat.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+                applyReadMore(to: messageText, text: textChat, messageId: messageIdChat) {
+                    $0.richText(group_id: self.dataGroup["group_id"] as? String ?? "")
+                }
                 modifyText(at: indexPath)
             }
         } else {
-            messageText.attributedText = textChat.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
+            applyReadMore(to: messageText, text: textChat, messageId: messageIdChat) {
+                $0.richText(group_id: self.dataGroup["group_id"] as? String ?? "")
+            }
             modifyText(at: indexPath)
         }
         
@@ -9104,7 +9161,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 return
             }
 
-            var text = textChat
+            // Fix: this rebuilt the whole attributed string from the full message text to add
+            // link attributes, and then assigned it - so a message that had just been folded was
+            // handed its full text back one line later and the "Read more" went with it. It works
+            // on what is actually being shown now, and puts the "Read more" back afterwards.
+            var text = foldIfLong(textChat, messageId: messageIdChat)
             let messageData = dataMessages[indexPath.row]
 
             // Remove segment after separator
@@ -9147,6 +9208,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 ], range: range)
             }
 
+            if isFolded(messageIdChat, text: textChat) {
+                finalAttributed.append(readMoreSuffix())
+            }
             messageText.attributedText = finalAttributed
             messageText.delegate = self
         }
@@ -9158,7 +9222,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         }
         
         if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String != "11"  && !(dataMessages[indexPath.row][TypeDataMessage.message_id] as? String ?? "").contains("NTFPIN_") {
-            messageText.attributedText = textChat.richText(isSearching: true, textSearch: textSearch, group_id: self.dataGroup["group_id"]  as? String ?? "")
+            applyReadMore(to: messageText, text: textChat, messageId: messageIdChat) {
+                $0.richText(isSearching: true, textSearch: self.textSearch, group_id: self.dataGroup["group_id"] as? String ?? "")
+            }
         }
         
         let stringDate = (dataMessages[indexPath.row]["server_date"]  as? String ?? "")
@@ -9196,9 +9262,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             // its own now, and the bubble takes that.
             messageText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             messageText.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            var padTop: CGFloat = 32
+            // Fix: 32 is the room the sender's name takes at the top of a bubble, and an own
+            // bubble does not show one - so it was holding a gap open for something that is not
+            // there. Own bubbles take the same 15 a personal chat does; the extra 20 a
+            // "forwarded" line needs is the same either way.
+            var padTop: CGFloat = isOwnMessage ? 15 : 32
             if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 {
-                padTop = 52
+                padTop += 20
             }
             
             let incomingAudio = (dataMessages[indexPath.row]["f_pin"] as? String) != idMe
@@ -9279,20 +9349,24 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             
                         }
                     }
-                    if audioPlayers[messageIdChat] == nil {
-                        do {
-                            let audioPlayer = try AVAudioPlayer(contentsOf: url)
-                            // Set before the first play or the rate is ignored, so it is set here
-                            // once rather than at the moment somebody asks for a faster reading.
-                            audioPlayer.enableRate = true
-                            audioPlayer.rate = audioRates[messageIdChat] ?? 1
-                            audioPlayers[messageIdChat] = audioPlayer
-                            audioPlayer.delegate = self
-                        } catch {
-                            print("Error loading audio: \(error)")
+                    // One player per recording, kept by the service - never opened here. A
+                    // bubble that opened its own would be a second player for a recording that
+                    // may already be playing somewhere else, which is what left this row silent
+                    // and showing a play button while the sound carried on.
+                    let audioPlayer = AudioMiniPlayer.shared.player(for: messageIdChat,
+                                                                    openingFrom: url,
+                                                                    rate: audioRates[messageIdChat] ?? 1)
+                    if let audioPlayer = audioPlayer, audioPlayers[messageIdChat] !== audioPlayer {
+                        audioPlayers[messageIdChat] = audioPlayer
+                        audioPlayer.delegate = self
+                        if audioPlayer.isPlaying {
+                            // Still running from before this screen was opened - the strip comes
+                            // down and this bubble shows it from here on.
+                            _ = AudioMiniPlayer.shared.reclaim(messageId: messageIdChat)
+                            playingAudioId = messageIdChat
+                            beginAudioSession(messageIdChat)
                         }
                     }
-                    let audioPlayer = audioPlayers[messageIdChat]
                     // Fix: the length and the reading under the line were written only on the pass
                     // that first opened the file. A player now outlives its audio finishing (so a
                     // drag in progress is not cut short), so a bubble scrolled back to would have
@@ -9302,7 +9376,11 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         progressSliderAudio.value = Float(player.currentTime)
                         timeLabelAudio.text = formatTime(player.currentTime > 0 ? player.currentTime : player.duration)
                     }
-                    if playingAudioId == messageIdChat, let player = audioPlayer, player.isPlaying {
+                    // Fix: this also asked whether this screen thought it was the one playing,
+                    // which it does not think while the strip still holds the recording - so a
+                    // bubble drawn at that moment showed a play button over audible sound. What
+                    // the player is doing is the only thing that decides.
+                    if let player = audioPlayer, player.isPlaying {
                         playButtonAudio.setImage(UIImage(systemName: "pause.fill"), for: .normal)
                     } else {
                         playButtonAudio.setImage(UIImage(systemName: "play.fill"), for: .normal)
@@ -9315,6 +9393,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     audioSliders[messageIdChat] = progressSliderAudio
                     audioPlayButtons[messageIdChat] = playButtonAudio
                     audioTimeLabels[messageIdChat] = timeLabelAudio
+                    // Already playing when the bubble was built - taken back from the strip, or
+                    // scrolled away from and returned to - so the row needs its own ticker or the
+                    // line would sit still while the recording ran.
+                    if let running = audioPlayer, running.isPlaying, timers[messageIdChat] == nil {
+                        startAudioTicker(messageId: messageIdChat,
+                                         progressSlider: progressSliderAudio,
+                                         timeLabel: timeLabelAudio,
+                                         wave: isVoiceNoteAudio ? waveAudio : nil)
+                    }
                     if isVoiceNoteAudio {
                         if let known = AudioWaveformStore.levels(for: audioChat) {
                             waveAudio.levels = known
@@ -9391,10 +9478,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 statusMessage.isHidden = true
                 imageStared.isHidden = true
                 topMarginText.constant = topMarginText.constant + 220
-                var constTop = 35.0
+                // Fix: 35 is 5 plus the 30 the sender's name takes; an own bubble shows no name,
+                // so it sits at the same 5 a personal chat uses.
+                var constTop = isOwnMessage ? 5.0 : 35.0
                 if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 {
                     topMarginText.constant = topMarginText.constant + 20
-                    constTop = 55.0
+                    // Same 30 for the name, still only on a bubble that shows one.
+                    constTop = isOwnMessage ? 35.0 : 55.0
                 }
                 // WhatsApp's arrangement, and the reason it changes with the count: two
                 // images are two tall halves side by side, three are one tall half beside two
@@ -9613,7 +9703,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 imageThumb.frame = CGRect(x: 0, y: 0, width: getWidthImage, height: getHeightImage)
                 let data = queryMessageReply(message_id: reffChat)
                 if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 == 0) {
-                    imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 37).isActive = true
+                    // Fix: 37 leaves room for the sender's name, which an own bubble does not
+                    // show. Personal chats use 15 here and so does an own bubble now.
+                    imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: isOwnMessage ? 15 : 37).isActive = true
                 }
                 imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 imageThumb.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
@@ -9961,7 +10053,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerViewFile.translatesAutoresizingMaskIntoConstraints = false
             let data = queryMessageReply(message_id: reffChat)
             if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 == 0) {
-                containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 37).isActive = true
+                // Fix: 37 leaves room for the sender's name, which an own bubble does not show.
+                containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: isOwnMessage ? 15 : 37).isActive = true
             } else {
                 containerViewFile.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
             }
@@ -10248,11 +10341,30 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let data = queryMessageReply(message_id: reffChat)
             if data.count != 0 {
                 
+                // Measured off a WhatsApp bubble: the bubble is #D6E8FC and the quote inside it is
+                // #D3E1F2 - the bubble lifted toward grey, not darkened with black, which is a
+                // light grey at 22%. Taken as an overlay it holds on any bubble colour, and the
+                // text on it is the foreground held back rather than a colour of its own: that
+                // #303237 quote is black at 77%.
+                //
+                // Dark mode turns the overlay over. WhatsApp's dark bubble is a deep green, so
+                // lifting it still leaves somewhere dark to write on; ours is a bright blue
+                // (#367dd9), and lifting that leaves white text at 2.2:1 - unreadable. Darkening
+                // instead moves the quote away from the bubble the same way, and the text goes to
+                // 87% for the same reason WhatsApp can afford 60% and we cannot.
+                let isDarkQuote = self.traitCollection.userInterfaceStyle == .dark
+                let quoteOverlay: UIColor = isDarkQuote
+                    ? .black.withAlphaComponent(0.22)
+                    : UIColor(white: 0.784, alpha: 0.22)
+                let quotedTextColour: UIColor = isDarkQuote
+                    ? .white.withAlphaComponent(0.87)
+                    : .black.withAlphaComponent(0.77)
+
                 let containerReply = UIView()
                 containerMessage.addSubview(containerReply)
                 containerReply.translatesAutoresizingMaskIntoConstraints = false
                 containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-                containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32).isActive = true
+                containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: isOwnMessage ? 15 : 32).isActive = true
                 if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                     containerReply.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
                 } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
@@ -10268,7 +10380,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
                 minHeightConstraint.priority = .defaultHigh
                 minHeightConstraint.isActive = true
-                containerReply.backgroundColor = .black.withAlphaComponent(0.3)
+                containerReply.backgroundColor = quoteOverlay
                 containerReply.layer.cornerRadius = 5
                 containerReply.clipsToBounds = true
                 
@@ -10304,13 +10416,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         titleReply.text = "Bot"
                     }
                 }
-                if dataMessages[indexPath.row]["f_pin"] as? String == idMe {
-                    titleReply.textColor = .white
-                    leftReply.backgroundColor = .white
-                } else {
-                    titleReply.textColor = .mainColor
-                    leftReply.backgroundColor = .mainColor
-                }
+                // The name and the bar take the colour of whoever is being quoted, the way
+                // WhatsApp gives everyone in a group one of their own. White only worked here
+                // while the quote sat on a black overlay; on the bubble's own colour it went.
+                let quoteGround = UIColor.composite(quoteOverlay, over: containerMessage.backgroundColor ?? .white)
+                let quoteAccent = UIColor.participant(pin: data["f_pin"] as? String ?? "", conversation: self.conversationScope(), on: quoteGround)
+                titleReply.textColor = quoteAccent
+                leftReply.backgroundColor = quoteAccent
                 
                 let contentReply = UILabel()
                 contentReply.numberOfLines = 3
@@ -10371,12 +10483,12 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
                                                                         audioName: audio_chat,
                                                                         font: contentReply.font,
-                                                                        colour: .white.withAlphaComponent(0.6))
+                                                                        colour: quotedTextColour)
                 }
-                // The quoted body is white at 60%, which is what WhatsApp uses for it
-                // (--quoted-message-text, hsla(0,0%,100%,0.6)). The name above it keeps the
-                // accent colour, so the two read as heading and quote rather than one block.
-                contentReply.textColor = .white.withAlphaComponent(0.6)
+// WhatsApp writes the quote in the foreground colour held back a little, not in a
+                // colour of its own: #303237 on that #D3E1F2 quote is black at 77%. Its dark
+                // theme does the same the other way round, white at 60%.
+                contentReply.textColor = quotedTextColour
                 
                 if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
                     let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
@@ -10455,7 +10567,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerMessage.addSubview(containerForwarded)
             containerForwarded.translatesAutoresizingMaskIntoConstraints = false
             containerForwarded.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-            containerForwarded.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 32).isActive = true
+            containerForwarded.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: isOwnMessage ? 15 : 32).isActive = true
             containerForwarded.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
             containerForwarded.heightAnchor.constraint(equalToConstant: 20).isActive = true
             if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
@@ -10488,7 +10600,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             var addTopMargin = true
             if !reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM {
                 let data = queryMessageReply(message_id: reffChat)
-                if data.count != 0 && (topMarginText.constant == 32.0 || topMarginText.constant == 100.0) {
+                if data.count != 0 && (topMarginText.constant == baseTopMarginText || topMarginText.constant == 100.0) {
                     addTopMargin = false
                 }
             }
@@ -10519,7 +10631,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     }
     
     func playPauseAudio(messageId: String, playButton: UIButton, progressSlider: UISlider, timeLabel: UILabel) {
-        guard let audioPlayer = audioPlayers[messageId] else { return }
+        // Pressing the button is this screen saying the recording is its own now, so it takes it
+        // off the strip before doing anything with it.
+        guard let audioPlayer = adoptFromMiniPlayerIfNeeded(messageId) else { return }
 
         if audioPlayer.isPlaying {
             // Pause Audio
@@ -10529,17 +10643,21 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             timers[messageId] = nil
             playingAudioId = nil
         } else {
-            // Stop other players if one is already playing
-            if let playing = playingAudioId, playing != messageId {
-                audioPlayers[playing]?.pause()
-                timers[playing]?.invalidate()
-                timers[playing] = nil
-                audioPlayers[playing] = nil
+            // One recording at a time. This used to reach only for what this screen thought it was
+            // playing, which misses a recording still running on the strip from a conversation
+            // that was left - starting a second one then left two of them talking over each other.
+            // The service knows about every one of them and stops the rest.
+            for stopped in AudioMiniPlayer.shared.pauseAllExcept(messageId) {
+                timers[stopped]?.invalidate()
+                timers[stopped] = nil
+                if playingAudioId == stopped {
+                    playingAudioId = nil
+                }
                 // Another note taking over ends the first one's turn, so its picture comes back.
-                endAudioSession(playing)
+                endAudioSession(stopped)
                 // Fix: the row was reloaded by the index path this had been holding, which by then
                 // may belong to another message or to no row at all. Looked up from the message.
-                if let at = indexPath(forMessageId: playing) {
+                if let at = indexPath(forMessageId: stopped) {
                     tableChatView.reloadRows(at: [at], with: .none)
                 }
             }
@@ -10563,34 +10681,55 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             // behind it never moved at all - the timer only knew about the slider. Also `[weak
             // self]`: a repeating timer holding the conversation keeps it alive after it is closed,
             // and keeps firing.
-            timers[messageId]?.invalidate()
-            timers[messageId] = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self, weak audioPlayer, weak progressSlider, weak timeLabel] _ in
-                guard let self = self, let audioPlayer = audioPlayer else {
-                    return
-                }
-                // Fix: this wrote the thumb back into place ten times a second, including while
-                // the reader was dragging it - so the finger and the timer pulled against each
-                // other and the thumb stuttered. While it is being held, it is theirs.
-                guard progressSlider?.isTracking != true else {
-                    return
-                }
-                // Fix: the bubble these belong to may have scrolled away and had its cell handed to
-                // another message by now, in which case this was drawing one note's progress across
-                // somebody else's bubble.
-                guard self.audioViewsAlive(messageId) else {
-                    return
-                }
-                progressSlider?.value = Float(audioPlayer.currentTime)
-                timeLabel?.text = self.formatTime(audioPlayer.currentTime)
-                if audioPlayer.duration > 0 {
-                    self.audioWaves[messageId]?.progress = CGFloat(audioPlayer.currentTime / audioPlayer.duration)
-                }
+            startAudioTicker(messageId: messageId, progressSlider: progressSlider, timeLabel: timeLabel)
+        }
+    }
+
+    /// Keeps a bubble's line, head and reading moving while its recording plays.
+    ///
+    /// Its own function because more than one thing starts a recording moving now: the play
+    /// button, and a bubble coming back on screen with the recording already playing - taken back
+    /// from the strip at the top, or simply scrolled away from and returned to.
+    func startAudioTicker(messageId: String,
+                          progressSlider: UISlider,
+                          timeLabel: UILabel,
+                          wave: AudioWaveformView? = nil) {
+        timers[messageId]?.invalidate()
+        timers[messageId] = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self, weak progressSlider, weak timeLabel, weak wave] _ in
+            guard let self = self, let audioPlayer = self.livePlayer(for: messageId) else {
+                return
+            }
+            // Where it has got to is kept as it goes, so leaving the conversation at any moment
+            // leaves the bubble knowing where it was.
+            AudioPositionStore.remember(audioPlayer.currentTime, for: messageId)
+            // Fix: this wrote the thumb back into place ten times a second, including while
+            // the reader was dragging it - so the finger and the timer pulled against each
+            // other and the thumb stuttered. While it is being held, it is theirs.
+            guard progressSlider?.isTracking != true else {
+                return
+            }
+            // Fix: the bubble these belong to may have scrolled away and had its cell handed to
+            // another message by now, in which case this was drawing one note's progress across
+            // somebody else's bubble.
+            guard self.audioViewsAlive(messageId) else {
+                return
+            }
+            progressSlider?.value = Float(audioPlayer.currentTime)
+            timeLabel?.text = self.formatTime(audioPlayer.currentTime)
+            if audioPlayer.duration > 0 {
+                // Fix: the thumb and the reading are held straight, as references; only the drawn
+                // line was fetched from the dictionary each tick. Whenever the two disagreed about
+                // which views belong to this bubble, the line was the one left behind - which is
+                // why a note could finish with its thumb back at the start, its reading at 0:00,
+                // and half its line still blue. Held the same way the other two are.
+                let line = wave ?? self.audioWaves[messageId]
+                line?.progress = CGFloat(audioPlayer.currentTime / audioPlayer.duration)
             }
         }
     }
     
     func sliderChanged(messageId: String, progressSlider: UISlider, timeLabel: UILabel) {
-        guard let audioPlayer = audioPlayers[messageId] else { return }
+        guard let audioPlayer = adoptFromMiniPlayerIfNeeded(messageId) else { return }
         audioPlayer.currentTime = TimeInterval(progressSlider.value)
         timeLabel.text = formatTime(audioPlayer.currentTime)
         // The audio had already run out while this drag was going on, so the wait for the picture
@@ -10682,12 +10821,239 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
 
     /// Everything playing, stopped. Called when the conversation goes away, so no timer is left
     /// running and no player left holding the audio session.
+    /// Gives a recording that is still playing to the strip at the top of the screen, so leaving
+    /// the conversation carries on listening instead of cutting it off. Returns the message that
+    /// was handed over; its player is the one that must not be stopped with the rest.
+    @discardableResult
+    func handOverPlayingAudio() -> String? {
+        guard let id = playingAudioId,
+              let player = audioPlayers[id],
+              player.isPlaying else {
+            return nil
+        }
+        let message = dataMessages.first { ($0["message_id"] as? String) == id }
+        let isVoiceNote = (message?["attachment_flag"] as? String) == "60"
+        let sender = (message?["f_pin"] as? String) ?? ""
+        let name: String
+        if sender == User.getMyPin() {
+            name = "You".localized()
+        } else {
+            name = getDataProfile(f_pin: sender, message_id: id)["name"] ?? ""
+        }
+        // The picture the bubble itself is showing, so the strip carries on with the same face.
+        let avatar = audioAvatars[id]?.subviews.compactMap { $0 as? UIImageView }.first?.image
+        AudioMiniPlayer.shared.takeOver(player: player,
+                                        messageId: id,
+                                        name: name,
+                                        avatar: isVoiceNote ? avatar : nil,
+                                        isVoiceNote: isVoiceNote)
+        return id
+    }
+
+    /// Takes back a recording that is still playing on the strip, now that this conversation is
+    /// on screen.
+    ///
+    /// The bubble asks for it too as it is built, but that can be too early or too late: UIKit
+    /// builds the screen being opened before it tears down the screen being left, and the bubble
+    /// may not even be on screen yet when the conversation opens. Asked again here, where the
+    /// answer has settled, so the row cannot be left showing a play button over a recording that
+    /// is audibly running.
+    func reclaimPlayingAudioIfMine() {
+        guard let id = AudioMiniPlayer.shared.currentMessageId,
+              let at = indexPath(forMessageId: id),
+              adoptFromMiniPlayerIfNeeded(id) != nil else {
+            return
+        }
+        tableChatView.reloadRows(at: [at], with: .none)
+    }
+
+    /// The player behind a recording, wherever it currently lives.
+    ///
+    /// A recording that carried on playing after the conversation was left is held by the strip,
+    /// not by this screen, and it may still be held there when a bubble is drawn: ownership moves
+    /// back on its own schedule, and the row must not sit showing a play button in the meantime.
+    /// Everything that draws or reads asks here, so what is on screen always follows the player
+    /// that is actually running.
+    func livePlayer(for messageId: String) -> AVAudioPlayer? {
+        // One place keeps the players, so there is only ever one answer here.
+        return AudioMiniPlayer.shared.player(for: messageId)
+    }
+
+    /// Takes ownership of a recording still held by the strip, so this screen drives it from now
+    /// on. Does nothing when the recording is already this screen's.
+    @discardableResult
+    func adoptFromMiniPlayerIfNeeded(_ messageId: String) -> AVAudioPlayer? {
+        guard let player = AudioMiniPlayer.shared.reclaim(messageId: messageId) else {
+            return audioPlayers[messageId]
+        }
+        // Fix: this gave up the moment it found something already in audioPlayers, and what it
+        // found was usually the idle stand-in built while the strip still had the recording. The
+        // stand-in is thrown away; the one that is actually playing takes its place.
+        if let standIn = audioPlayers[messageId], standIn !== player {
+            standIn.stop()
+        }
+        player.delegate = self
+        audioPlayers[messageId] = player
+        playingAudioId = messageId
+        beginAudioSession(messageId)
+        return player
+    }
+
+    /// Slides the conversation up to the newest message.
+    ///
+    /// Not scrollToRow: with a long history the rows above are estimated heights, so the place it
+    /// is aiming for is a guess that UIKit keeps correcting while the animation is already
+    /// running - which is the bouncing. The bottom is measured from the content that has actually
+    /// been laid out, and the offset is set once.
+    func slideToNewestMessage(animated: Bool = true) {
+        guard let table = tableChatView, table.numberOfSections > 0 else {
+            return
+        }
+        let lowest = -table.adjustedContentInset.top
+        let bottom = table.contentSize.height + table.adjustedContentInset.bottom - table.bounds.height
+        let target = max(lowest, bottom)
+        guard abs(table.contentOffset.y - target) > 0.5 else {
+            return
+        }
+        let settle = { table.contentOffset = CGPoint(x: table.contentOffset.x, y: target) }
+        guard animated else {
+            settle()
+            return
+        }
+        // The same unhurried ease the reference uses: the new bubble is already in place and the
+        // conversation moves up under it, rather than the row being chased into view.
+        UIView.animate(withDuration: 0.25, delay: 0,
+                       options: [.curveEaseOut, .beginFromCurrentState],
+                       animations: settle,
+                       completion: { _ in
+            // Fix: the offset alone was not enough to land on. contentSize is built from rows
+            // measured only as they are needed, so the bottom it names is an estimate - the
+            // animation stopped short of the real end and stayed there. scrollToRow knows where
+            // the last row actually is; asked without animation, it closes the gap silently.
+            let lastSection = table.numberOfSections - 1
+            guard lastSection >= 0 else {
+                return
+            }
+            let lastRow = table.numberOfRows(inSection: lastSection) - 1
+            guard lastRow >= 0 else {
+                return
+            }
+            table.safeScrollToRow(at: IndexPath(row: lastRow, section: lastSection), at: .bottom, animated: false)
+        })
+    }
+
+    /// The tag the bubble carries so an arrival animation can find it again in a built cell.
+    static let bubbleTag = 77_301
+
+    /// The pop a new bubble arrives with: it grows out of the side it belongs to, and fades in.
+    ///
+    /// WhatsApp's own animation, which they describe as the bubble fading in while scaling up
+    /// slightly as it settles rather than appearing abruptly. Growing it about its trailing
+    /// corner for a message of ours, and its leading corner for one that arrives, is what makes
+    /// it look like it comes out of that side instead of out of the middle.
+    ///
+    /// Done with a transform rather than by moving the layer's anchor point: a transform sits on
+    /// top of Auto Layout and undoes itself cleanly, where a moved anchor point is put back by
+    /// the next layout pass and leaves the bubble somewhere it should not be.
+    func playBubbleArrival(at indexPath: IndexPath, outgoing: Bool) {
+        guard let cell = tableChatView.cellForRow(at: indexPath),
+              let bubble = cell.contentView.viewWithTag(Self.bubbleTag),
+              bubble.bounds.width > 0 else {
+            return
+        }
+        let scale: CGFloat = 0.78
+        let shrink = (1 - scale) / 2
+        // Keeps the corner it grows from where it already is: scaling about the centre pulls that
+        // corner inwards, so it is pushed back out by the same amount.
+        let dx = bubble.bounds.width * shrink * (outgoing ? 1 : -1)
+        let dy = bubble.bounds.height * shrink
+        bubble.transform = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
+        bubble.alpha = 0
+        UIView.animate(withDuration: 0.26, delay: 0,
+                       usingSpringWithDamping: 0.82, initialSpringVelocity: 0.5,
+                       options: [.beginFromCurrentState, .allowUserInteraction]) {
+            bubble.transform = .identity
+            bubble.alpha = 1
+        }
+    }
+
+    // MARK: - Long messages
+    //
+    // The rule itself lives in LongMessage, shared with starred messages and message info; these
+    // are the handful of lines that put it into this screen's bubbles.
+
+    static var collapsedLineLimit: Int { return LongMessage.lineLimit }
+
+    /// Whether this message is being shown folded at the moment.
+    func isFolded(_ messageId: String, text: String) -> Bool {
+        return LongMessage.isFolded(messageId, text: text)
+    }
+
+    /// The "Read more" that closes a folded message.
+    func readMoreSuffix() -> NSAttributedString {
+        return LongMessage.suffix(fontSize: 12 + offset())
+    }
+
+    /// Folds a long message down, or leaves it whole once the reader has opened it.
+    func foldIfLong(_ text: String, messageId: String) -> String {
+        return LongMessage.visibleText(text, messageId: messageId)
+    }
+
+    @discardableResult
+    private func applyReadMore(to view: UIView,
+                               text: String,
+                               messageId: String,
+                               attributed: (String) -> NSMutableAttributedString) -> String {
+        // The two conversations draw their message text with different views - a label in one, a
+        // text view in the other - so the folding is told where to put its answer rather than
+        // being written twice.
+        func show(_ body: NSAttributedString) {
+            if let label = view as? UILabel {
+                label.numberOfLines = 0
+                label.attributedText = body
+            } else if let textView = view as? UITextView {
+                textView.attributedText = body
+            }
+        }
+        guard isFolded(messageId, text: text) else {
+            show(attributed(text))
+            return text
+        }
+        let shown = LongMessage.folded(text)
+        let body = attributed(shown)
+        body.append(readMoreSuffix())
+        show(body)
+        view.isUserInteractionEnabled = true
+        view.addGestureRecognizer(ReadMoreTap(messageId: messageId, target: self, action: #selector(readMoreTapped(_:))))
+        return shown
+    }
+
+    @objc private func readMoreTapped(_ sender: UITapGestureRecognizer) {
+        guard let tap = sender as? ReadMoreTap else {
+            return
+        }
+        LongMessage.expand(tap.messageId)
+        guard let at = indexPath(forMessageId: tap.messageId) else {
+            tableChatView.reloadData()
+            return
+        }
+        tableChatView.reloadRows(at: [at], with: .none)
+    }
+
     func stopAllAudio() {
         timers.values.forEach { $0.invalidate() }
         timers.removeAll()
         audioRestTimers.values.forEach { $0.invalidate() }
         audioRestTimers.removeAll()
-        audioPlayers.values.forEach { $0.stop() }
+        // Where each recording was left is kept, so walking back into the conversation picks it
+        // up there instead of starting it over. The one still playing is handed to the strip at
+        // the top of the screen rather than stopped - see handOverPlayingAudio.
+        for (id, player) in audioPlayers {
+            AudioPositionStore.remember(player.currentTime, for: id)
+        }
+        handOverPlayingAudio()
+        // Only this screen's references go. The players themselves belong to the service, and a
+        // paused one is where the reader left it - stopping it would throw that away.
         audioPlayers.removeAll()
         audioWaves.removeAll()
         audioSliders.removeAll()
@@ -10715,6 +11081,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             self.timers[finished]?.invalidate()
             self.timers[finished] = nil
             self.playingAudioId = nil
+            // Played to the end, so there is no part-way point to come back to: the next listen
+            // starts at the beginning rather than at a line already full.
+            AudioPositionStore.forget(finished)
+            AudioMiniPlayer.shared.player(for: finished)?.currentTime = 0
             // Fix: this rebuilt the row. Audio reaching its end while the reader still had hold of
             // the slider therefore tore the control out from under their finger, and threw the
             // player away with it, so the drag died where it was. The bubble is put back to rest

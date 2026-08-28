@@ -3037,7 +3037,7 @@
                         <viewLayoutGuide key="safeArea" id="9qz-fK-dJv"/>
                         <constraints>
                             <constraint firstItem="R3H-lp-ykb" firstAttribute="leading" secondItem="9qz-fK-dJv" secondAttribute="leading" id="74e-tt-1zg"/>
-                            <constraint firstAttribute="bottom" secondItem="R3H-lp-ykb" secondAttribute="bottom" constant="20" id="LmS-xC-8SD"/>
+                            <constraint firstAttribute="bottom" secondItem="R3H-lp-ykb" secondAttribute="bottom" id="LmS-xC-8SD"/>
                             <constraint firstItem="R3H-lp-ykb" firstAttribute="top" secondItem="p3k-nc-8oU" secondAttribute="top" id="bbM-ub-q68"/>
                             <constraint firstItem="9qz-fK-dJv" firstAttribute="trailing" secondItem="R3H-lp-ykb" secondAttribute="trailing" id="czZ-ay-Zr2"/>
                         </constraints>

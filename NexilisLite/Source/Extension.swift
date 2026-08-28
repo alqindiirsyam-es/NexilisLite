@@ -839,6 +839,224 @@ extension UIColor {
     public static var whatsappGreenColor: UIColor {
         return renderColor(hex: "#20A961")
     }
+
+    // MARK: - Participant colours
+    //
+    // WhatsApp gives everyone in a group a colour of their own, so two people with similar names
+    // are still told apart at a glance. Ours does the same: a fixed palette, picked by the
+    // person's pin, so the same person is always the same colour to everybody.
+    //
+    // Each hue is kept in two versions. One colour cannot serve both a near-white bubble and a
+    // near-black one, and which is needed is not a question of the theme but of the exact surface
+    // the name is drawn on - a quote panel is not the same colour as the bubble around it. The
+    // ground is passed in and the version that reads better on it is the one used.
+
+    // Twenty-one colours, which is what WhatsApp Web itself carries: it tags a member's name with
+    // one of `.color-0` through `.color-20`, and a theme that recolours nicknames has to cover
+    // exactly that range. The "256 colours" figure repeated around the web traces back to one
+    // unsourced blog whose only citation is Wikipedia's article on the RGB colour model.
+    //
+    // Fewer colours are further apart: at fifty the closest pair sat at a difference of 15, at
+    // twenty-one it is 24.
+
+    /// Vivid mid-tones for names on a light surface.
+    ///
+    /// Chroma is the point of these, not just hue. An earlier set held its contrast by going
+    /// dark, and dark colours have little chroma left to carry a hue: two names came out
+    /// #224133 and #22401D - 56 degrees apart in hue and still both just "dark green", because
+    /// at that lightness there was nothing of the hue left to see. Every colour here keeps a
+    /// chroma of at least 38, which is what WhatsApp's own #C33C66 does at 57.
+    private static let participantOnLight = [
+        "#BE3762", "#007A00", "#144DFF", "#046FA9", "#8F5F00", "#4F0C6E", "#D60000",
+        "#B800CC", "#037756", "#7A0F00", "#0B61D5", "#C70592", "#516218", "#621843",
+        "#250099", "#182A62", "#8649CA", "#D1053A", "#B84600", "#914F30", "#91307F"
+    ]
+
+    /// The same idea for a dark surface: light enough to read, still carrying a hue.
+    private static let participantOnDark = [
+        "#FC8DB0", "#1AFF70", "#FFC61A", "#1AE8FF", "#96BB72", "#94ACFF", "#CEFF2E",
+        "#FA80FF", "#FF9861", "#1AFFC8", "#FBFC83", "#FFDBA8", "#B4FDDD", "#7ED147",
+        "#F8CAFC", "#CBAE4D", "#29BDFA", "#A1FDA2", "#FF961A", "#ECA293", "#D79CF7"
+    ]
+
+    /// The colour this person is known by in this conversation, on the surface their name is
+    /// drawn on.
+    ///
+    /// - Parameters:
+    ///   - pin: the person's pin. Empty falls back to the app's accent.
+    ///   - conversation: the group id, or the other person's pin in a one-to-one chat. It does
+    ///     not colour anybody by itself - a person is the same colour wherever they are - it only
+    ///     names the room whose members have to be told apart from each other.
+    ///   - ground: the colour actually behind the name, composited - not a translucent overlay.
+    ///     Use `composite(_:over:)` to work it out where the surface is an overlay on a bubble.
+    public static func participant(pin: String,
+                                   conversation: String = "",
+                                   members: [String] = [],
+                                   on ground: UIColor) -> UIColor {
+        guard !pin.isEmpty else {
+            return .mainColor
+        }
+        // Hashing the pin alone leaves it to chance whether two people in the same conversation
+        // land on the same colour, and with eighteen colours chance obliges more often than not:
+        // eight people collide about six times in ten. Dealing the palette out by the person's
+        // place in the member list instead means nobody in a conversation shares a colour until
+        // there are more people in it than there are colours.
+        let index = seatIndex(pin: pin, conversation: conversation, members: members)
+        let deep = renderColor(hex: participantOnLight[index])
+        let pastel = renderColor(hex: participantOnDark[index])
+        let chosen = contrast(deep, ground) >= contrast(pastel, ground) ? deep : pastel
+        return legible(chosen, on: ground)
+    }
+
+    /// Which seat in the palette this person holds.
+    ///
+    /// The seat comes from the person's pin and nothing else, so somebody is the same colour in
+    /// every group, every topic and every one-to-one chat. The conversation only comes into it to
+    /// settle a clash: where two people in the same conversation land on the same seat, the one
+    /// further down the sorted list steps to the next free seat, so no two names in front of the
+    /// reader are ever the same colour. That is the only thing that can move a person's colour,
+    /// and it moves only the person who lost the toss.
+    private static func seatIndex(pin: String, conversation: String, members: [String]) -> Int {
+        let seats = participantOnLight.count
+        let own = Int(stableHash(pin) % UInt32(seats))
+
+        let roster = members.isEmpty ? cachedRoster(for: conversation) : members
+        guard !roster.isEmpty else {
+            return own
+        }
+        var ordered = Array(Set(roster.filter { !$0.isEmpty })).sorted()
+        // The member table does not always carry the reader themselves, and the reader's own name
+        // shows up in quotes as much as anybody's.
+        if let me = User.getMyPin(), !me.isEmpty, !ordered.contains(me) {
+            ordered.append(me)
+            ordered.sort()
+        }
+        guard ordered.contains(pin) else {
+            return own
+        }
+
+        var taken = Set<Int>()
+        for person in ordered {
+            var seat = Int(stableHash(person) % UInt32(seats))
+            // Past the point where every seat is spoken for there is nowhere left to move to.
+            if taken.count < seats {
+                while taken.contains(seat) {
+                    seat = (seat + 1) % seats
+                }
+            }
+            taken.insert(seat)
+            if person == pin {
+                return seat
+            }
+        }
+        return own
+    }
+
+    /// Swift's own hashValue is seeded afresh every process, so anything built on it would come
+    /// out a different colour on every launch. FNV-1a is stable, which is the whole point.
+    private static func stableHash(_ value: String) -> UInt32 {
+        var hash: UInt32 = 2166136261
+        for byte in value.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* 16777619
+        }
+        return hash
+    }
+
+    private static var rosterCache: [String: (pins: [String], readAt: Date)] = [:]
+    private static let rosterLock = NSLock()
+
+    /// The conversation's members, read once and kept.
+    ///
+    /// A miss - somebody who joined since, or someone who was never a member at all - is worth
+    /// one more read, but not one per row drawn, so a conversation is re-read at most once a
+    /// minute however many misses it takes.
+    private static func cachedRoster(for conversation: String) -> [String] {
+        guard !conversation.isEmpty else {
+            return []
+        }
+        rosterLock.lock()
+        let cached = rosterCache[conversation]
+        rosterLock.unlock()
+
+        if let cached, Date().timeIntervalSince(cached.readAt) < 60 {
+            return cached.pins
+        }
+        let pins = Member.getAllMember(group_id: conversation).map { $0.pin }
+        rosterLock.lock()
+        rosterCache[conversation] = (pins, Date())
+        rosterLock.unlock()
+        return pins
+    }
+
+    /// Walks a colour toward white or black until it can be read on `ground`.
+    ///
+    /// Most surfaces need none of this. The one that does is the outgoing bubble in dark mode,
+    /// a bright blue on which even pure white only reaches 4.1:1 - no colour reads well there,
+    /// and several hues land near 2:1. Keeping the hue and moving its lightness costs less of
+    /// the person's identity than dropping to a flat grey, which is what used to be there.
+    private static func legible(_ colour: UIColor, on ground: UIColor, floor: CGFloat = 3.0) -> UIColor {
+        guard contrast(colour, ground) < floor else {
+            return colour
+        }
+        let target: UIColor = relativeLuminance(ground) < 0.35 ? .white : .black
+        var best = colour
+        for step in 1...9 {
+            let mixed = mix(colour, with: target, amount: CGFloat(step) / 10.0)
+            best = mixed
+            if contrast(mixed, ground) >= floor {
+                break
+            }
+        }
+        return best
+    }
+
+    private static func mix(_ a: UIColor, with b: UIColor, amount: CGFloat) -> UIColor {
+        var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
+        var br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
+        guard a.getRed(&ar, green: &ag, blue: &ab, alpha: &aa),
+              b.getRed(&br, green: &bg, blue: &bb, alpha: &ba) else {
+            return a
+        }
+        return UIColor(red: ar + (br - ar) * amount,
+                       green: ag + (bg - ag) * amount,
+                       blue: ab + (bb - ab) * amount,
+                       alpha: 1)
+    }
+
+    /// What `overlay` looks like once it has been composited over `ground`.
+    ///
+    /// A translucent `backgroundColor` reports its own colour and alpha, not what the eye ends up
+    /// seeing, and it is what the eye ends up seeing that a name has to stand out from.
+    public static func composite(_ overlay: UIColor, over ground: UIColor) -> UIColor {
+        var or: CGFloat = 0, og: CGFloat = 0, ob: CGFloat = 0, oa: CGFloat = 0
+        var gr: CGFloat = 0, gg: CGFloat = 0, gb: CGFloat = 0, ga: CGFloat = 0
+        guard overlay.getRed(&or, green: &og, blue: &ob, alpha: &oa),
+              ground.getRed(&gr, green: &gg, blue: &gb, alpha: &ga) else {
+            return ground
+        }
+        return UIColor(red: or * oa + gr * (1 - oa),
+                       green: og * oa + gg * (1 - oa),
+                       blue: ob * oa + gb * (1 - oa),
+                       alpha: 1)
+    }
+
+    /// WCAG contrast ratio between two opaque colours.
+    private static func contrast(_ a: UIColor, _ b: UIColor) -> CGFloat {
+        let la = relativeLuminance(a), lb = relativeLuminance(b)
+        return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+    }
+
+    private static func relativeLuminance(_ colour: UIColor) -> CGFloat {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard colour.getRed(&r, green: &g, blue: &b, alpha: &a) else {
+            return 0
+        }
+        func channel(_ v: CGFloat) -> CGFloat {
+            return v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    }
     
     public static var whatsappGreenTitleColor: UIColor {
         return renderColor(hex: "#295C3B")

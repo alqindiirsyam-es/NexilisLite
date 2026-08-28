@@ -1914,7 +1914,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
         cell.backgroundColor = .clear
         cell.selectionStyle = .none
         
-        let containerMessage = UIView()
+        let containerMessage = BubbleView()
         cell.contentView.addSubview(containerMessage)
         containerMessage.translatesAutoresizingMaskIntoConstraints = false
         
@@ -1946,6 +1946,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             containerMessage.layer.cornerRadius = 10.0
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner, .layerMinXMinYCorner]
             containerMessage.clipsToBounds = true
+            (containerMessage as? BubbleView)?.lift()
             
             timeMessage.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8).isActive = true
             
@@ -2003,6 +2004,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             containerMessage.layer.cornerRadius = 10.0
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
             containerMessage.clipsToBounds = true
+            (containerMessage as? BubbleView)?.lift()
             
             timeMessage.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: 8).isActive = true
         }

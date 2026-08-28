@@ -35,6 +35,14 @@ class ContactChatViewController: UITableViewController {
     var contacts: [User] = []
     
     var groups: [Group] = []
+    /// The open groups last fetched, kept apart from the list they are shown in.
+    ///
+    /// Fix: the fetch appended them straight into `groups`, and the walk over the group table
+    /// replaces that whole array when it lands. The two run side by side here - the walk from
+    /// reloadAllData, the fetch from viewWillAppear - so whichever finished last won, and the
+    /// walk usually finished last, which is why the open groups so often never appeared. Kept
+    /// here and put back after every rebuild, the order stops mattering.
+    private var openGroups: [Group] = []
     
     var groupMap: [String:Int] = [:]
     
@@ -68,7 +76,6 @@ class ContactChatViewController: UITableViewController {
     // for it, so without this a refresh arriving meanwhile would start a second walk on top.
     private var isGettingGroups = false
     // When the open-group list was last fetched from the server, for the throttle below.
-    private var lastOpenGroupsFetch: Date?
     // Callers waiting to be told that the list has finished reloading (see ChatListTab).
     private var pendingReloadCompletions: [() -> Void] = []
     // Numbers the reads of the chat list so a slow one cannot land on top of a newer one.
@@ -132,7 +139,10 @@ class ContactChatViewController: UITableViewController {
         tagSearchHeader.axis = .vertical
         tagSearchHeader.spacing = 8
         tagSearchHeader.isLayoutMarginsRelativeArrangement = true
-        tagSearchHeader.layoutMargins = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        // Forwarding puts this list in a card whose navigation bar sits directly on top of the
+        // segmented control, with none of the breathing room the tab version gets from the
+        // search field above it.
+        tagSearchHeader.layoutMargins = UIEdgeInsets(top: isChooser != nil ? 20 : 8, left: 0, bottom: 8, right: 0)
         tagSearchHeader.backgroundColor = traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
         tagSearch.chipsView.heightAnchor.constraint(equalToConstant: 40).isActive = true
 
@@ -190,7 +200,9 @@ class ContactChatViewController: UITableViewController {
     /// that segment they stay put whether or not a search is running, so a filter can be
     /// picked without opening the search first.
     private func updateTagSearchAvailability() {
-        let shouldShow = segment.numberOfSegments == 3 && segment.selectedSegmentIndex == 0
+        // Not while forwarding: the question there is which conversation to send to, and
+        // narrowing that list by what its messages carry answers a different one.
+        let shouldShow = segment.numberOfSegments == 3 && segment.selectedSegmentIndex == 0 && isChooser == nil
         // Any filter, not only the ones the component draws: the unread filter leaves its
         // conversations in fillteredData, and the contacts segment reads that same array as
         // users - which would be a crash, not a wrong row.
@@ -205,12 +217,17 @@ class ContactChatViewController: UITableViewController {
     }
 
     func filterContentForSearchText(_ searchText: String) {
-        // With a filter on, the results are the filter's answer - drawn by the component for
-        // the attachment filters, handed to this list for the unread one. Either way the plain
-        // text search below must not overwrite them.
-        tagSearch.setSearchText(searchText)
-        if tagSearch.selectedTag != 0 {
-            return
+        // While forwarding, the search is for a name in the list in front of the reader - not the
+        // tag search, which reaches into message contents and draws its own results over the very
+        // list they are trying to pick from.
+        if isChooser == nil {
+            // With a filter on, the results are the filter's answer - drawn by the component for
+            // the attachment filters, handed to this list for the unread one. Either way the plain
+            // text search below must not overwrite them.
+            tagSearch.setSearchText(searchText)
+            if tagSearch.selectedTag != 0 {
+                return
+            }
         }
         func filterContact() {
             Utils.inTabChats = false
@@ -228,11 +245,17 @@ class ContactChatViewController: UITableViewController {
                 case 2:
                     fillteredData = self.groups.filter { $0.name.lowercased().contains(searchText.lowercased()) }
                 default:
+                    let deepCopyChats = self.chats.map{ $0.copy() }
+                    guard isChooser == nil else {
+                        // Names only. Matching the last message too would offer a conversation
+                        // whose visible row shows nothing of what was typed.
+                        fillteredData = deepCopyChats.filter { $0.name.lowercased().contains(searchText.lowercased()) }
+                        break
+                    }
                     var group_id: String?
                     if let filterGroupKey = self.chatGroupMaps.first(where: { $0.value.contains { $0.name.lowercased().contains(searchText.lowercased()) || $0.groupName.lowercased().contains(searchText.lowercased()) || $0.messageText.lowercased().contains(searchText.lowercased()) } } ) {
                         group_id = filterGroupKey.key
                     }
-                    let deepCopyChats = self.chats.map{ $0.copy() }
                     fillteredData = deepCopyChats.filter { $0.name.lowercased().contains(searchText.lowercased()) || $0.messageText.lowercased().contains(searchText.lowercased()) || $0.groupId == group_id }
                 }
             } else {
@@ -416,35 +439,14 @@ class ContactChatViewController: UITableViewController {
             self.navigationController?.navigationBar.setNeedsLayout()
         }
         reloadAllData()
-        // Fetching the open groups is a blocking round trip to the server (up to four
-        // attempts) that ends in a full table reload, and this runs every time the screen
-        // appears. Once a minute is plenty for a list that barely changes.
-        let now = Date()
-        let isOpenGroupsFresh = lastOpenGroupsFetch.map { now.timeIntervalSince($0) < 60 } ?? false
-        if !isOpenGroupsFresh {
-            lastOpenGroupsFetch = now
-            networkQueue.async {
-                self.getOpenGroups(listGroups: self.groups, completion: { g in
-                    DispatchQueue.main.async {
-                        self.groups.removeAll(where: { $0.isOpen == "1" && $0.groupType == "NOTJOINED" })
-                        for og in g {
-                            if self.groups.first(where: { $0.id == og.id }) == nil {
-                                self.groups.append(og)
-                            }
-                        }
-                        self.groups.sort { (a, b) -> Bool in
-                            if Int(a.official) == 1 {
-                                return true
-                            } else if Int(b.official) == 1 {
-                                return false
-                            } else {
-                                return Int(a.official) ?? 0 > Int(b.official) ?? 0
-                            }
-                        }
-                        self.tableView.reloadData()
-                    }
-                })
+        // The asking, the retrying and the once-a-minute gate live in APIS, shared with the chat
+        // list: whichever of the two screens asks first, the other is answered from that fetch.
+        APIS.getOpenGroups { g in
+            guard let g = g else {
+                return
             }
+            self.openGroups = g
+            self.applyOpenGroups()
         }
         APIS.setDataForShareExtension()
     }
@@ -471,6 +473,31 @@ class ContactChatViewController: UITableViewController {
 //        tableView.reloadData()
 //    }
     
+    /// Puts the fetched open groups back into the list and redraws.
+    ///
+    /// Safe to call as often as it takes: it clears the ones it added last time first.
+    private func applyOpenGroups() {
+        DispatchQueue.main.async {
+            guard !self.openGroups.isEmpty else {
+                return
+            }
+            self.groups.removeAll(where: { $0.isOpen == "1" && $0.groupType == "NOTJOINED" })
+            for og in self.openGroups where self.groups.first(where: { $0.id == og.id }) == nil {
+                self.groups.append(og)
+            }
+            self.groups.sort { (a, b) -> Bool in
+                if Int(a.official) == 1 {
+                    return true
+                } else if Int(b.official) == 1 {
+                    return false
+                } else {
+                    return Int(a.official) ?? 0 > Int(b.official) ?? 0
+                }
+            }
+            self.tableView.reloadData()
+        }
+    }
+
     private func reloadAllData(completion: (() -> Void)? = nil) {
 //        print("reloadAllData")
         DispatchQueue.main.async { [weak self] in
@@ -583,28 +610,12 @@ class ContactChatViewController: UITableViewController {
         case 1:
             Utils.inTabChats = false
             if segment.numberOfSegments < 3 {
-                networkQueue.async {
-                    self.getOpenGroups(listGroups: self.groups, completion: { g in
-                        DispatchQueue.main.async {
-                            for og in g {
-                                if self.groups.first(where: { $0.id == og.id }) == nil {
-                                    self.groups.append(og)
-                                }
-                            }
-                            self.groups.sort { (a, b) -> Bool in
-                                if Int(a.official) == 1 {
-                                    return true
-                                } else if Int(b.official) == 1 {
-                                    return false
-                                } else {
-                                    return Int(a.official) ?? 0 > Int(b.official) ?? 0
-                                }
-                            }
-                            DispatchQueue.main.async {
-                                self.tableView.reloadData()
-                            }
-                        }
-                    })
+                APIS.getOpenGroups { g in
+                    guard let g = g else {
+                        return
+                    }
+                    self.openGroups = g
+                    self.applyOpenGroups()
                 }
             }
         case 2:
@@ -688,6 +699,9 @@ class ContactChatViewController: UITableViewController {
                             return Int(a.official) ?? 0 > Int(b.official) ?? 0
                         }
                     }
+                    // The walk has just replaced the whole list, open groups and all; they go
+                    // back on top of it rather than being lost to whichever finished last.
+                    self.applyOpenGroups()
                     if waitsForGroups {
                         self.finishGettingData()
                     } else {
@@ -1044,45 +1058,6 @@ class ContactChatViewController: UITableViewController {
         return tree
     }
     
-    private func getOpenGroups(listGroups: [Group], completion: @escaping ([Group]) -> (), retry: Int = 3) {
-        if let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getOpenGroups(p_account: "1,2,3,5,6,7", offset: "0", search: "")) {
-            var dataGroups: [Group] = []
-            if (response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "00") {
-                let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
-                if let json = try! JSONSerialization.jsonObject(with: data.data(using: String.Encoding.utf8)!, options: []) as? [[String: Any?]] {
-                    for dataJson in json {
-                        let group = Group(
-                            id: dataJson[CoreMessage_TMessageKey.GROUP_ID] as? String ?? "",
-                            name: dataJson[CoreMessage_TMessageKey.GROUP_NAME] as? String ?? "",
-                            profile: dataJson[CoreMessage_TMessageKey.THUMB_ID] as? String ?? "",
-                            quote: dataJson[CoreMessage_TMessageKey.QUOTE] as? String ?? "",
-                            by: dataJson[CoreMessage_TMessageKey.BLOCK] as? String ?? "",
-                            date: "",
-                            parent: "",
-                            chatId: "",
-                            groupType: "NOTJOINED",
-                            isOpen: dataJson[CoreMessage_TMessageKey.IS_OPEN] as? String ?? "",
-                            official: "0",
-                            isEducation: "")
-                        dataGroups.append(group)
-                    }
-                    completion(dataGroups)
-                } else {
-                    if retry != 0 {
-                        getOpenGroups(listGroups: listGroups, completion: completion, retry: retry - 1)
-                    }
-                }
-            } else {
-                if retry != 0 {
-                    getOpenGroups(listGroups: listGroups, completion: completion, retry: retry - 1)
-                }
-            }
-        } else {
-            if retry != 0 {
-                getOpenGroups(listGroups: listGroups, completion: completion, retry: retry - 1)
-            }
-        }
-    }
     
     private func getGroups(id: String = "", parent: String = "", completion: @escaping ([Group]) -> ()) {
         listQueue.async {
@@ -2188,7 +2163,7 @@ extension ContactChatViewController {
                                 }
                                 timeView.text = formatter.string(from: date)
                             } else {
-                                let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "M/dd/yy", localeIdentifier: "id")
+                                let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "dd/MM/yy", localeIdentifier: "id")
                                 timeView.text = stringFormat
                             }
                         }

@@ -629,7 +629,15 @@ class OutgoingThread {
                     _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", _where: "message_id = '\(messageId)'")
                     let l_pin = message.getBody(key: CoreMessage_TMessageKey.L_PIN)
                     let chat = message.getBody(key: CoreMessage_TMessageKey.CHAT_ID)
-                    let scope = message.getBody(key: CoreMessage_TMessageKey.SCOPE_ID)
+                    // Fix: this read SCOPE_ID ("A76"), and the scope is put in the message under
+                    // MESSAGE_SCOPE_ID ("A06") - so it came back empty every time and the group
+                    // branch below was never taken. Deleting for yourself in a group therefore
+                    // looked for the newest remaining message with the personal query, which asks
+                    // for WHISPER and friends and can never match a group message. Nothing was
+                    // found, so the summary was left naming a message that had just been deleted -
+                    // and the chat list joins MESSAGE_SUMMARY to MESSAGE on that id, so the whole
+                    // conversation dropped off the list.
+                    let scope = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID)
                     do {
                         var pin = l_pin
                         if !chat.isEmpty {
@@ -649,6 +657,10 @@ class OutgoingThread {
                         if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
                             pinned = Int(cursor.int(forColumnIndex: 0))
                             archived = Int(cursor.int(forColumnIndex: 1))
+                            // Left open, this one. A result set still open on the connection is
+                            // enough to make the write below fail, and the whole transaction with
+                            // it - deletion included.
+                            cursor.close()
                         }
                         if !messageId.isEmpty {
                             _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
@@ -658,6 +670,11 @@ class OutgoingThread {
                                 "pinned" : pinned,
                                 "archived" : archived
                             ], replace: true)
+                        } else {
+                            // Nothing left in this conversation at all. A summary with nothing to
+                            // name is a row the list cannot draw, so it goes rather than being
+                            // left behind pointing at a message that is gone.
+                            _ = Database.shared.deleteRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", _where: "l_pin = '\(pin)'")
                         }
                         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                     } catch {

@@ -2711,8 +2711,10 @@ public class APIS: NSObject {
     /// database is the only way to know which Editor a push belongs to; when the row isn't
     /// there, showEditorOrCallFromAPN would be handed an empty pin and type and open nothing at
     /// all, which is exactly the "tapping the notification does not go to the Editor" case.
+    ///
+    /// Also used by the strip a recording keeps playing on, to get back to the bubble it is in.
     @discardableResult
-    private static func openChatForLocalMessage(_ localMessageId: String) -> Bool {
+    static func openChatForLocalMessage(_ localMessageId: String) -> Bool {
         guard !localMessageId.isEmpty, !checkAppStateisBackground() else {
             return false
         }
@@ -4252,6 +4254,114 @@ public class APIS: NSObject {
     private static var appNm = "";
     public static func getAppNm() -> String {
         return appNm
+    }
+
+    // MARK: - Open groups
+    //
+    // Both the chat list and the start-a-conversation screen show the groups anyone may join, and
+    // each of them had its own copy of the asking, the retrying, the parsing and the once-a-minute
+    // gate. Two copies of the same thing drift, and these had: the same four faults had to be
+    // fixed in both places at once. One copy here, and a second screen asking within the minute
+    // is answered from what the first one already fetched rather than asking again.
+
+    private static var openGroupsCache: [Group] = []
+    private static var openGroupsFetchedAt: Date?
+    private static var openGroupsWaiting: [([Group]?) -> Void] = []
+    private static var openGroupsInFlight = false
+    private static let openGroupsLock = NSLock()
+    private static let openGroupsQueue = DispatchQueue(label: "io.nexilis.openGroups")
+
+    /// The groups anyone may join.
+    ///
+    /// Answers on the main thread. A fetch that fails answers nil rather than falling silent, and
+    /// leaves nothing cached, so the next screen to ask tries again instead of waiting out a gate
+    /// that a failure had no business closing.
+    ///
+    /// - Parameters:
+    ///   - maxAge: how old an answer may be before it is asked for again. Zero forces a fetch.
+    ///   - completion: the groups, or nil when the ask got no answer.
+    public static func getOpenGroups(maxAge: TimeInterval = 60,
+                                     completion: @escaping ([Group]?) -> Void) {
+        openGroupsLock.lock()
+        if let at = openGroupsFetchedAt, Date().timeIntervalSince(at) < maxAge, !openGroupsCache.isEmpty {
+            let cached = openGroupsCache
+            openGroupsLock.unlock()
+            DispatchQueue.main.async { completion(cached) }
+            return
+        }
+        // One ask at a time; everybody who asked while it was out gets the same answer.
+        openGroupsWaiting.append(completion)
+        guard !openGroupsInFlight else {
+            openGroupsLock.unlock()
+            return
+        }
+        openGroupsInFlight = true
+        openGroupsLock.unlock()
+
+        openGroupsQueue.async {
+            let groups = fetchOpenGroups()
+            openGroupsLock.lock()
+            if let groups = groups {
+                openGroupsCache = groups
+                openGroupsFetchedAt = Date()
+            }
+            let waiting = openGroupsWaiting
+            openGroupsWaiting.removeAll()
+            openGroupsInFlight = false
+            openGroupsLock.unlock()
+            DispatchQueue.main.async {
+                waiting.forEach { $0(groups) }
+            }
+        }
+    }
+
+    /// One round trip, retried a few times. Blocking; called only from `openGroupsQueue`.
+    private static func fetchOpenGroups(retry: Int = 3) -> [Group]? {
+        func askAgainOrGiveUp() -> [Group]? {
+            guard retry > 0 else {
+                return nil
+            }
+            // Fix: the retries went out back to back, so all four attempts landed inside the same
+            // bad moment and the whole thing was over before anything could recover. Spaced out,
+            // they cover a stretch of time rather than an instant.
+            Thread.sleep(forTimeInterval: pow(2.0, Double(3 - retry)))
+            return fetchOpenGroups(retry: retry - 1)
+        }
+
+        // Fix: writeAndWait sends nothing at all while the link is down, but has no way of knowing
+        // that and waits its full fifteen seconds for an answer to a question that never left the
+        // device. Right after launch or a resume - exactly when these screens ask - that was four
+        // attempts, a minute of waiting, and nothing to show for it.
+        guard Nexilis.waitForLink(upTo: 8) else {
+            return askAgainOrGiveUp()
+        }
+        guard let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.getOpenGroups(p_account: "1,2,3,5,6,7", offset: "0", search: "")) else {
+            return askAgainOrGiveUp()
+        }
+        guard response.getBody(key: CoreMessage_TMessageKey.ERRCOD, default_value: "99") == "00" else {
+            return askAgainOrGiveUp()
+        }
+        // Fix: `try!` on a payload that comes off the network, with a force unwrap in front of it.
+        // An empty or malformed answer brought the app down where it should have been retried.
+        let data = response.getBody(key: CoreMessage_TMessageKey.DATA)
+        guard let raw = data.data(using: .utf8),
+              let json = (try? JSONSerialization.jsonObject(with: raw, options: [])) as? [[String: Any?]] else {
+            return askAgainOrGiveUp()
+        }
+        return json.map { dataJson in
+            Group(id: dataJson[CoreMessage_TMessageKey.GROUP_ID] as? String ?? "",
+                  name: dataJson[CoreMessage_TMessageKey.GROUP_NAME] as? String ?? "",
+                  profile: dataJson[CoreMessage_TMessageKey.THUMB_ID] as? String ?? "",
+                  quote: dataJson[CoreMessage_TMessageKey.QUOTE] as? String ?? "",
+                  by: dataJson[CoreMessage_TMessageKey.BLOCK] as? String ?? "",
+                  date: "",
+                  parent: "",
+                  chatId: "",
+                  groupType: "NOTJOINED",
+                  isOpen: dataJson[CoreMessage_TMessageKey.IS_OPEN] as? String ?? "",
+                  official: "0",
+                  isEducation: "")
+        }
     }
     
     private static var nameGroupShared = "group.nexilis.share";
