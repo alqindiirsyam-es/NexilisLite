@@ -11,8 +11,7 @@ import WebKit
 import Speech
 import CommonCrypto
 import nuSDKService
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScrollViewDelegate, UIGestureRecognizerDelegate, WKScriptMessageHandler, SFSpeechRecognizerDelegate, ImageVideoPickerDelegate {
     var webView: WKWebView!
     let closeButton = UIButton()

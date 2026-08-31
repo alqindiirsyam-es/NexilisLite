@@ -13,14 +13,14 @@ import AVKit
 import UIKit
 import FMDB
 import QuickLook
-import NotificationBannerSwift
+@_implementationOnly import NotificationBannerSwift
 import SDWebImage
 import CryptoKit
 import WebKit
 import CommonCrypto
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.1.19"
+    public static var cpaasVersion = "5.2.0"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""

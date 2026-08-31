@@ -6,8 +6,8 @@
 //
 
 import UIKit
-import Alamofire
-import NotificationBannerSwift
+@_implementationOnly import Alamofire
+@_implementationOnly import NotificationBannerSwift
 import nuSDKService
 
 public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {

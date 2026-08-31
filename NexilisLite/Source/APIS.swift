@@ -8,7 +8,7 @@
 import Foundation
 import UIKit
 import FMDB
-import NotificationBannerSwift
+@_implementationOnly import NotificationBannerSwift
 #if SWIFT_PACKAGE
 import Toast
 #else

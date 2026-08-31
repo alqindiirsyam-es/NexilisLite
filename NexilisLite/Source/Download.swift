@@ -7,8 +7,7 @@
 //
 
 import Foundation
-import Alamofire
-
+@_implementationOnly import Alamofire
 /// How many bytes of a transfer have gone through, and how many there are in total, for
 /// whatever transfers are in flight.
 ///

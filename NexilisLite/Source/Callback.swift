@@ -10,8 +10,7 @@ import Foundation
 import UIKit
 import nuSDKService
 import Network
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 class Callback : CallBack {
     var sID: String = "Callback"
     

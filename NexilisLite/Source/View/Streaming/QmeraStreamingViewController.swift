@@ -7,7 +7,7 @@
 
 import UIKit
 import nuSDKService
-import NotificationBannerSwift
+@_implementationOnly import NotificationBannerSwift
 import AVFAudio
 
 class QmeraStreamingViewController: UIViewController {

@@ -9,8 +9,7 @@
 import Foundation
 import FMDB
 import Security
-import KeychainAccess
-
+@_implementationOnly import KeychainAccess
 public class Database {
     
     public init() {

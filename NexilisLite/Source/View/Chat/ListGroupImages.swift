@@ -7,7 +7,7 @@
 
 import UIKit
 import ImageIO
-import Popover
+@_implementationOnly import Popover
 import QuickLook
 import AVFoundation
 

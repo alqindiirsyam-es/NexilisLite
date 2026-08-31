@@ -7,9 +7,7 @@
 
 import UIKit
 import nuSDKService
-import NotificationBannerSwift
-
-
+@_implementationOnly import NotificationBannerSwift
 public class FloatingButton: UIView, UIGestureRecognizerDelegate {
     
     var groupView: UIStackView!

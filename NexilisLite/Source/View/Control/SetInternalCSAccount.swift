@@ -6,8 +6,7 @@
 //
 
 import UIKit
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 public class SetInternalCSAccount: UITableViewController {
     private var searchController: UISearchController!
     public var isSetCS = false

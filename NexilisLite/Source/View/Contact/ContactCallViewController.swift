@@ -7,8 +7,7 @@
 
 import UIKit
 import nuSDKService
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 class ContactCallViewController: UIViewController {
     
     @IBOutlet weak var tableView: UITableView!

@@ -7,8 +7,7 @@
 
 import Foundation
 import UIKit
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UISearchBarDelegate {
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let searchController = UISearchController(searchResultsController: nil)

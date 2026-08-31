@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import Alamofire
+@_implementationOnly import Alamofire
 import UniformTypeIdentifiers
 
 public class Network {
@@ -194,7 +194,12 @@ public class Network {
         _ = uploadHTTP(UPLOAD_URL_BACKUP, files: [fileUrl], completion: completion)
     }
     
-    public func uploadHTTP(_ endUrl: String, files: [URL] = [], filename: [String] = [], parameters: [String : Any] = [:], completion: @escaping (Bool, Double)->()) -> UploadRequest {
+    // Internal: returning Alamofire.UploadRequest would drag `import Alamofire`
+    // into the generated .swiftinterface, and consumers do not have that module
+    // because Alamofire is linked into this framework rather than installed
+    // beside it. The public uploadHTTP(name:) / uploadHTTP(fileUrl:) overloads
+    // return Void and stay public.
+    func uploadHTTP(_ endUrl: String, files: [URL] = [], filename: [String] = [], parameters: [String : Any] = [:], completion: @escaping (Bool, Double)->()) -> UploadRequest {
         
         var filesIn = [URL]()
         filesIn.append(contentsOf: files)

@@ -8,7 +8,7 @@
 import UIKit
 import AVFoundation
 import nuSDKService
-import NotificationBannerSwift
+@_implementationOnly import NotificationBannerSwift
 import MediaPlayer
 
 class QmeraAudioViewController: UIViewController {

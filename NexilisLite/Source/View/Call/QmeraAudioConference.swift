@@ -8,8 +8,7 @@
 import UIKit
 import AVFoundation
 import nuSDKService
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 class QmeraAudioConference: UIViewController {
     
     let buttonSize: CGFloat = 70

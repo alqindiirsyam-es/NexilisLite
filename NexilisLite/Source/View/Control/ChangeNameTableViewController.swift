@@ -6,8 +6,7 @@
 //
 
 import UIKit
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 class ChangeNameTableViewController: UITableViewController {
     
     @IBOutlet weak var name: UITextField!

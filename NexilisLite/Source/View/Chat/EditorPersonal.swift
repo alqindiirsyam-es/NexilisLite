@@ -9,10 +9,10 @@ import UIKit
 import AVKit
 import AVFoundation
 import QuickLook
-import NotificationBannerSwift
+@_implementationOnly import NotificationBannerSwift
 import Photos
 import nuSDKService
-import SwiftLinkPreview
+@_implementationOnly import SwiftLinkPreview
 import SDWebImage
 import PhotosUI
 import ObjectiveC

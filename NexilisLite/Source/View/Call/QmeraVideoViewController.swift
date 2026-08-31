@@ -13,7 +13,7 @@
 import UIKit
 import nuSDKService
 import AVFoundation
-import NotificationBannerSwift
+@_implementationOnly import NotificationBannerSwift
 import MediaPlayer
 
 class QmeraVideoViewController: UIViewController {

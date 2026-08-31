@@ -6,7 +6,7 @@
 //
 
 import UIKit
-import NotificationBannerSwift
+@_implementationOnly import NotificationBannerSwift
 import AVFoundation
 
 public class CreateSeminarViewController: UITableViewController {

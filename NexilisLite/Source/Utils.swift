@@ -8,7 +8,7 @@
 
 import Foundation
 import UIKit
-import NotificationBannerSwift
+@_implementationOnly import NotificationBannerSwift
 import nuSDKService
 import CoreLocation
 import CryptoKit

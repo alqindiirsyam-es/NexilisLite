@@ -7,8 +7,7 @@
 
 import Foundation
 import UIKit
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 public class CommunityNew: UIViewController, UITextFieldDelegate  {
     
     let containerButton = UIView()

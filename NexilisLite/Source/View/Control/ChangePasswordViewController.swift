@@ -6,8 +6,7 @@
 //
 
 import UIKit
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 class ChangePasswordViewController: UIViewController {
     @IBOutlet weak var oldPassField: PasswordTextField!
     @IBOutlet weak var newPassField: PasswordTextField!

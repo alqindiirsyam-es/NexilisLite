@@ -55,6 +55,22 @@ DYNAMIC_PODS = %w[
   GTMSessionFetcher
   RecaptchaInterop
   SDWebImage
+  # FMDB cannot be absorbed: 15 public declarations take or return
+  # FMDatabase / FMResultSet / FMDatabaseQueue (Database.shared.getRecords and
+  # friends, which AppBuilder uses), so the generated .swiftinterface names the
+  # module and a consumer must actually have it. SQLCipher comes with it —
+  # FMDB/SQLCipher is compiled against it, not the system libsqlite3.
+  FMDB
+  SQLCipher
+  # Toast-Swift and ZIPFoundation extend UIView and FileManager, and those
+  # extensions are reachable from a consumer that only writes `import
+  # NexilisLite` — verified: UIView().makeToast(…) and
+  # FileManager.default.zipItem(…) both compile against the published binary
+  # pod. Hiding them would silently take working API away, so they are shipped
+  # as declared dependencies instead. Named types (Keychain, NotificationBanner,
+  # Popover, SwiftLinkPreview) are NOT reachable that way and stay absorbed.
+  Toast-Swift
+  ZIPFoundation
 ].freeze
 
 pre_install do |installer|

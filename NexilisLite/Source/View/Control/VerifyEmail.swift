@@ -6,8 +6,7 @@
 //
 
 import UIKit
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 class VerifyEmail: UIViewController, UITextFieldDelegate, OTPTextFieldDelegate {
     var initialBounds: CGRect?
     var email = ""

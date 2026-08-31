@@ -8,7 +8,7 @@
 import UIKit
 import QuickLook
 //import Zip
-import NotificationBannerSwift
+@_implementationOnly import NotificationBannerSwift
 import ZIPFoundation
 import FMDB
 

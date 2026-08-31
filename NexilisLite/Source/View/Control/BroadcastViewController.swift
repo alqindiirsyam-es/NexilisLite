@@ -9,8 +9,7 @@ import UIKit
 import AVKit
 import AVFoundation
 import FMDB
-import NotificationBannerSwift
-
+@_implementationOnly import NotificationBannerSwift
 class BroadcastViewController: UITableViewController, UITextFieldDelegate, UITextViewDelegate, ImageVideoPickerDelegate, DocumentPickerDelegate {
 
     @IBOutlet weak var targetAudienceLabel: UILabel!
