@@ -249,6 +249,22 @@ class IncomingThread {
                                 dataMessage["message_id_notif"] = messageIdNotif
                                 dataMessage["is_pinned"] = pinned
                                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil, userInfo: dataMessage)
+                                // Fix: a pin arriving from another participant or another device
+                                // was written in with nothing counting what the conversation
+                                // already had, so it could end up holding four or more. The
+                                // server keeps neither the list nor the count, so this database
+                                // is where the limit of three has to hold: the oldest pins over
+                                // it are let go here, and every screen showing them is told.
+                                if pinned != "0",
+                                   let conversation = PinnedMessages.conversationClause(forMessageId: messageId, fmdb: fmdb) {
+                                    for droppedId in PinnedMessages.trim(conversation: conversation, fmdb: fmdb) {
+                                        var dropped: [AnyHashable : Any] = [:]
+                                        dropped["message_id"] = droppedId
+                                        dropped["message_id_notif"] = ""
+                                        dropped["is_pinned"] = "0"
+                                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil, userInfo: dropped)
+                                    }
+                                }
                             }
                             ack(message: message)
                         } catch {

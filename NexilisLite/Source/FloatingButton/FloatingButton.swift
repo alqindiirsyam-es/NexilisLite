@@ -47,7 +47,27 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
     let heightFBSideTab = (UIScreen.main.bounds.height * 1.05) / 6.5
     let widthFBSideTab: CGFloat = 20
     let widthVerticalSideTab: CGFloat = 60
-    let heightVerticalSideTab: CGFloat = 250
+    // How the vertical side tab is built, one button at a time: a 30pt button, 20pt of air
+    // between two of them, and 10pt above the first and below the last. So every button after
+    // the first adds exactly 50pt to the box.
+    let verticalSideTabButtonSize: CGFloat = 30
+    let verticalSideTabSpacing: CGFloat = 20
+    let verticalSideTabPadding: CGFloat = 10
+    /// The box never shrinks below four buttons, and never grows past five - a sixth is scrolled
+    /// to rather than made room for.
+    let verticalSideTabMinButtons = 4
+    let verticalSideTabMaxButtons = 5
+    /// Fix: this was a fixed 250, the height of five buttons, whatever was actually in it - so a
+    /// side tab configured with four left a button's worth of empty box hanging under the last
+    /// one. It follows what it holds now (see updateVerticalSideTabSize), between the two limits
+    /// above, which is also why it is no longer a constant: the drag limits and the on-screen
+    /// clamping all read it.
+    var heightVerticalSideTab: CGFloat = 250
+    /// The height of the box, and the air above and below the buttons in it - both change with
+    /// the number of buttons, so both are held on to.
+    private var verticalSideTabHeightConstraint: NSLayoutConstraint?
+    private var verticalSideTabTopConstraint: NSLayoutConstraint?
+    private var verticalSideTabBottomConstraint: NSLayoutConstraint?
     
     final let MODE_VERTICAL_FLOATING_BUTTON = "1"
     final let MODE_VERTICAL_ANIMATION = "2"
@@ -183,7 +203,8 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
             scrollView.leftAnchor.constraint(equalTo: nexilis_button.rightAnchor).isActive = true
             scrollView.centerYAnchor.constraint(equalTo: nexilis_button.centerYAnchor).isActive = true
             scrollView.widthAnchor.constraint(equalToConstant: widthVerticalSideTab).isActive = true
-            scrollView.heightAnchor.constraint(equalToConstant: heightVerticalSideTab).isActive = true
+            verticalSideTabHeightConstraint = scrollView.heightAnchor.constraint(equalToConstant: heightVerticalSideTab)
+            verticalSideTabHeightConstraint?.isActive = true
         } else if configModeFB != MODE_HORIZONTAL_SIDE_TAB {
             scrollView.topAnchor.constraint(equalTo: topAnchor).isActive = true
             if configModeFB == MODE_VERTICAL_ANIMATION {
@@ -218,9 +239,11 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         scrollView.addSubview(groupView)
 
         if configModeFB == MODE_VERTICAL_SIDE_TAB {
-            groupView.spacing = 20.0
-            groupView.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 10).isActive = true
-            groupView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -10).isActive = true
+            groupView.spacing = verticalSideTabSpacing
+            verticalSideTabTopConstraint = groupView.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: verticalSideTabPadding)
+            verticalSideTabBottomConstraint = groupView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -verticalSideTabPadding)
+            verticalSideTabTopConstraint?.isActive = true
+            verticalSideTabBottomConstraint?.isActive = true
             groupView.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor).isActive = true
         } else if configModeFB == MODE_HORIZONTAL_SIDE_TAB {
             groupView.leftAnchor.constraint(equalTo: scrollView.leftAnchor).isActive = true
@@ -240,6 +263,10 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         center.addObserver(self, selector: #selector(imageFBUpdate(notification:)), name: NSNotification.Name(rawValue: "imageFBUpdate"), object: nil)
         center.addObserver(self, selector: #selector(checkCounter), name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil)
         center.addObserver(self, selector: #selector(checkCounter), name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil)
+        // Messages can be read while the app is away - on another device, or from a notification -
+        // and nothing posts to this button while it is in the background. Counting again on the
+        // way back is what stops a mark surviving from one session into the next.
+        center.addObserver(self, selector: #selector(checkCounter), name: UIApplication.didBecomeActiveNotification, object: nil)
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(hideButton))
         tapGesture.cancelsTouchesInView = false
         UIApplication.shared.windows.first?.rootViewController?.view.addGestureRecognizer(tapGesture)
@@ -423,9 +450,9 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                                     newButton.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                     newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                                 } else if mode == MODE_VERTICAL_SIDE_TAB {
-                                    newButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
-                                    newButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                                    newButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
+                                    newButton.frame = CGRect(x: 0, y: 0, width: verticalSideTabButtonSize, height: verticalSideTabButtonSize)
+                                    newButton.widthAnchor.constraint(equalToConstant: verticalSideTabButtonSize).isActive = true
+                                    newButton.heightAnchor.constraint(equalToConstant: verticalSideTabButtonSize).isActive = true
                                     newButton.contentMode = .scaleAspectFill
                                     newButton.clipsToBounds = true
                                 } else {
@@ -492,6 +519,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                                 let qmeraLongPress = UILongPressGestureRecognizer(target: self, action: #selector(qmeraLongPress(gestureRecognizer:)))
                                 newButton.addGestureRecognizer(qmeraLongPress)
                             }
+                            updateVerticalSideTabSize()
                         }
                     }
                 }
@@ -499,6 +527,49 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         }
     }
     
+    /// Sizes the vertical side tab to what is actually in it.
+    ///
+    /// The box is as tall as its buttons need, from four of them up to five; a sixth and beyond
+    /// are reached by scrolling, which is what the box did for every count before. Below four
+    /// the box stays the height of four and the buttons are centred in it, rather than hanging
+    /// from the top with the space left underneath.
+    private func updateVerticalSideTabSize() {
+        guard configModeFB == MODE_VERTICAL_SIDE_TAB else {
+            return
+        }
+        let count = groupView.arrangedSubviews.count
+        // Nothing has been built yet - the box keeps the size it has rather than collapsing to
+        // an empty one that the buttons would then have to grow back out of.
+        guard count > 0 else {
+            return
+        }
+        let shown = min(max(count, verticalSideTabMinButtons), verticalSideTabMaxButtons)
+        let boxHeight = CGFloat(shown) * verticalSideTabButtonSize
+            + CGFloat(shown - 1) * verticalSideTabSpacing
+            + verticalSideTabPadding * 2
+        let buttonsHeight = CGFloat(count) * verticalSideTabButtonSize
+            + CGFloat(count - 1) * verticalSideTabSpacing
+        // With fewer buttons than the box is tall for, the air above and below takes the whole
+        // difference, half each - which is what puts them in the middle. With more, this is the
+        // 10pt it always was and the rest is scrolled.
+        let padding = max(verticalSideTabPadding, (boxHeight - buttonsHeight) / 2)
+
+        heightVerticalSideTab = boxHeight
+        verticalSideTabHeightConstraint?.constant = boxHeight
+        verticalSideTabTopConstraint?.constant = padding
+        verticalSideTabBottomConstraint?.constant = -padding
+
+        // The view is the box, and it is placed by its frame rather than by constraints, so a
+        // box that changed height has to be told - and put back on screen if the new height
+        // pushed its foot past the bottom.
+        frame.size.height = boxHeight
+        let heightScreen = UIScreen.main.bounds.height
+        if frame.origin.y > heightScreen - boxHeight {
+            frame.origin.y = heightScreen - boxHeight
+        }
+        layoutIfNeeded()
+    }
+
     func getDefaultButton() {
         let mode = configModeFB
         var data = [Nexilis.IDX_NOTIF_CENTER, Nexilis.IDX_CC, Nexilis.IDX_CONVERSATION, Nexilis.IDX_CALL, Nexilis.IDX_STREAM]
@@ -520,9 +591,9 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
                 newButton.widthAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
                 newButton.heightAnchor.constraint(equalToConstant: defaultWidthHeightMenuFB).isActive = true
             } else if mode == MODE_VERTICAL_SIDE_TAB {
-                newButton.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
-                newButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                newButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
+                newButton.frame = CGRect(x: 0, y: 0, width: verticalSideTabButtonSize, height: verticalSideTabButtonSize)
+                newButton.widthAnchor.constraint(equalToConstant: verticalSideTabButtonSize).isActive = true
+                newButton.heightAnchor.constraint(equalToConstant: verticalSideTabButtonSize).isActive = true
                 newButton.contentMode = .scaleAspectFill
                 newButton.clipsToBounds = true
             } else {
@@ -563,6 +634,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
             let qmeraLongPress = UILongPressGestureRecognizer(target: self, action: #selector(qmeraLongPress(gestureRecognizer:)))
             newButton.addGestureRecognizer(qmeraLongPress)
         }
+        updateVerticalSideTabSize()
     }
     
     @objc func draggedView(_ sender:UIPanGestureRecognizer){
@@ -633,49 +705,96 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         indicatorCounterFB.isHidden = !hasUnreadMark
     }
 
+    /// The line the unread count is read on, and which read is the newest.
+    ///
+    /// Fix: every count ran on the shared global queue, so two of them started close together
+    /// could come back in either order - and they are started close together all the time, since
+    /// "reloadTabChats" is posted from dozens of places, several of them in a row as a chat is
+    /// opened and its messages are marked read. The count taken just *before* a chat was read
+    /// could then land after the count taken once it had been, putting the mark back for
+    /// messages that were already read and leaving it there until something else counted again.
+    /// The slower the device the wider that window is, which is why an iPhone 7 shows it and a
+    /// newer phone rarely does: the count is a SUM over three joined tables.
+    ///
+    /// One serial line means the reads happen in the order they were asked for, and the request
+    /// number means only the newest one is read at all - a burst of posts now costs one query
+    /// rather than one each.
+    private let counterQueue = DispatchQueue(label: "io.nexilis.floatingbutton.counter", qos: .utility)
+    private let counterLock = NSLock()
+    private var counterRequests = 0
+
+    private func newCounterRequest() -> Int {
+        counterLock.lock()
+        counterRequests += 1
+        let request = counterRequests
+        counterLock.unlock()
+        return request
+    }
+
+    private func isNewestCounterRequest(_ request: Int) -> Bool {
+        counterLock.lock()
+        let newest = counterRequests
+        counterLock.unlock()
+        return request == newest
+    }
+
     @objc func checkCounter() {
-        DispatchQueue.global().async { [self] in
-            let counter = APIS.getTotalCounter()
-            if counter > 0 {
-                DispatchQueue.main.async { [self] in
-                    hasUnreadMark = true
-                    if button_fb2 != nil && !indicatorCounterFB.isDescendant(of: button_fb2) {
-                        button_fb2.addSubview(indicatorCounterFB)
-                        indicatorCounterFB.layer.cornerRadius = 7.5
-                        indicatorCounterFB.layer.masksToBounds = true
-                        indicatorCounterFB.backgroundColor = .systemRed
-                        indicatorCounterFB.anchor(top: button_fb2.topAnchor, left: button_fb2.leftAnchor, height: 15, minWidth: 15, maxWidth: 20)
-                        indicatorCounterFB.addSubview(labelCounterFB)
-                        labelCounterFB.anchor(left: indicatorCounterFB.leftAnchor, right: indicatorCounterFB.rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: indicatorCounterFB.centerXAnchor, centerY: indicatorCounterFB.centerYAnchor)
-                        labelCounterFB.font = .systemFont(ofSize: 10)
-                        labelCounterFB.textColor = .white
-                    }
-                    if !indicatorCounterFBBig.isDescendant(of: nexilis_button){
-                        nexilis_button.addSubview(indicatorCounterFBBig)
-                        indicatorCounterFBBig.tintColor = .systemRed
-                        indicatorCounterFBBig.image = UIImage(systemName: "staroflife.circle.fill")
-                        indicatorCounterFBBig.anchor(top: nexilis_button.topAnchor, left: nexilis_button.leftAnchor, paddingTop: 5, paddingLeft: 5, width: 15, height: 15)
-                    }
-                    labelCounterFB.text = "\(counter)"
-                    updateUnreadMark()
+        let request = newCounterRequest()
+        counterQueue.async { [weak self] in
+            guard let self = self, self.isNewestCounterRequest(request) else {
+                return
+            }
+            let counter = Int(APIS.getTotalCounter())
+            // Asked again while this one was reading: that read is about to happen on this same
+            // line, and it knows something this one does not.
+            guard self.isNewestCounterRequest(request) else {
+                return
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, self.isNewestCounterRequest(request) else {
+                    return
                 }
-            } else {
-                DispatchQueue.main.async { [self] in
-                    hasUnreadMark = false
-                    // Hidden as well as taken out: taking it out only works if it is where it
-                    // was expected to be, and hiding it is true wherever it ended up.
-                    updateUnreadMark()
-                    if button_fb2 != nil && indicatorCounterFB.isDescendant(of: button_fb2) {
-                        indicatorCounterFB.removeFromSuperview()
-                    }
-                    if indicatorCounterFBBig.isDescendant(of: nexilis_button) {
-                        indicatorCounterFBBig.removeFromSuperview()
-                    }
-                }
+                self.applyCounter(counter)
             }
         }
     }
-    
+
+    /// Puts a count on the button: the number beside the conversations item, and the mark on the
+    /// button itself. Nothing here reads the database, so it cannot be the one that is late.
+    private func applyCounter(_ counter: Int) {
+        hasUnreadMark = counter > 0
+        if hasUnreadMark {
+            if button_fb2 != nil && !indicatorCounterFB.isDescendant(of: button_fb2) {
+                button_fb2.addSubview(indicatorCounterFB)
+                indicatorCounterFB.layer.cornerRadius = 7.5
+                indicatorCounterFB.layer.masksToBounds = true
+                indicatorCounterFB.backgroundColor = .systemRed
+                indicatorCounterFB.anchor(top: button_fb2.topAnchor, left: button_fb2.leftAnchor, height: 15, minWidth: 15, maxWidth: 20)
+                indicatorCounterFB.addSubview(labelCounterFB)
+                labelCounterFB.anchor(left: indicatorCounterFB.leftAnchor, right: indicatorCounterFB.rightAnchor, paddingLeft: 5, paddingRight: 5, centerX: indicatorCounterFB.centerXAnchor, centerY: indicatorCounterFB.centerYAnchor)
+                labelCounterFB.font = .systemFont(ofSize: 10)
+                labelCounterFB.textColor = .white
+            }
+            if !indicatorCounterFBBig.isDescendant(of: nexilis_button) {
+                nexilis_button.addSubview(indicatorCounterFBBig)
+                indicatorCounterFBBig.tintColor = .systemRed
+                indicatorCounterFBBig.image = UIImage(systemName: "staroflife.circle.fill")
+                indicatorCounterFBBig.anchor(top: nexilis_button.topAnchor, left: nexilis_button.leftAnchor, paddingTop: 5, paddingLeft: 5, width: 15, height: 15)
+            }
+            labelCounterFB.text = "\(counter)"
+        } else {
+            // Hidden as well as taken out: taking it out only works if it is where it was
+            // expected to be, and hiding it is true wherever it ended up.
+            if indicatorCounterFB.superview != nil {
+                indicatorCounterFB.removeFromSuperview()
+            }
+            if indicatorCounterFBBig.superview != nil {
+                indicatorCounterFBBig.removeFromSuperview()
+            }
+        }
+        updateUnreadMark()
+    }
+
     @objc func qmeraTap() {
         show(isShow: !isShow)
     }
@@ -725,6 +844,9 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
             animationTimer.invalidate()
             pullButton()
             updateUnreadMark()
+            // Opening the menu is a good moment to ask again: it is rare, it is the reader's own
+            // doing, and it is the gesture somebody makes when the mark looks wrong.
+            checkCounter()
             var height = CGFloat((defaultWidthHeightMenuFB * countMenuFB) + defaultHeightFB + 5) //defaultWidthHeightMenuFB
             var width = frame.width
             var xPosition = frame.origin.x

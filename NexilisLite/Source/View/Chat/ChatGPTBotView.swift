@@ -38,6 +38,9 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
     public var unique_l_pin = ""
     var counter = 0
     var markerCounter: String?
+    /// How many messages the band above the marker says are waiting. Kept beside
+    /// `markerCounter` because `counter` is cleared as soon as the chat opens.
+    var markerCount = 0
     var buttonScrollToBottom = UIButton()
     let indicatorCounterBSTB = UIView()
     let labelCounter = UILabel()
@@ -995,6 +998,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                     else if self.counter != 0 {
                         if !self.indicatorCounterBSTB.isDescendant(of: self.view) && self.buttonScrollToBottom.isDescendant(of: self.view) {
                             self.markerCounter = row["message_id"] as? String
+                            self.markerCount = self.counter
                             self.addCounterAtButttonScrollToBottom()
                             let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
                             if indexMessage != nil {
@@ -1165,7 +1169,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                 return formatter.string(from: date)
             } else {
                 let formatter = DateFormatter()
-                formatter.dateFormat = "EE, dd MMM"
+                formatter.dateFormat = ChatDayLabel.format(for: date)
                 let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
                 if lang == "id" {
                     formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
@@ -1952,34 +1956,8 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             
         } else {
             if markerCounter != nil && dataMessages[indexPath.row]["message_id"] as? String == markerCounter {
-                containerMessage.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 35).isActive = true
-                let newMessagesView = UIView()
-                cell.contentView.addSubview(newMessagesView)
-                newMessagesView.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    newMessagesView.topAnchor.constraint(equalTo: newMessagesView.topAnchor),
-                    newMessagesView.bottomAnchor.constraint(equalTo: containerMessage.topAnchor),
-                    newMessagesView.centerXAnchor.constraint(equalTo: cell.contentView.centerXAnchor),
-                    newMessagesView.heightAnchor.constraint(equalToConstant: 30),
-                    newMessagesView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
-                ])
-                newMessagesView.backgroundColor = .greenColor
-                newMessagesView.layer.cornerRadius = 15.0
-                newMessagesView.clipsToBounds = true
-                
-                let labelNewMessages = UILabel()
-                newMessagesView.addSubview(labelNewMessages)
-                labelNewMessages.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    labelNewMessages.centerYAnchor.constraint(equalTo: newMessagesView.centerYAnchor),
-                    labelNewMessages.centerXAnchor.constraint(equalTo: newMessagesView.centerXAnchor),
-                    labelNewMessages.leadingAnchor.constraint(equalTo: newMessagesView.leadingAnchor, constant: 10),
-                    labelNewMessages.trailingAnchor.constraint(equalTo: newMessagesView.trailingAnchor, constant: -10),
-                ])
-                labelNewMessages.textAlignment = .center
-                labelNewMessages.textColor = .secondaryColor
-                labelNewMessages.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
-                labelNewMessages.text = "Unread Messages".localized()
+                containerMessage.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: UnreadMarker.totalTopInset).isActive = true
+                UnreadMarker.install(in: cell.contentView, count: markerCount, fontSize: 14 + offset())
                 
             } else {
                 containerMessage.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 5).isActive = true

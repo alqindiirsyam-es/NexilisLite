@@ -245,10 +245,84 @@ class OutgoingThread {
      *
      */
     
+    /// Messages the reader has stopped on purpose.
+    ///
+    /// Cancelling the transfer only makes one attempt fail, and this thread retries an upload five
+    /// times before it gives up - so a send that had been stopped simply went again a minute later
+    /// and arrived. Stopping has to be remembered, not just done once: the message is taken off the
+    /// queue, out of the outgoing table, and named here so a retry already in flight lets it go.
+    private var cancelledSends: Set<String> = []
+    private let cancelLock = NSLock()
+
+    /// Stops a message being sent, now and on any retry.
+    func cancelSend(messageId: String) {
+        guard !messageId.isEmpty else { return }
+        cancelLock.lock()
+        cancelledSends.insert(messageId)
+        cancelLock.unlock()
+
+        queueLock.lock()
+        queue.removeAll { $0.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID) == messageId }
+        queueLock.unlock()
+
+        maxRetryUpload.removeValue(forKey: messageId)
+        maxRetryUploadTime.removeValue(forKey: messageId)
+
+        removeOutgoing(messageId: messageId)
+    }
+
+    /// Takes every queued copy of a message out of the outgoing table.
+    ///
+    /// Fix: this was a delete on `id`, and OUTGOING.id is not the message's id at all - it is the
+    /// transaction the message was packed with, `me + getTID()`, freshly minted every time a
+    /// message is built. Nothing was ever matched, so a stopped message stayed in the table. The
+    /// reconnect sweep re-queues any row whose message reads as still sending, which is exactly
+    /// what the reader asking to send it again makes it: two copies of one message then went up
+    /// together, sharing one file, and the first to finish moved that file out of the documents
+    /// folder into the secure store. The second had nothing left to upload, failed its five
+    /// attempts and marked the message as never sent - for good, because every attempt after that
+    /// found the same nothing. The rows here are only messages that have not been sent, so reading
+    /// them to find the right one costs nothing worth counting.
+    func removeOutgoing(messageId: String) {
+        guard !messageId.isEmpty else { return }
+        Database.shared.database?.inTransaction({ (fmdb, _) in
+            var queuedUnder: [String] = []
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message, id from OUTGOING") {
+                while cursor.next() {
+                    guard let packed = cursor.string(forColumnIndex: 0) else { continue }
+                    if TMessage(data: packed).getBody(key: CoreMessage_TMessageKey.MESSAGE_ID) == messageId {
+                        queuedUnder.append(cursor.string(forColumnIndex: 1) ?? "")
+                    }
+                }
+                cursor.close()
+            }
+            for id in queuedUnder where !id.isEmpty {
+                _ = Database.shared.deleteRecord(fmdb: fmdb, table: "OUTGOING", _where: "id = '\(id)'")
+            }
+        })
+    }
+
+    /// True once, then forgotten: a stopped message is only stopped until it is sent again.
+    func isCancelled(messageId: String) -> Bool {
+        cancelLock.lock()
+        defer { cancelLock.unlock() }
+        return cancelledSends.contains(messageId)
+    }
+
+    func clearCancelled(messageId: String) {
+        cancelLock.lock()
+        cancelledSends.remove(messageId)
+        cancelLock.unlock()
+    }
+
     private var maxRetryUpload: [String: Int] = [:]
     private var maxRetryUploadTime: [String: Int] = [:]
     
     private func sendChat(message: TMessage) {
+        // Stopped before this ever got its turn on the queue.
+        if isCancelled(messageId: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)) {
+            return
+        }
         // if media exist upload first
         var fileName = message.getBody(key: CoreMessage_TMessageKey.IMAGE_ID, default_value: "")
         if fileName.isEmpty {
@@ -268,6 +342,14 @@ class OutgoingThread {
             }
             if (!message.getBody(key: CoreMessage_TMessageKey.THUMB_ID).isEmpty) {
                 Network().uploadHTTP(name: message.getBody(key: CoreMessage_TMessageKey.THUMB_ID)) { (result, progress) in
+                    // Fix: the reader's stop only kept a *failed* attempt from being tried again.
+                    // The attempt that succeeded went out regardless - and a picture goes up in two
+                    // parts, its thumbnail first, so a stop pressed while the thumbnail was moving
+                    // cancelled nothing that was running, the picture went up next, and the message
+                    // arrived anyway. This is the point where it actually leaves.
+                    if self.isCancelled(messageId: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)) {
+                        return
+                    }
                     if result, progress == 100 {
                         do {
                             do{
@@ -287,6 +369,9 @@ class OutgoingThread {
                             }
                         } catch {}
                         Network().uploadHTTP(name: fileName) { (result, progress) in
+                            if self.isCancelled(messageId: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)) {
+                                return
+                            }
                             if result {
                                 if let delegate = Nexilis.shared.messageDelegate {
                                     delegate.onUpload(name: fileName, progress: progress)
@@ -333,6 +418,9 @@ class OutgoingThread {
                 }
             } else {
                 Network().uploadHTTP(name: fileName) { (result, progress) in
+                    if self.isCancelled(messageId: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)) {
+                        return
+                    }
                     if result {
                         if let delegate = Nexilis.shared.messageDelegate {
                             delegate.onUpload(name: fileName, progress: progress)
@@ -517,6 +605,10 @@ class OutgoingThread {
             maxRetryTime = "60000"
         }
         
+        // Stopped by the reader: no more attempts, whatever the retry count says.
+        if isCancelled(messageId: message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)) {
+            return
+        }
         var countRetry = 0
         do {
             countRetry = maxRetryUpload[message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)] ?? 0

@@ -369,7 +369,7 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
         content.secondaryAttributedText = typeCallLog(type: call.status, isVideo: call.isVideo)
         content.secondaryTextProperties.font = .systemFont(ofSize: 14)
         content.secondaryTextProperties.color = .gray
-        getImage(name: call.image, placeholderImage: UIImage(systemName: "person.circle.fill"), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+        getImage(name: call.image, placeholderImage: UIImage(systemName: "person.circle.fill"), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 40, height: 40), completion: { result, isDownloaded, image in
             content.image = image
         })
         let constantSize = 40.0

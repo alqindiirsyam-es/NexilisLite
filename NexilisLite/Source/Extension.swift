@@ -12,6 +12,7 @@ import SDWebImage
 import ImageIO
 import MobileCoreServices
 import CommonCrypto
+import CoreImage
 import ZIPFoundation
 import PDFKit
 import ObjectiveC
@@ -378,7 +379,97 @@ extension Data {
 }
 
 extension UIImage {
-    
+
+    /// A picture decoded no larger than it is going to be drawn.
+    ///
+    /// Fix: thumbnails were decoded in full and then re-rendered through `resize(target:)` into a
+    /// five-hundred-point box - and a renderer works at the screen's scale, so a two-hundred-pixel
+    /// thumbnail came out a fifteen-hundred-pixel bitmap. Fifty-six times the pixels, not one of
+    /// them carrying detail the original had, nine megabytes apiece held in the image cache, and
+    /// enough pressure on that cache to have the work done again and again. `resize` also scales
+    /// *up* when the source is smaller than the target, which is the whole of that waste.
+    ///
+    /// Downsampling at decode reads only what it needs and never enlarges anything.
+    public static func thumbnail(from data: Data, maxPixels: CGFloat = 900) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData,
+                                                       [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            return UIImage(data: data)
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixels
+        ]
+        guard let reduced = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: reduced)
+    }
+
+    private static let softenContext = CIContext(options: [.useSoftwareRenderer: false])
+    private static let softenCache = NSCache<NSString, UIImage>()
+
+    /// A softened copy of a thumbnail, for a picture that is here in outline but not yet itself.
+    ///
+    /// Fix: this used to be done with a blur *view* laid over the thumbnail, and a blur view is a
+    /// veil - translucent white or grey - which drains the colour out of whatever is under it. The
+    /// bubble ended up a pale rectangle rather than a photograph waiting to be fetched, however
+    /// thin the material was made. Blurring the picture itself keeps every colour it had and takes
+    /// only the detail away, which is what the reference does and what "still clearly visible"
+    /// means.
+    ///
+    /// `key` names the file, so the work is done once per thumbnail rather than on every pass of
+    /// cellForRow.
+    public func softened(radius: CGFloat = 7, key: String? = nil) -> UIImage {
+        let cacheKey = key.map { "\($0)#\(Int(radius))" as NSString }
+        if let cacheKey = cacheKey, let ready = UIImage.softenCache.object(forKey: cacheKey) {
+            return ready
+        }
+        guard let source = cgImage else { return self }
+
+        // Fix: blur what is small, and let it be drawn large. A gaussian costs what it touches, and
+        // this touched every pixel of a thumbnail that `resize` had already blown up to five
+        // hundred points - which at three times the screen's scale is over two million of them,
+        // for a picture whose whole point is that its detail is gone. The thumbnail file was never
+        // the slow part after a cold start; this was.
+        let longest = CGFloat(max(source.width, source.height))
+        let working: CGFloat = 220
+        let shrink = longest > working ? working / longest : 1
+        var pixels = source
+        if shrink < 1 {
+            let reduced = CGSize(width: (CGFloat(source.width) * shrink).rounded(),
+                                 height: (CGFloat(source.height) * shrink).rounded())
+            let format = UIGraphicsImageRendererFormat()
+            // One pixel per point: a blurred picture has no detail that a finer grid could hold.
+            format.scale = 1
+            let smaller = UIGraphicsImageRenderer(size: reduced, format: format).image { _ in
+                self.draw(in: CGRect(origin: .zero, size: reduced))
+            }
+            guard let cg = smaller.cgImage else { return self }
+            pixels = cg
+        }
+
+        let input = CIImage(cgImage: pixels)
+        guard let filter = CIFilter(name: "CIGaussianBlur") else { return self }
+        filter.setValue(input, forKey: kCIInputImageKey)
+        // Applied at the smaller size, so the radius shrinks with it - drawn back up to the size of
+        // the bubble, what the reader sees is as soft as it was before.
+        filter.setValue(radius * shrink, forKey: kCIInputRadiusKey)
+        // A gaussian reaches past the edges of what it is given, so the result is bigger than the
+        // picture and its border fades to nothing. Cropping back to the original extent is what
+        // keeps the edges opaque and the size unchanged.
+        guard let blurred = filter.outputImage,
+              let rendered = UIImage.softenContext.createCGImage(blurred, from: input.extent) else {
+            return self
+        }
+        let result = UIImage(cgImage: rendered, scale: 1, orientation: imageOrientation)
+        if let cacheKey = cacheKey {
+            UIImage.softenCache.setObject(result, forKey: cacheKey)
+        }
+        return result
+    }
+
     var isPortrait:  Bool    { size.height > size.width }
     var isLandscape: Bool    { size.width > size.height }
     var breadth:     CGFloat { min(size.width, size.height) }
@@ -453,6 +544,55 @@ extension NSObject {
     
     private static var urlStore = [String:String]()
 
+    /// Pictures that have already been decoded, resized and masked, by what was asked for.
+    ///
+    /// Fix: every call read the file off disk, decoded it at full size, redrew it into a 400x400
+    /// bitmap and then redrew it again through a circular mask - all on the main thread, inside
+    /// cellForRowAt. That is the whole of that work once per row of every redraw, for a picture
+    /// that has not changed since the last time it was drawn. It is done once now and remembered.
+    private static let preparedImages: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 300
+        cache.totalCostLimit = 1024 * 1024 * 60
+        return cache
+    }()
+
+    /// Redraws the one row a picture belongs to, if it is still a row.
+    ///
+    /// The list may have changed while the file was coming down, so the index path is checked
+    /// against what the table holds now rather than trusted.
+    fileprivate static func redrawRow(_ indexPath: IndexPath?, in tableView: UITableView) {
+        guard let indexPath = indexPath,
+              indexPath.section >= 0, indexPath.section < tableView.numberOfSections,
+              indexPath.row >= 0, indexPath.row < tableView.numberOfRows(inSection: indexPath.section) else {
+            return
+        }
+        tableView.reloadRows(at: [indexPath], with: .none)
+    }
+
+    /// Where downloads land. Asking the file manager for it is a filesystem call, and it was being
+    /// made for every row.
+    private static let documentsDirectory: URL? = {
+        return try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
+                                            appropriateFor: nil, create: true)
+    }()
+
+    /// Resizes and masks a picture the way the caller asked for, and remembers the result.
+    private func prepareImage(_ image: UIImage?, isResized: Bool, isCircle: Bool, targetSize: CGSize, key: NSString) -> UIImage? {
+        var image = image
+        if isResized {
+            image = image?.sd_resizedImage(with: targetSize, scaleMode: .aspectFill)
+        }
+        if isCircle {
+            image = image?.circleMasked
+        }
+        if let image = image {
+            let bytes = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+            NSObject.preparedImages.setObject(image, forKey: key, cost: bytes)
+        }
+        return image
+    }
+
     public func getImage(
         name url: String,
         placeholderImage: UIImage? = nil,
@@ -460,8 +600,23 @@ extension NSObject {
         tableView: UITableView? = nil,
         indexPath: IndexPath? = nil,
         isResized: Bool = true,
+        /// How large the picture is actually going to be drawn, **in points**.
+        ///
+        /// Fix: every picture was redrawn at 400x400 whatever it was for - far more pixels than a
+        /// 40pt avatar in a list can show, decoded and redrawn on the main thread. Naming a size
+        /// cuts that down, but the size has to be turned into pixels first: sd_resizedImage takes
+        /// points and keeps the source image's scale, and a picture read off disk has a scale of
+        /// 1 - so asking for 40 gave a 40 pixel bitmap, stretched three times over on a 3x screen.
+        /// Multiplied by the screen scale below, which is what makes 40 points mean 40 points.
+        ///
+        /// Left unsaid, the picture is drawn at the 400 pixels it always was, so a caller that has
+        /// not been looked at keeps exactly what it had.
+        targetSize: CGSize? = nil,
         completion: @escaping (Bool, Bool, UIImage?) -> ()
     ) {
+        let drawnSize: CGSize = targetSize.map {
+            CGSize(width: $0.width * UIScreen.main.scale, height: $0.height * UIScreen.main.scale)
+        } ?? CGSize(width: 400, height: 400)
         let tmpAddress = String(format: "%p", unsafeBitCast(self, to: Int.self))
         type(of: self).urlStore[tmpAddress] = url
         
@@ -471,20 +626,25 @@ extension NSObject {
             return
         }
         
+        // The same file asked for the same way gives the same picture. A picture that changes
+        // arrives under a new name, so there is nothing here to go stale.
+        let cacheKey = "\(url)|\(isResized)|\(isCircle)|\(Int(drawnSize.width))x\(Int(drawnSize.height))" as NSString
+        if let ready = NSObject.preparedImages.object(forKey: cacheKey) {
+            completion(true, false, ready)
+            return
+        }
+
         do {
-            let documentDir = try FileManager.default.url(for: .documentDirectory,
-                                                          in: .userDomainMask,
-                                                          appropriateFor: nil,
-                                                          create: true)
+            guard let documentDir = NSObject.documentsDirectory else {
+                throw CocoaError(.fileNoSuchFile)
+            }
             let file = documentDir.appendingPathComponent(url)
-            if FileManager().fileExists(atPath: file.path) {
-                var image = UIImage(contentsOfFile: file.path)
-                if isResized {
-                    image = image?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-                }
-                if isCircle {
-                    image = image?.circleMasked
-                }
+            // FileManager.default rather than FileManager(): a new one was being allocated per row
+            // only to ask whether a file exists.
+            if FileManager.default.fileExists(atPath: file.path) {
+                let image = prepareImage(UIImage(contentsOfFile: file.path),
+                                         isResized: isResized, isCircle: isCircle,
+                                         targetSize: drawnSize, key: cacheKey)
                 completion(true, false, image)
                 return
             }
@@ -492,13 +652,9 @@ extension NSObject {
                 if let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: tempData) {
                     tempData = dataDecrypt
                 }
-                var image = UIImage(data: tempData)
-                if isResized {
-                    image = image?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-                }
-                if isCircle {
-                    image = image?.circleMasked
-                }
+                let image = prepareImage(UIImage(data: tempData),
+                                         isResized: isResized, isCircle: isCircle,
+                                         targetSize: drawnSize, key: cacheKey)
                 completion(true, false, image)
                 return
             }
@@ -511,32 +667,26 @@ extension NSObject {
                 
                 DispatchQueue.main.async {
                     if type(of: self).urlStore[tmpAddress] == name && tableView == nil {
-                        if FileManager().fileExists(atPath: file.path) {
-                            var image = UIImage(contentsOfFile: file.path)
-                            if isResized {
-                                image = image?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-                            }
-                            if isCircle {
-                                image = image?.circleMasked
-                            }
+                        if FileManager.default.fileExists(atPath: file.path) {
+                            let image = self.prepareImage(UIImage(contentsOfFile: file.path),
+                                                          isResized: isResized, isCircle: isCircle,
+                                                          targetSize: drawnSize, key: cacheKey)
                             completion(true, true, image)
                         } else if FileEncryption.shared.isSecureExists(filename: url) {
                             if var imageData = try? FileEncryption.shared.readSecure(filename: url) {
                                 if let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: imageData) {
                                     imageData = dataDecrypt
                                 }
-                                var image = UIImage(data: imageData)
-                                if isResized {
-                                    image = image?.sd_resizedImage(with: CGSize(width: 400, height: 400), scaleMode: .aspectFill)
-                                }
-                                if isCircle {
-                                    image = image?.circleMasked
-                                }
+                                let image = self.prepareImage(UIImage(data: imageData),
+                                                              isResized: isResized, isCircle: isCircle,
+                                                              targetSize: drawnSize, key: cacheKey)
                                 completion(true, true, image)
                             }
                         }
                     } else if let tableView = tableView {
-                        tableView.reloadData()
+                        // Fix: reloadData() redrew every visible row because one picture landed.
+                        // Only the row that asked for it has anything new to show.
+                        NSObject.redrawRow(indexPath, in: tableView)
                     }
                 }
             }
@@ -547,7 +697,9 @@ extension NSObject {
             Download().startHTTP(forKey: url) { (name, progress) in
                 guard progress == 100 else { return }
                 DispatchQueue.main.async {
-                    tableView?.reloadData()
+                    if let tableView = tableView {
+                        NSObject.redrawRow(indexPath, in: tableView)
+                    }
                 }
             }
         }
@@ -805,8 +957,16 @@ extension UIColor {
         return renderColor(hex: "#798F9A")
     }
     
+    /// The colour a mention is drawn in.
+    ///
+    /// Fix: orange on a light bubble and pale yellow on a dark one were both hard to read - the
+    /// yellow especially, against the near-white of a mention drawn at medium weight. These two
+    /// are a deep blue and a light blue, each picked to stay legible on both bubbles it can land
+    /// on: the grey-blue of an outgoing bubble and the near-white/near-black of an incoming one.
+    /// Blue also says the same thing here as it does everywhere else on the screen - this text
+    /// can be tapped (see `NSAttributedString.Key.mentionPin`).
     public static var mentionColor: UIColor {
-        return UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? renderColor(hex: "#f6fcae") : renderColor(hex: "#FFA500")
+        return UIApplication.shared.visibleViewController?.traitCollection.userInterfaceStyle == .dark ? renderColor(hex: "#B3E1FF") : renderColor(hex: "#0A5AA8")
     }
     
     public static var blueBubbleColor: UIColor {
@@ -1618,6 +1778,11 @@ extension String {
                         text.addAttribute(.foregroundColor, value: UIColor.gray, range: NSRange(location: newRange.lowerBound, length: 1))
                         text.addAttribute(.foregroundColor, value: UIColor.mentionColor, range: NSRange(location: newRange.lowerBound + 1, length: fullName.count))
                         text.addAttribute(.font, value: UIFont.systemFont(ofSize: fontSize, weight: .medium), range: newRange)
+                        // Who the coloured name belongs to, carried by the text itself. A tap
+                        // lands on a character, and this is what turns that character back into
+                        // a person without re-parsing the string or matching on the colour -
+                        // the colour is a look, and looks change.
+                        text.addAttribute(.mentionPin, value: username, range: newRange)
                     }
                 }
             }
@@ -1637,6 +1802,15 @@ extension String {
     
 }
 
+
+public extension NSAttributedString.Key {
+    /// The pin of the person a mention names, attached to the "@Name" run itself.
+    ///
+    /// Only mentions that are drawn in `UIColor.mentionColor` carry it - a mention of somebody
+    /// who is not in this group is left as plain text and stays untappable, which is the same
+    /// rule the colour follows.
+    static let mentionPin = NSAttributedString.Key("nexilisMentionPin")
+}
 
 /// Names behind the pins that mentions are stored as.
 ///

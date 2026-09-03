@@ -363,53 +363,87 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
         return cell
     }
     
+    // MARK: - Section separators
+    //
+    // One section is told from the next by two hairlines, with the same space around them
+    // everywhere, and there is no line above the first section or below the last.
+    //
+    // Fix: a section can be empty - Config holds nothing at all unless the account may create an
+    // app, configure the floating button or switch style - and an empty section still drew its
+    // footer line and still took up header and footer height. So the gap between the sections on
+    // either side of it carried three lines instead of two, and was taller than every other gap
+    // on the screen. The rules below ask what is actually on screen rather than comparing section
+    // numbers, so an empty section takes no room and draws nothing, wherever it sits.
+
+    /// Thickness of a separator, the space above the pair, and the space between them.
+    private var separatorThickness: CGFloat { return 1 }
+    private var spaceBeforeSeparators: CGFloat { return 18 }
+    private var spaceBetweenSeparators: CGFloat { return 6 }
+    /// The small breath above the first section, which has no line of its own.
+    private var spaceAboveFirstSection: CGFloat { return 1 }
+
+    /// The sections that have at least one row, in the order they are drawn.
+    private var visibleSections: [Int] {
+        return (0..<Item.sections.count).filter { !Item.menuFor(section: $0).isEmpty }
+    }
+
+    /// Whether this section is drawn, and has another drawn section above it.
+    private func drawsSeparatorAbove(section: Int) -> Bool {
+        let visible = visibleSections
+        return visible.contains(section) && visible.first != section
+    }
+
+    /// Whether this section is drawn, and has another drawn section below it.
+    private func drawsSeparatorBelow(section: Int) -> Bool {
+        let visible = visibleSections
+        return visible.contains(section) && visible.last != section
+    }
+
+    /// A hairline across the foot of a header or footer view.
+    ///
+    /// Fix: the header and the footer each built their own copy of this, so the two could drift
+    /// apart while looking like one pair of lines.
+    private func separatorView() -> UIView {
+        let container = UIView()
+        container.backgroundColor = .clear
+
+        let line = UIView()
+        line.backgroundColor = .gray
+        line.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(line)
+
+        NSLayoutConstraint.activate([
+            line.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            line.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            line.heightAnchor.constraint(equalToConstant: separatorThickness),
+            line.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        return container
+    }
+
     public override func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
-        let footerView = UIView()
-        if section != 3 {
-            footerView.backgroundColor = .clear
-            
-            let lineView = UIView()
-            lineView.backgroundColor = .gray
-            lineView.translatesAutoresizingMaskIntoConstraints = false
-            footerView.addSubview(lineView)
-            
-            NSLayoutConstraint.activate([
-                lineView.leadingAnchor.constraint(equalTo: footerView.leadingAnchor),
-                lineView.trailingAnchor.constraint(equalTo: footerView.trailingAnchor),
-                lineView.heightAnchor.constraint(equalToConstant: 1),
-                lineView.bottomAnchor.constraint(equalTo: footerView.bottomAnchor)
-            ])
-        }
-        return footerView
+        return drawsSeparatorBelow(section: section) ? separatorView() : UIView()
     }
-    
+
+    public override func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
+        // Fix: this was never answered, so every section - an empty one included - was given the
+        // table's own 18pt footer. That is the space an empty section was taking.
+        return drawsSeparatorBelow(section: section) ? spaceBeforeSeparators : .leastNormalMagnitude
+    }
+
     public override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        let headerView = UIView()
-        if (section == 2 && Item.menus["Config"]!.count > 0) || section == 3 || (section == 1 && Item.menus["Config"]!.count > 0) {
-            headerView.backgroundColor = .clear
-            
-            let lineView = UIView()
-            lineView.backgroundColor = .gray
-            lineView.translatesAutoresizingMaskIntoConstraints = false
-            headerView.addSubview(lineView)
-            
-            NSLayoutConstraint.activate([
-                lineView.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
-                lineView.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
-                lineView.heightAnchor.constraint(equalToConstant: 1),
-                lineView.bottomAnchor.constraint(equalTo: headerView.bottomAnchor)
-            ])
-        }
-        return headerView
+        return drawsSeparatorAbove(section: section) ? separatorView() : UIView()
     }
-    
+
     public override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        if section == 2 || section == 3 || section == 1 {
-            return 6
+        if drawsSeparatorAbove(section: section) {
+            return spaceBetweenSeparators
         }
-        return 1
+        // A grouped table reads 0 as "use the default", so a section that is to take no room at
+        // all has to ask for the smallest height there is.
+        return visibleSections.contains(section) ? spaceAboveFirstSection : .leastNormalMagnitude
     }
-    
+
     public override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let item = Item.menuFor(section: indexPath.section)[indexPath.row]
@@ -644,6 +678,9 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                 } else {
                     UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
                 }
+                return
+            }
+            if APIS.blockedByCallInProgress() {
                 return
             }
             let controller = ScannerViewController()

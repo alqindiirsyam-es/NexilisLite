@@ -531,4 +531,12 @@ public class CoreMessage_TMessageKey {
     public static let SUBMIT_DATE = "SD01";
     public static let FORCE_LOGIN_AUTH = "FLA";
     public static let IS_BOT = "ibot";
+
+    /// How long the attachment runs, in whole seconds, as text. Sent for anything with a length -
+    /// a video, a video note, a voice note - so the other end can say "(0:08)" under a bubble
+    /// without having downloaded the file first.
+    public static let CONTENT_DURATION = "CDR";
+    /// How many bytes the attachment is. Sent for every kind of attachment, so a bubble that has
+    /// not been downloaded yet can say how big the download would be.
+    public static let FILE_SIZE_ATTACHMENT = "FSA";
 }

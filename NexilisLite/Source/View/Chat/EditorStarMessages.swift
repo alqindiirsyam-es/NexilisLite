@@ -18,6 +18,9 @@ import FMDB
 
 public class EditorStarMessages: UIViewController, UITableViewDataSource, UITableViewDelegate, UIContextMenuInteractionDelegate, QLPreviewControllerDataSource, UITextViewDelegate, AVAudioPlayerDelegate, UIGestureRecognizerDelegate, ChatBubbleContextMenuPresenting {
     @IBOutlet var tableChatView: UITableView!
+    /// Whether the list has just moved, which is what keeps a long press during a scroll from
+    /// opening the bubble menu or the link sheet. See ListMotion.
+    let listMotion = ListMotion()
     var dataMessages: [[String: Any?]] = []
     var dataDates: [String] = []
     /// What the reader has typed into the search field, if anything.
@@ -171,10 +174,10 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         navigationController?.navigationBar.barTintColor = UIColor.mainColor
         navigationController?.navigationBar.tintColor = .white
         navigationController?.navigationBar.topItem?.title = ""
-        self.title = "Favorite Messages".localized()
+        self.title = "Starred Messages".localized()
         
         let menu = UIMenu(title: "", children: [
-            UIAction(title: "Unfavorite all messages".localized(), handler: {(_) in
+            UIAction(title: "Unstar all messages".localized(), handler: {(_) in
                 DispatchQueue.global().async {
                     Database.shared.database?.inTransaction({ (fmdb, rollback) in
                         do {
@@ -306,20 +309,29 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     }
     
     @objc func profilePersonTapped(_ sender: ObjectGesture) {
+        showProfile(pin: sender.message_id)
+    }
+
+    /// Opens the profile of the person a pin belongs to.
+    ///
+    /// The picture at the top of a row has always led here; a coloured @mention inside the
+    /// message leads here now as well, through the same implementation. "-999" and "-997" are
+    /// nobody in particular (a system message, and @All), and stay where they are.
+    func showProfile(pin: String) {
         let idMe = User.getMyPin() as String?
-        if sender.message_id == idMe {
+        if pin == idMe {
             let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
-            controller.data = sender.message_id
+            controller.data = pin
             controller.flag = .me
             navigationController?.show(controller, sender: nil)
-        } else if sender.message_id != "-999" && sender.message_id != "-997"  {
-            let data = User.getDataCanNil(pin: sender.message_id)
+        } else if pin != "-999" && pin != "-997"  {
+            let data = User.getDataCanNil(pin: pin)
             if data != nil {
                 let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
                 controller.flag = .friend
                 controller.user = data
                 controller.name = data!.fullName
-                controller.data = sender.message_id
+                controller.data = pin
                 controller.picture = data!.thumb
                 self.navigationController?.show(controller, sender: nil)
             }
@@ -329,6 +341,42 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     /// Group names already looked up, by group id. A bubble is drawn many times while the list
     /// scrolls, and this is a query.
     private var groupNames: [String: String] = [:]
+
+    /// Group ids already worked out from a conversation id. Same reason as the names above: this
+    /// is asked once per bubble drawn, and it is a query.
+    private var membershipGroups: [String: String] = [:]
+
+    /// The group whose membership decides who is who in a conversation.
+    ///
+    /// A starred message carries the id of the conversation it was sent in, and that is either
+    /// the group's own id or the chat id of a topic inside it. Only the group's id has members
+    /// under it, so a topic has to be resolved back to the group that owns it - otherwise every
+    /// mention in a topic reads as somebody who is not here, and is left plain.
+    private func membershipGroupId(forConversationId id: String) -> String {
+        guard !id.isEmpty else {
+            return ""
+        }
+        if let known = membershipGroups[id] {
+            return known
+        }
+        var resolved = ""
+        Database.shared.database?.inTransaction({ fmdb, _ in
+            if let c = Database().getRecords(fmdb: fmdb, query: "SELECT group_id FROM GROUPZ WHERE group_id = '\(id)'"), c.next() {
+                resolved = c.string(forColumnIndex: 0) ?? ""
+                c.close()
+            } else if let c = Database().getRecords(fmdb: fmdb, query: "SELECT group_id FROM DISCUSSION_FORUM WHERE chat_id = '\(id)'"), c.next() {
+                resolved = c.string(forColumnIndex: 0) ?? ""
+                c.close()
+            }
+        })
+        guard !resolved.isEmpty else {
+            // Same as the names: nothing is remembered about an id that answered nothing, since
+            // it may only have been asked about before the group list had been read.
+            return ""
+        }
+        membershipGroups[id] = resolved
+        return resolved
+    }
 
     /// The group a starred message came from and the topic within it, as "Group (Topic)".
     ///
@@ -475,7 +523,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
 
         
         let profileMessage = UIImageView()
-        profileMessage.frame.size = CGSize(width: 35, height: 35)
+        // No frame of its own: constraints give it 30x30, and a 35pt frame set here only misled
+        // the rounding that used to be worked out from it.
         cellMessage.contentView.addSubview(profileMessage)
         profileMessage.translatesAutoresizingMaskIntoConstraints = false
         let tapGestureRecognizer = ObjectGesture(target: self, action: #selector(profilePersonTapped(_:)))
@@ -559,8 +608,30 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         // by dropping whichever constraint it likes.
         topMarginText.priority = .defaultHigh
         
-        let dataProfile = getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"]  as? String ?? "")
+        // The message id and the group it was sent in let the lookup fall back to the group's
+        // membership and to the name the message itself carries.
+        let dataProfile = getDataProfile(f_pin: dataMessages[indexPath.row]["f_pin"]  as? String ?? "",
+                                         messageId: messageIdChat,
+                                         groupId: {
+                                            let chatId = dataMessages[indexPath.row]["chat_id"] as? String ?? ""
+                                            return chatId.isEmpty ? (dataMessages[indexPath.row]["l_pin"] as? String ?? "") : chatId
+                                         }())
         let isMine = dataMessages[indexPath.row]["f_pin"] as? String == idMe
+
+        // The group this message was sent in, which is what tells a mention of somebody in it
+        // apart from an "@" in ordinary text. A one-to-one chat has no membership to check, and
+        // both ids the message can carry are tried, for the same reason the group's name below
+        // tries both: a message can hold a topic's chat id, its group's id, or only l_pin.
+        let mentionGroupId: String = {
+            guard (dataMessages[indexPath.row]["message_scope_id"] as? String ?? "") != MessageScope.WHISPER else {
+                return ""
+            }
+            let fromChatId = membershipGroupId(forConversationId: dataMessages[indexPath.row]["chat_id"] as? String ?? "")
+            if !fromChatId.isEmpty {
+                return fromChatId
+            }
+            return membershipGroupId(forConversationId: dataMessages[indexPath.row]["l_pin"] as? String ?? "")
+        }()
 
         // Fix: this row used to be the conversation's own layout - the reader's messages on the
         // right, everybody else's on the left, the name inside the bubble. Starred messages are a
@@ -573,7 +644,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         profileMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 10).isActive = true
         profileMessage.widthAnchor.constraint(equalToConstant: 30).isActive = true
         profileMessage.heightAnchor.constraint(equalToConstant: 30).isActive = true
-        profileMessage.circle()
+        // Fix: circle() takes half of bounds.width, and at this point the view has not been laid
+        // out - it still carries the 35pt frame it was given on creation, so the radius came out
+        // 17.5 on a picture that ends up 30 wide, and the corners never closed. Half of the size
+        // the constraints above actually give it.
+        profileMessage.layer.cornerRadius = 15
         profileMessage.clipsToBounds = true
         profileMessage.backgroundColor = .lightGray
         profileMessage.image = UIImage(systemName: "person")
@@ -672,7 +747,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         dateMessage.translatesAutoresizingMaskIntoConstraints = false
         dateMessage.trailingAnchor.constraint(equalTo: cellMessage.contentView.trailingAnchor, constant: -16).isActive = true
         dateMessage.centerYAnchor.constraint(equalTo: nameSender.centerYAnchor).isActive = true
-        dateMessage.font = UIFont.systemFont(ofSize: 12 + offset())
+        // The same size as the name beside it; the weight and the colour stay its own.
+        dateMessage.font = UIFont.systemFont(ofSize: 14 + offset())
         dateMessage.textColor = .secondaryLabel
         dateMessage.textAlignment = .right
         dateMessage.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -854,11 +930,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageSticker.contentMode = .scaleAspectFit
             }
             else {
-                applyReadMore(to: messageText, text: textChat, messageId: messageIdChat)
+                applyReadMore(to: messageText, text: textChat, messageId: messageIdChat, groupId: mentionGroupId)
                 modifyText(at: indexPath)
             }
         } else {
-            applyReadMore(to: messageText, text: textChat, messageId: messageIdChat)
+            applyReadMore(to: messageText, text: textChat, messageId: messageIdChat, groupId: mentionGroupId)
             modifyText(at: indexPath)
         }
         
@@ -890,7 +966,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
 
             // Must be mutable!
-            let finalAttributed = NSMutableAttributedString(attributedString: text.richText())
+            let finalAttributed = NSMutableAttributedString(attributedString: text.richText(group_id: mentionGroupId))
 
             let fullString = finalAttributed.string
             let fullLength = (fullString as NSString).length
@@ -1139,6 +1215,39 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
         }
         
+        // A round video note is not a bubble with a picture inside it - it is a circle on the
+        // wallpaper. It has no caption, quote or collage, so none of the media layout below
+        // applies and the cell is finished here. What marks one out is the name of its file.
+        if VideoNote.isNote(videoChat) {
+            containerMessage.backgroundColor = .clear
+            containerMessage.layer.shadowOpacity = 0
+            messageText.isHidden = true
+
+            let note = VideoNoteBubbleView()
+            containerMessage.addSubview(note)
+            note.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                note.topAnchor.constraint(equalTo: containerMessage.topAnchor),
+                note.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor),
+                note.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor),
+                note.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor)
+            ])
+
+            let status = dataMessages[indexPath.row]["status"] as? String ?? ""
+            let mine = dataMessages[indexPath.row]["f_pin"] as? String == idMe
+            let progress = dataMessages[indexPath.row]["progress"] as? Double ?? 0.0
+            let state: VideoNoteBubbleView.State = (mine && status == "1")
+                ? .sending(progress / 100.0)
+                : .delivered
+            note.configure(videoId: videoChat, thumbId: thumbChat, state: state)
+            // Opening a note changes how tall its row is, and the table owns that.
+            note.onToggleSize = { [weak self] _ in
+                guard let self = self else { return }
+                self.tableChatView.beginUpdates()
+                self.tableChatView.endUpdates()
+            }
+            return cellMessage
+        }
         if (!thumbChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             // One measurement, not two: the width and the height come from the same look
             // at the file.
@@ -1866,18 +1975,26 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 let file_chat = data["file_id"] as? String ?? ""
                 if (attachment_flag == "0" && thumb_chat == "") {
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                    contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
+                    contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: mentionGroupId)
                 } else if (attachment_flag == "1" || image_chat != "") {
                     if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
                         contentReply.text = "📷 Photo".localized()
                     } else {
-                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
+                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: mentionGroupId)
                     }
                 } else if (attachment_flag == "2" || video_chat != "") {
                     if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
-                        contentReply.text = "📹 Video".localized()
+                        // A round video note is quoted as one, with its length; an ordinary video
+                        // is quoted the way it always was.
+                        if let noteLine = VideoNote.quotedLine(videoId: video_chat,
+                                                               font: contentReply.font,
+                                                               colour: contentReply.textColor ?? .gray) {
+                            contentReply.attributedText = noteLine
+                        } else {
+                            contentReply.text = "📹 Video".localized()
+                        }
                     } else {
-                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
+                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: mentionGroupId)
                     }
                 } else if (attachment_flag == "6" || file_chat != ""){
                     contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
@@ -1902,20 +2019,17 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                     if let dirPath = paths.first {
                         let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumb_chat)
-                        let image : UIImage? =  {
-                            if let img = Nexilis.imageCache.object(forKey: thumb_chat as NSString) {
-                                return img
-                            }
-                            else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                Nexilis.imageCache.setObject(img, forKey: thumb_chat as NSString)
-                                return img
-                            }
-                            return nil
-                        }()
-                        //                        let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
-                        let imageThumb = UIImageView(image: image)
+                        // Fix: this looked the picture up under `thumbChat` - the thumbnail of the
+                        // message being drawn - while loading the file for `thumb_chat`, the thumbnail of
+                        // the message being quoted. Two different pictures under one key, so a quote
+                        // could be handed the wrong still or none at all. And only the plain file was
+                        // read, which a receiver often does not have: see VideoNote.quotedStill.
+                        let imageThumb = UIImageView()
+                        VideoNote.loadQuotedStill(named: thumb_chat, into: imageThumb)
                         containerReply.addSubview(imageThumb)
-                        imageThumb.layer.cornerRadius = 2.0
+                        // A video note is round wherever it is shown, a quote included; the square corner
+                        // is what every other kind of attachment keeps.
+                        imageThumb.layer.cornerRadius = VideoNote.isNote(video_chat) ? 15.0 : 2.0
                         imageThumb.clipsToBounds = true
                         imageThumb.contentMode = .scaleAspectFill
                         imageThumb.translatesAutoresizingMaskIntoConstraints = false
@@ -2301,12 +2415,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
 
     /// Puts a long message in the bubble folded, with "Read more" after it. The rule itself is in
     /// LongMessage, shared with the conversations and message info.
-    private func applyReadMore(to textView: UITextView, text: String, messageId: String) {
+    private func applyReadMore(to textView: UITextView, text: String, messageId: String, groupId: String = "") {
         guard LongMessage.isFolded(messageId, text: text) else {
-            textView.attributedText = text.richText()
+            textView.attributedText = text.richText(group_id: groupId)
             return
         }
-        let body = NSMutableAttributedString(attributedString: LongMessage.folded(text).richText())
+        let body = NSMutableAttributedString(attributedString: LongMessage.folded(text).richText(group_id: groupId))
         body.append(LongMessage.suffix(fontSize: 12 + offset()))
         textView.attributedText = body
         textView.isUserInteractionEnabled = true
@@ -2646,7 +2760,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 }
                 return stringFormat
             } else {
-                let formatter = EditorStarMessages.chatDateFormatter(format: "EE, dd MMM", cached: &EditorStarMessages.dayDateFormatter)
+                let formatter = EditorStarMessages.chatDateFormatter(format: ChatDayLabel.format(for: date), cached: &EditorStarMessages.dayDateFormatter)
                 let stringFormat = formatter.string(from: date as Date)
                 if !dataDates.contains(stringFormat){
                     dataDates.append(stringFormat)
@@ -2699,7 +2813,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 imageViewer.navigationItem.rightBarButtonItem = shareButton
             }
             
-            let name = "Favorite Messages".localized()
+            let name = "Starred Messages".localized()
             imageViewer.title = name
             
             let transitionDelegate = ZoomTransitioningDelegate()
@@ -2969,21 +3083,46 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
     }
     
-    func getDataProfile(f_pin: String) -> [String: String]{
+    /// Who sent a message, and their picture.
+    ///
+    /// Fix: this asked BUDDY and gave up, so anyone not in the reader's contacts came out as
+    /// "Unknown" - which on this screen is most senders, since starred messages are gathered from
+    /// every group the reader is in. The same chain EditorGroup walks is walked here: the contact
+    /// list, then the membership of the group the message was sent in, then the name the message
+    /// itself carries. A message always carries one, so there is very little left for "Unknown".
+    func getDataProfile(f_pin: String, messageId: String = "", groupId: String = "") -> [String: String]{
         var data: [String: String] = [:]
         Database.shared.database?.inTransaction({ fmdb, rollback in
-            if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || last_name, image_id from BUDDY where f_pin = '\(f_pin)'"), c.next() {
-                data["name"] = c.string(forColumnIndex: 0)!.trimmingCharacters(in: .whitespacesAndNewlines)
-                data["image_id"] = c.string(forColumnIndex: 1)!
+            if let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || ifnull(last_name, ''), image_id from BUDDY where f_pin = '\(f_pin)'"), c.next() {
+                data["name"] = (c.string(forColumnIndex: 0) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                data["image_id"] = c.string(forColumnIndex: 1) ?? ""
+                c.close()
+            }
+            else if !groupId.isEmpty,
+                    let c = Database().getRecords(fmdb: fmdb, query: "select first_name || ' ' || ifnull(last_name, ''), thumb_id from GROUPZ_MEMBER where f_pin = '\(f_pin)' AND group_id = '\(groupId)'"), c.next() {
+                data["name"] = (c.string(forColumnIndex: 0) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                data["image_id"] = c.string(forColumnIndex: 1) ?? ""
+                c.close()
+            }
+            else if !messageId.isEmpty,
+                    let c = Database().getRecords(fmdb: fmdb, query: "select f_display_name from MESSAGE where message_id = '\(messageId)'"), c.next() {
+                data["name"] = (c.string(forColumnIndex: 0) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                data["image_id"] = ""
                 c.close()
             }
             else if f_pin == "-999" {
                 data["name"] = "Bot".localized()
                 data["image_id"] = "pb_powered"
             }
-            else {
-                data["name"] = "Unknown".localized()
+            else if f_pin == "-997" {
+                data["name"] = Utils.getGPTBotName()
                 data["image_id"] = ""
+            }
+            // A blank from any of the steps above is still a blank; only a sender nothing knows
+            // anything about falls through to Unknown.
+            if (data["name"] ?? "").isEmpty {
+                data["name"] = "Unknown".localized()
+                data["image_id"] = data["image_id"] ?? ""
             }
         })
         return data
@@ -3045,7 +3184,19 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
     }
     
+    public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView == tableChatView else {
+            return
+        }
+        listMotion.didMove()
+    }
+
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        // A finger put down on a list that is still moving is a finger stopping the list. It
+        // gets no menu, however long it then rests there - see ListMotion.
+        if listMotion.isMoving(tableChatView) {
+            return nil
+        }
         // Fix: mirrors EditorGroup.swift - suppresses the bubble-wide Unstar menu
         // when the touch is on a link, leaving it to handleLinkTouchHighlight's own
         // timer instead. See EditorGroup.swift's CHANGELOG entries for the full
@@ -3444,7 +3595,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     // MARK: - Link popup/highlight glue (mirrors EditorGroup.swift - see its
     // CHANGELOG entries for the full history of why this code is shaped this way)
 
-    private func presentLinkActionSheet(urlString: String, sourceView: UIView, sourceRect: CGRect) {
+    private func presentLinkActionSheet(urlString: String) {
         let openAction: () -> Void = { [weak self] in
             let gesture = ObjectGesture()
             gesture.message_id = urlString
@@ -3467,46 +3618,15 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             }
         } : nil
 
-        if #available(iOS 15.0, *) {
-            let sheetVC = LinkActionSheetViewController(urlString: urlString, onOpen: openAction, onCopy: copyAction, onOpenInChrome: openInChromeAction)
-            sheetVC.onDismissed = { [weak self] in self?.hideLinkHighlight() }
-
-            if let sheet = sheetVC.sheetPresentationController {
-                if #available(iOS 16.0, *) {
-                    let contentHeight = sheetVC.preferredContentHeight(forWidth: self.view.bounds.width)
-                    sheet.detents = [.custom(resolver: { _ in contentHeight })]
-                } else {
-                    sheet.detents = [.medium()]
-                }
-                sheet.prefersGrabberVisible = true
-                sheet.preferredCornerRadius = 16
-            }
-            present(sheetVC, animated: true)
-        } else {
-            let alert = UIAlertController(title: nil, message: urlString, preferredStyle: .actionSheet)
-            alert.addAction(UIAlertAction(title: "Open Link".localized(), style: .default) { [weak self] _ in
-                self?.hideLinkHighlight()
-                openAction()
-            })
-            if let openInChromeAction = openInChromeAction {
-                alert.addAction(UIAlertAction(title: "Open in Chrome".localized(), style: .default) { [weak self] _ in
-                    self?.hideLinkHighlight()
-                    openInChromeAction()
-                })
-            }
-            alert.addAction(UIAlertAction(title: "Copy".localized(), style: .default) { [weak self] _ in
-                self?.hideLinkHighlight()
-                copyAction()
-            })
-            alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel) { [weak self] _ in
-                self?.hideLinkHighlight()
-            })
-            if let popover = alert.popoverPresentationController {
-                popover.sourceView = sourceView
-                popover.sourceRect = sourceRect
-            }
-            present(alert, animated: true)
-        }
+        let sheetVC = LinkActionSheetViewController(urlString: urlString, onOpen: openAction, onCopy: copyAction, onOpenInChrome: openInChromeAction)
+        // Fix: hides the highlight no matter how the sheet was dismissed (an action
+        // tapped, or swiped away/tapped-outside with nothing chosen).
+        sheetVC.onDismissed = { [weak self] in self?.hideLinkHighlight() }
+        // Fix: one presentation path for every iOS version (see presentAsBottomSheet)
+        // - the old iOS 14 UIAlertController fallback and the iOS 15 half-screen
+        // `.medium()` sheet are both gone, so an iPhone 7 gets the same content-height
+        // sheet as an iPhone 15.
+        sheetVC.presentAsBottomSheet(from: self)
     }
 
     private func showLinkHighlight(range: NSRange, in textView: UITextView) {
@@ -3542,7 +3662,20 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
 
         switch sender.state {
         case .began:
-            guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else { return }
+            // The same rule as the bubble menu: nothing is offered on a press that landed on a
+            // list still in motion.
+            guard !listMotion.isMoving(tableChatView) else {
+                return
+            }
+            guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else {
+                // A mention is tappable too, so it gets the same highlight under the finger.
+                // Nothing is offered on a long press over one, so no timer is started for it -
+                // holding a mention leaves the bubble's own menu to appear as it always has.
+                if let mention = LinkHighlighting.mentionInfo(at: point, in: textView) {
+                    showLinkHighlight(range: mention.range, in: textView)
+                }
+                return
+            }
             showLinkHighlight(range: info.range, in: textView)
 
             linkPressGeneration += 1
@@ -3559,12 +3692,17 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     guard let self = self, self.suppressLinkTapToken == myToken else { return }
                     self.suppressNextLinkTap = false
                 }
-                self.presentLinkActionSheet(urlString: urlString, sourceView: textView, sourceRect: LinkHighlighting.boundingRect(for: range, in: textView))
+                self.presentLinkActionSheet(urlString: urlString)
             }
 
         case .changed:
             if let info = LinkHighlighting.linkInfo(at: point, in: textView) {
                 showLinkHighlight(range: info.range, in: textView)
+            } else if let mention = LinkHighlighting.mentionInfo(at: point, in: textView) {
+                // Dragged from a link onto a mention: the highlight follows the finger, and the
+                // pending sheet for the link it left is invalidated by the generation bump.
+                showLinkHighlight(range: mention.range, in: textView)
+                linkPressGeneration += 1
             } else {
                 hideLinkHighlight()
                 linkPressGeneration += 1
@@ -3585,11 +3723,33 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             return
         }
 
+        // The finger that stops a moving list is not opening what it landed on - the same rule
+        // the bubble menu and the link sheet follow.
+        guard !listMotion.isMoving(tableChatView) else { return }
         guard let textView = sender.view as? UITextView else { return }
         let point = sender.location(in: textView)
-        guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else { return }
+        guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else {
+            handleMentionTap(at: point, in: textView)
+            return
+        }
 
         LinkOpener.open(urlString: info.urlString)
+    }
+
+    /// A tap on a coloured @mention opens that person's profile, the same as in the conversation
+    /// the message was starred from.
+    ///
+    /// Only mentions carry the pin (see `NSAttributedString.Key.mentionPin`), so a tap anywhere
+    /// else in the message text falls through here doing nothing, as it did before.
+    private func handleMentionTap(at point: CGPoint, in textView: UITextView) {
+        // A long press over a mention still opens the bubble's own menu, and the finger-lift
+        // that opens it also satisfies this tap recognizer. With the menu already up, this touch
+        // has been spent.
+        guard !bubbleMenuVisible, presentedViewController == nil else { return }
+        guard let mention = LinkHighlighting.mentionInfo(at: point, in: textView) else { return }
+
+        hideLinkHighlight()
+        showProfile(pin: mention.pin)
     }
 }
 

@@ -956,7 +956,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 try? FileManager.default.removeItem(at: sourceURL)
             }
             DispatchQueue.main.async { [self] in
-                delegate!.sendChatFromPreviewImage(message_text: att.text, attachment_flag: "2", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: att.type == .gif ? renamedVideoName : "", file_id: "", viewController: self, specFile: att.specFileString)
+                delegate!.sendChatFromPreviewImage(message_text: att.text, attachment_flag: "0", image_id: "", video_id: renamedVideoName, thumb_id: thumbName, gif_id: att.type == .gif ? renamedVideoName : "", file_id: "", viewController: self, specFile: att.specFileString)
                 completion()
             }
         }

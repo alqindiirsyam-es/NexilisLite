@@ -20,7 +20,7 @@ import WebKit
 import CommonCrypto
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "5.2.0"
+    public static var cpaasVersion = "6.0.1"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -1080,7 +1080,7 @@ public class Nexilis: NSObject {
 //    }
     
     public static func apiSendChat(destination: String, message: String, isGroup: Bool, thumbnailName: String = "", imageName: String = "", videoName: String = "", fileName: String = "", audioName: String = "", replyMessageId : String = "") -> String {
-        let message = CoreMessage_TMessageBank.sendMessage(l_pin: destination, message_scope_id: isGroup ? MessageScope.GROUP : MessageScope.WHISPER, status: "3", message_text: message, credential: "", attachment_flag: !imageName.isEmpty ? "1" : !videoName.isEmpty ? "2" : !audioName.isEmpty ? "5" : !fileName.isEmpty ? "6" : "0", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageName, audio_id: audioName, video_id: videoName, file_id: fileName, thumb_id: thumbnailName, reff_id: replyMessageId, read_receipts: "4", chat_id: "", is_call_center: "0", call_center_id: "", opposite_pin: User.getMyPin() ?? "", specFile: "")
+        let message = CoreMessage_TMessageBank.sendMessage(l_pin: destination, message_scope_id: isGroup ? MessageScope.GROUP : MessageScope.WHISPER, status: "3", message_text: message, credential: "", attachment_flag: !imageName.isEmpty ? "1" : !videoName.isEmpty ? "0" : !audioName.isEmpty ? "5" : !fileName.isEmpty ? "6" : "0", ex_blog_id: "", message_large_text: "", ex_format: "", image_id: imageName, audio_id: audioName, video_id: videoName, file_id: fileName, thumb_id: thumbnailName, reff_id: replyMessageId, read_receipts: "4", chat_id: "", is_call_center: "0", call_center_id: "", opposite_pin: User.getMyPin() ?? "", specFile: "")
         addQueueMessage(message: message)
         return message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID)
     }
@@ -1845,6 +1845,11 @@ public class Nexilis: NSObject {
         guard !f_pin.isEmpty else {
             return
         }
+        // The picture the bubble is drawn around, asked for as soon as the message carrying it
+        // lands rather than when its row happens to scroll into view. It costs nothing to wait
+        // for - see ThumbnailPrefetch - and it is the difference between a conversation that
+        // opens finished and one that opens on blanks and rearranges itself.
+        ThumbnailPrefetch.fetch(message.getBody(key: CoreMessage_TMessageKey.THUMB_ID, default_value: ""))
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 var messageExist = false
@@ -1909,6 +1914,8 @@ public class Nexilis: NSObject {
                             "is_deleted_retention" : is_delete_retention,
                             "is_forwarded_message" : is_forwarded_message,
                             "attachment_speciality" : message.getBody(key: CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY, default_value:  ""),
+                            "content_duration" : message.getBody(key: CoreMessage_TMessageKey.CONTENT_DURATION, default_value: ""),
+                            "file_size_attch" : message.getBody(key: CoreMessage_TMessageKey.FILE_SIZE_ATTACHMENT, default_value: "0"),
                             "is_bot" : is_bot
                         ], replace: true)
                     } catch {

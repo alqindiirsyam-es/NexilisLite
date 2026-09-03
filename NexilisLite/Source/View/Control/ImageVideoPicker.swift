@@ -40,6 +40,11 @@ open class ImageVideoPicker: NSObject {
     }
     
     public func present(source sourceView: Source) {
+        // The camera is the call's for as long as it lasts; the photo library is not, and is
+        // left alone.
+        if (sourceView == .imageCamera || sourceView == .videoCamera), APIS.blockedByCallInProgress() {
+            return
+        }
         if UIBarButtonItem.appearance().titleTextAttributes(for: .normal) != nil {
             isBlackCancelButton = UIBarButtonItem.appearance().titleTextAttributes(for: .normal)?.values.first as! NSObject == UIColor.black
         }

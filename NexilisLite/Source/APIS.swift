@@ -268,18 +268,74 @@ public class APIS: NSObject {
     /// starting another call, live streaming, a conference, the contact centre. They cannot run
     /// alongside a call - the call is what would break - so they are turned away with a word
     /// rather than left to fail in the middle.
+    // Public: the host app has camera and microphone buttons of its own, and they answer to
+    // the same rule.
     @discardableResult
-    static func blockedByCallInProgress() -> Bool {
+    public static func blockedByCallInProgress() -> Bool {
         guard isCallInProgress else {
             return false
         }
         DispatchQueue.main.async {
-            let message = activeVideoCall != nil
-                ? "A video call is in progress".localized()
-                : "An audio call is in progress".localized()
-            UIApplication.shared.visibleViewController?.view.makeToast(message, duration: 3)
+            showCallInProgressAlert()
         }
         return true
+    }
+
+    /// Whether the "there is a call on" alert is already up, so a screen with several of these
+    /// buttons cannot stack one alert on top of another.
+    private static var isCallAlertShowing = false
+
+    /// The screen to put that alert on.
+    ///
+    /// Fix: asking UIApplication for its "visible" controller finds the key window, and while a
+    /// call is minimised there is more than one window up. The answer could be the strip's or
+    /// the bubble's own window, whose root shows nothing anybody can see - so the alert would be
+    /// presented onto nothing. The app's own window is picked out explicitly, and the screen on
+    /// top of it walked down from its root.
+    private static func callAlertPresenter() -> UIViewController? {
+        let appWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { !($0 is MiniVideoCallWindow) && !($0 is MiniCallBannerWindow)
+                            && !$0.isHidden && $0.rootViewController != nil })
+        guard var top = appWindow?.rootViewController else {
+            return UIApplication.shared.visibleViewController
+        }
+        for _ in 0..<20 {
+            if let presented = top.presentedViewController {
+                top = presented
+            } else if let tab = top as? UITabBarController, let selected = tab.selectedViewController {
+                top = selected
+            } else if let navigation = top as? UINavigationController, let visible = navigation.visibleViewController {
+                top = visible
+            } else {
+                break
+            }
+        }
+        return top
+    }
+
+    /// Says that the camera and the microphone belong to the call.
+    ///
+    /// Fix: this was a toast in the corner, which is easy to miss - and what it has to say is
+    /// that the thing just tapped is not going to happen at all. An alert says it where the
+    /// reader is already looking and waits to be acknowledged.
+    public static func showCallInProgressAlert() {
+        guard !isCallAlertShowing, let presenter = callAlertPresenter() else {
+            return
+        }
+        let title = activeVideoCall != nil
+            ? "A video call is in progress".localized()
+            : "An audio call is in progress".localized()
+        isCallAlertShowing = true
+        let alert = LibAlertController(
+            title: title,
+            message: "The camera and the microphone belong to the call until it ends.".localized(),
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK".localized(), style: .default) { _ in
+            isCallAlertShowing = false
+        })
+        presenter.present(alert, animated: true) 
     }
 
     public static func openContactCenter(media: Int? = nil, category: Int? = nil) {
@@ -2741,15 +2797,17 @@ public class APIS: NSObject {
         if type.isEmpty || pin.isEmpty {
             return false
         }
-        if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
-            if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
-                navigationC.popViewController(animated: false)
-            }
+        if isShowingConversation(pin) {
+            // The same conversation the reader is already in - see isShowingConversation.
+            reloadChatListThenOpen { }
+            return true
         }
-        // The message this notification is about was written to the database moments ago, so
-        // the chat list behind the Editor is one message behind. Refresh it before covering it.
-        reloadChatListThenOpen {
-            showEditorOrCallFromAPN(pin, type, "CL01")
+        clearShowingEditor {
+            // The message this notification is about was written to the database moments ago, so
+            // the chat list behind the Editor is one message behind. Refresh it before covering it.
+            reloadChatListThenOpen {
+                showEditorOrCallFromAPN(pin, type, "CL01")
+            }
         }
         return true
     }
@@ -2854,19 +2912,22 @@ public class APIS: NSObject {
                 let id = userInfo["id"] ?? ""
                 let type = userInfo["type"] ?? ""
                 let callType = userInfo["callType"] ?? ""
-                if let navigationC = UIApplication.shared.visibleViewController as? UINavigationController {
-                    if navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorPersonal || navigationC.viewControllers[navigationC.viewControllers.count - 1] is EditorGroup {
-                        navigationC.popViewController(animated: true)
-                    }
+                if (type == "0" || type == "1"), isShowingConversation(id) {
+                    // Already here. The list behind it is a message behind either way, so that is
+                    // refreshed and the screen itself left exactly as the reader left it.
+                    reloadChatListThenOpen { }
+                    return
                 }
-                // Only chats wait for the list: an incoming call has to be answered now, and
-                // there is no list row behind it to get out of date anyway.
-                if type == "0" || type == "1" {
-                    reloadChatListThenOpen {
+                clearShowingEditor {
+                    // Only chats wait for the list: an incoming call has to be answered now, and
+                    // there is no list row behind it to get out of date anyway.
+                    if type == "0" || type == "1" {
+                        reloadChatListThenOpen {
+                            showEditorOrCallFromAPN(id, type, callType)
+                        }
+                    } else {
                         showEditorOrCallFromAPN(id, type, callType)
                     }
-                } else {
-                    showEditorOrCallFromAPN(id, type, callType)
                 }
             } else {
                 let userInfo = response.notification.request.content.userInfo
@@ -2935,6 +2996,67 @@ public class APIS: NSObject {
 //        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
     
+    /// Takes whatever Editor is on screen out of the way, then puts the next one up.
+    ///
+    /// Fix: this only ever tried to pop. An Editor opened from a notification is not pushed onto
+    /// anything - it is the root of a navigation controller presented modally - and popping the
+    /// root of a stack does nothing at all: `popViewController` on a single-item stack returns nil
+    /// and leaves the screen exactly where it was. The new Editor was then presented on top of the
+    /// old one, so tapping a notification stacked Editor A over Editor A, one more each time, with
+    /// every one of them still alive underneath.
+    ///
+    /// Pushed or presented, it is now taken away by whichever means actually removes it, and the
+    /// next one goes up only once it has gone.
+    private static func clearShowingEditor(then present: @escaping () -> Void) {
+        let top = UIApplication.shared.visibleViewController
+        if let navigation = top as? UINavigationController {
+            let stack = navigation.viewControllers
+            let showingEditor = stack.last is EditorPersonal || stack.last is EditorGroup
+            if showingEditor, stack.count > 1 {
+                navigation.popViewController(animated: false)
+                present()
+                return
+            }
+            if showingEditor, navigation.presentingViewController != nil {
+                navigation.dismiss(animated: false, completion: present)
+                return
+            }
+        }
+        if let editor = top, editor is EditorPersonal || editor is EditorGroup,
+           editor.presentingViewController != nil {
+            editor.dismiss(animated: false, completion: present)
+            return
+        }
+        present()
+    }
+
+    /// Whether the conversation already on screen is the one a notification is about.
+    ///
+    /// Fix: a tap on a notification popped whatever Editor was open and presented one afresh -
+    /// even when it was the very same conversation. Coming back from another app to a chat the
+    /// reader had left open therefore threw that screen away and built an identical one in its
+    /// place: the same conversation, but scrolled back to the bottom and with everything the
+    /// screen was holding gone. A notification from the conversation you are already looking at is
+    /// not somewhere to navigate to.
+    static func isShowingConversation(_ conversationId: String) -> Bool {
+        guard !conversationId.isEmpty else { return false }
+        var top = UIApplication.shared.visibleViewController
+        if let navigation = top as? UINavigationController {
+            top = navigation.viewControllers.last
+        }
+        if let personal = top as? EditorPersonal {
+            return personal.unique_l_pin == conversationId
+        }
+        if let group = top as? EditorGroup {
+            // A group answers to its own id or to its topic's chat id, depending on which way it
+            // was opened; either one means the reader is already there.
+            return group.unique_l_pin == conversationId
+                || group.dataGroup["group_id"] as? String == conversationId
+                || group.dataTopic["chat_id"] as? String == conversationId
+        }
+        return false
+    }
+
     private static func showEditorOrCallFromAPN(_ id: String, _ type: String, _ callType: String) {
         if type.isEmpty {
             return
@@ -3872,7 +3994,7 @@ public class APIS: NSObject {
                         safeCopy(from: sharedURL, to: doc.appendingPathComponent(entryVideo))
                         safeCopy(from: thumbURL, to: doc.appendingPathComponent(entryThumb))
 
-                        sendIt(attachmentFlag: "2", messageText: caption, videoId: entryVideo, thumbId: entryThumb)
+                        sendIt(attachmentFlag: "0", messageText: caption, videoId: entryVideo, thumbId: entryThumb)
                         process(index + 1)
                     }
 
@@ -3890,7 +4012,7 @@ public class APIS: NSObject {
                         safeCopy(from: sharedURL, to: doc.appendingPathComponent(entryGif))
                         safeCopy(from: thumbURL, to: doc.appendingPathComponent(entryThumb))
 
-                        sendIt(attachmentFlag: "2",
+                        sendIt(attachmentFlag: "0",
                                messageText: caption,
                                videoId: entryGif,
                                thumbId: entryThumb,
@@ -4370,6 +4492,9 @@ public class APIS: NSObject {
     }
     
     public static func openQris() {
+        if blockedByCallInProgress() {
+            return
+        }
         let scannerVC = QRScannerViewController()
         scannerVC.modalPresentationStyle = .fullScreen
         if UIApplication.shared.visibleViewController?.navigationController != nil {

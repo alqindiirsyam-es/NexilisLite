@@ -124,6 +124,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     var complaintId = ""
     var counter = 0
     var markerCounter: String?
+    /// How many messages the band above the marker says are waiting. Kept beside
+    /// `markerCounter` because `counter` is cleared as soon as the chat opens.
+    var markerCount = 0
 
     // MARK: - Paging
     //
@@ -176,9 +179,42 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// The chat opens at its newest message; this makes sure that is true of the first frame
     /// the table lays out, not just of the moment after it.
     private var pendingInitialScrollToBottom = false
+    /// How long that placement may keep correcting itself, and how tall the content was on the
+    /// previous pass.
+    ///
+    /// Fix: placing the chat at its newest message was a single scroll on the first layout pass.
+    /// The rows above the screen have never been drawn at that point, so the table is still
+    /// guessing their heights from an estimate; when the real ones arrive the content grows
+    /// underneath and the chat quietly scrolls up by a message, which is exactly the shift seen
+    /// on opening one. The bottom is held now until the content height stops changing between
+    /// passes - the same rule the unread marker's placement already follows.
+    private var initialBottomDeadline: Date?
+    private var initialBottomLastContentHeight: CGFloat = -1
+    /// When the hold started, so it can be kept up for a moment after the rows first look
+    /// settled.
+    ///
+    /// Fix: some rows change height a beat after the chat is drawn - a picture's own size
+    /// arriving, a name resolving, a page of older messages landing - and the hold had already
+    /// let go by then, so that late change pushed the newest message off the bottom. It now
+    /// keeps its place for a short while whatever the heights say, which is also what a reader
+    /// who has not scrolled expects: the chat stays at its newest message.
+    private var initialBottomStartedAt: Date?
+    /// How long the opening placement stays in charge once the rows look settled, and the hard
+    /// stop for the whole thing.
+    private static let initialBottomGrace: TimeInterval = 1.0
     /// The first unread message, while the chat is still being placed at it.
     private var pendingUnreadMarkerScroll: String?
     private var remainingUnreadMarkerScrollPasses = 0
+    /// When to give up on placing the marker, whatever has or has not settled by then.
+    ///
+    /// Fix: the budget was a count of layout passes, and a pass spent waiting for the table to
+    /// have any rows at all cost as much as a pass that actually aimed. A conversation that took
+    /// a few passes to get going spent the whole budget waiting and never scrolled. Time is what
+    /// the giving-up should be measured in; the passes are only the opportunities to try.
+    private var pendingUnreadMarkerDeadline: Date?
+    /// How tall the content was on the previous pass, so "the heights have stopped moving" can be
+    /// told apart from "this pass happened to agree with the estimates".
+    private var unreadMarkerLastContentHeight: CGFloat = -1
     /// Enough layout passes for the estimated row heights above the marker to be replaced by
     /// measured ones, and few enough that a conversation that will not settle gives up rather
     /// than re-scrolling under the reader's finger.
@@ -232,7 +268,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     var timerFakeProgress: Timer?
     var showMenuContext = false
     var touchedSubview = UIView()
-    var listViewOnSection: [UIView] = []
+    /// Shows and hides the floating date over the conversation. See DateHeaderVisibility.
+    let dateHeaders = DateHeaderVisibility()
+    /// Whether the list has just moved, which is what keeps a long press during a scroll from
+    /// opening the bubble menu or the link sheet. See ListMotion.
+    let listMotion = ListMotion()
     var fakeProgMultip = 0
     let maxFakeProgMultip = 2
     var groupImages: [String:[ImageGrouping]] = [:]
@@ -944,7 +984,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
         // There is no Cancel among the answers: the card carries a close button and shuts on a tap
         // outside, the way the design asks for.
-        let sheet = BottomChoiceSheet(question: "Delete message?".localized(),
+        let sheet = BottomChoiceSheet(question: "Delete messages?".localized(),
                                       options: options,
                                       appearance: presenter == nil ? .unspecified : .dark)
         // Putting a sheet up from a controller that is not on screen does nothing at all, so it is
@@ -1066,7 +1106,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                     // row, which ran the sweep again. That loop is what made the bubble flicker.
                     // A failure is remembered, so nothing starts it again on its own; tapping it
                     // still can, and clears the mark.
-                    self.unreachableFiles.insert(name)
+                    //
+                    // Being stopped is not being unreachable, though - both are reported the same
+                    // way, and marking a file the reader called off as one the server would not
+                    // give up turned a video's bubble into "could not be had" the moment its
+                    // download was cancelled.
+                    if Download.wasCalledOff(forKey: name) {
+                        self.unreachableFiles.remove(name)
+                    } else {
+                        self.unreachableFiles.insert(name)
+                    }
                 } else if progress >= 100 {
                     self.unreachableFiles.remove(name)
                     // A video that has just landed can be measured now, so the lengths are read
@@ -1096,7 +1145,40 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// mistaken for one that is still current.
     private static var transferTick = 0
 
+    /// Thumbnails being read and decoded right now.
+    ///
+    /// Fix: every thumbnail that finished downloading redrew every visible row - that is what the
+    /// transfer tick above does - and each redraw threw away the bubble that had asked for a
+    /// picture and started the same read again from a new one. With a screenful arriving, each
+    /// arrival orphaned all the reads in flight, which restarted, and were orphaned by the next.
+    /// The work never finished because it was never allowed to. One read per file, and whoever is
+    /// on screen when it lands gets the picture.
+    private static var thumbnailsBeingRead = Set<String>()
+
+    /// Where thumbnails are read and decoded.
+    ///
+    /// Fix: this work went to `DispatchQueue.global`, and a global queue is one shared line that
+    /// every part of the app joins. Measured on the device, reading and decrypting a thumbnail took
+    /// a millisecond and decoding it thirty-five - and the work waited **four and a half seconds**
+    /// to be given a thread at all, because it was behind everything else already in that line.
+    /// Four rounds of making the work itself faster could never have helped: the work was never
+    /// the slow part. This line is ours alone. Serial on purpose - thirty-five milliseconds each
+    /// means a screenful costs a fifth of a second, and one thread cannot flood the pool.
+    private static let thumbnailQueue = DispatchQueue(label: "nexilis.thumbnails.decode",
+                                                      qos: .userInitiated)
+
     private static var bubbleSignatureKey: UInt8 = 0
+
+    /// How many times this screen has changed a message in place.
+    ///
+    /// Fix: a bubble is cached against a signature made of the message's own fields, and a
+    /// message can return to a state it has already been drawn in - sent, stopped, sent again.
+    /// A cell left in the reuse pool from the first time round then matches the new signature
+    /// exactly, so the table hands that cell straight back and the row is never built: no stop
+    /// control, and the badge belonging to the wrong round. The count makes every local change
+    /// a state the row has never been in before.
+    private var localEdits: [String: Int] = [:]
+
 
     /// Everything the drawing of one bubble depends on, in one string.
     ///
@@ -1122,6 +1204,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         parts.append("width=\(Int(view.frame.size.width))")
         parts.append("appearance=\(traitCollection.userInterfaceStyle.rawValue)")
         parts.append("files=\(EditorGroup.transferTick)")
+        parts.append("edit=\(localEdits[messageId] ?? 0)")
         if let group = groupImages[messageId] {
             // Fix: starring a picture inside a collage changed the member's row and nothing else,
             // and a signature that only carried the members' ids and transfer state read as
@@ -1168,7 +1251,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
 
     /// Asks again once the list has settled. Cheap to call from anywhere that scrolls.
     private func scheduleAutoDownloadSweep() {
-        guard !isPreview, Utils.isAutoDownloadOn else {
+        guard !isPreview else {
             return
         }
         autoDownloadTimer?.invalidate()
@@ -1180,8 +1263,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
 
     /// Fetches what is on screen and not here yet, nearest the middle of the view first.
     private func sweepVisibleRowsForAutoDownload() {
-        guard Utils.isAutoDownloadOn,
-              let visible = tableChatView.indexPathsForVisibleRows, !visible.isEmpty else {
+        guard let visible = tableChatView.indexPathsForVisibleRows, !visible.isEmpty else {
             return
         }
         var slots = EditorGroup.maximumConcurrentAutoDownloads - autoDownloadsInFlight.count
@@ -1191,7 +1273,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         // Light things first, across every visible row, before anything heavy is started at
         // all: a document or a video can hold a place for a long time, and a thumbnail two rows
         // down should not be waiting behind it to appear.
-        for keys in [EditorGroup.lightAttachmentKeys, EditorGroup.heavyAttachmentKeys] {
+        // A thumbnail is fetched whether or not the reader has auto download on. It is not a copy
+        // of the attachment - it is what the bubble is: the picture behind the blur, and the still
+        // a video or a note is offered by. Held back, the bubble is a blank square with an arrow
+        // on it, and the reader is asked to fetch something they have not been shown.
+        var passes = [EditorGroup.thumbnailKeys]
+        if Utils.isAutoDownloadOn {
+            passes.append(EditorGroup.lightAttachmentKeys)
+            passes.append(EditorGroup.heavyAttachmentKeys)
+        }
+        for keys in passes {
             for indexPath in visible {
                 for filename in autoDownloadableFiles(at: indexPath, keys: keys) {
                     guard slots > 0 else {
@@ -1210,7 +1301,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     }
 
     /// What the bubble draws: small, and worth having before anything else.
-    private static let lightAttachmentKeys = ["thumb_id", "image_id", "gif_id", "audio_id"]
+    /// Always fetched, setting or no setting - see the sweep.
+    private static let thumbnailKeys = ["thumb_id"]
+    private static let lightAttachmentKeys = ["image_id", "gif_id", "audio_id"]
     /// What the bubble only offers to open. Fetched too, but never ahead of the above.
     private static let heavyAttachmentKeys = ["video_id", "file_id"]
 
@@ -1268,7 +1361,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         if videoLengths == nil {
             videoLengths = videoDurations()
         }
-        return videoLengths?[row["message_id"] as? String ?? ""] ?? 0
+        if let measured = videoLengths?[row["message_id"] as? String ?? ""], measured > 0 {
+            return measured
+        }
+        // Fix: this only ever read `video_duration`, which is filled in by opening the file and
+        // measuring it - so a video that had just finished downloading showed no length at all
+        // until that measurement came back, a beat later and only if the file could be read. The
+        // sender already said how long it runs, and that travelled with the message: it is known
+        // the moment the video is.
+        let name = row["video_id"] as? String ?? ""
+        let claimed = VideoNote.Facts.of(attachmentNamed: name).duration
+        return claimed > 0 ? Int(claimed) : 0
     }
 
     private func startAutoDownload(_ filename: String) {
@@ -1569,15 +1672,78 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         // The rows have real heights only once the table has laid out. Placing the chat at
         // its newest message here means it is drawn in the right place the first time, with
         // no visible jump - which is what the old fade from alpha 0 was covering up.
-        if pendingInitialScrollToBottom, tableChatView.numberOfSections > 0 {
-            pendingInitialScrollToBottom = false
-            let lastSection = tableChatView.numberOfSections - 1
-            let lastRow = tableChatView.numberOfRows(inSection: lastSection) - 1
-            if lastRow >= 0 {
-                tableChatView.safeScrollToRow(at: IndexPath(row: lastRow, section: lastSection), at: .bottom, animated: false)
+        applyPendingInitialBottomScroll()
+        applyPendingUnreadMarkerScroll()
+    }
+
+    /// Makes the opening placement converge now instead of over the next few layout passes.
+    ///
+    /// Fix: a row the table has never drawn is guessed at, so the first placement is worked out
+    /// from guesses and lands short of the newest message; the passes that follow correct it,
+    /// and that correction is the drift seen as a chat opens. Only measuring replaces a guess,
+    /// so the measuring is asked for here - a handful of layout passes, each costing the visible
+    /// rows - at a moment when the screen is still sliding in and nothing of this is visible.
+    private func settleInitialBottomNow() {
+        guard pendingInitialScrollToBottom, pendingUnreadMarkerScroll == nil,
+              tableChatView.numberOfSections > 0 else {
+            return
+        }
+        // Whatever this settles, the per-pass hold keeps watching afterwards: the bars around
+        // the table can still change its height once more before the screen is done arriving.
+        let held = pendingInitialScrollToBottom
+        view.layoutIfNeeded()
+        for _ in 0..<6 {
+            let before = tableChatView.contentSize.height
+            applyPendingInitialBottomScroll()
+            tableChatView.layoutIfNeeded()
+            if tableChatView.contentSize.height == before {
+                break
             }
         }
-        applyPendingUnreadMarkerScroll()
+        pendingInitialScrollToBottom = held
+    }
+
+    /// Keeps the chat at its newest message while the rows above it settle.
+    ///
+    /// Gives up on its deadline, whatever the table has got itself into, and the moment the
+    /// reader takes the list over - see scrollViewDidScroll.
+    private func applyPendingInitialBottomScroll() {
+        // The unread marker's placement aims somewhere else entirely; the two never run for the
+        // same opening, and this makes sure of it.
+        guard pendingInitialScrollToBottom, pendingUnreadMarkerScroll == nil else {
+            return
+        }
+        if initialBottomDeadline == nil {
+            initialBottomDeadline = Date().addingTimeInterval(2.5)
+            initialBottomStartedAt = Date()
+        }
+        if let deadline = initialBottomDeadline, Date() > deadline {
+            pendingInitialScrollToBottom = false
+            initialBottomDeadline = nil
+            initialBottomStartedAt = nil
+            return
+        }
+        guard tableChatView.numberOfSections > 0, tableChatView.bounds.height > 0 else {
+            // Nothing to aim at yet. Waiting is not an attempt, and the deadline is what stops
+            // this going on for ever.
+            return
+        }
+        let lowest = -tableChatView.adjustedContentInset.top
+        let bottom = max(lowest, tableChatView.contentSize.height
+                         + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
+        let contentHeight = tableChatView.contentSize.height
+        let heightsSettled = contentHeight == initialBottomLastContentHeight
+        initialBottomLastContentHeight = contentHeight
+        if abs(tableChatView.contentOffset.y - bottom) > 0.5 {
+            tableChatView.setContentOffset(CGPoint(x: tableChatView.contentOffset.x, y: bottom), animated: false)
+        } else if heightsSettled, let started = initialBottomStartedAt,
+                  Date().timeIntervalSince(started) > Self.initialBottomGrace {
+            // At the bottom, the rows have stopped changing size, and the grace period is up:
+            // this is the place, and the reader has the list from here.
+            pendingInitialScrollToBottom = false
+            initialBottomDeadline = nil
+            initialBottomStartedAt = nil
+        }
     }
 
     /// Puts the header in place: colours, the back button's tint, and the bar itself if the
@@ -1611,11 +1777,19 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         super.viewWillAppear(animated)
         prepareNavigationBar()
         addPreviewHeaderIfNeeded()
+        // The placement is settled here, while the push animation still covers the screen,
+        // rather than over the layout passes that follow it - see settleInitialBottomNow.
+        settleInitialBottomNow()
     }
 
     public override func viewDidAppear(_ animated: Bool) {
         prepareNavigationBar()
         updateProfile()
+        // Anything that arrived while this screen was being built gets its chance now.
+        applyPendingStatusUpdates()
+        // The conversation is open and its collages are built by now: anything inside one that has
+        // not been reported as seen is reported here.
+        sweepCollageReadReceipts()
         // A recording carried in on the strip belongs to a bubble here again. Asked for now, and
         // once more a moment later: the conversation being left tears its players down after this
         // one has already drawn, so the strip may not have been handed anything yet.
@@ -1627,6 +1801,15 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         // flick upwards does not immediately run out of messages.
         DispatchQueue.main.async { [weak self] in
             self?.prefetchOlderMessagesIfIdle()
+        }
+        // A row that changes height a beat later - a picture reporting its own size, a page of
+        // older messages landing - changes it inside the table, and that does not always ask
+        // this screen to lay out again. So the opening placement is looked at by the clock too,
+        // for as long as it is still in charge of where the list sits.
+        for delay in [0.1, 0.25, 0.5, 0.8] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.applyPendingInitialBottomScroll()
+            }
         }
 //        let indexPath = tableChatView.indexPathsForVisibleRows?.first
 //        if indexPath != nil && currentIndexpath != nil {
@@ -1671,8 +1854,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         
         buttonSendChat.circle()
         buttonSendChat.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
-        refreshSendOrRecordButton()
         buttonSendChat.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+        // After the colour, not before: the camera takes the microphone's own background to make
+        // one capsule of the two, and there is nothing to take until it has been set.
+        installVideoNoteButton()
+        refreshSendOrRecordButton()
         buttonAckConfidential.circle()
         buttonAckConfidential.addTarget(self, action: #selector(showChooserACKConfidential), for: .touchUpInside)
         buttonAckConfidential.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
@@ -1943,6 +2129,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         getCounter()
         loadInitialMessages()
         markerCounter = unreadMarkerMessageId(unread: counter)
+        markerCount = counter
         // A message swallowed by an image collage is not a row of its own, so the collage it
         // belongs to is the row that carries the marker.
         if let marker = markerCounter, !dataMessages.contains(where: { $0["message_id"] as? String == marker }),
@@ -2009,6 +2196,8 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 // going to land in the right place.
                 pendingUnreadMarkerScroll = marker
                 remainingUnreadMarkerScrollPasses = EditorGroup.unreadMarkerScrollPasses
+                pendingUnreadMarkerDeadline = Date().addingTimeInterval(2.5)
+                unreadMarkerLastContentHeight = -1
                 applyPendingUnreadMarkerScroll()
             } else {
                 // The marker's message is not a row of its own after all (deleted, or hidden
@@ -2035,7 +2224,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                         for i in idx..<dataMessages.count {
                             if dataMessages[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
                                 let fpin = dataMessages[i]["f_pin"]  as? String ?? ""
-                                let mId = dataMessages[i]["message_id"]  as? String ?? ""
+                                let mId = readReceiptIds(for: dataMessages[i])
                                 if stringMessage[fpin] == nil {
                                     stringMessage[fpin] = mId
                                 } else {
@@ -2061,7 +2250,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                                 let status = dataMessages[i][TypeDataMessage.status] as? String
                                 if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
                                     let fpin = dataMessages[i]["f_pin"]  as? String ?? ""
-                                    let mId = dataMessages[i]["message_id"]  as? String ?? ""
+                                    let mId = readReceiptIds(for: dataMessages[i])
                                     if stringMessage1[fpin] == nil {
                                         stringMessage1[fpin] = mId
                                     } else {
@@ -2130,7 +2319,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                     let status = dataMessages[i][TypeDataMessage.status] as? String
                     if dataMessages[i]["f_pin"] as? String != idMe && status != "4" && status != "8" && EditorGroup.conditionSendRead(scope: dataMessages[i][TypeDataMessage.message_scope_id] as! String, fPin: dataMessages[i][TypeDataMessage.f_pin] as! String, messageId: dataMessages[i][TypeDataMessage.message_id] as! String) {
                         let fpin = dataMessages[i]["f_pin"]  as? String ?? ""
-                        let mId = dataMessages[i]["message_id"]  as? String ?? ""
+                        let mId = readReceiptIds(for: dataMessages[i])
                         if stringMessage[fpin] == nil {
                             stringMessage[fpin] = mId
                         } else {
@@ -2215,12 +2404,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                             }
                         }
                         if row != nil && section != nil  {
-                            self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                            self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
                         }
                     }
                 })
             }
         }
+        trimPinnedMessages()
         let dataMessagesPin = self.pinnedMessagesForBanner()
         pinAllMessages(dataMessages: dataMessagesPin)
     }
@@ -2482,7 +2672,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                                 let minutesApart = getSecondsDifferenceFromTwoDates(
                                     start: Date(milliseconds: Int64(last.time) ?? 0),
                                     end: Date(milliseconds: Int64(row["server_date"] as? String ?? "") ?? 0)) / 60
+                                // A run is also broken where the pictures stop being in the same
+                                // state. A collage is offered, fetched and opened as one thing -
+                                // one blur over all of it, one size, one tap - and none of that
+                                // means anything for a group of pictures where some are here and
+                                // some are not. So pictures already on this device gather with
+                                // each other, pictures still to be fetched gather with each other,
+                                // and where the two meet the run ends.
+                                let lastIsHere = isFilePresent(last.imageId)
+                                let thisIsHere = isFilePresent(row["image_id"] as? String ?? "")
                                 breaksRun = (last.dataMessage["f_pin"] as? String ?? "") != (row["f_pin"] as? String ?? "")
+                                    || lastIsHere != thisIsHere
                                     || minutesApart >= 11
                                     || tempImages.count >= EditorGroup.maximumImagesInCollage
                             } else {
@@ -2497,6 +2697,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                         }
                         if marksFirstAsUnread && idxOff == 0 {
                             self.markerCounter = row["message_id"] as? String
+                            self.markerCount = self.counter
                         }
                         loaded.append(row)
                         idxOff+=1
@@ -2642,6 +2843,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
         let rowsBeforeLoad = dataMessages.count
 
+        // Sitting at the newest message is a place of its own, and it is where a chat that has
+        // just been opened sits. It has to be remembered as that, because the rows above have
+        // never been on screen and are still being guessed at: anchoring the list on the top
+        // row hands the bottom over to whatever those guesses turn out to be, and the chat
+        // scrolls itself up by a message the moment they are corrected.
+        let bottomOffset = tableChatView.contentSize.height - tableChatView.bounds.height
+            + tableChatView.adjustedContentInset.bottom
+        // The opening placement outranks the measurement: while it is still in charge the list
+        // belongs at the newest message, whatever the offset happens to read mid-settle.
+        let wasAtBottom = pendingInitialScrollToBottom || bottomOffset - tableChatView.contentOffset.y <= 24
+
         let anchorIndexPath = tableChatView.indexPathsForVisibleRows?.first
         var anchorMessageId: String?
         var anchorDistanceFromTop: CGFloat = 0
@@ -2662,9 +2874,29 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             tableChatView.reloadData()
             tableChatView.layoutIfNeeded()
         }
-        if let anchorMessageId = anchorMessageId, let restored = indexPath(forMessageId: anchorMessageId) {
-            let target = tableChatView.rectForRow(at: restored).minY - anchorDistanceFromTop
-            tableChatView.setContentOffset(CGPoint(x: 0, y: target), animated: false)
+        // Fix: put back where the reader was, and then check the answer and put it back again
+        // until it stops moving - all before this returns, so no frame is ever drawn in the
+        // wrong place. One pass was not enough: moving the list brings different rows on
+        // screen, measuring them changes what the rows above add up to, and the place worked
+        // out from the old numbers is then a row's worth out. That was the drop-and-recover
+        // seen when a page landed just after a chat opened.
+        for _ in 0..<4 {
+            var target: CGFloat?
+            if wasAtBottom {
+                let lowest = -tableChatView.adjustedContentInset.top
+                target = max(lowest, tableChatView.contentSize.height
+                             + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
+            } else if let anchorMessageId = anchorMessageId,
+                      let restored = indexPath(forMessageId: anchorMessageId) {
+                target = tableChatView.rectForRow(at: restored).minY - anchorDistanceFromTop
+            }
+            guard let target = target, abs(tableChatView.contentOffset.y - target) > 0.5 else {
+                break
+            }
+            tableChatView.setContentOffset(CGPoint(x: tableChatView.contentOffset.x, y: target), animated: false)
+            UIView.performWithoutAnimation {
+                tableChatView.layoutIfNeeded()
+            }
         }
     }
 
@@ -2786,6 +3018,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// refilled between flings.
     private func prefetchOlderMessagesIfIdle() {
         guard !isInitialLoading, hasOlderMessages else {
+            return
+        }
+        // Fix: not while the chat is still being placed at its newest message. A page landing
+        // above the screen moves the very ground that placement is standing on, and the two
+        // corrections one after the other are the bounce seen on opening a chat: the list drops
+        // by a row as the page lands, then is pulled back. Nobody can flick a chat they have not
+        // been shown yet, so this loses nothing by waiting for the placement to finish.
+        guard !pendingInitialScrollToBottom else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.prefetchOlderMessagesIfIdle()
+            }
             return
         }
         guard !tableChatView.isDragging, !tableChatView.isDecelerating else {
@@ -2928,19 +3171,19 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         guard let marker = pendingUnreadMarkerScroll else {
             return
         }
+        // Long enough is long enough, whatever state the table has got itself into.
+        if let deadline = pendingUnreadMarkerDeadline, Date() > deadline {
+            pendingUnreadMarkerScroll = nil
+            return
+        }
         guard tableChatView.numberOfSections > 0, tableChatView.bounds.height > 0,
               let indexPath = indexPath(forMessageId: marker),
               indexPath.section < tableChatView.numberOfSections,
               indexPath.row < tableChatView.numberOfRows(inSection: indexPath.section) else {
-            // Nothing to aim at yet - the table may not have any rows this pass. Keep the
-            // request; the pass budget still runs down so this cannot hang around forever.
-            remainingUnreadMarkerScrollPasses -= 1
-            if remainingUnreadMarkerScrollPasses <= 0 {
-                pendingUnreadMarkerScroll = nil
-            }
+            // Nothing to aim at yet - the table may not have any rows this pass. Costs nothing:
+            // waiting is not an attempt, and the deadline above is what stops this going on.
             return
         }
-        remainingUnreadMarkerScrollPasses -= 1
         let rowRect = tableChatView.rectForRow(at: indexPath)
         let topInset = tableChatView.adjustedContentInset.top
         // A plain table pins the date header over the top of the visible area, so the row has
@@ -2949,14 +3192,18 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         let lowest = -topInset
         let highest = max(lowest, tableChatView.contentSize.height + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
         let desired = min(max(rowRect.minY - topInset - headerHeight, lowest), highest)
+        // Fix: this used to stop the moment a pass found the offset already right. But `desired`
+        // is worked out from the row heights the table holds *now*, and early on those are
+        // estimates - so a pass could agree with a guess, stop correcting, and then have the
+        // content shift underneath it as the real heights arrived. It is only finished when the
+        // offset is right *and* the content stopped changing height between two passes, which is
+        // what "the heights have settled" actually means.
+        let contentHeight = tableChatView.contentSize.height
+        let heightsSettled = contentHeight == unreadMarkerLastContentHeight
+        unreadMarkerLastContentHeight = contentHeight
         if abs(tableChatView.contentOffset.y - desired) > 0.5 {
             tableChatView.setContentOffset(CGPoint(x: tableChatView.contentOffset.x, y: desired), animated: false)
-        } else {
-            // Already exactly there, and the heights it was worked out from are the measured
-            // ones by now - nothing left to correct.
-            remainingUnreadMarkerScrollPasses = 0
-        }
-        if remainingUnreadMarkerScrollPasses <= 0 {
+        } else if heightsSettled {
             pendingUnreadMarkerScroll = nil
         }
     }
@@ -2970,7 +3217,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
         var known = Set(pinned.compactMap { $0[TypeDataMessage.message_id] as? String })
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
-            let query = "SELECT message_id, f_pin, message_text, server_date, is_pinned, file_id, image_id, video_id, audio_id, gif_id FROM MESSAGE where \(self.messageWhereClause()) AND is_pinned <> '0' AND is_pinned IS NOT NULL order by server_date asc"
+            let query = "SELECT message_id, f_pin, message_text, server_date, is_pinned, file_id, image_id, video_id, audio_id, gif_id FROM MESSAGE where \(self.messageWhereClause()) AND is_pinned <> '0' AND is_pinned IS NOT NULL order by CAST(is_pinned AS INTEGER) desc LIMIT \(PinnedMessages.maximum)"
             if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) {
                 while cursor.next() {
                     let messageId = cursor.string(forColumnIndex: 0) ?? ""
@@ -2995,7 +3242,43 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 cursor.close()
             }
         })
-        return pinned
+        return PinnedMessages.newest(pinned)
+    }
+
+    /// Brings this conversation back to at most three pins in the database, and forgets in
+    /// memory the ones it let go.
+    ///
+    /// A conversation can be holding more than three before this screen ever opens - pins arrive
+    /// from other participants and other devices - and nothing else takes one away.
+    private func trimPinnedMessages() {
+        let removed = PinnedMessages.trim(conversation: messageWhereClause())
+        guard !removed.isEmpty else {
+            return
+        }
+        for messageId in removed {
+            if let idx = dataMessages.firstIndex(where: { $0["message_id"] as? String == messageId }) {
+                dataMessages[idx][TypeDataMessage.is_pinned] = "0"
+            }
+        }
+    }
+
+    /// Unpins these, in the order given, and says whether every one of them went.
+    ///
+    /// Fix: replacing a pin unpinned exactly one message, which is right only when there are
+    /// exactly three to begin with. A conversation that arrived holding four or more kept the
+    /// extra ones for good, since nothing else ever took a pin away.
+    private func unpinInOrder(_ messages: [[String: Any?]], completion: @escaping (Bool) -> Void) {
+        guard let first = messages.first else {
+            completion(true)
+            return
+        }
+        proceedPinUnpinMessage(checkDataPinned: first, isPinned: false) { removed in
+            guard removed else {
+                completion(false)
+                return
+            }
+            self.unpinInOrder(Array(messages.dropFirst()), completion: completion)
+        }
     }
 
     func getSecondsDifferenceFromTwoDates(start: Date, end: Date) -> Int {
@@ -3071,7 +3354,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 }
                 return stringFormat
             } else {
-                let formatter = EditorGroup.chatDateFormatter(format: "EE, dd MMM", cached: &EditorGroup.dayDateFormatter)
+                let formatter = EditorGroup.chatDateFormatter(format: ChatDayLabel.format(for: date), cached: &EditorGroup.dayDateFormatter)
                 let stringFormat = formatter.string(from: date as Date)
                 if !dataDates.contains(stringFormat){
                     dataDates.append(stringFormat)
@@ -3166,6 +3449,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             idx = dataMessages.lastIndex(where: { $0["image_id"] as? String == data["name"] as? String || $0["image_id"] as? String == data["image_id"] as? String })
             isImage = true
         }
+        // A round video note draws its own transfer, in its own control, from this same
+        // notification. What follows walks the cell's views looking for an image view with a shape
+        // layer in it and moves whatever it finds - which on a note is not the ring it thinks it
+        // is. Left alone, it drew the old media machinery over a bubble that had already answered
+        // for itself, which is the second appearance that turned up after Send again.
+        if idx != nil, VideoNote.isNote(dataMessages[idx!]["video_id"] as? String) {
+            return
+        }
         if (idx != nil) {
             let section = dataDates.firstIndex(of: dataMessages[idx!]["chat_date"]  as? String ?? "")
             if section == nil {
@@ -3218,7 +3509,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                                         loading.strokeEnd = CGFloat(progress / 100)
                                         if (progress == 100.0) {
                                             self.dataMessages[idx!]["progress"] = progress
-                                            self.tableChatView.reloadRows(at: [indexPath], with: .none)
+                                            self.tableChatView.reloadRowsKeepingPlace(at: [indexPath])
                                         }
                                     }
                                 }
@@ -3265,7 +3556,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                                                         loading.strokeEnd = CGFloat(progress / 100)
                                                         if (progress == 100.0) {
                                                             self.dataMessages[idx!]["progress"] = progress
-                                                            self.tableChatView.reloadRows(at: [indexPath], with: .none)
+                                                            self.tableChatView.reloadRowsKeepingPlace(at: [indexPath])
                                                         }
                                                     }
                                                 }
@@ -3380,16 +3671,19 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
                 if row != nil && section != nil  {
                     DispatchQueue.main.async {
-                        self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                        self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
                     }
                 }
-                let dataMessagesPin = self.pinnedMessagesForBanner()
-                self.pinAllMessages(dataMessages: dataMessagesPin)
-                
                 if !messageIdNotif.isEmpty {
                     self.appendNewMessage(messageId: messageIdNotif)
                 }
             }
+            // Fix: the banner was only rebuilt when the message was in the loaded window. A pin
+            // can be on a message far older than that - the banner reads the database for exactly
+            // that reason - so pinning or unpinning one from another device left the banner
+            // showing what it had.
+            let dataMessagesPin = self.pinnedMessagesForBanner()
+            self.pinAllMessages(dataMessages: dataMessagesPin)
         }
     }
     
@@ -3518,7 +3812,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             if let collageRow = self.foldIntoImageGroup(row) {
                 // Part of the run above it: no new row goes in, the row that draws the collage
                 // is redrawn to take it.
-                self.tableChatView.reloadRows(at: [collageRow], with: .none)
+                self.tableChatView.reloadRowsKeepingPlace(at: [collageRow])
                 self.tableChatView.layoutIfNeeded()
             } else {
                 self.dataMessages.append(row)
@@ -3624,6 +3918,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                             } else {
                                 self.updateStatusMessage(idx: idx, chatData: chatData)
                             }
+                        } else if chatData[CoreMessage_TMessageKey.DELETE_MESSAGE_FLAG] != "1" {
+                            // The row is not here yet - keep the answer until it is.
+                            self.parkStatusUpdate(messageId: chatData[CoreMessage_TMessageKey.MESSAGE_ID] ?? "",
+                                                  status: chatData[CoreMessage_TMessageKey.STATUS] ?? "")
                         }
                     }
                     else if (chatData.keys.contains("message_id")) {
@@ -3645,6 +3943,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                             } else {
                                 self.updateStatusMessage(idx: idx, chatData: chatData)
                             }
+                        } else if chatData[CoreMessage_TMessageKey.DELETE_MESSAGE_FLAG] != "1" {
+                            self.parkStatusUpdate(messageId: idMessage,
+                                                  status: chatData[CoreMessage_TMessageKey.STATUS] ?? "")
                         }
                     }
                     else {
@@ -3660,6 +3961,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                             }
                             if (idx != nil) {
                                 self.updateStatusMessage(idx: idx, chatData: chatData)
+                            } else {
+                                self.parkStatusUpdate(messageId: String(listMessageId[i]),
+                                                      status: chatData[CoreMessage_TMessageKey.STATUS] ?? "")
                             }
                         }
                     }
@@ -3702,17 +4006,12 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.groupImages[idxMessageIdParent].key })
             }
             
-            if (idx != nil) {
-                do {
-                    self.dataMessages[idx!]["status"] = status
-                    let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                    let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
-                    if row != nil && section != nil  {
-                        self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                    }
-                } catch {
-                }
+            // Same as the acknowledgement path: an answer that beats its row is kept, not lost,
+            // and an index the table does not have yet is never handed to reloadRows.
+            if let idx = idx, self.applyStatus(status, at: idx) {
+                return
             }
+            self.parkStatusUpdate(messageId: messageId, status: status)
         }
     }
     
@@ -3727,7 +4026,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
             let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
             if row != nil && section != nil  {
-                self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
             }
             if self.listTimerCredential[self.dataMessages[idx!]["message_id"]  as? String ?? ""] != nil {
                 self.listTimerCredential.removeValue(forKey: self.dataMessages[idx!]["message_id"]  as? String ?? "")
@@ -3742,18 +4041,115 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
     }
     
+
+    /// Statuses that arrived before the row they belong to. Sending writes the message to the
+    /// database and puts it on screen, and the server's acknowledgement comes back on its own
+    /// schedule - on an older device (an X or an XR, where the main thread has more to do and less
+    /// to do it with) that answer regularly lands before the row has finished being inserted. Every
+    /// path below used to be written as `if idx != nil { ... }` with no else, so an acknowledgement
+    /// that arrived a moment early was dropped on the floor: the database said sent, the bubble
+    /// kept its clock, and the only cure was killing the app so the list was read from the database
+    /// again. Parked here instead, and applied the moment the row exists.
+    private var pendingStatusUpdates: [String: String] = [:]
+
+    private func parkStatusUpdate(messageId: String, status: String) {
+        guard !messageId.isEmpty, !status.isEmpty else { return }
+        // Status only ever moves forward, so a late arrival never displaces a later one.
+        if let parked = pendingStatusUpdates[messageId], (Int(parked) ?? -1) >= (Int(status) ?? -1) {
+            return
+        }
+        pendingStatusUpdates[messageId] = status
+        scheduleParkedStatusSweep()
+    }
+
+    /// Whether a sweep is already booked, so a burst of acknowledgements books one, not twenty.
+    private var parkedStatusSweepScheduled = false
+    /// When to look again. A parked update is waiting for a row that is being inserted right now,
+    /// so the first look is almost always the last; the later ones cover a device that is busy
+    /// enough to still be laying out. It ends - a row that never arrives is a row this screen is
+    /// not showing, and the database keeps the truth for the next time it is opened.
+    private static let parkedStatusSweepDelays: [TimeInterval] = [0.2, 0.5, 1.0, 2.0, 4.0]
+
+    private func scheduleParkedStatusSweep(from step: Int = 0) {
+        guard !pendingStatusUpdates.isEmpty else { return }
+        guard step < Self.parkedStatusSweepDelays.count else { return }
+        if step == 0 {
+            guard !parkedStatusSweepScheduled else { return }
+            parkedStatusSweepScheduled = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.parkedStatusSweepDelays[step]) { [weak self] in
+            guard let self = self else { return }
+            self.applyPendingStatusUpdates()
+            if self.pendingStatusUpdates.isEmpty {
+                self.parkedStatusSweepScheduled = false
+            } else {
+                self.scheduleParkedStatusSweep(from: step + 1)
+                if step + 1 >= Self.parkedStatusSweepDelays.count {
+                    self.parkedStatusSweepScheduled = false
+                }
+            }
+        }
+    }
+
+    /// Called wherever the table has just gained rows, so anything parked gets its chance.
+    func applyPendingStatusUpdates() {
+        guard !pendingStatusUpdates.isEmpty else { return }
+        for (messageId, status) in pendingStatusUpdates {
+            if let idxMessageIdParent = groupImages.firstIndex(where: { $0.value.contains(where: { $0.messageId == messageId }) }),
+               let idxInImages = groupImages[idxMessageIdParent].value.firstIndex(where: { $0.messageId == messageId }) {
+                groupImages[idxMessageIdParent].value[idxInImages].status = status
+                groupImages[idxMessageIdParent].value[idxInImages].dataMessage["status"] = status
+                let collageId = groupImages[idxMessageIdParent].key
+                if let idx = dataMessages.firstIndex(where: { $0["message_id"] as? String == collageId }),
+                   applyStatus(status, at: idx) {
+                    pendingStatusUpdates.removeValue(forKey: messageId)
+                }
+                continue
+            }
+            guard let idx = dataMessages.firstIndex(where: { $0["message_id"] as? String == messageId }) else {
+                continue
+            }
+            if applyStatus(status, at: idx) {
+                pendingStatusUpdates.removeValue(forKey: messageId)
+            }
+        }
+    }
+
+    /// Writes the new status into the row and redraws it. Returns false when the row is not yet
+    /// something the table can be asked to reload, so the caller can park the update rather than
+    /// lose it - and so that an index the table does not have yet is never handed to reloadRows,
+    /// which would take the app down rather than miss a tick.
+    @discardableResult
+    private func applyStatus(_ status: String, at idx: Int) -> Bool {
+        guard idx >= 0, idx < dataMessages.count else { return false }
+        // Status only ever moves forward: a late "sent" must not undo a "read".
+        let current = Int(dataMessages[idx]["status"] as? String ?? "") ?? -1
+        let incoming = Int(status) ?? -1
+        if current > incoming { return true }
+        dataMessages[idx]["status"] = status
+        let date = dataMessages[idx]["chat_date"] as? String ?? ""
+        let messageId = dataMessages[idx]["message_id"] as? String ?? ""
+        guard let section = dataDates.firstIndex(of: date),
+              let row = messages(onDate: date).firstIndex(where: { $0["message_id"] as? String == messageId }) else {
+            return false
+        }
+        guard section < tableChatView.numberOfSections,
+              row < tableChatView.numberOfRows(inSection: section) else {
+            return false
+        }
+        tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row, section: section)])
+        return true
+    }
+
     private func updateStatusMessage(idx: Int?, chatData: [String: String]) {
-        do {
-            if Int(self.dataMessages[idx!]["status"]  as? String ?? "")! > Int(chatData[CoreMessage_TMessageKey.STATUS]!)! {
-                return
-            }
-            self.dataMessages[idx!]["status"] = chatData[CoreMessage_TMessageKey.STATUS]!
-            let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-            let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
-            if row != nil && section != nil  {
-                self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-            }
-        } catch {
+        guard let idx = idx, idx >= 0, idx < dataMessages.count,
+              let status = chatData[CoreMessage_TMessageKey.STATUS] else {
+            return
+        }
+        // The two Int(...)! here used to be force unwraps inside a do/catch that could never have
+        // caught them - a status that was empty or not a number took the app down.
+        if !applyStatus(status, at: idx) {
+            parkStatusUpdate(messageId: dataMessages[idx]["message_id"] as? String ?? "", status: status)
         }
     }
     
@@ -3979,32 +4375,42 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     }
     
     @objc func profilePersonTapped(_ sender: ObjectGesture) {
+        showProfile(pin: sender.message_id)
+    }
+
+    /// Opens the profile of the person a pin belongs to.
+    ///
+    /// The picture beside a message has always led here; a coloured @mention inside one leads
+    /// here now as well, so both go through the same implementation rather than a second copy
+    /// of it. "-999" and "-997" are nobody in particular (a system message, and @All), and stay
+    /// where they are.
+    func showProfile(pin: String) {
         if isHistoryCC {
             return
         }
         let idMe = User.getMyPin() as String?
-        if sender.message_id == idMe {
+        if pin == idMe {
             let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
-            controller.data = sender.message_id
+            controller.data = pin
             controller.flag = .me
             navigationController?.show(controller, sender: nil)
-        } else if sender.message_id != "-999" && sender.message_id != "-997"  {
-            let data = User.getDataCanNil(pin: sender.message_id)
+        } else if pin != "-999" && pin != "-997"  {
+            let data = User.getDataCanNil(pin: pin)
             if data != nil {
                 let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
                 controller.flag = .friend
                 controller.user = data
                 controller.name = data!.fullName
-                controller.data = sender.message_id
+                controller.data = pin
                 controller.picture = data!.thumb
                 self.navigationController?.show(controller, sender: nil)
             } else {
-                let dataUser = getDataProfile(f_pin: sender.message_id, message_id: "")
+                let dataUser = getDataProfile(f_pin: pin, message_id: "")
                 let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
                 controller.flag = .invite
                 controller.user = nil
                 controller.name = dataUser["name"]!
-                controller.data = sender.message_id
+                controller.data = pin
                 controller.picture = dataUser["image_id"]!
                 self.navigationController?.show(controller, sender: nil)
             }
@@ -4026,7 +4432,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
                         if listData[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: listData[i][TypeDataMessage.message_scope_id] as! String, fPin: listData[i][TypeDataMessage.f_pin] as! String, messageId: listData[i][TypeDataMessage.message_id] as! String) {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
+                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: self.readReceiptIds(for: listData[i]))
                         }
                     }
                 }
@@ -4038,7 +4444,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                     let idMe = User.getMyPin() as String?
                     for i in 0...listData.count - 1 {
                         if listData[i]["f_pin"] as? String != idMe && EditorGroup.conditionSendRead(scope: listData[i][TypeDataMessage.message_scope_id] as! String, fPin: listData[i][TypeDataMessage.f_pin] as! String, messageId: listData[i][TypeDataMessage.message_id] as! String) {
-                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
+                            self.sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: self.readReceiptIds(for: listData[i]))
                         }
                     }
                 }
@@ -4200,12 +4606,55 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         let hasText = !(textFieldSend.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && textFieldSend.textColor != .lightGray
         wantsVoiceNote = !hasText
+        // The camera belongs to an empty bar. Once there is something written the bar is about
+        // sending that, and a second way to start a recording only gets in the way.
+        videoNoteEntry?.setHidden(hasText)
+        // Read off the microphone itself, every refresh, so the joined capsule follows it through
+        // a theme change instead of holding whatever colour it was built with.
+        videoNoteEntry?.matchAppearance(
+            background: buttonSendChat.backgroundColor,
+            tint: self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white)
         guard !hasText else {
             buttonSendChat.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
             return
         }
         let mic = UIImage(systemName: "mic.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold))
         buttonSendChat.setImage(mic?.withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white, renderingMode: .alwaysOriginal), for: .normal)
+    }
+
+
+    /// The camera beside the microphone, and the round-video screen it opens. Kept on the
+    /// conversation so the button survives every refresh of the input bar.
+    var videoNoteEntry: VideoNoteEntryPoint? {
+        get { return objc_getAssociatedObject(self, &EditorVoiceNoteKeys.videoNote) as? VideoNoteEntryPoint }
+        set { objc_setAssociatedObject(self, &EditorVoiceNoteKeys.videoNote, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
+
+    /// Puts the camera in beside the microphone. Safe to call more than once.
+    func installVideoNoteButton() {
+        guard videoNoteEntry == nil, buttonSendChat != nil else {
+            return
+        }
+        let entry = VideoNoteEntryPoint(owner: self, anchor: buttonSendChat)
+        entry.onHint = { [weak self] text in
+            self?.view.makeToast(text, duration: 2)
+        }
+        entry.onWillPresent = { [weak self] in
+            guard let self = self else { return }
+            // Nothing else is being written or picked while a video note is being taken.
+            self.textFieldSend.resignFirstResponder()
+            if self.viewSticker.isDescendant(of: self.view) {
+                self.constraintBottomAttachment.constant = 0.0
+                self.viewSticker.removeConstraints(self.viewSticker.constraints)
+                self.viewSticker.removeFromSuperview()
+                self.view.layoutIfNeeded()
+            }
+        }
+        entry.onFinish = { [weak self] url, _ in
+            self?.sendVideoNote(at: url)
+        }
+        entry.install()
+        videoNoteEntry = entry
     }
 
     /// True while the button is offering to record rather than to send.
@@ -4222,6 +4671,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// Puts the recording bar over the input bar and starts listening.
     func beginVoiceNote() {
         guard voiceNoteBar == nil else {
+            return
+        }
+        // Turned away here rather than at the recorder, so the recording bar never appears for
+        // a recording that cannot happen.
+        if APIS.blockedByCallInProgress() {
             return
         }
         let bar = VoiceNoteBar()
@@ -4308,6 +4762,25 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                  attachment_flag: "60",
                  audio_id: renamed,
                  viewController: self)
+    }
+
+    /// Sends a round video note. It travels as an ordinary video - same attachment flag, same
+    /// video and thumbnail slots - and what marks it out as a note is the name of the file.
+    func sendVideoNote(at url: URL) {
+        VideoNote.package(recording: url) { [weak self] videoId, thumbId in
+            guard let self = self else { return }
+            guard let videoId = videoId, let thumbId = thumbId else {
+                self.view.makeToast("Failed to save the recording".localized(), duration: 3)
+                return
+            }
+            // The first send gets the same mark as a resend, so the control does not depend on
+            // the row being redrawn while the status still reads "1".
+            VideoNote.markSending(videoId: videoId)
+            self.sendChat(attachment_flag: "0",
+                          video_id: videoId,
+                          thumb_id: thumbId,
+                          viewController: self)
+        }
     }
 
     @objc func sendTapped() {
@@ -4493,7 +4966,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             }
             if let collageRow = self.foldIntoImageGroup(newRow) {
                 // Part of the run above it: no new row goes in, the row that draws the
-                // collage is redrawn to take it.
+                // collage is redrawn to take it. Plainly, not through the place-keeping
+                // reload: this is inside a batch update, where the table is mid-way through
+                // rearranging itself and must not be asked to lay out or to move.
                 self.tableChatView.reloadRows(at: [collageRow], with: .none)
             } else {
                 self.dataMessages.append(newRow)
@@ -4543,7 +5018,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 let section = self.dataDates.firstIndex(of: self.dataDates[self.dataDates.count - 1])
                 let row = self.messages(onDate: self.dataDates[self.dataDates.count - 1]).firstIndex(where: { $0["message_id"] as? String == messageId})
                 if row != nil && section != nil{
-                    self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                    self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
                 }
             })
             self.timerCredential[messageId] = timer
@@ -4569,7 +5044,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
                 let row = self.messages(onDate: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
                 if row != nil && section != nil  {
-                    self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                    self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
                 }
             }
         }
@@ -5240,7 +5715,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             updateCounter(counter: counter)
         }
     }
-    //sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: listData[i]["message_id"]  as? String ?? "")
+    //sendReadMessageStatus(chat_id: self.dataTopic["chat_id"]  as? String ?? "", f_pin: listData[i]["f_pin"]  as? String ?? "", message_scope_id: MessageScope.GROUP, message_id: self.readReceiptIds(for: listData[i]))
 }
 
 extension EditorGroup: ImageVideoPickerDelegate, PreviewAttachmentImageVideoDelegate, PHPickerViewControllerDelegate {
@@ -6327,6 +6802,11 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     }
 
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        // A finger put down on a list that is still moving is a finger stopping the list. It
+        // gets no menu, however long it then rests there - see ListMotion.
+        if listMotion.isMoving(tableChatView) {
+            return nil
+        }
         // Fix: this used to be where the "Open Link"/"Copy" sheet got triggered too
         // (containerMessage's UIContextMenuInteraction recognizes a stationary hold
         // reliably, at its own ~0.3-0.5s default threshold - not directly
@@ -6341,6 +6821,28 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         // on top of things well before the threshold is reached.
         if LinkHighlighting.linkHit(at: location, in: interaction.view) != nil {
             return nil
+        }
+
+        // An attachment still on its way has nothing this menu can offer: it cannot be starred,
+        // replied to, forwarded or pinned before it exists anywhere but here. And the menu opens
+        // over the bubble, which is exactly where the stop control sits - on a note at the foot of
+        // its circle, on a picture in the middle - so a hold meant to stop the send put a menu on
+        // top of the button instead. Nothing is lost with it: once a send has failed the message
+        // says so, and the menu comes back with Send again in it.
+        if let path = tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: tableChatView)),
+           path.section < dataDates.count {
+            let rows = messages(onDate: dataDates[path.section])
+            if path.row < rows.count {
+                let videoId = rows[path.row][TypeDataMessage.video_id] as? String
+                let imageId = rows[path.row][TypeDataMessage.image_id] as? String ?? ""
+                let mine = rows[path.row][TypeDataMessage.f_pin] as? String == User.getMyPin()
+                let carriesAFile = !(videoId ?? "").isEmpty || !imageId.isEmpty
+                let onItsWay = rows[path.row][TypeDataMessage.status] as? String == "1"
+                    || VideoNote.isSending(videoId: videoId ?? "")
+                if onItsWay, mine, carriesAFile {
+                    return nil
+                }
+            }
         }
 
         if textFieldSend.isFirstResponder {
@@ -6374,7 +6876,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 if idx != nil{
                     self.dataMessages[idx!]["is_stared"] = "1"
                 }
-                self.tableChatView.reloadRows(at: [indexPath!], with: .none)
+                self.tableChatView.reloadRowsKeepingPlace(at: [indexPath!])
                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil, userInfo: nil)
             })
         } else {
@@ -6398,7 +6900,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 if idx != nil{
                     self.dataMessages[idx!]["is_stared"] = "0"
                 }
-                self.tableChatView.reloadRows(at: [indexPath!], with: .none)
+                self.tableChatView.reloadRowsKeepingPlace(at: [indexPath!])
                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "listenerStarMessage"), object: nil, userInfo: nil)
             })
         }
@@ -6425,7 +6927,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 }
                 var checkDataPinned = self.pinnedMessagesForBanner()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: {
-                    if checkDataPinned.count == 3 {
+                    if checkDataPinned.count >= PinnedMessages.maximum {
                         let alert = UIAlertController(title: "Replace oldest pin?".localized(),
                                                       message: "Your pin will replace the oldest one.".localized(),
                                                       preferredStyle: .alert)
@@ -6452,12 +6954,9 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         return
                     }
                     if replace {
-                        checkDataPinned.sort {
-                            let firstPinned = Int64($0[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
-                            let secondPinned = Int64($1[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
-                            return firstPinned < secondPinned
-                        }
-                        self.proceedPinUnpinMessage(checkDataPinned: checkDataPinned[0], isPinned: false) { res1 in
+                        // Every pin over the limit, oldest first - one of them in the ordinary
+                        // case, more when the conversation arrived holding too many.
+                        self.unpinInOrder(PinnedMessages.toReplace(checkDataPinned)) { res1 in
                             if res1 {
                                 self.proceedPinUnpinMessage(checkDataPinned: dataMessages[indexPath!.row], isPinned: true) { res2 in
                                     if res2 {
@@ -6629,7 +7128,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                                 self.dataMessages[idx!][TypeDataMessage.message_text] = (dataMessages[indexPath!.row][TypeDataMessage.message_text] as? String ?? "") + "\n\n" + "$\(dataContent)$"
                             }
                             DispatchQueue.main.async{
-                                self.tableChatView.reloadRows(at: [indexPath!], with: .none)
+                                self.tableChatView.reloadRowsKeepingPlace(at: [indexPath!])
                             }
                         }
                     }
@@ -6738,66 +7237,10 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
         })
         
-        let resend = chatMenuAction(title: "Resend".localized(), image: UIImage(systemName: "arrow.clockwise"), handler: {(_) in
-            let messageId = dataMessages[indexPath!.row][TypeDataMessage.message_id]  as? String ?? ""
-            let status = dataMessages[indexPath!.row][TypeDataMessage.status]  as? String ?? ""
-            
-            var idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String ?? "" == messageId })
-            if let idxMessageIdParent = self.groupImages.firstIndex(where: { $0.value.contains(where: { $0.messageId == messageId }) }) {
-                if let idxInImages = self.groupImages[idxMessageIdParent].value.firstIndex(where: { $0.messageId == messageId }) {
-                    self.groupImages[idxMessageIdParent].value[idxInImages].status = "1"
-                    self.groupImages[idxMessageIdParent].value[idxInImages].dataMessage[TypeDataMessage.status] = "1"
-                }
-                idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.groupImages[idxMessageIdParent].key })
-            }
-            
-            if (idx != nil) {
-                do {
-                    self.dataMessages[idx!][TypeDataMessage.status] = "1"
-                    self.dataMessages[idx!][TypeDataMessage.progress] = 0.0
-                    let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                    let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[idx!]["message_id"] as? String })
-                    if row != nil && section != nil  {
-                        self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
-                    }
-                } catch {
-                }
-            }
-            Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                do {
-                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                        "status" : "1"
-                    ], _where: "message_id = '\(messageId)'")
-                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS", cvalues: [
-                        "status" : "1"
-                    ], _where: "message_id = '\(messageId)'")
-                } catch {
-                    rollback.pointee = true
-                    print("Access database error: \(error.localizedDescription)")
-                }
-            })
-            let message = CoreMessage_TMessageBank.sendMessage(message_id: messageId,
-                                                               l_pin: dataMessages[indexPath!.row][TypeDataMessage.l_pin]  as? String ?? "",
-                                                               message_scope_id: dataMessages[indexPath!.row][TypeDataMessage.message_scope_id]  as? String ?? "",
-                                                               status: "1",
-                                                               message_text: dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "",
-                                                               credential: dataMessages[indexPath!.row][TypeDataMessage.credential]  as? String ?? "",
-                                                               attachment_flag: dataMessages[indexPath!.row][TypeDataMessage.attachment_flag]  as? String ?? "",
-                                                               ex_blog_id: dataMessages[indexPath!.row][TypeDataMessage.blog_id]  as? String ?? "",
-                                                               message_large_text: "",
-                                                               ex_format: "",
-                                                               image_id: dataMessages[indexPath!.row][TypeDataMessage.image_id]  as? String ?? "",
-                                                               audio_id: dataMessages[indexPath!.row][TypeDataMessage.audio_id]  as? String ?? "",
-                                                               video_id: dataMessages[indexPath!.row][TypeDataMessage.video_id]  as? String ?? "",
-                                                               file_id: dataMessages[indexPath!.row][TypeDataMessage.file_id]  as? String ?? "",
-                                                               thumb_id: dataMessages[indexPath!.row][TypeDataMessage.thumb_id]  as? String ?? "",
-                                                               reff_id: dataMessages[indexPath!.row][TypeDataMessage.reff_id]  as? String ?? "",
-                                                               read_receipts: dataMessages[indexPath!.row][TypeDataMessage.read_receipts]  as? String ?? "",
-                                                               chat_id: dataMessages[indexPath!.row][TypeDataMessage.chat_id]  as? String ?? "",
-                                                               is_call_center: dataMessages[indexPath!.row][TypeDataMessage.is_call_center]  as? String ?? "",
-                                                               call_center_id: dataMessages[indexPath!.row][TypeDataMessage.call_center_id]  as? String ?? "",
-                                                               opposite_pin: dataMessages[indexPath!.row][TypeDataMessage.opposite_pin]  as? String ?? "", specFile: "")
-            Nexilis.addQueueMessage(message: message)
+        let resend = chatMenuAction(title: "Send again".localized(), image: UIImage(systemName: "arrow.clockwise"), handler: { [weak self] (_) in
+            guard let self = self, let indexPath = indexPath else { return }
+            let messageId = self.dataMessages[indexPath.row][TypeDataMessage.message_id] as? String ?? ""
+            self.sendAgain(messageId: messageId)
         })
         
         var children: [UIMenuElement] = [star, reply, pin, copy, delete]
@@ -6886,10 +7329,15 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     
     func proceedPinUnpinMessage(checkDataPinned: [String: Any?], isPinned: Bool, completion: @escaping (Bool)-> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
+            // Fix: the moment of the pin was read from the clock three separate times - once for
+            // the server, once for the database, once for the row on screen - so the three could
+            // differ by a few milliseconds. That number is what decides which pin is the oldest,
+            // and so which one a fourth pin replaces. Read once, used everywhere.
+            let pinnedAt = isPinned ? "\(Date().currentTimeMillis())" : "0"
             var jaData = [[String: Any]]()
             var jsonObject = [String: Any]()
             jsonObject[CoreMessage_TMessageKey.MESSAGE_ID] = checkDataPinned["message_id"]  as? String ?? ""
-            jsonObject[CoreMessage_TMessageKey.IS_PINNED_MESSAGE] = isPinned ? "\(Date().currentTimeMillis())" : "0"
+            jsonObject[CoreMessage_TMessageKey.IS_PINNED_MESSAGE] = pinnedAt
             jaData.append(jsonObject)
             if let jsonData = try? JSONSerialization.data(withJSONObject: jaData, options: []),
                let jsonString = String(data: jsonData, encoding: .utf8) {
@@ -6903,7 +7351,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                                 do {
                                     _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                                        "is_pinned" : isPinned ? "\(Date().currentTimeMillis())" : "0"
+                                        "is_pinned" : pinnedAt
                                     ], _where: "message_id = '\(checkDataPinned["message_id"]  as? String ?? "")'")
                                 } catch {
                                     rollback.pointee = true
@@ -6913,12 +7361,12 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         }
                         let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == checkDataPinned["message_id"]  as? String ?? ""})
                         if idx != nil{
-                            self.dataMessages[idx!][TypeDataMessage.is_pinned] = isPinned ? "\(Date().currentTimeMillis())" : "0"
+                            self.dataMessages[idx!][TypeDataMessage.is_pinned] = pinnedAt
                             let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
                             let row = self.messages(onDate: self.dataMessages[idx!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? "" })
                             if row != nil && section != nil  {
                                 DispatchQueue.main.async {
-                                    self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                                    self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
                                 }
                             }
                         }
@@ -6998,7 +7446,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             if let collageRow = self.foldIntoImageGroup(row) {
                 // Part of the run above it: no new row goes in, the row that draws the
                 // collage is redrawn to take it.
-                self.tableChatView.reloadRows(at: [collageRow], with: .none)
+                self.tableChatView.reloadRowsKeepingPlace(at: [collageRow])
             } else {
                 self.dataMessages.append(row)
                 let arrived = IndexPath(row: self.messages(onDate: self.dataDates[self.dataDates.count - 1]).count - 1, section: self.dataDates.count - 1)
@@ -7195,7 +7643,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                         if idx != nil{
                             self.dataMessages[idx!][TypeDataMessage.message_text] = newText
                             self.dataMessages[idx!][TypeDataMessage.last_edit] = lastEdited
-                            self.tableChatView.reloadRows(at: [indexPath], with: .none)
+                            self.tableChatView.reloadRowsKeepingPlace(at: [indexPath])
                         }
                     }
                 }
@@ -7604,6 +8052,124 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         Nexilis.deleteQueueMessage(message: tmessage)
     }
     
+
+    /// Puts a message that never left back on the queue.
+    ///
+    /// Audited on the way out of the context menu, and it was losing things. The rebuilt message
+    /// dropped `gif_id` entirely - so a gif sent again came back as a video with no animation -
+    /// and blanked `specFile`, `message_large_text` and `ex_format`, and never carried
+    /// `is_forwarded` or `is_secret`. A message sent again should be the same message, not a
+    /// plainer copy of it. Everything the row holds is passed through.
+    ///
+    /// One place, so the context menu and the "not sent" sheet cannot drift apart.
+    func sendAgain(messageId: String) {
+        guard !messageId.isEmpty,
+              let idx = dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == messageId }) else {
+            return
+        }
+        // A message is only stopped until it is asked for again - on the queue, and for the
+        // note's own control.
+        localEdits[messageId, default: 0] += 1
+        OutgoingThread.default.clearCancelled(messageId: messageId)
+        // Whatever is still queued for this message goes before a new copy is added. Two copies of
+        // one message upload the same file, and the first to finish takes that file away from the
+        // second.
+        OutgoingThread.default.removeOutgoing(messageId: messageId)
+        VideoNote.clearStopped(videoId: dataMessages[idx][TypeDataMessage.video_id] as? String ?? "")
+        VideoNote.markSending(videoId: dataMessages[idx][TypeDataMessage.video_id] as? String ?? "")
+        let row = dataMessages[idx]
+
+        // Back to "on its way" wherever the state is kept: the collage, the list, and the database.
+        if let parent = groupImages.firstIndex(where: { $0.value.contains(where: { $0.messageId == messageId }) }),
+           let inImages = groupImages[parent].value.firstIndex(where: { $0.messageId == messageId }) {
+            groupImages[parent].value[inImages].status = "1"
+            groupImages[parent].value[inImages].dataMessage[TypeDataMessage.status] = "1"
+        }
+        dataMessages[idx][TypeDataMessage.status] = "1"
+        dataMessages[idx][TypeDataMessage.progress] = 0.0
+        let date = dataMessages[idx][TypeDataMessage.chat_date] as? String ?? ""
+        if let section = dataDates.firstIndex(of: date),
+           let rowIndex = messages(onDate: date).firstIndex(where: { $0[TypeDataMessage.message_id] as? String == messageId }),
+           section < tableChatView.numberOfSections,
+           rowIndex < tableChatView.numberOfRows(inSection: section) {
+            tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: rowIndex, section: section)])
+        }
+        Database.shared.database?.inTransaction({ (fmdb, _) in
+            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE",
+                                             cvalues: ["status": "1"], _where: "message_id = '\(messageId)'")
+            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS",
+                                             cvalues: ["status": "1"], _where: "message_id = '\(messageId)'")
+        })
+
+        let message = CoreMessage_TMessageBank.sendMessage(
+            message_id: messageId,
+            l_pin: row[TypeDataMessage.l_pin] as? String ?? "",
+            message_scope_id: row[TypeDataMessage.message_scope_id] as? String ?? "",
+            status: "1",
+            message_text: row[TypeDataMessage.message_text] as? String ?? "",
+            credential: row[TypeDataMessage.credential] as? String ?? "",
+            attachment_flag: row[TypeDataMessage.attachment_flag] as? String ?? "",
+            ex_blog_id: row[TypeDataMessage.blog_id] as? String ?? "",
+            message_large_text: "",
+            ex_format: "",
+            image_id: row[TypeDataMessage.image_id] as? String ?? "",
+            audio_id: row[TypeDataMessage.audio_id] as? String ?? "",
+            video_id: row[TypeDataMessage.video_id] as? String ?? "",
+            file_id: row[TypeDataMessage.file_id] as? String ?? "",
+            thumb_id: row[TypeDataMessage.thumb_id] as? String ?? "",
+            reff_id: row[TypeDataMessage.reff_id] as? String ?? "",
+            read_receipts: row[TypeDataMessage.read_receipts] as? String ?? "",
+            chat_id: row[TypeDataMessage.chat_id] as? String ?? "",
+            is_call_center: row[TypeDataMessage.is_call_center] as? String ?? "",
+            call_center_id: row[TypeDataMessage.call_center_id] as? String ?? "",
+            opposite_pin: row[TypeDataMessage.opposite_pin] as? String ?? "",
+            gif_id: row[TypeDataMessage.gif_id] as? String ?? "",
+            isForwarded: (row[TypeDataMessage.is_forwarded] as? Int).map(String.init) ?? "",
+            isSecret: (row[TypeDataMessage.is_secret] as? Int).map(String.init) ?? "",
+            specFile: row[TypeDataMessage.spec_file] as? String ?? "")
+        Nexilis.addQueueMessage(message: message)
+    }
+
+    /// A send the reader stopped. The bytes are already halted; this is what it means for the
+    /// message - it becomes one that never left, which is exactly what a failure looks like, and
+    /// the red mark and its sheet follow from that.
+    func markSendCancelled(messageId: String) {
+        guard !messageId.isEmpty,
+              let idx = dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == messageId }) else {
+            return
+        }
+        // Off the queue first: cancelling the transfer only fails one attempt, and the outgoing
+        // thread retries five times before giving up - which is how a stopped note sent itself
+        // anyway a minute later.
+        localEdits[messageId, default: 0] += 1
+        OutgoingThread.default.cancelSend(messageId: messageId)
+        // Every part of it, not just the part that happens to be moving. A picture goes up as a
+        // thumbnail first and then the picture itself, so stopping one of them left the other to
+        // finish and the message to go out after all.
+        for name in [dataMessages[idx][TypeDataMessage.image_id] as? String,
+                     dataMessages[idx][TypeDataMessage.video_id] as? String,
+                     dataMessages[idx][TypeDataMessage.thumb_id] as? String] {
+            Network.cancelUpload(name: name ?? "")
+        }
+        VideoNote.markStopped(videoId: dataMessages[idx][TypeDataMessage.video_id] as? String ?? "")
+        VideoNote.clearSending(videoId: dataMessages[idx][TypeDataMessage.video_id] as? String ?? "")
+        dataMessages[idx][TypeDataMessage.status] = "0"
+        dataMessages[idx][TypeDataMessage.progress] = 0.0
+        Database.shared.database?.inTransaction({ (fmdb, _) in
+            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE",
+                                             cvalues: ["status": "0"], _where: "message_id = '\(messageId)'")
+            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS",
+                                             cvalues: ["status": "0"], _where: "message_id = '\(messageId)'")
+        })
+        let date = dataMessages[idx][TypeDataMessage.chat_date] as? String ?? ""
+        if let section = dataDates.firstIndex(of: date),
+           let rowIndex = messages(onDate: date).firstIndex(where: { $0[TypeDataMessage.message_id] as? String == messageId }),
+           section < tableChatView.numberOfSections,
+           rowIndex < tableChatView.numberOfRows(inSection: section) {
+            tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: rowIndex, section: section)])
+        }
+    }
+
     private func queryMessageReply(message_id: String) -> [String: Any?] {
         var dataQuery: [String: Any] = [:]
         Database.shared.database?.inTransaction({ fmdb, rollback in
@@ -7875,7 +8441,7 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
     // note above that method for why this routing, rather than a separate gesture
     // recognizer on messageText, is what actually works consistently for a
     // stationary press-and-hold).
-    private func presentLinkActionSheet(urlString: String, sourceView: UIView, sourceRect: CGRect) {
+    private func presentLinkActionSheet(urlString: String) {
         let openAction: () -> Void = { [weak self] in
             let gesture = ObjectGesture()
             gesture.message_id = urlString
@@ -7904,59 +8470,15 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             }
         } : nil
 
-        // Fix: UISheetPresentationController is iOS 15+ only (this project's
-        // deployment target is iOS 14 - see Podfile) - fall back to the plain
-        // UIAlertController action sheet on iOS 14 devices.
-        if #available(iOS 15.0, *) {
-            let sheetVC = LinkActionSheetViewController(urlString: urlString, onOpen: openAction, onCopy: copyAction, onOpenInChrome: openInChromeAction)
-            // Fix: hides the highlight no matter how the sheet was dismissed (an
-            // action tapped, or swiped away/tapped-outside with nothing chosen).
-            sheetVC.onDismissed = { [weak self] in self?.hideLinkHighlight() }
-
-            if let sheet = sheetVC.sheetPresentationController {
-                if #available(iOS 16.0, *) {
-                    let contentHeight = sheetVC.preferredContentHeight(forWidth: self.view.bounds.width)
-                    sheet.detents = [.custom(resolver: { _ in contentHeight })]
-                } else {
-                    // Fix: iOS 15 doesn't support custom-height detents - .medium()
-                    // is the closest available and will leave some empty space below
-                    // the content; this is a known, acceptable trade-off on iOS 15
-                    // only, resolved automatically once the device is on iOS 16+.
-                    sheet.detents = [.medium()]
-                }
-                sheet.prefersGrabberVisible = true
-                sheet.preferredCornerRadius = 16
-            }
-            present(sheetVC, animated: true)
-        } else {
-            let alert = UIAlertController(title: nil, message: urlString, preferredStyle: .actionSheet)
-            alert.addAction(UIAlertAction(title: "Open Link".localized(), style: .default) { [weak self] _ in
-                self?.hideLinkHighlight()
-                openAction()
-            })
-            if let openInChromeAction = openInChromeAction {
-                alert.addAction(UIAlertAction(title: "Open in Chrome".localized(), style: .default) { [weak self] _ in
-                    self?.hideLinkHighlight()
-                    openInChromeAction()
-                })
-            }
-            alert.addAction(UIAlertAction(title: "Copy".localized(), style: .default) { [weak self] _ in
-                self?.hideLinkHighlight()
-                copyAction()
-            })
-            alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel) { [weak self] _ in
-                self?.hideLinkHighlight()
-            })
-
-            // Fix: required on iPad (actionSheet crashes there without a popover
-            // anchor) - anchoring it to the link's own rect also means the popover
-            // arrow points straight at the link that was pressed.
-            if let popover = alert.popoverPresentationController {
-                popover.sourceView = sourceView
-                popover.sourceRect = sourceRect
-            }
-            present(alert, animated: true)
-        }
+        let sheetVC = LinkActionSheetViewController(urlString: urlString, onOpen: openAction, onCopy: copyAction, onOpenInChrome: openInChromeAction)
+        // Fix: hides the highlight no matter how the sheet was dismissed (an action
+        // tapped, or swiped away/tapped-outside with nothing chosen).
+        sheetVC.onDismissed = { [weak self] in self?.hideLinkHighlight() }
+        // Fix: one presentation path for every iOS version (see presentAsBottomSheet)
+        // - the old iOS 14 UIAlertController fallback and the iOS 15 half-screen
+        // `.medium()` sheet are both gone, so an iPhone 7 gets the same content-height
+        // sheet as an iPhone 15.
+        sheetVC.presentAsBottomSheet(from: self)
     }
 
     // Fix: chromeURL(for:)/highlightRects(for:in:) moved to LinkHighlighting
@@ -8015,7 +8537,20 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
 
         switch sender.state {
         case .began:
-            guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else { return }
+            // The same rule as the bubble menu: nothing is offered on a press that landed on a
+            // list still in motion.
+            guard !listMotion.isMoving(tableChatView) else {
+                return
+            }
+            guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else {
+                // A mention is tappable too, so it gets the same highlight under the finger.
+                // Nothing is offered on a long press over one, so no timer is started for it -
+                // holding a mention leaves the bubble's own menu to appear as it always has.
+                if let mention = LinkHighlighting.mentionInfo(at: point, in: textView) {
+                    showLinkHighlight(range: mention.range, in: textView)
+                }
+                return
+            }
             showLinkHighlight(range: info.range, in: textView)
 
             linkPressGeneration += 1
@@ -8047,12 +8582,17 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                     guard let self = self, self.suppressLinkTapToken == myToken else { return }
                     self.suppressNextLinkTap = false
                 }
-                self.presentLinkActionSheet(urlString: urlString, sourceView: textView, sourceRect: LinkHighlighting.boundingRect(for: range, in: textView))
+                self.presentLinkActionSheet(urlString: urlString)
             }
 
         case .changed:
             if let info = LinkHighlighting.linkInfo(at: point, in: textView) {
                 showLinkHighlight(range: info.range, in: textView)
+            } else if let mention = LinkHighlighting.mentionInfo(at: point, in: textView) {
+                // Dragged from a link onto a mention: the highlight follows the finger, and the
+                // pending sheet for the link it left is invalidated by the generation bump.
+                showLinkHighlight(range: mention.range, in: textView)
+                linkPressGeneration += 1
             } else {
                 // Fix: finger dragged off the link before the threshold - this is no
                 // longer a press on this link at all, invalidate the pending timer
@@ -8156,10 +8696,20 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         let scrolledSinceLastFrame = abs(scrollView.contentOffset.y - lastY)
         lastY = scrollView.contentOffset.y
+        if scrollView == tableChatView {
+            dateHeaders.listDidMove(isDragging: scrollView.isDragging, in: tableChatView)
+            listMotion.didMove()
+        }
         // The reader has taken the list over - a later layout pass must not pull it back to
         // the unread marker under their finger.
         if scrollView == tableChatView, scrollView.isDragging, pendingUnreadMarkerScroll != nil {
             pendingUnreadMarkerScroll = nil
+        }
+        // And the same for the opening placement: a finger on the list outranks it.
+        if scrollView == tableChatView, scrollView.isDragging, pendingInitialScrollToBottom {
+            pendingInitialScrollToBottom = false
+            initialBottomDeadline = nil
+            initialBottomStartedAt = nil
         }
         // Last resort: the reader has run out of loaded messages mid-flight. Reading more here
         // costs the deceleration, but a list that stops dead at a false end costs more.
@@ -8199,6 +8749,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         guard scrollView == tableChatView else {
             return
         }
+        dateHeaders.listDidSettle(in: tableChatView)
         prefetchOlderMessagesIfIdle()
         scheduleAutoDownloadSweep()
     }
@@ -8207,6 +8758,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         guard scrollView == tableChatView, !decelerate else {
             return
         }
+        // The finger has left and nothing is left moving, which is exactly when the date goes.
+        dateHeaders.listDidSettle(in: tableChatView)
         prefetchOlderMessagesIfIdle()
         scheduleAutoDownloadSweep()
     }
@@ -8254,7 +8807,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             dateView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
             dateView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
         ])
-        dateView.backgroundColor = .orangeColor
+        dateView.backgroundColor = DateHeaderVisibility.pillBackground
         dateView.layer.cornerRadius = 8.0
         dateView.clipsToBounds = true
         
@@ -8268,9 +8821,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             labelDate.trailingAnchor.constraint(equalTo: dateView.trailingAnchor, constant: -10),
         ])
         labelDate.textAlignment = .center
-        labelDate.textColor = .secondaryColor
+        labelDate.textColor = DateHeaderVisibility.pillText
         labelDate.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
         labelDate.text = dataDates[section]
+        dateHeaders.track(containerView, section: section, in: tableView)
         return containerView
     }
     
@@ -8398,7 +8952,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == dataMessages[indexPath.row]["message_id"]  as? String ?? ""})
             if idx != nil {
                 self.dataMessages[idx!]["isSelected"] = !(self.dataMessages[idx!]["isSelected"] as? Bool ?? false)
-                self.tableChatView.reloadRows(at: [indexPath], with: .none)
+                self.tableChatView.reloadRowsKeepingPlace(at: [indexPath])
             }
             containerMultpileSelectSession.subviews.forEach({ $0.removeFromSuperview() })
             addSubviewMultipleSession()
@@ -8831,36 +9385,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
             
             if markerCounter != nil && dataMessages[indexPath.row]["message_id"] as? String == markerCounter {
-                profileMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 35).isActive = true
-                containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 35).isActive = true
+                profileMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: UnreadMarker.totalTopInset).isActive = true
+                containerMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: UnreadMarker.totalTopInset).isActive = true
                 
-                let newMessagesView = UIView()
-                cellMessage.contentView.addSubview(newMessagesView)
-                newMessagesView.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    newMessagesView.topAnchor.constraint(equalTo: newMessagesView.topAnchor),
-                    newMessagesView.bottomAnchor.constraint(equalTo: containerMessage.topAnchor),
-                    newMessagesView.centerXAnchor.constraint(equalTo: cellMessage.contentView.centerXAnchor),
-                    newMessagesView.heightAnchor.constraint(equalToConstant: 30),
-                    newMessagesView.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
-                ])
-                newMessagesView.backgroundColor = .greenColor
-                newMessagesView.layer.cornerRadius = 15.0
-                newMessagesView.clipsToBounds = true
-                
-                let labelNewMessages = UILabel()
-                newMessagesView.addSubview(labelNewMessages)
-                labelNewMessages.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    labelNewMessages.centerYAnchor.constraint(equalTo: newMessagesView.centerYAnchor),
-                    labelNewMessages.centerXAnchor.constraint(equalTo: newMessagesView.centerXAnchor),
-                    labelNewMessages.leadingAnchor.constraint(equalTo: newMessagesView.leadingAnchor, constant: 10),
-                    labelNewMessages.trailingAnchor.constraint(equalTo: newMessagesView.trailingAnchor, constant: -10),
-                ])
-                labelNewMessages.textAlignment = .center
-                labelNewMessages.textColor = .secondaryColor
-                labelNewMessages.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
-                labelNewMessages.text = "Unread Messages".localized()
+                UnreadMarker.install(in: cellMessage.contentView, count: markerCount, fontSize: 14 + offset())
                 
             } else {
                 profileMessage.topAnchor.constraint(equalTo: cellMessage.contentView.topAnchor, constant: 5).isActive = true
@@ -9472,6 +10000,90 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
+        // A round video note is not a bubble with a picture inside it - it is a circle sitting on
+        // the wallpaper, with the time and the ticks beside it as usual. It has no caption, no
+        // quote and no collage, so none of the media layout below applies and the cell is finished
+        // here. What marks one out is the name of its file; see VideoNote.
+        if VideoNote.isNote(videoChat) {
+            containerMessage.backgroundColor = .clear
+            // lift() has already been run with a colour, and a shadow under a transparent square
+            // behind a circle is a shadow cast by nothing.
+            containerMessage.layer.shadowOpacity = 0
+            messageText.isHidden = true
+
+            let note = VideoNoteBubbleView()
+            containerMessage.addSubview(note)
+            note.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                note.topAnchor.constraint(equalTo: containerMessage.topAnchor),
+                note.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor),
+                note.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor),
+                note.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor)
+            ])
+
+            // Fix: this read the row's `progress`, which for a video note is never driven up to
+            // 100 - so a note that had plainly been sent, ticked and all, sat at "0%" for good and
+            // never began to play. The status is what actually says where the message has got to:
+            // "1" is still on its way, anything past that has left.
+            let status = dataMessages[indexPath.row]["status"] as? String ?? ""
+            let mine = dataMessages[indexPath.row]["f_pin"] as? String == idMe
+            let progress = dataMessages[indexPath.row]["progress"] as? Double ?? 0.0
+            let state: VideoNoteBubbleView.State = (mine && (status == "1" || VideoNote.isSending(videoId: videoChat)))
+                ? .sending(progress / 100.0)
+                : .delivered
+            // Wired before it is configured, not after. Configuring is what puts the stop
+            // control on screen, and a control on screen can be pressed - a handler assigned a
+            // line later is a handler that is nil for the one press that matters.
+            let noteMessageId = dataMessages[indexPath.row][TypeDataMessage.message_id] as? String ?? ""
+            note.onCancelSend = { [weak self] in
+                self?.markSendCancelled(messageId: noteMessageId)
+            }
+            note.configure(videoId: videoChat, thumbId: thumbChat, state: state)
+
+            // A note that never left says so: a red mark beside the bubble, and a tap on it offers
+            // the only two things left to do with it.
+            if mine, status == "0" {
+                let badge = MessageNotSentBadge()
+                cellMessage.contentView.addSubview(badge)
+                NSLayoutConstraint.activate([
+                    badge.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8),
+                    badge.centerYAnchor.constraint(equalTo: containerMessage.centerYAnchor)
+                ])
+                let messageId = dataMessages[indexPath.row]["message_id"] as? String ?? ""
+                let failedRow = dataMessages[indexPath.row]
+                badge.addAction(UIAction { [weak self] _ in
+                    guard let self = self else { return }
+                    // The app's own sheet, with icons - rather than a second sheet class that
+                    // would be a second look to keep in step.
+                    let sheet = BottomChoiceSheet(
+                        question: "Your message was not sent.".localized(),
+                        options: [
+                            BottomChoiceSheet.Option(title: "Send again".localized(),
+                                                     icon: "arrow.clockwise") { [weak self] in
+                                self?.sendAgain(messageId: messageId)
+                            },
+                            BottomChoiceSheet.Option(title: "Delete".localized(),
+                                                     icon: "trash",
+                                                     isDestructive: true) { [weak self] in
+                                // The app already asks this question properly, and for a message
+                                // that never left it offers the only answer there is: delete it
+                                // here. "For everyone" is filtered out for a failed message
+                                // already, because there is no everyone to delete it from.
+                                self?.presentDeleteOptions(for: [failedRow])
+                            }
+                        ])
+                    self.present(sheet, animated: true)
+                }, for: .touchUpInside)
+            }
+            // Opening a note changes how tall its row is, and the table owns that.
+            note.onToggleSize = { [weak self] _ in
+                guard let self = self else { return }
+                self.tableChatView.beginUpdates()
+                self.tableChatView.endUpdates()
+            }
+            // Opening one changes how tall its row is, and the table owns that.
+            return cellMessage
+        }
         if (!thumbChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             if let listImages = groupImages[messageIdChat] {
                 timeMessage.isHidden = true
@@ -9528,57 +10140,90 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
                         case (3, 2):
                             listImageThumb[i].anchor(top: listImageThumb[1].bottomAnchor, left: listImageThumb[0].rightAnchor, paddingTop: 5, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
+                        // Fix: the square of quarters was pinned from both ends and joined in the
+                        // middle by nothing. The top row hung from the top of the bubble, the
+                        // bottom row from its bottom, and no constraint said the two rows were five
+                        // points apart - so the gap between them was whatever height the bubble
+                        // happened to have left over, and the tiles were squeezed or stretched to
+                        // absorb it, differently on each side. The right edge was pinned twice as
+                        // well, once by the top-right tile and again by the bottom-right, which is
+                        // a second answer to a question already answered.
+                        //
+                        // Now the grid is one chain: the second row hangs off the first, each tile
+                        // is the same square, and the bubble takes its width from the top-right
+                        // tile and its height from the bottom-left. Every edge is settled once.
                         case (_, 0):
                             listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, paddingTop: constTop, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
                         case (_, 1):
-                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingTop: constTop, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
                         case (_, 2):
-                            listImageThumb[i].anchor(left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingLeft: 5, paddingBottom: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: listImageThumb[0].bottomAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingTop: 5, paddingLeft: 5, paddingBottom: 5, width: widthHeightImage, height: widthHeightImage)
                         default:
-                            listImageThumb[i].anchor(left: listImageThumb[2].rightAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingBottom: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: listImageThumb[1].bottomAnchor, left: listImageThumb[2].rightAnchor, paddingTop: 5, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
                     }
                     let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                     let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                     let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                     if let dirPath = paths.first {
                         let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(listImages[i].thumbId)
-                        if FileManager.default.fileExists(atPath: thumbURL.path) {
-                            DispatchQueue.main.async {
-                                let image : UIImage? =  {
-                                    if let img = Nexilis.imageCache.object(forKey: listImages[i].thumbId as NSString) {
-                                        return img
+                        // The same treatment the single picture gets: a thumbnail already in hand goes
+                        // up at once, and anything that has to be read, decrypted and decoded is
+                        // done away from the main thread. A collage is four of these at a time, so
+                        // it is four times the reason not to do that work while drawing a cell.
+                        let tileId = listImages[i].thumbId
+                        let tile = listImageThumb[i]
+                        // Each tile of a collage is a message of its own, so each answers for
+                        // itself: softened while its own picture is not here, sharp once it is -
+                        // the same rule, and the same look, as a picture on its own.
+                        let tileImageId = listImages[i].imageId
+                        let tileFull = URL(fileURLWithPath: dirPath).appendingPathComponent(tileImageId)
+                        let softenTile = !tileImageId.isEmpty
+                            && !FileManager.default.fileExists(atPath: tileFull.path)
+                            && !FileEncryption.shared.isSecureExists(filename: tileImageId)
+                        let drawTile: (UIImage) -> UIImage = { image in
+                            // Twice the radius, for the same softness. The blur is baked into the
+                            // picture at a fixed working size, so how soft it *looks* depends on
+                            // how far that picture is then stretched: a full bubble is around two
+                            // hundred and fifty points wide, a collage tile a hundred and twenty.
+                            // The same radius on a tile is stretched half as far and reads as half
+                            // as blurred, which is exactly the difference you can see between them.
+                            softenTile ? image.softened(radius: 14, key: tileId) : image
+                        }
+                        if let ready = Nexilis.imageCache.object(forKey: tileId as NSString) {
+                            tile.image = drawTile(ready)
+                        } else if !tileId.isEmpty,
+                                  FileManager.default.fileExists(atPath: thumbURL.path)
+                                    || FileEncryption.shared.isSecureExists(filename: tileId) {
+                            let tilePath = thumbURL.path
+                            if !EditorGroup.thumbnailsBeingRead.contains(tileId) {
+                                EditorGroup.thumbnailsBeingRead.insert(tileId)
+                                EditorGroup.thumbnailQueue.async { [weak tile, weak self] in
+                                    var bytes: Data?
+                                    if FileManager.default.fileExists(atPath: tilePath) {
+                                        bytes = try? Data(contentsOf: URL(fileURLWithPath: tilePath))
+                                    } else if var stored = try? FileEncryption.shared.readSecure(filename: tileId, withoutBiometric: true) {
+                                        if let plain = FileEncryption.shared.decryptFileFromServer(data: stored) {
+                                            stored = plain
+                                        }
+                                        bytes = stored
                                     }
-                                    else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                            Nexilis.imageCache.setObject(img, forKey: listImages[i].thumbId as NSString)
-                                            return img
+                                    var made: UIImage?
+                                    if let bytes = bytes, let picture = UIImage.thumbnail(from: bytes) {
+                                        Nexilis.imageCache.setObject(picture, forKey: tileId as NSString)
+                                        made = drawTile(picture)
                                     }
-                                    return nil
-                                }()
-                                listImageThumb[i].image = image
-                            }
-                        } else if FileEncryption.shared.isSecureExists(filename: listImages[i].thumbId) {
-                            do {
-                                if var data = try FileEncryption.shared.readSecure(filename: listImages[i].thumbId) {
-                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                    if dataDecrypt != nil {
-                                        data = dataDecrypt!
-                                    }
+                                    let finishedTile = made
                                     DispatchQueue.main.async {
-                                        let image : UIImage? =  {
-                                            if let img = Nexilis.imageCache.object(forKey: listImages[i].thumbId as NSString) {
-                                                return img
-                                            }
-                                            else if let img = UIImage(data: data)?.resize(target: CGSize(width: 500, height: 500)) {
-                                                Nexilis.imageCache.setObject(img, forKey: listImages[i].thumbId as NSString)
-                                                return img
-                                            }
-                                            return nil
-                                        }()
-                                        listImageThumb[i].image = image
+                                        EditorGroup.thumbnailsBeingRead.remove(tileId)
+                                        guard let finishedTile = finishedTile else { return }
+                                        // On screen, not merely alive - see the single picture.
+                                        if let showing = tile, showing.window != nil {
+                                            showing.image = finishedTile
+                                        } else {
+                                            self?.reloadMessageRow(withFileNamed: tileId)
+                                        }
                                     }
                                 }
-                            } catch {
-                                
                             }
                         } else {
                             // Fix: cellForRow runs again on every scroll pass, and each pass used to hand the
@@ -9600,14 +10245,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                             }
                         }
                         
-                        let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(listImages[i].imageId)
-                        if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
-                            let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
-                            let blurEffectView = UIVisualEffectView(effect: blurEffect)
-                            blurEffectView.frame = CGRect(x: 0, y: 0, width: listImageThumb[i].frame.size.width, height: listImageThumb[i].frame.size.height)
-                            blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                            listImageThumb[i].addSubview(blurEffectView)
-                        } else if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
+                        // Fix: a full-strength light blur *view* was laid over every tile whose
+                        // picture was not here yet - and a blur view is a veil, translucent white,
+                        // which drains whatever colour is under it. Over a small tile it left an
+                        // almost empty white square, which is the "blank collage": the thumbnail
+                        // was there and loading correctly all along, painted out by this. The same
+                        // veil was taken off the single picture several changes ago and replaced by
+                        // softening the picture itself; the tile does that too, in drawTile above,
+                        // and this had simply been left behind.
+                        if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
                             let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.dark)
                             let blurEffectView = UIVisualEffectView(effect: blurEffect)
                             blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
@@ -9676,6 +10322,106 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         objectTap.isInitiator = dataMessages[indexPath.row]["f_pin"] as? String == idMe
                     }
                 }
+                // What the reference puts over the middle of a grid that has not been fetched:
+                // one offer for the lot of them. A collage stands for several messages, so there
+                // is no single corner to put a size in and no single picture to offer - and when
+                // the thumbnails have not arrived either, this is the only thing on the bubble
+                // that says what it is.
+                let collageDocuments = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                var missingNames: [String] = []
+                for member in listImages {
+                    let name = member.imageId
+                    guard !name.isEmpty else { continue }
+                    let alreadyHere = FileManager.default.fileExists(atPath: collageDocuments.appendingPathComponent(name).path)
+                        || FileEncryption.shared.isSecureExists(filename: name)
+                    guard !alreadyHere else { continue }
+                    missingNames.append(name)
+                }
+                // Going out, not coming in. A collage is sent as one thing, so it reports as one:
+                // a single stop over the middle of the grid, its arc measuring all of the pictures
+                // between them, and a red mark beside the bubble if they never left.
+                let collageIsMine = dataMessages[indexPath.row]["f_pin"] as? String == idMe
+                let collageSending = listImages.filter { $0.status == "1" && !$0.imageId.isEmpty }
+                let collageFailed = listImages.filter { $0.status == "0" && !$0.imageId.isEmpty }
+                if collageIsMine, !collageSending.isEmpty {
+                    let stop = TransferStopControl()
+                    containerMessage.addSubview(stop)
+                    NSLayoutConstraint.activate([
+                        stop.centerXAnchor.constraint(equalTo: containerMessage.centerXAnchor),
+                        stop.centerYAnchor.constraint(equalTo: containerMessage.centerYAnchor)
+                    ])
+                    let goingOut = collageSending
+                    stop.onStop = { [weak self] in
+                        self?.markCollageSendCancelled(goingOut)
+                    }
+                    let sent = goingOut.reduce(0.0) { running, member in
+                        guard let moved = TransferBytes.get(name: member.imageId), moved.total > 0 else {
+                            return running
+                        }
+                        return running + Double(moved.completed) / Double(moved.total) * 100
+                    }
+                    stop.begin(all: goingOut.map { $0.imageId },
+                               progress: sent / Double(goingOut.count))
+                }
+                if collageIsMine, !collageFailed.isEmpty, collageSending.isEmpty {
+                    let badge = MessageNotSentBadge()
+                    cellMessage.contentView.addSubview(badge)
+                    NSLayoutConstraint.activate([
+                        badge.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8),
+                        badge.centerYAnchor.constraint(equalTo: containerMessage.centerYAnchor)
+                    ])
+                    let neverLeft = collageFailed
+                    badge.addAction(UIAction { [weak self] _ in
+                        guard let self = self else { return }
+                        let sheet = BottomChoiceSheet(
+                            question: "Your message was not sent.".localized(),
+                            options: [
+                                BottomChoiceSheet.Option(title: "Send again".localized(),
+                                                         icon: "arrow.clockwise") { [weak self] in
+                                    self?.sendCollageAgain(neverLeft)
+                                },
+                                BottomChoiceSheet.Option(title: "Delete".localized(),
+                                                         icon: "trash",
+                                                         isDestructive: true) { [weak self] in
+                                    self?.presentDeleteOptions(for: neverLeft.map { $0.dataMessage })
+                                }
+                            ])
+                        self.present(sheet, animated: true)
+                    }, for: .touchUpInside)
+                }
+                if !missingNames.isEmpty, !collageIsMine {
+                    let fetching = missingNames.filter { Download.isDownloading(forKey: $0) }
+                    if fetching.isEmpty {
+                        // The offer. A tap on it - or on any picture still behind its blur - asks
+                        // for the lot of them.
+                        let offerPill = VideoBubbleChrome.addCollageOffer(to: containerMessage,
+                                                                          files: missingNames)
+                        offerPill.isUserInteractionEnabled = true
+                        let askFor = missingNames
+                        let pillTap = ObjectGesture(target: self, action: #selector(collageOfferTapped(_:)))
+                        pillTap.collageFiles = askFor
+                        offerPill.addGestureRecognizer(pillTap)
+                    } else {
+                        // On their way: one stop with one arc, standing for all of them together.
+                        // When the last lands the row is drawn again, and by then there is nothing
+                        // missing - no blur, no stop, no ring.
+                        let stop = TransferStopControl()
+                        containerMessage.addSubview(stop)
+                        NSLayoutConstraint.activate([
+                            stop.centerXAnchor.constraint(equalTo: containerMessage.centerXAnchor),
+                            stop.centerYAnchor.constraint(equalTo: containerMessage.centerYAnchor)
+                        ])
+                        let running = missingNames
+                        stop.onStop = { [weak self] in
+                            for name in running {
+                                Download.cancel(forKey: name)
+                            }
+                            self?.reloadMessageRow(withFileNamed: running.first ?? "")
+                        }
+                        let sum = running.reduce(0.0) { $0 + (Download.progress(forKey: $1) ?? 0) }
+                        stop.beginDownload(all: running, progress: sum / Double(running.count))
+                    }
+                }
                 if listImages.count > 4, listImageThumb.count == 4 {
                     let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.dark)
                     let blurEffectView = UIVisualEffectView(effect: blurEffect)
@@ -9734,44 +10480,83 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                 if let dirPath = paths.first {
                     let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumbChat)
-                    if FileManager.default.fileExists(atPath: thumbURL.path) {
-                        DispatchQueue.main.async {
-                            let image : UIImage? =  {
-                                if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
-                                    return img
+                    // While the picture itself is not here, the thumbnail standing in for it is
+                    // softened - the same state the blur view used to mark, decided in one place
+                    // and applied to the picture rather than laid over it.
+                    let fullPicture = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
+                    let softenThumb = !imageChat.isEmpty
+                        && !FileManager.default.fileExists(atPath: fullPicture.path)
+                        && !FileEncryption.shared.isSecureExists(filename: imageChat)
+                    // Fix: the thumbnail was decrypted on the main thread, then decoded, resized
+                    // and softened on it as well - inside a block deferred to the next turn of the
+                    // run loop, so the first frame of the row never had a picture in it at all. On
+                    // a warm screen nothing was cheap enough to notice; on a cold start, with every
+                    // cache empty, that work does not fit between the frames of the push animation
+                    // and the bubble sits there grey until it finishes. A picture already in hand
+                    // goes up at once, and everything else is done away from the main thread with
+                    // only the finished image coming back to it.
+                    let drawThumb: (UIImage) -> UIImage = { image in
+                        softenThumb ? image.softened(key: thumbChat) : image
+                    }
+                    if let ready = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
+                        imageThumb.image = drawThumb(ready)
+                    } else if !thumbChat.isEmpty,
+                              FileManager.default.fileExists(atPath: thumbURL.path)
+                                || FileEncryption.shared.isSecureExists(filename: thumbChat) {
+                        // The picture is here, it has simply not been read yet. The same spinner
+                        // the missing case uses stands in for it meanwhile: reading, decrypting and
+                        // decoding cannot be done while the cell is being built, and an empty
+                        // square says nothing is happening when something is.
+                        let preparing = UIActivityIndicatorView(style: .medium)
+                        preparing.color = .white
+                        imageThumb.addSubview(preparing)
+                        preparing.translatesAutoresizingMaskIntoConstraints = false
+                        preparing.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
+                        preparing.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+                        preparing.startAnimating()
+                        let thumbPath = thumbURL.path
+                        if !EditorGroup.thumbnailsBeingRead.contains(thumbChat) {
+                            EditorGroup.thumbnailsBeingRead.insert(thumbChat)
+                            EditorGroup.thumbnailQueue.async { [weak imageThumb, weak preparing, weak self] in
+                                var bytes: Data?
+                                if FileManager.default.fileExists(atPath: thumbPath) {
+                                    bytes = try? Data(contentsOf: URL(fileURLWithPath: thumbPath))
+                                } else if var stored = try? FileEncryption.shared.readSecure(filename: thumbChat, withoutBiometric: true) {
+                                    if let plain = FileEncryption.shared.decryptFileFromServer(data: stored) {
+                                        stored = plain
+                                    }
+                                    bytes = stored
                                 }
-                                else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                        Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
-                                        return img
+                                var drawn: UIImage?
+                                if let bytes = bytes, let picture = UIImage.thumbnail(from: bytes) {
+                                    Nexilis.imageCache.setObject(picture, forKey: thumbChat as NSString)
+                                    drawn = drawThumb(picture)
                                 }
-                                return nil
-                            }()
-                            imageThumb.image = image
-                        }
-                    } else if FileEncryption.shared.isSecureExists(filename: thumbChat) {
-                        do {
-                            if var data = try FileEncryption.shared.readSecure(filename: thumbChat) {
-                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                if dataDecrypt != nil {
-                                    data = dataDecrypt!
-                                }
+                                let finished = drawn
                                 DispatchQueue.main.async {
-                                    let image : UIImage? =  {
-                                        if let img = Nexilis.imageCache.object(forKey: thumbChat as NSString) {
-                                            return img
-                                        }
-                                        else if let img = UIImage(data: data)?.resize(target: CGSize(width: 500, height: 500)) {
-                                            Nexilis.imageCache.setObject(img, forKey: thumbChat as NSString)
-                                            return img
-                                        }
-                                        return nil
-                                    }()
-                                    imageThumb.image = image
+                                    EditorGroup.thumbnailsBeingRead.remove(thumbChat)
+                                    preparing?.removeFromSuperview()
+                                    guard let finished = finished else { return }
+                                    // Fix: this asked whether the view still existed, and a view
+                                    // taken out of a rebuilt cell goes on existing for a while yet -
+                                    // so the picture was handed to something nobody could see, and
+                                    // no redraw was asked for. The bubble in front of the reader
+                                    // meanwhile refused to start its own read, because this one was
+                                    // already running, and simply waited: "busy", for ever, until
+                                    // some unrelated redraw happened along. What matters is not
+                                    // whether the view is alive but whether it is on screen.
+                                    if let showing = imageThumb, showing.window != nil {
+                                        showing.image = finished
+                                    } else {
+                                        // The picture is in the cache now; the row only has to be
+                                        // drawn again to pick it up, and it will find it waiting.
+                                        self?.reloadMessageRow(withFileNamed: thumbChat)
+                                    }
                                 }
                             }
-                        } catch {
-                            
                         }
+                        // Another bubble may already be reading this very file: nothing to start,
+                        // and the spinner stays until it lands and the row is drawn again.
                     } else {
                         // Nothing to draw yet. A spinner in the middle of the space being held for
                         // the picture says so - the reader sees that it is coming rather than a
@@ -9806,26 +10591,45 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     
                     let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageChat)
                     if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
-                        let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.light)
-                        let blurEffectView = UIVisualEffectView(effect: blurEffect)
-                        blurEffectView.frame = CGRect(x: 0, y: 0, width: imageThumb.frame.size.width, height: imageThumb.frame.size.height)
-                        blurEffectView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                        imageThumb.addSubview(blurEffectView)
+                        // Fix: what stood here was a blur view laid over the thumbnail. A blur
+                        // view is a veil - translucent white or grey - and it drains the colour
+                        // out of whatever is under it, so the bubble read as a pale rectangle
+                        // rather than a photograph waiting to be fetched, however thin the
+                        // material was made. The picture itself is softened where it is loaded
+                        // instead: every colour it had, only the detail gone.
                         // Fix: while the image is actually downloading the progress ring stands in for
                         // this button - they are both centred on the thumbnail and would overlap.
                         // Fix: the arrow used to show whenever the full picture was not here,
                         // even while the thumbnail it stands on had not arrived either - an
                         // invitation to tap a blank square, next to a spinner saying the opposite.
                         // Nothing can be asked for before there is a picture to ask about.
-                        let hasThumb = FileManager.default.fileExists(atPath: thumbURL.path) || FileEncryption.shared.isSecureExists(filename: thumbChat)
+                        // Fix: an empty thumb id makes `thumbURL` the documents folder itself, and
+                        // a folder exists - so every one of these checks answered "the thumbnail is
+                        // already here" for a message that has no thumbnail at all. Nothing was
+                        // ever fetched, nothing could ever be decoded, and the bubble stayed an
+                        // empty rectangle with an offer to download the picture drawn over it, for
+                        // good. The name has to be a name before any of this means anything.
+                        let hasThumb = !thumbChat.isEmpty
+                            && (FileManager.default.fileExists(atPath: thumbURL.path)
+                                || FileEncryption.shared.isSecureExists(filename: thumbChat))
                         if hasThumb, !imageChat.isEmpty, !Download.isDownloading(forKey: imageChat) {
-                            let imageDownload = UIImageView(image: UIImage(systemName: "arrow.down.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .bold, scale: .default)))
-                            imageThumb.addSubview(blurEffectView)
-                            imageThumb.addSubview(imageDownload)
-                            imageDownload.tintColor = .black.withAlphaComponent(0.3)
-                            imageDownload.translatesAutoresizingMaskIntoConstraints = false
-                            imageDownload.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
-                            imageDownload.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
+                            // The same disc the stop wears, showing its other face. Accepting the
+                            // offer changes the mark inside it and nothing else - the ring does not
+                            // arrive somewhere else, at some other size. It takes no touches of its
+                            // own: the thumbnail already carries the tap that starts a download.
+                            // (The blur was added a second time here, over itself.)
+                            let offer = TransferStopControl()
+                            offer.showOffer()
+                            imageThumb.addSubview(offer)
+                            NSLayoutConstraint.activate([
+                                offer.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor),
+                                offer.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor)
+                            ])
+                            // ...and how big it would be, in the corner. It belongs to the offer,
+                            // so it is drawn only where the offer is: a transfer that has started
+                            // has the disc in the middle to speak for it, and the row is built
+                            // again either way - when the fetch begins, and when it is called off.
+                            VideoBubbleChrome.addPendingSize(to: imageThumb, fileName: imageChat)
                         }
                     } else if (dataMessages[indexPath.row]["credential"] as? String) == "1" && (dataMessages[indexPath.row]["lock"] as? String) != "2" && (dataMessages[indexPath.row]["lock"] as? String) != "1" {
                         let blurEffect = UIBlurEffect(style: UIBlurEffect.Style.dark)
@@ -9906,60 +10710,128 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 // upload ring for ever. What settles it is the message's own status: still being
                 // sent (1) means a transfer really is running; anything above that has arrived.
                 let sendingNow = (dataMessages[indexPath.row]["status"] as? String ?? "") == "1"
-                if (sendingNow && dataMessages[indexPath.row]["progress"] as? Double ?? 0.0 != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
-                    let container = UIView()
-                    imageThumb.addSubview(container)
-                    container.translatesAutoresizingMaskIntoConstraints = false
-                    container.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
-                    container.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
-                    container.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                    container.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                    container.backgroundColor = .white.withAlphaComponent(0.1)
-                    let circlePath = UIBezierPath(arcCenter: CGPoint(x: 10, y: 20), radius: 15, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
-                    let trackShape = CAShapeLayer()
-                    trackShape.path = circlePath.cgPath
-                    trackShape.fillColor = UIColor.black.withAlphaComponent(0.3).cgColor
-                    trackShape.lineWidth = 3
-                    trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
-                    container.backgroundColor = .clear
-                    container.layer.addSublayer(trackShape)
-                    let shapeLoading = CAShapeLayer()
-                    shapeLoading.path = circlePath.cgPath
-                    shapeLoading.fillColor = UIColor.clear.cgColor
-                    shapeLoading.lineWidth = 3
-                    shapeLoading.strokeEnd = 0
-                    shapeLoading.strokeColor = UIColor.blueBubbleColor.cgColor
-                    container.layer.addSublayer(shapeLoading)
-                    let imageupload = UIImageView(image: UIImage(systemName: "arrow.up", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
-                    imageupload.tintColor = .white
-                    container.addSubview(imageupload)
-                    imageupload.translatesAutoresizingMaskIntoConstraints = false
-                    imageupload.centerXAnchor.constraint(equalTo: container.centerXAnchor).isActive = true
-                    imageupload.centerYAnchor.constraint(equalTo: container.centerYAnchor).isActive = true
-                    imageupload.widthAnchor.constraint(equalToConstant: 20).isActive = true
-                    imageupload.heightAnchor.constraint(equalToConstant: 20).isActive = true
-                    // Fix: the same caption as the download ring - how much of the file has gone up
-                    // so far, out of how much there is (TransferBytes, filled in by Network).
-                    let uploadingChat = !videoChat.isEmpty ? videoChat : imageChat
+                // What is actually going up. A gif is not uploaded at all - its id names something
+                // the server already holds - so a gif on its way out has no transfer to draw and
+                // nothing a stop could stop; the control would simply turn for ever.
+                let uploadingChat = !videoChat.isEmpty ? videoChat : imageChat
+                if (sendingNow && !uploadingChat.isEmpty && dataMessages[indexPath.row]["progress"] as? Double ?? 0.0 != 100.0 && dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
+                    // Fix: what stood here was a thirty-point disc with an up arrow in it, drawn
+                    // from a path whose centre was (10, 20) inside a thirty-point box - five points
+                    // off the middle in both directions - and whose progress layer was never given
+                    // a name, so nothing ever found it and its arc sat at zero for the whole
+                    // transfer. There was also no way to stop a send once it had begun. This is the
+                    // control the video note wears: in the middle of the picture, as the reference
+                    // has it, and large enough to be pressed.
+                    let stop = TransferStopControl()
+                    // On the bubble rather than on the thumbnail. The thumbnail carries the tap
+                    // that opens the picture, and a button inside it would have both fire at once -
+                    // a stop that also opened what it was stopping.
+                    containerMessage.addSubview(stop)
+                    NSLayoutConstraint.activate([
+                        stop.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor),
+                        stop.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor)
+                    ])
+                    // The same caption as the download ring - how much of the file has gone up so
+                    // far, out of how much there is (TransferBytes, filled in by Network) - and
+                    // under the control, where the download ring already puts it.
                     let uploadChip = ChatTransferRing.addSizeLabel(to: imageThumb, fileName: uploadingChat)
                     NSLayoutConstraint.activate([
-                        uploadChip.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                        uploadChip.leadingAnchor.constraint(equalTo: container.trailingAnchor, constant: 6)
+                        uploadChip.topAnchor.constraint(equalTo: stop.bottomAnchor, constant: 6),
+                        uploadChip.centerXAnchor.constraint(equalTo: stop.centerXAnchor)
                     ])
+                    let uploadingMessageId = dataMessages[indexPath.row][TypeDataMessage.message_id] as? String ?? ""
+                    stop.onStop = { [weak self] in
+                        _ = Network.cancelUpload(name: uploadingChat)
+                        self?.markSendCancelled(messageId: uploadingMessageId)
+                    }
+                    stop.onFinished = { [weak uploadChip] in
+                        uploadChip?.isHidden = true
+                    }
+                    // Picked up where the transfer already is, not started from nothing: this row
+                    // is built again every time the message moves on, and a ring that goes back to
+                    // the beginning at each rebuild says less than no ring at all.
+                    let sent = TransferBytes.get(name: uploadingChat)
+                    let alreadySent = (sent?.total ?? 0) > 0
+                        ? Double(sent!.completed) / Double(sent!.total) * 100
+                        : 0
+                    stop.begin(transferNamed: uploadingChat, progress: alreadySent)
                 }
                 
+                // A picture that never left says so the same way a note does: a red mark beside
+                // the bubble, and a tap on it offering the only two things there are left to do.
+                // The tick beside the time already says "not sent", but it says it in the corner
+                // of a bubble, and Send again was reachable only by holding the picture down.
+                if dataMessages[indexPath.row]["f_pin"] as? String == idMe,
+                   (dataMessages[indexPath.row]["status"] as? String ?? "") == "0" {
+                    let badge = MessageNotSentBadge()
+                    cellMessage.contentView.addSubview(badge)
+                    NSLayoutConstraint.activate([
+                        badge.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8),
+                        badge.centerYAnchor.constraint(equalTo: containerMessage.centerYAnchor)
+                    ])
+                    let failedMessageId = dataMessages[indexPath.row]["message_id"] as? String ?? ""
+                    let failedRow = dataMessages[indexPath.row]
+                    badge.addAction(UIAction { [weak self] _ in
+                        guard let self = self else { return }
+                        let sheet = BottomChoiceSheet(
+                            question: "Your message was not sent.".localized(),
+                            options: [
+                                BottomChoiceSheet.Option(title: "Send again".localized(),
+                                                         icon: "arrow.clockwise") { [weak self] in
+                                    self?.sendAgain(messageId: failedMessageId)
+                                },
+                                BottomChoiceSheet.Option(title: "Delete".localized(),
+                                                         icon: "trash",
+                                                         isDestructive: true) { [weak self] in
+                                    self?.presentDeleteOptions(for: [failedRow])
+                                }
+                            ])
+                        self.present(sheet, animated: true)
+                    }, for: .touchUpInside)
+                }
+
                 // Fix: the download ring is drawn from here now, not built by hand in
                 // contentMessageTapped - so it survives the cell being recycled, and shows up
                 // by itself on a transfer that was already running when this screen opened.
                 let downloadingChat = !videoChat.isEmpty ? videoChat : imageChat
                 if !downloadingChat.isEmpty, Download.isDownloading(forKey: downloadingChat) {
-                    ChatTransferRing.add(to: imageThumb, fileName: downloadingChat, progress: Download.progress(forKey: downloadingChat) ?? 0)
+                    // The offer's disc, now wearing the stop and its turning arc - and it can be
+                    // pressed to call the fetch off. On the bubble rather than on the thumbnail:
+                    // the thumbnail carries the tap that opens the picture, and a button inside it
+                    // would have both fire at once.
+                    let stop = TransferStopControl()
+                    containerMessage.addSubview(stop)
+                    NSLayoutConstraint.activate([
+                        stop.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor),
+                        stop.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor)
+                    ])
+                    stop.onStop = { [weak self] in
+                        Download.cancel(forKey: downloadingChat)
+                        // A cancel is reported as a failure, and the screen leaves failures alone
+                        // rather than driving a ring backwards - so the row is asked for again here,
+                        // which is what puts the offer back.
+                        self?.reloadMessageRow(withFileNamed: downloadingChat)
+                    }
+                    stop.beginDownload(transferNamed: downloadingChat,
+                                       progress: Download.progress(forKey: downloadingChat) ?? 0)
                 } else if !videoChat.isEmpty, !sendingNow, isUnreachable(fileNamed: videoChat) {
                     // Here, and the file is not: tried, could not be had. An offer to fetch it
                     // rather than a ring that would never fill.
                     VideoBubbleChrome.addUnavailable(to: imageThumb, sizeText: ChatTransferRing.sizeText(forFileNamed: videoChat))
                 }
-                if !videoChat.isEmpty {
+                // What the corner says about a video depends on whether it is here. Once it is, the
+                // useful fact is how long it runs; before it is, the useful fact is how big it
+                // would be to fetch - the same offer a picture makes. And while it is on its way,
+                // neither: the disc in the middle speaks for it, and nothing else should.
+                let videoIsHere = !videoChat.isEmpty
+                    && (FileManager.default.fileExists(atPath: FileManager.default
+                            .urls(for: .documentDirectory, in: .userDomainMask)[0]
+                            .appendingPathComponent(videoChat).path)
+                        || FileEncryption.shared.isSecureExists(filename: videoChat))
+                if !videoChat.isEmpty, !videoIsHere, !Download.isDownloading(forKey: videoChat) {
+                    VideoBubbleChrome.addPendingSize(to: imageThumb, fileName: videoChat)
+                }
+                if !videoChat.isEmpty, videoIsHere {
                     let knownLength = videoLength(ofMessage: dataMessages[indexPath.row])
                     let lengthLabel = VideoBubbleChrome.addFooter(to: imageThumb, seconds: knownLength)
                     if knownLength == 0 {
@@ -9994,61 +10866,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if (!fileChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             topMarginText.constant = topMarginText.constant + 55
             
-            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
             let arrExtFile = (originalMessageText.components(separatedBy: "|")[0]).split(separator: ".")
             let finalExtFile = arrExtFile[arrExtFile.count - 1]
-            if let dirPath = paths.first {
-                let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(fileChat)
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    if let dataFile = try? Data(contentsOf: fileURL), textChat.isEmpty {
-                        var sizeOfFile = Int(dataFile.count / 1000000)
-                        if (sizeOfFile < 1) {
-                            sizeOfFile = Int(dataFile.count / 1000)
-                            if (finalExtFile.count > 4) {
-                                messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
-                            }else {
-                                messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
-                            }
-                        } else {
-                            if (finalExtFile.count > 4) {
-                                messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
-                            }else {
-                                messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
-                            }
-                        }
-                    }
-                }
-                else if FileEncryption.shared.isSecureExists(filename: fileChat) {
-                    do {
-                        if var dataFile = try FileEncryption.shared.readSecure(filename: fileChat), textChat.isEmpty {
-                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: dataFile)
-                            if dataDecrypt != nil {
-                                dataFile = dataDecrypt!
-                            }
-                            var sizeOfFile = Int(dataFile.count / 1000000)
-                            if (sizeOfFile < 1) {
-                                sizeOfFile = Int(dataFile.count / 1000)
-                                if (finalExtFile.count > 4) {
-                                    messageText.text = "\(sizeOfFile) kB \u{2022} TXT"
-                                }else {
-                                    messageText.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
-                                }
-                            } else {
-                                if (finalExtFile.count > 4) {
-                                    messageText.text = "\(sizeOfFile) MB \u{2022} TXT"
-                                }else {
-                                    messageText.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
-                                }
-                            }
-                        }
-                    } catch {
-                        
-                    }
-                }
-            }
-            
             containerMessage.addSubview(containerViewFile)
             containerViewFile.translatesAutoresizingMaskIntoConstraints = false
             let data = queryMessageReply(message_id: reffChat)
@@ -10067,69 +10886,197 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerViewFile.clipsToBounds = true
             
             let imageFile = UIImageView(image: UIImage(systemName: "doc.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .bold, scale: .default)))
-            containerViewFile.addSubview(imageFile)
-            let nameFile = UILabel()
-            containerViewFile.addSubview(nameFile)
-            
-            imageFile.translatesAutoresizingMaskIntoConstraints = false
-            imageFile.leadingAnchor.constraint(equalTo: containerViewFile.leadingAnchor, constant: 5).isActive = true
-            imageFile.trailingAnchor.constraint(equalTo: nameFile.leadingAnchor, constant: -5).isActive = true
-            imageFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
-            imageFile.widthAnchor.constraint(equalToConstant: 30).isActive = true
-            imageFile.heightAnchor.constraint(equalToConstant: 30).isActive = true
             imageFile.tintColor = .docColor
-            
-            nameFile.translatesAutoresizingMaskIntoConstraints = false
-            nameFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
-            nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
+            containerViewFile.addSubview(imageFile)
+            imageFile.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                imageFile.leadingAnchor.constraint(equalTo: containerViewFile.leadingAnchor, constant: 5),
+                imageFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                imageFile.widthAnchor.constraint(equalToConstant: 30),
+                imageFile.heightAnchor.constraint(equalToConstant: 30)
+            ])
+
+            let nameFile = UILabel()
+            nameFile.numberOfLines = 2
+            nameFile.lineBreakMode = .byTruncatingTail
+            nameFile.setContentCompressionResistancePriority(.required, for: .vertical)
+            // Fix: this asked the name not to resist being squeezed, which took away the one thing
+            // that made the card wide - the label's own width was what pushed the strip, and the
+            // bubble with it. Without it the card shrank to almost nothing and every name was
+            // three characters and an ellipsis. The name asks for room again, and the cap below
+            // decides how much it may ask for.
+            let nameFileWidth = nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200)
+            nameFileWidth.priority = .defaultHigh
+            nameFileWidth.isActive = true
             nameFile.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
             nameFile.textColor = .white
             nameFile.text = originalMessageText.components(separatedBy: "|")[0]
-            
-            if (dataMessages[indexPath.row]["progress"] as? Double ?? 0.0 != 100.0) {
-                let containerLoading = UIView()
-                containerViewFile.addSubview(containerLoading)
-                containerLoading.translatesAutoresizingMaskIntoConstraints = false
-                containerLoading.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
-                containerLoading.leadingAnchor.constraint(equalTo: nameFile.trailingAnchor, constant: 5).isActive = true
-                containerLoading.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5).isActive = true
-                containerLoading.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                containerLoading.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                let circlePath = UIBezierPath(arcCenter: CGPoint(x: 15, y: 15), radius: 10, startAngle: -(.pi / 2), endAngle: .pi * 2, clockwise: true)
-                let trackShape = CAShapeLayer()
-                trackShape.path = circlePath.cgPath
-                trackShape.fillColor = UIColor.clear.cgColor
-                trackShape.lineWidth = 5
-                trackShape.strokeColor = UIColor.blueBubbleColor.withAlphaComponent(0.3).cgColor
-                containerLoading.layer.addSublayer(trackShape)
-                let shapeLoading = CAShapeLayer()
-                shapeLoading.path = circlePath.cgPath
-                shapeLoading.fillColor = UIColor.clear.cgColor
-                shapeLoading.lineWidth = 3
-                shapeLoading.strokeEnd = 0
-                shapeLoading.strokeColor = UIColor.secondaryColor.cgColor
-                containerLoading.layer.addSublayer(shapeLoading)
-                var imageupload = UIImageView(image: UIImage(systemName: "arrow.up", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
-                if dataMessages[indexPath.row]["f_pin"] as? String != idMe {
-                    imageupload = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold, scale: .default)))
-                    shapeLoading.strokeColor = UIColor.blueBubbleColor.cgColor
+
+            // How big it is and what it is, on the line the name's third used to have. The size is
+            // the sender's own figure where they sent one and what landed here otherwise; the type
+            // is the extension, which is all this line ever said about it.
+            let fileFacts = UILabel()
+            fileFacts.numberOfLines = 1
+            fileFacts.font = .systemFont(ofSize: 11)
+            fileFacts.textColor = UIColor.white.withAlphaComponent(0.75)
+            fileFacts.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            var fileBytes = VideoNote.Facts.of(attachmentNamed: fileChat).bytes
+            if fileBytes == 0 {
+                fileBytes = VideoNote.Facts.measuredSize(ofAttachmentNamed: fileChat)
+            }
+            let fileType = finalExtFile.count > 4 ? "TXT" : finalExtFile.uppercased()
+            fileFacts.text = fileBytes > 0
+                ? "\(VideoNote.Facts.humanSize(fileBytes)) \u{2022} \(fileType)"
+                : fileType
+            if fileBytes == 0 {
+                // Neither the sender nor a plain copy on disk could say. The one place left to
+                // look is the secure store, and looking there means opening the whole file - so it
+                // is done away from the main thread and the line fills itself in.
+                VideoNote.Facts.measureSize(ofAttachmentNamed: fileChat) { [weak fileFacts] bytes in
+                    fileFacts?.text = "\(VideoNote.Facts.humanSize(bytes)) \u{2022} \(fileType)"
                 }
-                imageupload.tintColor = .white
-                containerLoading.addSubview(imageupload)
-                imageupload.translatesAutoresizingMaskIntoConstraints = false
-                imageupload.centerYAnchor.constraint(equalTo: containerLoading.centerYAnchor).isActive = true
-                imageupload.centerXAnchor.constraint(equalTo: containerLoading.centerXAnchor).isActive = true
-                // Fix: the ring on a file bubble says how far along it is in bytes now, the
-                // same as the one on photos and videos. It hangs under the file name, which
-                // stays put - so a file that is merely not downloaded yet looks exactly as it
-                // always did, and the caption only takes up room once there is a size to show.
-                let transferSizeChip = ChatTransferRing.addSizeLabel(to: containerViewFile, fileName: fileChat, chromeless: true)
+            }
+
+            // Fix: the name used to carry its own vertical constraints, and every branch below had
+            // to remember to give it a trailing edge - the one branch that forgot collapsed the
+            // whole bubble into a sliver. A stack owns the arrangement, and there is one trailing
+            // edge to settle rather than one per state.
+            let fileText = UIStackView(arrangedSubviews: [nameFile, fileFacts])
+            fileText.axis = .vertical
+            fileText.spacing = 1
+            fileText.alignment = .fill
+            containerViewFile.addSubview(fileText)
+            fileText.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                fileText.leadingAnchor.constraint(equalTo: imageFile.trailingAnchor, constant: 8),
+                fileText.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                // Fix, twice over. First the stack was held between "no higher than the top" and
+                // "no lower than the bottom" - two constraints that only limit and never drive, so
+                // nothing ever asked the strip to be taller and the second line was clipped away.
+                // Then the strip was told to be as tall as the stack, which failed for a subtler
+                // reason: a label only knows how many lines it needs once it knows how wide it is,
+                // and its width is settled a layout pass after its height is first asked for. The
+                // strip measured one line of a name that then drew two.
+                //
+                // So the card is given the height it is drawn at, worked out from the fonts rather
+                // than guessed: two lines of name, the gap, one line of size and type, and the
+                // margins. Nothing has to be measured, nothing settles a pass later, and it is the
+                // fixed-height card the reference has - a short name simply leaves its second line
+                // empty.
+                containerViewFile.heightAnchor.constraint(
+                    equalToConstant: ceil(nameFile.font.lineHeight) * 2 + 1 + ceil(fileFacts.font.lineHeight) + 12)
+            ])
+
+            let mineFile = dataMessages[indexPath.row]["f_pin"] as? String == idMe
+            let sendingFile = (dataMessages[indexPath.row]["status"] as? String ?? "") == "1"
+            let fetchingFile = !fileChat.isEmpty && Download.isDownloading(forKey: fileChat)
+            let fileIsHere = !fileChat.isEmpty
+                && (FileManager.default.fileExists(atPath: FileManager.default
+                        .urls(for: .documentDirectory, in: .userDomainMask)[0]
+                        .appendingPathComponent(fileChat).path)
+                    || FileEncryption.shared.isSecureExists(filename: fileChat))
+
+            if mineFile, sendingFile, !fileChat.isEmpty {
+                // Beside the name, in the same place a file coming in wears its arrow and its
+                // stop. The document icon stays where it is: it says what the message is, and what
+                // the transfer is doing is a different thing that belongs in a different place -
+                // taking turns with the icon made the bubble read as two unrelated states.
+                let stop = TransferStopControl(side: 30)
+                // On the bubble rather than inside the strip. The strip carries the tap that opens
+                // the file, and a button inside it would have both fire at once.
+                containerMessage.addSubview(stop)
                 NSLayoutConstraint.activate([
-                    transferSizeChip.topAnchor.constraint(equalTo: nameFile.bottomAnchor, constant: 2),
-                    transferSizeChip.leadingAnchor.constraint(equalTo: nameFile.leadingAnchor)
+                    stop.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                    stop.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5),
+                    fileText.trailingAnchor.constraint(equalTo: stop.leadingAnchor, constant: -8)
+                ])
+                let uploadingMessageId = dataMessages[indexPath.row][TypeDataMessage.message_id] as? String ?? ""
+                stop.onStop = { [weak self] in
+                    Network.cancelUpload(name: fileChat)
+                    self?.markSendCancelled(messageId: uploadingMessageId)
+                }
+                let sentSoFar = TransferBytes.get(name: fileChat)
+                let alreadySent = (sentSoFar?.total ?? 0) > 0
+                    ? Double(sentSoFar!.completed) / Double(sentSoFar!.total) * 100
+                    : 0
+                stop.begin(transferNamed: fileChat, progress: alreadySent)
+            } else if fetchingFile {
+                // Coming in and on its way: the same disc, in the same place and at the same size,
+                // now wearing the stop and its turning arc. Accepting the offer changes what is
+                // inside the circle and nothing else.
+                let stop = TransferStopControl(side: 30)
+                containerMessage.addSubview(stop)
+                NSLayoutConstraint.activate([
+                    stop.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                    stop.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5),
+                    fileText.trailingAnchor.constraint(equalTo: stop.leadingAnchor, constant: -8)
+                ])
+                stop.onStop = { [weak self] in
+                    Download.cancel(forKey: fileChat)
+                    // A cancel is reported as a failure, and the screen leaves failures alone
+                    // rather than driving a ring backwards - so the row is asked for again here,
+                    // which is what puts the arrow back.
+                    self?.reloadMessageRow(withFileNamed: fileChat)
+                }
+                stop.beginDownload(transferNamed: fileChat,
+                                   progress: Download.progress(forKey: fileChat) ?? 0)
+            } else if !mineFile, !fileIsHere, !fileChat.isEmpty {
+                // Not here yet: a disc with an arrow in it and nothing more. There is no progress
+                // to draw before there is a transfer, and a ring that does not move reads as one
+                // that is stuck - which is what the track and its arc used to say here, always.
+                let offer = UIView()
+                offer.backgroundColor = .blueBubbleColor
+                offer.layer.cornerRadius = 15
+                offer.isUserInteractionEnabled = false
+                containerViewFile.addSubview(offer)
+                offer.translatesAutoresizingMaskIntoConstraints = false
+                let arrow = UIImageView(image: UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)))
+                arrow.tintColor = .white
+                arrow.contentMode = .scaleAspectFit
+                offer.addSubview(arrow)
+                arrow.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    offer.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                    offer.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5),
+                    offer.widthAnchor.constraint(equalToConstant: 30),
+                    offer.heightAnchor.constraint(equalToConstant: 30),
+                    arrow.centerXAnchor.constraint(equalTo: offer.centerXAnchor),
+                    arrow.centerYAnchor.constraint(equalTo: offer.centerYAnchor),
+                    fileText.trailingAnchor.constraint(equalTo: offer.leadingAnchor, constant: -8)
                 ])
             } else {
-                nameFile.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5).isActive = true
+                fileText.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5).isActive = true
+            }
+
+            // A file that never left says so the same way a picture does: a red mark beside the
+            // bubble, and a tap on it offering the only two things there are left to do.
+            if dataMessages[indexPath.row]["f_pin"] as? String == idMe,
+               (dataMessages[indexPath.row]["status"] as? String ?? "") == "0" {
+                let badge = MessageNotSentBadge()
+                cellMessage.contentView.addSubview(badge)
+                NSLayoutConstraint.activate([
+                    badge.trailingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -8),
+                    badge.centerYAnchor.constraint(equalTo: containerMessage.centerYAnchor)
+                ])
+                let failedFileMessageId = dataMessages[indexPath.row]["message_id"] as? String ?? ""
+                let failedFileRow = dataMessages[indexPath.row]
+                badge.addAction(UIAction { [weak self] _ in
+                    guard let self = self else { return }
+                    let sheet = BottomChoiceSheet(
+                        question: "Your message was not sent.".localized(),
+                        options: [
+                            BottomChoiceSheet.Option(title: "Send again".localized(),
+                                                     icon: "arrow.clockwise") { [weak self] in
+                                self?.sendAgain(messageId: failedFileMessageId)
+                            },
+                            BottomChoiceSheet.Option(title: "Delete".localized(),
+                                                     icon: "trash",
+                                                     isDestructive: true) { [weak self] in
+                                self?.presentDeleteOptions(for: [failedFileRow])
+                            }
+                        ])
+                    self.present(sheet, animated: true)
+                }, for: .touchUpInside)
             }
             
             if !copySession && !forwardSession && !deleteSession && !summarizeSession {
@@ -10461,7 +11408,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     }
                 } else if (attachment_flag == "2" || video_chat != "") {
                     if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
-                        contentReply.text = "📹 Video".localized()
+                        // A round video note is quoted as one, with its length; an ordinary video
+                        // is quoted the way it always was.
+                        if let noteLine = VideoNote.quotedLine(videoId: video_chat,
+                                                               font: contentReply.font,
+                                                               colour: contentReply.textColor ?? .gray) {
+                            contentReply.attributedText = noteLine
+                        } else {
+                            contentReply.text = "📹 Video".localized()
+                        }
                     } else {
                         contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: self.dataGroup["group_id"]  as? String ?? "")
                     }
@@ -10496,20 +11451,17 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                     if let dirPath = paths.first {
                         let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumb_chat)
-                        let image : UIImage? =  {
-                            if let img = Nexilis.imageCache.object(forKey: thumb_chat as NSString) {
-                                return img
-                            }
-                            else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                                Nexilis.imageCache.setObject(img, forKey: thumb_chat as NSString)
-                                return img
-                            }
-                            return nil
-                        }()
-                        //                        let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
-                        let imageThumb = UIImageView(image: image)
+                        // Fix: this looked the picture up under `thumbChat` - the thumbnail of the
+                        // message being drawn - while loading the file for `thumb_chat`, the thumbnail of
+                        // the message being quoted. Two different pictures under one key, so a quote
+                        // could be handed the wrong still or none at all. And only the plain file was
+                        // read, which a receiver often does not have: see VideoNote.quotedStill.
+                        let imageThumb = UIImageView()
+                        VideoNote.loadQuotedStill(named: thumb_chat, into: imageThumb)
                         containerReply.addSubview(imageThumb)
-                        imageThumb.layer.cornerRadius = 2.0
+                        // A video note is round wherever it is shown, a quote included; the square corner
+                        // is what every other kind of attachment keeps.
+                        imageThumb.layer.cornerRadius = VideoNote.isNote(video_chat) ? 15.0 : 2.0
                         imageThumb.clipsToBounds = true
                         imageThumb.contentMode = .scaleAspectFill
                         imageThumb.translatesAutoresizingMaskIntoConstraints = false
@@ -10609,6 +11561,17 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
+        // Fix: an empty message text is not an empty view. `messageText` is a UITextView, and an
+        // empty one still keeps a line's worth of height for a caret that will never appear - a
+        // height that follows whatever font the branch above happened to give it. Every kind of
+        // attachment therefore ended up with a different gap beneath it whenever nothing had been
+        // written, which is the uneven padding. Nothing to show, no height, and one bottom margin
+        // for all of them.
+        if messageText.superview != nil,
+           (messageText.attributedText?.string ?? messageText.text ?? "")
+               .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            messageText.heightAnchor.constraint(equalToConstant: 0).isActive = true
+        }
         return cellMessage
     }
     
@@ -10658,7 +11621,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 // Fix: the row was reloaded by the index path this had been holding, which by then
                 // may belong to another message or to no row at all. Looked up from the message.
                 if let at = indexPath(forMessageId: stopped) {
-                    tableChatView.reloadRows(at: [at], with: .none)
+                    tableChatView.reloadRowsKeepingPlace(at: [at])
                 }
             }
             
@@ -10864,7 +11827,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
               adoptFromMiniPlayerIfNeeded(id) != nil else {
             return
         }
-        tableChatView.reloadRows(at: [at], with: .none)
+        tableChatView.reloadRowsKeepingPlace(at: [at])
     }
 
     /// The player behind a recording, wherever it currently lives.
@@ -11037,7 +12000,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             tableChatView.reloadData()
             return
         }
-        tableChatView.reloadRows(at: [at], with: .none)
+        tableChatView.reloadRowsKeepingPlace(at: [at])
     }
 
     func stopAllAudio() {
@@ -11239,7 +12202,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                         let section = self.dataDates.firstIndex(of: self.dataMessages[index]["chat_date"]  as? String ?? "")
                         let row = self.messages(onDate: self.dataDates[section!]).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[index]["message_id"]  as? String ?? ""})
                         if row != nil && section != nil {
-                            self.tableChatView.reloadRows(at: [IndexPath(row: row!, section: section!)], with: .none)
+                            self.tableChatView.reloadRowsKeepingPlace(at: [IndexPath(row: row!, section: section!)])
                         }
                         self.view.makeToast("Confirmation Success.".localized(), duration: 3)
                     }
@@ -11260,6 +12223,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 if row != nil && section != nil {
                     indexPath = IndexPath(row: row!, section: section!)
                 }
+            }
+        }
+        // A collage whose pictures have not been fetched: the tap is a request for them, not a
+        // request to look at them. Only when they are all here does it open the gallery.
+        if let members = sender.listImageFromGrouping, !members.isEmpty {
+            let wanted = members.map { $0.imageId }.filter { !$0.isEmpty && !isFilePresent($0) }
+            if !wanted.isEmpty {
+                fetchCollage(wanted)
+                return
             }
         }
         let dataMessages = self.messages(onDate: dataDates[indexPath.section])
@@ -11747,11 +12719,35 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             return
         }
 
+        // The finger that stops a moving list is not opening what it landed on - the same rule
+        // the bubble menu and the link sheet follow.
+        guard !listMotion.isMoving(tableChatView) else { return }
         guard let textView = sender.view as? UITextView else { return }
         let point = sender.location(in: textView)
-        guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else { return }
+        guard let info = LinkHighlighting.linkInfo(at: point, in: textView) else {
+            handleMentionTap(at: point, in: textView)
+            return
+        }
 
         LinkOpener.open(urlString: info.urlString)
+    }
+
+    /// A tap on a coloured @mention opens that person's profile.
+    ///
+    /// Only mentions carry the pin (see `NSAttributedString.Key.mentionPin`), so a tap on any
+    /// other part of the message text falls through here doing nothing, exactly as before.
+    private func handleMentionTap(at point: CGPoint, in textView: UITextView) {
+        // While messages are being picked - to copy, forward, delete or summarise - a tap
+        // belongs to that selection, and must not navigate away from it.
+        guard !copySession, !forwardSession, !deleteSession, !summarizeSession else { return }
+        // A long press over a mention still opens the bubble's own menu, and the finger-lift
+        // that opens it also satisfies this tap recognizer. With the menu already up, this
+        // touch has been spent.
+        guard presentedViewController == nil else { return }
+        guard let mention = LinkHighlighting.mentionInfo(at: point, in: textView) else { return }
+
+        hideLinkHighlight()
+        showProfile(pin: mention.pin)
     }
     
     //    public func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
@@ -11906,8 +12902,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let secondPinned = Int64($1[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
             return firstPinned < secondPinned
         }
-        guard nextPinShowed < dataMessagesPin.count else {
+        guard !dataMessagesPin.isEmpty else {
             return
+        }
+        // Fix: the step counter is kept between taps, and the list it steps through can shrink -
+        // a pin taken away here or on another device, or three shown where four had been. A
+        // counter left past the end used to make the banner do nothing at all when tapped, for
+        // good, since nothing ever put it back. Out of range starts again from the first pin.
+        if nextPinShowed >= dataMessagesPin.count {
+            nextPinShowed = 0
         }
         let obj = ObjectGesture()
         obj.message_id = dataMessagesPin[nextPinShowed][TypeDataMessage.message_id] as? String ?? ""
@@ -12086,7 +13089,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         } else if (attachment_flag == "2" || video_chat != "") {
             if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
-                contentReply.text = "📹 Video".localized()
+                // A round video note is quoted as one, with its length; an ordinary video
+                // is quoted the way it always was.
+                if let noteLine = VideoNote.quotedLine(videoId: video_chat,
+                                                       font: contentReply.font,
+                                                       colour: contentReply.textColor ?? .gray) {
+                    contentReply.attributedText = noteLine
+                } else {
+                    contentReply.text = "📹 Video".localized()
+                }
             } else {
                 contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
             }
@@ -12138,7 +13149,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 //                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
                 let imageThumb = UIImageView(image: image)
                 self.containerPreviewReply.addSubview(imageThumb)
-                imageThumb.layer.cornerRadius = 2.0
+                // A video note is round wherever it is shown, a quote included; the square corner
+                // is what every other kind of attachment keeps.
+                imageThumb.layer.cornerRadius = VideoNote.isNote(video_chat) ? 15.0 : 2.0
                 imageThumb.clipsToBounds = true
                 imageThumb.translatesAutoresizingMaskIntoConstraints = false
                 imageThumb.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
@@ -13041,6 +14054,167 @@ extension EditorGroup {
     // started from is only good at that one moment - a message arriving or being deleted
     // shifts it, and leaving and re-entering the chat rebuilds the table from scratch. So
     // the row is looked up again, by the file the transfer is for, every time it reports.
+
+    /// Fetches every picture of a collage that is not on this device yet.
+    ///
+    /// A collage is one bubble and reads as one thing, so it is fetched as one thing: the offer in
+    /// the middle asks for all of them, and so does a tap on any picture still behind its blur.
+    func fetchCollage(_ names: [String]) {
+        var asked = false
+        for name in names where !name.isEmpty {
+            guard !isFilePresent(name), !Download.isDownloading(forKey: name) else { continue }
+            if beginTransfer(ofFileNamed: name) {
+                asked = true
+            }
+        }
+        if !asked, let first = names.first {
+            // Already on their way; the row still has to be drawn to show that.
+            reloadMessageRow(withFileNamed: first)
+        }
+    }
+
+    @objc func collageOfferTapped(_ sender: ObjectGesture) {
+        fetchCollage(sender.collageFiles)
+    }
+
+
+    /// Sends every picture of a collage that never left.
+    ///
+    /// A collage is one bubble, so it is asked for again as one thing. Only the first of its
+    /// messages is still a row of the list - the rest live in the grouping - so each is put back on
+    /// the queue by whichever route it can be reached.
+    func sendCollageAgain(_ members: [ImageGrouping]) {
+        for member in members where member.status == "0" {
+            if dataMessages.contains(where: { $0[TypeDataMessage.message_id] as? String == member.messageId }) {
+                sendAgain(messageId: member.messageId)
+            } else {
+                resendGrouped(member)
+            }
+        }
+    }
+
+    /// One picture of a collage that is not a row of its own.
+    private func resendGrouped(_ member: ImageGrouping) {
+        let messageId = member.messageId
+        guard !messageId.isEmpty else { return }
+        OutgoingThread.default.clearCancelled(messageId: messageId)
+        OutgoingThread.default.removeOutgoing(messageId: messageId)
+        member.status = "1"
+        member.dataMessage[TypeDataMessage.status] = "1"
+        Database.shared.database?.inTransaction({ (fmdb, _) in
+            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE",
+                                             cvalues: ["status": "1"], _where: "message_id = '\(messageId)'")
+            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS",
+                                             cvalues: ["status": "1"], _where: "message_id = '\(messageId)'")
+        })
+        let row = member.dataMessage
+        let message = CoreMessage_TMessageBank.sendMessage(
+            message_id: messageId,
+            l_pin: row[TypeDataMessage.l_pin] as? String ?? "",
+            message_scope_id: row[TypeDataMessage.message_scope_id] as? String ?? "",
+            status: "1",
+            message_text: row[TypeDataMessage.message_text] as? String ?? "",
+            credential: row[TypeDataMessage.credential] as? String ?? "",
+            attachment_flag: row[TypeDataMessage.attachment_flag] as? String ?? "",
+            ex_blog_id: row[TypeDataMessage.blog_id] as? String ?? "",
+            message_large_text: "",
+            ex_format: "",
+            image_id: row[TypeDataMessage.image_id] as? String ?? "",
+            audio_id: row[TypeDataMessage.audio_id] as? String ?? "",
+            video_id: row[TypeDataMessage.video_id] as? String ?? "",
+            file_id: row[TypeDataMessage.file_id] as? String ?? "",
+            thumb_id: row[TypeDataMessage.thumb_id] as? String ?? "",
+            reff_id: row[TypeDataMessage.reff_id] as? String ?? "",
+            read_receipts: row[TypeDataMessage.read_receipts] as? String ?? "",
+            chat_id: row[TypeDataMessage.chat_id] as? String ?? "",
+            is_call_center: row[TypeDataMessage.is_call_center] as? String ?? "",
+            call_center_id: row[TypeDataMessage.call_center_id] as? String ?? "",
+            opposite_pin: row[TypeDataMessage.opposite_pin] as? String ?? "",
+            gif_id: row[TypeDataMessage.gif_id] as? String ?? "",
+            isForwarded: (row[TypeDataMessage.is_forwarded] as? Int).map(String.init) ?? "",
+            specFile: row[TypeDataMessage.spec_file] as? String ?? "")
+        Nexilis.addQueueMessage(message: message)
+    }
+
+    /// Stops the sending of every picture of a collage, and says so of each of them.
+    func markCollageSendCancelled(_ members: [ImageGrouping]) {
+        for member in members where member.status == "1" {
+            if dataMessages.contains(where: { $0[TypeDataMessage.message_id] as? String == member.messageId }) {
+                markSendCancelled(messageId: member.messageId)
+            } else {
+                OutgoingThread.default.cancelSend(messageId: member.messageId)
+                Network.cancelUpload(name: member.imageId)
+                Network.cancelUpload(name: member.thumbId)
+                member.status = "0"
+                member.dataMessage[TypeDataMessage.status] = "0"
+                let messageId = member.messageId
+                Database.shared.database?.inTransaction({ (fmdb, _) in
+                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE",
+                                                     cvalues: ["status": "0"], _where: "message_id = '\(messageId)'")
+                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE_STATUS",
+                                                     cvalues: ["status": "0"], _where: "message_id = '\(messageId)'")
+                })
+            }
+        }
+        if let anchor = members.first?.imageId, !anchor.isEmpty {
+            reloadMessageRow(withFileNamed: anchor)
+        }
+    }
+
+
+    /// The message ids a row stands for, ready to be reported as one.
+    ///
+    /// A collage is one row of the list but several messages: the rest were taken out of the list
+    /// when they were gathered into it. Anything that says what the reader has seen has to say it
+    /// of all of them - a read mark sent for the first picture alone leaves every other picture in
+    /// the collage looking unread to whoever sent it, for good.
+
+    /// Every picture of every collage, checked once the conversation is open.
+    ///
+    /// The workaround to a shape this list cannot easily change: read marks are gathered by walking
+    /// the rows, and a collage is one row standing for several messages - so a collage whose row
+    /// has already been reported leaves its other pictures unreported, and they stay unread to
+    /// whoever sent them. The gathering itself now expands a row into its members, but that only
+    /// helps the messages it happens to walk past. This walks the collages themselves, on opening,
+    /// and reports whatever is still outstanding - grouped by sender, because in a group each of
+    /// them is told separately.
+    func sweepCollageReadReceipts() {
+        guard !isPreview, !groupImages.isEmpty, let idMe = User.getMyPin() else {
+            return
+        }
+        var outstanding: [String: [String]] = [:]
+        for (_, members) in groupImages {
+            for member in members {
+                let row = member.dataMessage
+                let status = row[TypeDataMessage.status] as? String ?? ""
+                let fPin = row["f_pin"] as? String ?? ""
+                // 4 and 8 are the states that already mean "seen"; anything else has not been
+                // reported yet.
+                guard status != "4", status != "8", fPin != idMe, !fPin.isEmpty,
+                      !member.messageId.isEmpty,
+                      EditorGroup.conditionSendRead(scope: row[TypeDataMessage.message_scope_id] as? String ?? "",
+                                                    fPin: fPin,
+                                                    messageId: member.messageId) else {
+                    continue
+                }
+                outstanding[fPin, default: []].append(member.messageId)
+            }
+        }
+        for (fPin, ids) in outstanding {
+            sendReadMessageStatus(chat_id: dataTopic["chat_id"] as? String ?? "",
+                                  f_pin: fPin,
+                                  message_scope_id: MessageScope.GROUP,
+                                  message_id: ids.joined(separator: ","))
+        }
+    }
+
+    func readReceiptIds(for row: [String: Any?]) -> String {
+        let id = row[TypeDataMessage.message_id] as? String ?? ""
+        guard let members = groupImages[id], !members.isEmpty else { return id }
+        let all = members.map { $0.messageId }.filter { !$0.isEmpty }
+        return all.isEmpty ? id : all.joined(separator: ",")
+    }
+
     func indexPathForMessage(withFileNamed name: String) -> IndexPath? {
         guard !name.isEmpty else {
             return nil
@@ -13104,7 +14278,7 @@ extension EditorGroup {
               indexPath.row < messages(onDate: dataDates[indexPath.section]).count else {
             return
         }
-        tableChatView.reloadRows(at: [indexPath], with: .none)
+        tableChatView.reloadRowsKeepingPlace(at: [indexPath])
     }
 }
 
@@ -13313,9 +14487,10 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
     private var feedback: UIImpactFeedbackGenerator?
     private let push = InteractiveSidePush()
 
-    /// Where a leftward pull leads. Given one, the pull opens that screen the way WhatsApp does
-    /// - dragging it in from the right edge, and letting it fall back if the pull is abandoned -
-    /// rather than moving the row and pushing at the end.
+    /// Where a leftward pull leads. Given one, the pull moves the bubble first and then drags
+    /// that screen in from the right edge the way WhatsApp does, letting it fall back if the
+    /// pull is abandoned. A shorter pull, released before the screen takes over, still opens it
+    /// - with the ordinary push.
     public var infoDestination: ((IndexPath) -> (viewController: UIViewController, navigation: UINavigationController)?)?
 
     /// How far the row can be pulled, and how far it has to be pulled for the action to fire.
@@ -13329,6 +14504,14 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
     /// before letting go opens the screen rather than putting it back.
     private static let pushCommitProgress: CGFloat = 0.33
     private static let pushCommitVelocity: CGFloat = 700
+    /// How far the bubble is pulled before the info screen starts coming in behind it.
+    ///
+    /// Fix: the screen began arriving with the very first movement of the finger, so a pull that
+    /// was meant to be a pull was already a page turn. The bubble travels a real distance first
+    /// and the screen takes over from there, carrying on from exactly where the pull stopped so
+    /// there is no jump between the two. The same distance as the threshold, so the tap of
+    /// confirmation and the screen taking over are one moment rather than two.
+    private static let infoHandoff: CGFloat = threshold
 
     public init(tableView: UITableView,
                 canPerform: @escaping (IndexPath, Direction) -> Bool,
@@ -13371,12 +14554,6 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
             // The row is being pulled sideways now; letting the list scroll underneath at the
             // same time is what makes this feel loose rather than deliberate.
             tableView.isScrollEnabled = false
-            if direction == .info,
-               let destination = infoDestination?(indexPath) {
-                // The screen starts coming in with the first movement, not at the end of it.
-                push.begin(pushing: destination.viewController, in: destination.navigation)
-                return
-            }
             addIcon(to: cell, direction: direction)
 
         case .changed:
@@ -13384,15 +14561,10 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
                 return
             }
             if push.isRunning {
-                // Measured against the window: the table is inside the screen being pushed
-                // aside, so a translation read in its own coordinates would be measured against
-                // a moving ruler.
-                let space = tableView.window ?? tableView
-                let travelled = max(0, beganTranslation - sender.translation(in: space).x)
-                push.update(travelled / max(space.bounds.width, 1))
+                push.update(pushProgress(of: sender))
                 return
             }
-            let raw = sender.translation(in: tableView).x - beganTranslation
+            let raw = sender.translation(in: activeDirection == .info ? (tableView.window ?? tableView) : tableView).x - beganTranslation
             // Only the direction this drag started in counts; pulling back the other way just
             // returns the row to where it was.
             let travelled = activeDirection == .reply ? max(0, raw) : max(0, -raw)
@@ -13401,6 +14573,21 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
             let pulled = travelled <= ChatBubbleSwipe.maxPull
                 ? travelled
                 : ChatBubbleSwipe.maxPull + (travelled - ChatBubbleSwipe.maxPull) * 0.15
+            // Far enough: the bubble has been pulled its whole length, and from here the drag
+            // belongs to the screen coming in behind it. The bubble stays where the pull left
+            // it - putting it back at this moment would be a jump backwards under the finger -
+            // and the list travels the rest of the way as one.
+            if activeDirection == .info, travelled >= ChatBubbleSwipe.infoHandoff, !push.isRunning,
+               let indexPath = activeIndexPath,
+               let destination = infoDestination?(indexPath) {
+                offset(cell: cell, by: -ChatBubbleSwipe.infoHandoff)
+                // The same tap of confirmation a reply pull gives at its threshold - here it
+                // marks the moment the screen takes the drag over.
+                feedback?.impactOccurred()
+                push.begin(pushing: destination.viewController, in: destination.navigation)
+                push.update(pushProgress(of: sender))
+                return
+            }
             offset(cell: cell, by: activeDirection == .reply ? pulled : -pulled)
             updateIcon(progress: min(pulled / ChatBubbleSwipe.threshold, 1))
             if pulled >= ChatBubbleSwipe.threshold {
@@ -13418,8 +14605,7 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
         case .ended:
             if push.isRunning {
                 let space = tableView.window ?? tableView
-                let travelled = max(0, beganTranslation - sender.translation(in: space).x)
-                let progress = travelled / max(space.bounds.width, 1)
+                let progress = pushProgress(of: sender)
                 // Far enough across, or thrown hard enough that stopping short would be a
                 // surprise - the same two ways the system's own back-swipe commits.
                 if progress >= ChatBubbleSwipe.pushCommitProgress || -sender.velocity(in: space).x >= ChatBubbleSwipe.pushCommitVelocity {
@@ -13446,6 +14632,21 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
         }
     }
 
+    /// How far the screen coming in has travelled, as a fraction of the screen.
+    ///
+    /// Measured against the window: the table is inside the screen being pushed aside, so a
+    /// translation read in its own coordinates would be measured against a moving ruler. The
+    /// distance the bubble was pulled before the handover is taken off, so the screen starts
+    /// from nothing at the moment it takes over rather than jumping in already part way.
+    private func pushProgress(of sender: UIPanGestureRecognizer) -> CGFloat {
+        guard let tableView = tableView else {
+            return 0
+        }
+        let space = tableView.window ?? tableView
+        let travelled = max(0, beganTranslation - sender.translation(in: space).x - ChatBubbleSwipe.infoHandoff)
+        return travelled / max(space.bounds.width, 1)
+    }
+
     /// Moves what the row draws, sideways.
     ///
     /// Fix: this used to transform `cell.contentView`. A table view sets that view's *frame* on
@@ -13462,8 +14663,16 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
 
     /// The round badge WhatsApp shows behind the row while it is being pulled: a filled circle
     /// with a white arrow in it, not a bare glyph.
+    ///
+    /// A leftward pull has none. What it leads to is a screen arriving behind the bubble, which
+    /// says what is happening on its own; a badge in the space the bubble leaves is one thing
+    /// too many to look at.
     private func addIcon(to cell: UITableViewCell, direction: Direction) {
         iconView?.removeFromSuperview()
+        guard direction == .reply else {
+            iconView = nil
+            return
+        }
         let isDark = cell.traitCollection.userInterfaceStyle == .dark
         let badge = UIImageView()
         badge.backgroundColor = UIColor(white: isDark ? 0.26 : 0.60, alpha: 0.95)
@@ -13644,26 +14853,43 @@ public final class InteractiveSidePush: NSObject, UINavigationControllerDelegate
         // top of it - a date across the top of a message, say - was hidden behind the bar for the
         // length of the transition and appeared to arrive late. The context knows the frame the
         // screen is going to end up in; it is given that one from the start.
+        let finalFrame: CGRect
         if let toController = transitionContext.viewController(forKey: .to) {
-            let finalFrame = transitionContext.finalFrame(for: toController)
-            toView.frame = finalFrame.isEmpty ? container.bounds : finalFrame
+            let frame = transitionContext.finalFrame(for: toController)
+            finalFrame = frame.isEmpty ? container.bounds : frame
         } else {
-            toView.frame = container.bounds
+            finalFrame = container.bounds
         }
-        toView.transform = CGAffineTransform(translationX: width, y: 0)
-        container.addSubview(toView)
+        toView.frame = finalFrame
+
+        // Fix: the travel used to be a transform on the arriving screen itself. Setting a frame
+        // on a view that carries a transform recomputes its bounds and centre to satisfy that
+        // frame, which cancels the translation - and laying that screen out is exactly what the
+        // navigation controller does, repeatedly, while the transition is in flight. So after the
+        // first layout pass the screen stopped travelling and simply sat where it was going to
+        // end up, gradually uncovered as the conversation slid off it. What that looks like is
+        // what the recording shows: nothing arriving, a dark empty panel widening from the right,
+        // and the contents of the screen appearing to land all at once at the end.
+        //
+        // The travel is carried by a wrapper now. Nothing lays the wrapper out, so its transform
+        // survives, and the screen inside it comes in with the finger, already drawn.
+        let slider = UIView(frame: container.bounds)
+        slider.backgroundColor = .clear
+        slider.addSubview(toView)
+        slider.transform = CGAffineTransform(translationX: width, y: 0)
+        container.addSubview(slider)
 
         // The same parallax the system's push uses: the screen being left behind drifts a third
         // of the way, under a slight dim, so the two read as a stack rather than a swap.
         let dim = UIView(frame: container.bounds)
         dim.backgroundColor = .black
         dim.alpha = 0
-        container.insertSubview(dim, belowSubview: toView)
+        container.insertSubview(dim, belowSubview: slider)
 
         // Linear: an interactive transition is scrubbed by the finger, and any other curve makes
         // the screen lag behind or run ahead of it.
         UIView.animate(withDuration: transitionDuration(using: transitionContext), delay: 0, options: [.curveLinear], animations: {
-            toView.transform = .identity
+            slider.transform = .identity
             fromView.transform = CGAffineTransform(translationX: -width / 3, y: 0)
             dim.alpha = 0.1
         }, completion: { _ in
@@ -13672,7 +14898,13 @@ public final class InteractiveSidePush: NSObject, UINavigationControllerDelegate
             dim.removeFromSuperview()
             if cancelled {
                 toView.removeFromSuperview()
+            } else {
+                // Handed back to the container the navigation controller knows about, at the
+                // frame it was going to have anyway, before the wrapper goes.
+                toView.frame = finalFrame
+                container.addSubview(toView)
             }
+            slider.removeFromSuperview()
             transitionContext.completeTransition(!cancelled)
         })
     }
@@ -13682,4 +14914,5 @@ public final class InteractiveSidePush: NSObject, UINavigationControllerDelegate
 enum EditorVoiceNoteKeys {
     static var wants: UInt8 = 0
     static var bar: UInt8 = 0
+    static var videoNote: UInt8 = 0
 }

@@ -111,8 +111,18 @@ class ContactChatViewController: UITableViewController {
     private static let reloadCoalescingWindow: TimeInterval = 0.3
     // When the last rebuild landed.
     private var lastFullReloadAt: Date?
+    /// What the last read changed, worked out against the rows on screen before they were
+    /// replaced - see publishChatRows().
+    private var pendingChatsPlan: ChatRowDiff.Plan?
     var timerReloadData: Timer?
     
+    /// Sender names already looked up, by the pin and conversation they were asked for.
+    ///
+    /// Fix: this was a database query per row, run while the list scrolls, and its result force
+    /// unwrapped - a sender who has since left the contact list was a crash rather than a missing
+    /// name.
+    var groupSenderNames: [String: String] = [:]
+
     var noUCList = false
     
     /// Puts the segmented control and the tag chips in a bar that stays put, and the tag
@@ -308,7 +318,7 @@ class ContactChatViewController: UITableViewController {
 //            UIAction(title: "Configure Email", image: UIImage(systemName: "mail"), handler: {[weak self](_) in
 //
 //            }),
-            UIAction(title: "Favorite Messages".localized(), image: UIImage(systemName: "star"), handler: {[weak self](_) in
+            UIAction(title: "Starred Messages".localized(), image: UIImage(systemName: "star"), handler: {[weak self](_) in
                 let editorStaredVC = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "staredVC") as! EditorStarMessages
                 self?.navigationController?.show(editorStaredVC, sender: nil)
             }),
@@ -717,7 +727,7 @@ class ContactChatViewController: UITableViewController {
     // Puts whatever was just read on screen and releases anyone waiting on the reload.
     private func finishGettingData() {
         DispatchQueue.main.async {
-            self.tableView.reloadData()
+            self.publishChatRows()
             self.loadingData = false
             self.isGettingData = false
             self.loadStartedAt = nil
@@ -759,6 +769,62 @@ class ContactChatViewController: UITableViewController {
 
     /// A parent row carries the sum of its group's conversations, expanded or not, so it is
     /// added up from chatGroupMaps rather than from the rows that happen to be on screen.
+    /// Whether the conversation list is the thing on screen. It has a segment of its own only
+    /// when this account has one at all - without it the first segment is Contacts.
+    private var isShowingChatRows: Bool {
+        return segment.numberOfSegments == 3 && segment.selectedSegmentIndex == 0
+            && !isFiltering && !tagSearch.isShowingResults
+    }
+
+    /// Puts the list that was just read on screen.
+    ///
+    /// Fix: this was `reloadData()`, on every message that arrived. A plan describes the same
+    /// change as rows - the conversation that moved to the top, and the rows whose preview or
+    /// badge changed - so the rest of the list is left alone: no flicker, no rebuilding of rows
+    /// that did not change, and the row that moved is animated into its new place.
+    private func publishChatRows() {
+        let plan = pendingChatsPlan
+        pendingChatsPlan = nil
+        guard isShowingChatRows, let plan = plan else {
+            tableView.reloadData()
+            return
+        }
+        // An empty list at either end is drawn as the "no conversations" row, which is not one
+        // of these rows at all.
+        guard plan.oldCount > 0, plan.newCount > 0, chats.count == plan.newCount,
+              tableView.numberOfSections == 1,
+              tableView.numberOfRows(inSection: 0) == plan.oldCount else {
+            tableView.reloadData()
+            return
+        }
+        // Nothing to say: the rows on screen already draw what was just read.
+        guard !plan.isEmpty else {
+            return
+        }
+        let section = 0
+        tableView.performBatchUpdates({
+            if !plan.deletes.isEmpty {
+                tableView.deleteRows(at: plan.deletes.map { IndexPath(row: $0, section: section) }, with: .fade)
+            }
+            if !plan.inserts.isEmpty {
+                tableView.insertRows(at: plan.inserts.map { IndexPath(row: $0, section: section) }, with: .fade)
+            }
+            for move in plan.moves {
+                tableView.moveRow(at: IndexPath(row: move.from, section: section),
+                                  to: IndexPath(row: move.to, section: section))
+            }
+        }, completion: { [weak self] _ in
+            guard let self = self else {
+                return
+            }
+            let rows = plan.rowsToRefresh.filter { $0 < self.chats.count }
+            guard !rows.isEmpty, self.tableView.numberOfRows(inSection: section) == self.chats.count else {
+                return
+            }
+            self.tableView.reloadRows(at: rows.map { IndexPath(row: $0, section: section) }, with: .none)
+        })
+    }
+
     private func applyUnreadCounters(_ counters: [String: String]) {
         var changed = false
         for children in chatGroupMaps.values {
@@ -770,7 +836,10 @@ class ContactChatViewController: UITableViewController {
                 }
             }
         }
-        for chat in chats {
+        // Which rows the new numbers actually land on, so that a badge changing redraws that
+        // row rather than the whole list.
+        var changedRows: [Int] = []
+        for (index, chat) in chats.enumerated() {
             if chat.pin == "Archived" {
                 continue
             }
@@ -784,10 +853,16 @@ class ContactChatViewController: UITableViewController {
             if chat.counter != fresh {
                 chat.counter = fresh
                 changed = true
+                changedRows.append(index)
             }
         }
         guard changed else { return }
-        tableView.reloadData()
+        guard isShowingChatRows, !changedRows.isEmpty, tableView.numberOfSections == 1,
+              tableView.numberOfRows(inSection: 0) == chats.count else {
+            tableView.reloadData()
+            return
+        }
+        tableView.reloadRows(at: changedRows.map { IndexPath(row: $0, section: 0) }, with: .none)
     }
 
     // Called once the table has been reloaded with the fresh data, from whichever run of
@@ -905,9 +980,15 @@ class ContactChatViewController: UITableViewController {
                 // otherwise write back the counters it read before they were cleared, and
                 // nothing would ask again - the rows stayed wrong for the rest of the session.
                 guard generation == self.chatsLoadGeneration else {
+                    // A newer read owns the rows now; anything worked out against this one is
+                    // no longer a description of what is on screen.
+                    self.pendingChatsPlan = nil
                     completion()
                     return
                 }
+                // Against the rows still on screen, and before they are replaced: this is
+                // the difference the table is about to be told about, one row at a time.
+                self.pendingChatsPlan = ChatRowDiff.plan(from: self.chats, to: tempChats)
                 self.chats = tempChats
                 self.chatGroupMaps = newChatGroupMaps
                 self.listMaxArchived = newListMaxArchived
@@ -1863,6 +1944,20 @@ extension ContactChatViewController {
         return nil
     }
     
+    func groupSenderName(fpin: String, lPin: String) -> String {
+        let key = fpin + "|" + lPin
+        if let known = groupSenderNames[key] {
+            return known
+        }
+        var fullname = User.getData(pin: fpin, lPin: lPin)?.fullName ?? ""
+        let components = fullname.split(separator: " ")
+        if components.count >= 2 {
+            fullname = components.prefix(2).joined(separator: " ")
+        }
+        groupSenderNames[key] = fullname
+        return fullname
+    }
+
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         var cell: UITableViewCell!
         switch segment.selectedSegmentIndex {
@@ -1870,17 +1965,29 @@ extension ContactChatViewController {
             if segment.numberOfSegments < 3 {
                 cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierContact", for: indexPath)
                 let content = cell.contentView
+                // See CellBuildSignature: the row is only torn down and rebuilt when what it
+                // draws has actually changed.
+                var contactForRow: User?
+                if isFiltering {
+                    contactForRow = indexPath.row < fillteredData.count ? fillteredData[indexPath.row] as? User : nil
+                } else if indexPath.row < contacts.count {
+                    contactForRow = contacts[indexPath.row]
+                }
+                let rowSignature = [
+                    "\(indexPath.section).\(indexPath.row)",
+                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)",
+                    "\(traitCollection.userInterfaceStyle.rawValue)|\(String.offset())|\(Int(view.frame.width))",
+                    CellBuildSignature.describe(contactForRow)
+                ].joined(separator: ";")
+                if CellBuildSignature.of(cell) == rowSignature {
+                    return cell
+                }
+                CellBuildSignature.set(rowSignature, on: cell)
                 if content.subviews.count > 0 {
                     content.subviews.forEach { $0.removeFromSuperview() }
                 }
-                let data: User
-                if isFiltering {
-                    data = fillteredData[indexPath.row] as! User
-                } else {
-                    if  indexPath.row > contacts.count - 1 {
-                        return cell
-                    }
-                    data = contacts[indexPath.row]
+                guard let data = contactForRow else {
+                    return cell
                 }
                 let imageView = UIImageView(frame: CGRect(x: 0, y: 0, width: 40.0, height: 40.0))
                 content.addSubview(imageView)
@@ -1914,7 +2021,7 @@ extension ContactChatViewController {
                     }
                 }
                 else {
-                    getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                    getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 40, height: 40), completion: { result, isDownloaded, image in
                         imageView.image = image
                     })
                 }
@@ -1942,6 +2049,25 @@ extension ContactChatViewController {
             } else {
                 cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierChat", for: indexPath)
                 let content = cell.contentView
+                // See CellBuildSignature.
+                var chatForRow: Chat?
+                if !noData {
+                    if isFiltering {
+                        chatForRow = indexPath.row < fillteredData.count ? fillteredData[indexPath.row] as? Chat : nil
+                    } else if indexPath.row < chats.count {
+                        chatForRow = chats[indexPath.row]
+                    }
+                }
+                let rowSignature = [
+                    "\(indexPath.section).\(indexPath.row)",
+                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)",
+                    "\(traitCollection.userInterfaceStyle.rawValue)|\(String.offset())|\(Int(view.frame.width))",
+                    CellBuildSignature.describe(chatForRow)
+                ].joined(separator: ";")
+                if CellBuildSignature.of(cell) == rowSignature {
+                    return cell
+                }
+                CellBuildSignature.set(rowSignature, on: cell)
                 if content.subviews.count > 0 {
                     content.subviews.forEach { $0.removeFromSuperview() }
                 }
@@ -2054,7 +2180,7 @@ extension ContactChatViewController {
                         }
                     } else {
                         if data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL || data.isParent || data.pin == "-999" {
-                            getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : (data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL) ? "Profile---Black" : "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                            getImage(name: data.profile, placeholderImage: UIImage(named: data.pin == "-999" ? "pb_button" : (data.messageScope == MessageScope.WHISPER || data.messageScope == MessageScope.CALL || data.messageScope == MessageScope.MISSED_CALL) ? "Profile---Black" : "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 55, height: 55), completion: { result, isDownloaded, image in
                                 imageView.image = image
                             })
                         } else {
@@ -2155,13 +2281,12 @@ extension ContactChatViewController {
                             timeView.text = "Yesterday".localized()
                         } else {
                             if day < 7 {
-                                let formatter = DateFormatter()
-                                formatter.dateFormat = "EEEE"
+                                // Fix: a DateFormatter built per row, and this runs for every visible row of every
+                                // redraw. Building one is among the most expensive routine things in UIKit, and the
+                                // branch immediately below already asks the shared pool for its formatter.
                                 let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
-                                if lang == "id" {
-                                    formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
-                                }
-                                timeView.text = formatter.string(from: date)
+                                timeView.text = DateFormatterPool.shared.string(from: date, format: "EEEE",
+                                                                                localeIdentifier: lang == "id" ? "id" : nil)
                             } else {
                                 let stringFormat = DateFormatterPool.shared.string(from: date as Date, format: "dd/MM/yy", localeIdentifier: "id")
                                 timeView.text = stringFormat
@@ -2224,11 +2349,7 @@ extension ContactChatViewController {
                             }
                         } else {
                             if data.messageScope == "4" {
-                                var fullname = User.getData(pin: data.fpin, lPin: data.pin)!.fullName
-                                let components = fullname.split(separator: " ")
-                                if components.count >= 2 {
-                                    fullname = components.prefix(2).joined(separator: " ")
-                                }
+                                let fullname = groupSenderName(fpin: data.fpin, lPin: data.pin)
                                 stringMessage.append(NSAttributedString(string: fullname + ": ", attributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 12 + String.offset(), weight: .medium)]))
                             }
                             if data.messageScope == MessageScope.WHISPER && data.isBot == 1 {
@@ -2352,7 +2473,7 @@ extension ContactChatViewController {
                         cell.accessoryView = nil
                         cell.accessoryType = .none
                     }
-                    getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                    getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 40, height: 40)) { result, isDownloaded, image in
                         content.image = image
                     }
                 }
@@ -2360,11 +2481,11 @@ extension ContactChatViewController {
                     cell.accessoryView = nil
                     cell.accessoryType = .none
                     if group.isOpen == "1" && group.parent == "" {
-                        getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                        getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 40, height: 40)) { result, isDownloaded, image in
                             content.image = image
                         }
                     } else {
-                        getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                        getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 40, height: 40)) { result, isDownloaded, image in
                             content.image = image
                         }
                     }
@@ -2381,17 +2502,29 @@ extension ContactChatViewController {
             } else {
                 cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifierContact", for: indexPath)
                 let content = cell.contentView
+                // See CellBuildSignature: the row is only torn down and rebuilt when what it
+                // draws has actually changed.
+                var contactForRow: User?
+                if isFiltering {
+                    contactForRow = indexPath.row < fillteredData.count ? fillteredData[indexPath.row] as? User : nil
+                } else if indexPath.row < contacts.count {
+                    contactForRow = contacts[indexPath.row]
+                }
+                let rowSignature = [
+                    "\(indexPath.section).\(indexPath.row)",
+                    "\(isFiltering)|\(noData)|\(segment.selectedSegmentIndex)|\(segment.numberOfSegments)",
+                    "\(traitCollection.userInterfaceStyle.rawValue)|\(String.offset())|\(Int(view.frame.width))",
+                    CellBuildSignature.describe(contactForRow)
+                ].joined(separator: ";")
+                if CellBuildSignature.of(cell) == rowSignature {
+                    return cell
+                }
+                CellBuildSignature.set(rowSignature, on: cell)
                 if content.subviews.count > 0 {
                     content.subviews.forEach { $0.removeFromSuperview() }
                 }
-                let data: User
-                if isFiltering {
-                    data = fillteredData[indexPath.row] as! User
-                } else {
-                    if  indexPath.row > contacts.count - 1 {
-                        return cell
-                    }
-                    data = contacts[indexPath.row]
+                guard let data = contactForRow else {
+                    return cell
                 }
                 let imageView = UIImageView(frame: CGRect(x: 0, y: 0, width: 40.0, height: 40.0))
                 content.addSubview(imageView)
@@ -2425,7 +2558,7 @@ extension ContactChatViewController {
                     }
                 }
                 else {
-                    getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
+                    getImage(name: data.thumb, placeholderImage: UIImage(named: "Profile---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 40, height: 40), completion: { result, isDownloaded, image in
                         imageView.image = image
                     })
                 }
@@ -2499,7 +2632,7 @@ extension ContactChatViewController {
                 let imageView = UIImageView(image: UIImage(systemName: iconName))
                 imageView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
                 cell.accessoryView = imageView
-                getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 40, height: 40)) { result, isDownloaded, image in
                     content.image = image
                 }
             }
@@ -2507,11 +2640,11 @@ extension ContactChatViewController {
                 cell.accessoryView = nil
                 cell.accessoryType = .none
                 if group.isOpen == "1" && group.parent == "" {
-                    getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                    getImage(name: group.profile, placeholderImage: UIImage(named: "group-chat", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 40, height: 40)) { result, isDownloaded, image in
                         content.image = image
                     }
                 } else {
-                    getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                    getImage(name: group.profile, placeholderImage: UIImage(named: "Conversation---Black", in: Bundle.resourceBundle(for: Nexilis.self), with: nil), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 40, height: 40)) { result, isDownloaded, image in
                         content.image = image
                     }
                 }

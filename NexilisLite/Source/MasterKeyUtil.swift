@@ -88,12 +88,23 @@ public class MasterKeyUtil {
     
     private let masterKeyQueue = DispatchQueue(label: "io.nexilis.masterKeyQueue")
 
+    /// The key, once it has been fetched.
+    ///
+    /// Fix: every call queried the keychain, and every decryption calls this - so a screenful of
+    /// thumbnails after a cold start was a screenful of keychain lookups, one behind another
+    /// through the queue below. The key does not change while the app is running. What guards
+    /// access to it is the check below, and that still runs every single time.
+    private var cachedKey: SymmetricKey?
+
     func getMasterKey(withoutBiometric: Bool = false) throws -> SymmetricKey {
         var retrievedKey: SymmetricKey?
         var thrownError: Error?
 
         masterKeyQueue.sync {
-            if Nexilis.checkingAccess(key: "authentication") && isDeviceNotSecure() && !withoutBiometric {
+            // `!withoutBiometric` first: it is the cheapest of the three by a long way, and the two
+            // before it are not - one parses the feature-access blob and the other asks the
+            // biometry subsystem what it can do. Same answer, in the order that stops early.
+            if !withoutBiometric && Nexilis.checkingAccess(key: "authentication") && isDeviceNotSecure() {
                 let semaphore = DispatchSemaphore(value: 0)
                 var result = false
 
@@ -127,6 +138,11 @@ public class MasterKeyUtil {
                 }
             }
 
+            if let already = cachedKey {
+                retrievedKey = already
+                return
+            }
+
             let query: [String: Any] = [
                 kSecClass as String: kSecClassKey,
                 kSecAttrApplicationTag as String: keyAlias,
@@ -145,7 +161,9 @@ public class MasterKeyUtil {
                 return
             }
 
-            retrievedKey = SymmetricKey(data: keyData)
+            let key = SymmetricKey(data: keyData)
+            cachedKey = key
+            retrievedKey = key
         }
 
         if let error = thrownError {

@@ -359,6 +359,10 @@ public class Database {
                 // the first time the file can be read and kept here, so the media grid can label
                 // every video without opening any of them.
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "video_duration", columnType: "INTEGER", defaultValue: "0")
+                // How long an attachment runs and how big it is, as sent with the message - so a
+                // bubble can say both before the file has been downloaded.
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "content_duration", columnType: "TEXT", defaultValue: "")
+                addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "file_size_attch", columnType: "INTEGER", defaultValue: "0")
                 
                 //COMMUNITY
                 changeNameColumn(database: fmdb, tableName: "COMMUNITY", oldColumnName: "group_type", newColumnName: "community_type")
@@ -614,6 +618,8 @@ public class Database {
                                "'story_pin' TEXT," +
                                "'is_pinned' INTEGER DEFAULT 0," +
                                "'attachment_speciality' TEXT," +
+                               "'content_duration' TEXT," +
+                               "'file_size_attch' INTEGER DEFAULT 0," +
                                "'is_bot' INTEGER DEFAULT 0" +
                                 ")", values: nil)
         

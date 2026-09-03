@@ -8,6 +8,7 @@
 
 import Foundation
 import UIKit
+import FMDB
 @_implementationOnly import NotificationBannerSwift
 import nuSDKService
 import CoreLocation
@@ -602,6 +603,25 @@ public final class Utils {
             }
         }
         else if !chat.video.isEmpty {
+            // A round video note says what it is and how long it runs, the way a voice note does.
+            // Nothing on the message marks one out - it travels as an ordinary video - so the name
+            // of the file is what tells them apart. See VideoNote.
+            if VideoNote.isNote(chat.video) {
+                let camera = NSTextAttachment()
+                camera.image = UIImage(systemName: "video.fill")?.withTintColor(.gray, renderingMode: .alwaysOriginal)
+                camera.bounds = CGRect(x: 0, y: -2, width: 16, height: 12)
+                var text = "Video note".localized()
+                let length = VideoNote.duration(ofVideoId: chat.video)
+                if length > 0 {
+                    text += " (" + VideoNote.clockLength(length) + ")"
+                }
+                let line = NSMutableAttributedString(attachment: camera)
+                line.append(NSAttributedString(string: " " + text, attributes: [
+                    .font: UIFont.systemFont(ofSize: 12 + String.offset()),
+                    .foregroundColor: UIColor.gray
+                ]))
+                return line
+            }
             if !chat.messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return "📹 \(chat.messageText)".richText(group_id: chat.pin)
             } else {
@@ -6862,6 +6882,12 @@ final public class MiniVideoCallManager {
         }
         self.call = call
         self.callContainer = container
+        // Fix: the button used to be held down for the whole call, minimised or not. Minimised,
+        // the app is what the reader is looking at and the button is part of it - there is
+        // nothing for it to float over any more, and taking it away for the length of a call is
+        // taking away the way around the app. It comes back here and is put away again in
+        // restore(), where the call takes the screen back.
+        FloatingButton.isSuppressed = false
 
         let host = UIViewController()
         host.view.backgroundColor = .clear
@@ -6926,6 +6952,8 @@ final public class MiniVideoCallManager {
             dismissBubble()
             return
         }
+        // The call is taking the screen back, and the button has no business over it.
+        FloatingButton.isSuppressed = true
         guard let presenter = presentationHost() else {
             return
         }
@@ -6952,6 +6980,8 @@ final public class MiniVideoCallManager {
         let ending = callContainer
         callContainer = nil
         call = nil
+        // Whatever route the ending took, nothing is holding the button down any more.
+        FloatingButton.isSuppressed = false
         dismissBubble()
         // Released next turn: this is nearly always called from the call's own code.
         DispatchQueue.main.async {
@@ -7056,6 +7086,12 @@ final public class MiniCallBannerManager {
         // The call is remembered before anything else. A strip left over from an earlier call
         // used to make this return early, and then the strip on screen belonged to a call this
         // object no longer had - tapping it could only take itself away.
+        // Fix: the button used to be held down for the whole call, minimised or not. Minimised,
+        // the app is what the reader is looking at and the button is part of it - there is
+        // nothing for it to float over any more, and taking it away for the length of a call is
+        // taking away the way around the app. It comes back here and is put away again in
+        // restore(), where the call takes the screen back.
+        FloatingButton.isSuppressed = false
         self.call = call
         if let banner = banner {
             banner.configure(name: call.miniBannerTitle, isMuted: call.isMutedNow) { [weak call] in
@@ -7120,6 +7156,8 @@ final public class MiniCallBannerManager {
             dismissBanner()
             return
         }
+        // The call is taking the screen back, and the button has no business over it.
+        FloatingButton.isSuppressed = true
         guard call.presentingViewController == nil else {
             // Already back on screen somehow; nothing to do but tidy up.
             dismissBanner()
@@ -7165,6 +7203,8 @@ final public class MiniCallBannerManager {
         // is a use-after-free waiting to happen.
         let ending = call
         call = nil
+        // Whatever route the ending took, nothing is holding the button down any more.
+        FloatingButton.isSuppressed = false
         dismissBanner()
         DispatchQueue.main.async {
             _ = ending
@@ -7447,11 +7487,15 @@ public final class BottomChoiceSheet: UIViewController {
 
     public struct Option {
         public let title: String
+        /// An SF Symbol in front of the words, where a choice reads better with one. Optional, so
+        /// every sheet that already exists carries on without one.
+        public let icon: String?
         public let isDestructive: Bool
         public let handler: () -> Void
 
-        public init(title: String, isDestructive: Bool = false, handler: @escaping () -> Void) {
+        public init(title: String, icon: String? = nil, isDestructive: Bool = false, handler: @escaping () -> Void) {
             self.title = title
+            self.icon = icon
             self.isDestructive = isDestructive
             self.handler = handler
         }
@@ -7528,12 +7572,30 @@ public final class BottomChoiceSheet: UIViewController {
             button.titleLabel?.adjustsFontSizeToFitWidth = true
             button.titleLabel?.minimumScaleFactor = 0.8
             button.contentHorizontalAlignment = .leading
-            button.contentEdgeInsets = UIEdgeInsets(top: 0, left: 22, bottom: 0, right: 22)
+            // The words start clear of the icon when there is one, and where they always did when
+            // there is not.
+            let textInset: CGFloat = option.icon == nil ? 22 : 60
+            button.contentEdgeInsets = UIEdgeInsets(top: 0, left: textInset, bottom: 0, right: 22)
             button.backgroundColor = .tertiarySystemBackground
             button.layer.cornerRadius = 27
             button.tag = index
             button.addTarget(self, action: #selector(tapOption(_:)), for: .touchUpInside)
             button.heightAnchor.constraint(equalToConstant: 54).isActive = true
+
+            if let symbol = option.icon {
+                let icon = UIImageView(image: UIImage(systemName: symbol,
+                                                      withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)))
+                icon.tintColor = option.isDestructive ? .systemRed : .label
+                icon.contentMode = .center
+                icon.isUserInteractionEnabled = false
+                button.addSubview(icon)
+                icon.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    icon.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 22),
+                    icon.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+                    icon.widthAnchor.constraint(equalToConstant: 24)
+                ])
+            }
             rows.addArrangedSubview(button)
         }
 
@@ -7630,6 +7692,156 @@ public enum VideoBubbleChrome {
             length.centerYAnchor.constraint(equalTo: badge.centerYAnchor)
         ])
         return length
+    }
+
+    /// An arrow and how big it is, on a dark chip in the bottom corner of a picture.
+    ///
+    /// What the reference shows beside a photograph that has not been fetched: not a promise that
+    /// something is happening, but the two facts worth knowing before deciding to fetch it. It
+    /// goes away the moment a transfer starts - the disc in the middle speaks for that - and comes
+    /// back if the transfer is called off.
+    ///
+    /// The size is asked for in the cheapest order there is: what a transfer already measured,
+    /// then what a previous ask found out, and only then the server itself.
+    @discardableResult
+    public static func addPendingSize(to host: UIView, fileName: String) -> UIView {
+        let chip = UIView()
+        chip.backgroundColor = .black.withAlphaComponent(0.45)
+        chip.layer.cornerRadius = 9
+        chip.clipsToBounds = true
+        chip.isUserInteractionEnabled = false
+        chip.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(chip)
+
+        let arrow = UIImageView(image: UIImage(systemName: "arrow.down",
+                                               withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)))
+        arrow.tintColor = .white
+        arrow.contentMode = .scaleAspectFit
+        arrow.translatesAutoresizingMaskIntoConstraints = false
+        chip.addSubview(arrow)
+
+        let size = UILabel()
+        size.font = .systemFont(ofSize: 11, weight: .semibold)
+        size.textColor = .white
+        size.translatesAutoresizingMaskIntoConstraints = false
+        chip.addSubview(size)
+
+        NSLayoutConstraint.activate([
+            chip.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 8),
+            chip.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -8),
+            chip.heightAnchor.constraint(equalToConstant: 20),
+            arrow.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 6),
+            arrow.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
+            arrow.widthAnchor.constraint(equalToConstant: 11),
+            size.leadingAnchor.constraint(equalTo: arrow.trailingAnchor, constant: 4),
+            size.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -7),
+            size.centerYAnchor.constraint(equalTo: chip.centerYAnchor)
+        ])
+
+        // The sender's figure, then what a transfer measured, then what a previous ask found out -
+        // see Facts.expectedSize. The server itself is the last resort, below.
+        let bytes = VideoNote.Facts.expectedSize(ofAttachmentNamed: fileName)
+        size.text = bytes > 0 ? VideoNote.Facts.humanSize(bytes) : ""
+        // Nothing to say yet: the chip waits rather than showing an arrow with a blank beside it.
+        chip.isHidden = bytes == 0
+        if bytes == 0 {
+            Download.remoteSize(forKey: fileName) { [weak chip, weak size] answer in
+                guard answer > 0 else { return }
+                size?.text = VideoNote.Facts.humanSize(answer)
+                chip?.isHidden = false
+            }
+        }
+        return chip
+    }
+
+    /// The pale pill in the middle of a collage that has not been fetched.
+    ///
+    /// A collage stands for several messages at once, so there is no one corner to put a size in
+    /// and no one picture to offer. The reference answers that with a single pill over the middle
+    /// of the grid: what it would cost altogether, and how many pictures that is.
+    @discardableResult
+    public static func addCollageOffer(to host: UIView, files names: [String]) -> UIView {
+        let count = names.count
+        // The same order as everywhere else, added up: what the sender said, what a transfer
+        // measured, what a previous ask found out. Anything still unknown after that is asked of
+        // the server below, and the line fills itself in as the answers arrive - a collage is
+        // several files, so it can be part known and part not.
+        let known = Ledger()
+        for name in names {
+            known.bytes += VideoNote.Facts.expectedSize(ofAttachmentNamed: name)
+        }
+        let bytes = known.bytes
+        return buildCollageOffer(to: host, bytes: bytes, count: count, unknown: names.filter {
+            VideoNote.Facts.expectedSize(ofAttachmentNamed: $0) == 0
+        }, ledger: known)
+    }
+
+    /// A running total the server's answers can be added to as they come back.
+    private final class Ledger {
+        var bytes: Int64 = 0
+    }
+
+    @discardableResult
+    private static func buildCollageOffer(to host: UIView, bytes: Int64, count: Int,
+                                          unknown: [String], ledger: Ledger) -> UIView {
+        let pill = UIView()
+        pill.backgroundColor = UIColor(white: 0.96, alpha: 0.94)
+        pill.layer.cornerRadius = 23
+        // The tap that fetches these belongs to the pictures underneath; this only says what is
+        // there to fetch.
+        pill.isUserInteractionEnabled = false
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(pill)
+
+        let arrow = UIImageView(image: UIImage(systemName: "arrow.down",
+                                               withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)))
+        arrow.tintColor = UIColor(white: 0.25, alpha: 1)
+        arrow.contentMode = .scaleAspectFit
+        arrow.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(arrow)
+
+        let size = UILabel()
+        size.text = VideoNote.Facts.humanSize(bytes)
+        size.font = .systemFont(ofSize: 15, weight: .medium)
+        size.textColor = UIColor(white: 0.2, alpha: 1)
+        // Fix: the pill hid itself when the size was unknown, which is exactly the case it exists
+        // for - a collage nobody has fetched has no measured size, and old messages carry no size
+        // from the sender either. So it never appeared at all. The count on its own is still an
+        // offer; the size joins it once it is known.
+        size.isHidden = bytes <= 0
+        for name in unknown {
+            Download.remoteSize(forKey: name) { [weak size, weak ledger] answer in
+                guard answer > 0, let ledger = ledger else { return }
+                ledger.bytes += answer
+                size?.text = VideoNote.Facts.humanSize(ledger.bytes)
+                size?.isHidden = false
+            }
+        }
+
+        let items = UILabel()
+        items.text = count == 1 ? "1 item".localized() : String(format: "%d items".localized(), count)
+        items.font = .systemFont(ofSize: 13)
+        items.textColor = UIColor(white: 0.35, alpha: 1)
+
+        let lines = UIStackView(arrangedSubviews: [size, items])
+        lines.axis = .vertical
+        lines.spacing = 0
+        lines.alignment = .center
+        lines.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(lines)
+
+        NSLayoutConstraint.activate([
+            pill.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            pill.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            pill.heightAnchor.constraint(equalToConstant: 46),
+            arrow.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 16),
+            arrow.centerYAnchor.constraint(equalTo: pill.centerYAnchor),
+            arrow.widthAnchor.constraint(equalToConstant: 20),
+            lines.leadingAnchor.constraint(equalTo: arrow.trailingAnchor, constant: 10),
+            lines.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -18),
+            lines.centerYAnchor.constraint(equalTo: pill.centerYAnchor)
+        ])
+        return pill
     }
 
     /// The pale pill in the middle of a video that is not on this device.
@@ -7931,6 +8143,11 @@ public final class VoiceNoteBar: UIView, AVAudioRecorderDelegate, AVAudioPlayerD
     // MARK: Recording
 
     public func begin(completion: @escaping (Bool) -> Void) {
+        // The last word on the microphone, whoever asked and from where: a call has it.
+        if APIS.blockedByCallInProgress() {
+            completion(false)
+            return
+        }
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
                 guard granted, let self = self, self.start() else {
@@ -8762,15 +8979,63 @@ public final class AudioBubbleContent: UIView {
     }
 }
 
-/// One line of text that walks itself across and back when there is more of it than there is room.
+/// Remembers what a reused cell was last built for, so a redraw that would produce exactly the
+/// same row hands back the row already in front of the reader instead of building it again.
+///
+/// A conversation list tears its cell down to nothing and rebuilds forty-odd views and their
+/// constraints on every pass - and cellForRow runs for every visible row of every redraw, not only
+/// for rows new to the screen. A message arriving, a counter changing, a picture landing: each of
+/// those redraws rows that are already correct. On an older phone that is the scrolling.
+///
+/// The same idea as EditorPersonal's bubbleSignature, kept here because more than one list needs
+/// it.
+public enum CellBuildSignature {
+
+    private static var key: UInt8 = 0
+
+    public static func of(_ cell: UITableViewCell) -> String? {
+        return objc_getAssociatedObject(cell, &key) as? String
+    }
+
+    public static func set(_ signature: String?, on cell: UITableViewCell) {
+        objc_setAssociatedObject(cell, &key, signature, .OBJC_ASSOCIATION_COPY_NONATOMIC)
+    }
+
+    /// Everything a value holds, in one string.
+    ///
+    /// Reflected rather than listed by hand: choosing which fields matter is exactly how a row
+    /// ends up showing yesterday's state, and a field that is added to the model later would be
+    /// left out of a hand-written list without anyone noticing.
+    public static func describe(_ value: Any?) -> String {
+        guard let value = value else {
+            return "nil"
+        }
+        let mirror = Mirror(reflecting: value)
+        guard !mirror.children.isEmpty else {
+            return String(describing: value)
+        }
+        var parts: [String] = []
+        parts.reserveCapacity(mirror.children.count)
+        for child in mirror.children {
+            parts.append("\(child.label ?? "")=\(child.value)")
+        }
+        return parts.joined(separator: "\u{1F}")
+    }
+}
+
+/// One line of text that walks itself across when there is more of it than there is room.
 ///
 /// A label would truncate instead, and on a starred row the part that gets cut is the end - which
 /// is where the group and the topic are, the very thing the line was widened to say.
 public final class MarqueeLabel: UIView {
 
     private let label = UILabel()
-    /// How far the text has to travel, worked out afresh whenever the line is given a size.
+    /// How far the text had to travel last time this was laid out, so a re-layout that changes
+    /// nothing does not restart the walk from the beginning.
     private var travelled: CGFloat = -1
+    /// Which walk is the current one. A walk schedules its own next step, so a walk that has been
+    /// replaced has to be able to recognise that it no longer is.
+    private var runToken = 0
 
     public var text: String? {
         get { return label.text }
@@ -8821,21 +9086,53 @@ public final class MarqueeLabel: UIView {
         restart()
     }
 
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Fix: a view taken off screen has its animations removed, and the transform is left
+        // wherever the walk had got to - which is how a name ended up permanently shifted with its
+        // first letters cut off, never moving again. Coming back on screen starts it over.
+        if window != nil {
+            restart()
+        }
+    }
+
     private func restart() {
+        runToken += 1
         label.layer.removeAllAnimations()
         label.transform = .identity
         let overflow = max(0, label.intrinsicContentSize.width - bounds.width)
-        guard overflow > 0, bounds.width > 0 else {
+        guard overflow > 0, bounds.width > 0, window != nil else {
             return
         }
-        // Slow enough to read - roughly 30pt a second - and it waits a moment at each end so the
-        // beginning and the end can both be taken in.
+        walk(token: runToken, overflow: overflow)
+    }
+
+    /// One pass: waits, walks the text left until its end shows, puts it straight back where it
+    /// started, waits again.
+    ///
+    /// Not an autoreversing animation - that walks back at reading speed, which reads as the text
+    /// sliding about. It goes one way and returns at once, the way a marquee does.
+    private func walk(token: Int, overflow: CGFloat) {
+        // Roughly 30pt a second, so it can be read as it goes, and never quicker than a second.
         let duration = TimeInterval(max(overflow / 30, 1))
         UIView.animate(withDuration: duration,
-                       delay: 1.5,
-                       options: [.curveEaseInOut, .autoreverse, .repeat, .allowUserInteraction],
+                       delay: 2,
+                       options: [.curveLinear, .allowUserInteraction],
                        animations: { [weak self] in
             self?.label.transform = CGAffineTransform(translationX: -overflow, y: 0)
+        }, completion: { [weak self] finished in
+            guard let self = self, finished, self.runToken == token else {
+                return
+            }
+            self.label.transform = .identity
+            // A pause at the beginning before setting off again, so the start of the name can be
+            // read without waiting out a whole pass.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self = self, self.runToken == token, self.window != nil else {
+                    return
+                }
+                self.walk(token: token, overflow: overflow)
+            }
         })
     }
 }
@@ -10089,6 +10386,608 @@ public final class AudioMiniPlayer: NSObject, AVAudioPlayerDelegate {
 ///
 /// The label it sits on is handed to a different message the moment its row scrolls away, so the
 /// message cannot be looked up from the view when the tap arrives - it is carried here instead.
+/// Whether a list has just moved, and so should not be answering a long press.
+///
+/// Fix: a long press on a conversation that was still gliding opened the bubble menu, or the
+/// link sheet, under a finger that had been put down to stop the list. Asking the scroll view
+/// is not enough on its own: a UIScrollView stops its own deceleration the instant it is
+/// touched, so by the time a press is recognised the list already reports itself still. The
+/// moment of the last movement is remembered instead, and a press that close behind it belongs
+/// to the scroll.
+final class ListMotion {
+
+    /// How long after the last movement a press is still part of the scroll rather than a press
+    /// on what happens to be under the finger.
+    static let quietFor: TimeInterval = 0.25
+
+    private var lastMovement = Date.distantPast
+
+    /// Called from scrollViewDidScroll.
+    func didMove() {
+        lastMovement = Date()
+    }
+
+    func isMoving(_ scrollView: UIScrollView?) -> Bool {
+        if let scrollView = scrollView, scrollView.isDragging || scrollView.isDecelerating {
+            return true
+        }
+        return Date().timeIntervalSince(lastMovement) < ListMotion.quietFor
+    }
+}
+
+/// How many messages a conversation may keep pinned, and which ones they are.
+///
+/// Fix: three was a bare number in the one place that checked it, and it was checked with `==`.
+/// A conversation can hold more than three pins already - a pin travels between devices and
+/// between participants, and nothing on the way in caps it - and against `== 3` a fourth pin was
+/// simply added, then a fifth, with the banner growing a segment for each. The rule lives here
+/// now, is asked rather than assumed, and repairs what it finds.
+enum PinnedMessages {
+
+    static let maximum = 3
+
+    /// When a message was pinned. Unpinned reads as 0, and so does anything unreadable.
+    static func pinTime(_ message: [String: Any?]) -> Int64 {
+        return Int64(message[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
+    }
+
+    /// The pins a conversation shows: the newest `maximum`, oldest first - which is the order
+    /// the banner steps through them in.
+    static func newest(_ pinned: [[String: Any?]]) -> [[String: Any?]] {
+        let sorted = pinned.sorted { pinTime($0) < pinTime($1) }
+        guard sorted.count > maximum else {
+            return sorted
+        }
+        return Array(sorted.suffix(maximum))
+    }
+
+    /// Brings a conversation in the database back to `maximum` pins, keeping the newest ones,
+    /// and says which messages it unpinned.
+    ///
+    /// The server keeps no list of what a conversation has pinned and no count of them, so this
+    /// database is where the rule has to hold. A pin from another participant or another device
+    /// is written straight in with nothing counting what is already there, which is how a
+    /// conversation ends up holding four.
+    ///
+    /// Ties are broken by message id so that "the newest three" is the same three every time
+    /// this is asked - two pins made in the same millisecond, on two devices, are possible.
+    @discardableResult
+    static func trim(conversation whereClause: String, fmdb: FMDatabase) -> [String] {
+        let pinnedRows = "\(whereClause) AND is_pinned <> '0' AND is_pinned IS NOT NULL"
+        let keep = "SELECT message_id FROM MESSAGE WHERE \(pinnedRows) ORDER BY CAST(is_pinned AS INTEGER) DESC, message_id DESC LIMIT \(maximum)"
+        var extra: [String] = []
+        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT message_id FROM MESSAGE WHERE \(pinnedRows) AND message_id NOT IN (\(keep))") {
+            while cursor.next() {
+                if let id = cursor.string(forColumnIndex: 0), !id.isEmpty {
+                    extra.append(id)
+                }
+            }
+            cursor.close()
+        }
+        guard !extra.isEmpty else {
+            return []
+        }
+        let list = extra.map { "'\($0)'" }.joined(separator: ",")
+        _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: ["is_pinned": "0"], _where: "message_id IN (\(list))")
+        return extra
+    }
+
+    /// The same, on a transaction of its own.
+    @discardableResult
+    static func trim(conversation whereClause: String) -> [String] {
+        var removed: [String] = []
+        Database.shared.database?.inTransaction({ (fmdb, _) in
+            removed = trim(conversation: whereClause, fmdb: fmdb)
+        })
+        return removed
+    }
+
+    /// The conversation a message belongs to, written as a condition over MESSAGE - the same
+    /// shape the editors use to read their own conversation, so a trim covers exactly the
+    /// messages that editor would show.
+    ///
+    /// Nil when the message is not in the database, or belongs to nothing that can be trimmed.
+    static func conversationClause(forMessageId messageId: String, fmdb: FMDatabase) -> String? {
+        guard !messageId.isEmpty else {
+            return nil
+        }
+        var clause: String?
+        let query = "SELECT chat_id, l_pin, f_pin, message_scope_id, is_call_center, call_center_id FROM MESSAGE WHERE message_id = '\(messageId)'"
+        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query), cursor.next() {
+            let chatId = cursor.string(forColumnIndex: 0) ?? ""
+            let lPin = cursor.string(forColumnIndex: 1) ?? ""
+            let fPin = cursor.string(forColumnIndex: 2) ?? ""
+            let scope = cursor.string(forColumnIndex: 3) ?? ""
+            let isCallCenter = cursor.string(forColumnIndex: 4) ?? "0"
+            let complaintId = cursor.string(forColumnIndex: 5) ?? ""
+            cursor.close()
+
+            if isCallCenter == "1", !complaintId.isEmpty {
+                clause = "call_center_id='\(complaintId)'"
+            } else if !chatId.isEmpty {
+                // A topic inside a group: every message in it carries the topic's chat id.
+                clause = "chat_id='\(chatId)'"
+            } else if scope == MessageScope.GROUP {
+                clause = "chat_id='' AND l_pin='\(lPin)'"
+            } else {
+                // A one-to-one chat is the pair, in whichever direction each message went.
+                let me = User.getMyPin() ?? ""
+                let other = fPin == me ? lPin : fPin
+                if !other.isEmpty {
+                    clause = "(f_pin='\(other)' or l_pin='\(other)') AND (message_scope_id = '\(MessageScope.WHISPER)' OR message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.MISSED_CALL)') AND is_call_center = 0"
+                }
+            }
+        }
+        return clause
+    }
+
+    /// What has to be unpinned before one more can be added, oldest first.
+    ///
+    /// Usually the single oldest pin. More than one only when the conversation arrived holding
+    /// more than it should, and this is what puts it back to `maximum`.
+    static func toReplace(_ pinned: [[String: Any?]]) -> [[String: Any?]] {
+        let sorted = pinned.sorted { pinTime($0) < pinTime($1) }
+        let over = sorted.count - (maximum - 1)
+        guard over > 0 else {
+            return []
+        }
+        return Array(sorted.prefix(over))
+    }
+}
+
+/// The floating date over a conversation: there while the list is moving, gone once it settles.
+///
+/// Fix: the date was an orange tab pinned to the top of the list for as long as its day was on
+/// screen, sitting over the messages behind it whether anybody was scrolling or not. It is a
+/// white pill now, faintly showing what is behind it, and the one that floats keeps out of the
+/// way when the reader has stopped moving - the same rule WhatsApp uses.
+///
+/// Only the floating one. A date sitting in its own place between two days is part of the
+/// conversation and stays put; the one that has left its place to hang at the top of the screen
+/// is the one that goes. Which is which is asked of the geometry: a header held back at the top
+/// ends up below where its own first row says it belongs.
+///
+/// The timings are taken from the recording this follows: the date stays about a third of a
+/// second after the list stops, then fades over about a quarter of a second, and comes back the
+/// instant the list moves again.
+/// What changed between two versions of a conversation list, as rows a UITableView can be told
+/// about one at a time.
+///
+/// Fix: a message arriving used to end in `reloadData()`, which throws every row away and builds
+/// them all again - the whole list flickers, whatever was under the reader's finger is rebuilt,
+/// and a row that only moved from third place to first is indistinguishable from a list that
+/// changed completely. What actually happens when a message arrives is one row moving to the top
+/// with its own preview and badge redrawn, and that is what this describes.
+public enum ChatRowDiff {
+
+    public struct Plan {
+        /// Rows to delete, as positions in the list the table is currently showing.
+        public let deletes: [Int]
+        /// Rows to insert, as positions in the new list.
+        public let inserts: [Int]
+        /// Rows that changed places: `from` in the old list, `to` in the new one.
+        public let moves: [(from: Int, to: Int)]
+        /// Rows that stayed put but no longer draw the same thing, as positions in the new list.
+        public let reloads: [Int]
+        /// What the table must already be showing for this plan to be applied to it.
+        public let oldCount: Int
+        public let newCount: Int
+
+        public var isEmpty: Bool {
+            return deletes.isEmpty && inserts.isEmpty && moves.isEmpty && reloads.isEmpty
+        }
+
+        /// Rows to rebuild once the batch has settled.
+        ///
+        /// The ones whose content changed, plus every row a structural change shifted. A cell is
+        /// kept by a move rather than built again, and these rows draw from where they sit - the
+        /// avatar a row asks the network for is delivered back to an index path, so a row that
+        /// has quietly slid down one place would take delivery of its neighbour's picture.
+        /// Rebuilding a row that is off screen costs nothing.
+        public var rowsToRefresh: [Int] {
+            var rows = Set(reloads)
+            var lowestShifted: Int?
+            func shift(_ index: Int) {
+                lowestShifted = min(lowestShifted ?? index, index)
+            }
+            deletes.forEach(shift)
+            inserts.forEach(shift)
+            var highestMoved = -1
+            for move in moves {
+                shift(min(move.from, move.to))
+                highestMoved = max(highestMoved, max(move.from, move.to))
+            }
+            if let lowest = lowestShifted {
+                // A row added or taken away pushes everything below it along; a move only
+                // disturbs the rows between where it left and where it landed.
+                let highest = (deletes.isEmpty && inserts.isEmpty) ? highestMoved : newCount - 1
+                if highest >= lowest {
+                    for row in lowest...highest {
+                        rows.insert(row)
+                    }
+                }
+            }
+            return rows.sorted()
+        }
+    }
+
+    /// What a row is, as opposed to what it currently says. Two readings of the same conversation
+    /// share this; two different conversations never do.
+    public static func identity(_ chat: Chat) -> String {
+        if chat.isParent {
+            return "folder\u{1F}" + chat.groupId
+        }
+        return "chat\u{1F}" + chat.pin + "\u{1F}" + chat.groupId
+    }
+
+    /// The work needed to turn `old` into `new`, or nil when the two cannot be lined up row by
+    /// row - a repeated identity, which the caller answers with a plain reload.
+    public static func plan(from old: [Chat], to new: [Chat]) -> Plan? {
+        var oldIndexById: [String: Int] = [:]
+        for (index, chat) in old.enumerated() {
+            let id = identity(chat)
+            guard oldIndexById[id] == nil else {
+                return nil
+            }
+            oldIndexById[id] = index
+        }
+        var newIndexById: [String: Int] = [:]
+        for (index, chat) in new.enumerated() {
+            let id = identity(chat)
+            guard newIndexById[id] == nil else {
+                return nil
+            }
+            newIndexById[id] = index
+        }
+
+        var deletes: [Int] = []
+        var survivors: [(from: Int, to: Int)] = []
+        for (index, chat) in old.enumerated() {
+            if let destination = newIndexById[identity(chat)] {
+                survivors.append((from: index, to: destination))
+            } else {
+                deletes.append(index)
+            }
+        }
+        var inserts: [Int] = []
+        for (index, chat) in new.enumerated() where oldIndexById[identity(chat)] == nil {
+            inserts.append(index)
+        }
+
+        // The rows that can stay where they are: the longest run of survivors already in the
+        // right order relative to each other. Everything else is a move, which is what keeps a
+        // message arriving at the top to a single travelling row rather than a list-wide shuffle.
+        let settled = longestRunInOrder(survivors.map { $0.to })
+        var moves: [(from: Int, to: Int)] = []
+        let structural = !deletes.isEmpty || !inserts.isEmpty
+        for (position, survivor) in survivors.enumerated() where !settled.contains(position) {
+            // With nothing added or taken away, a row whose place is unchanged has not moved,
+            // whichever side of the longest settled run it fell on.
+            if !structural && survivor.from == survivor.to {
+                continue
+            }
+            moves.append((from: survivor.from, to: survivor.to))
+        }
+
+        var reloads: [Int] = []
+        for survivor in survivors {
+            let before = CellBuildSignature.describe(old[survivor.from])
+            let after = CellBuildSignature.describe(new[survivor.to])
+            if before != after {
+                reloads.append(survivor.to)
+            }
+        }
+
+        return Plan(deletes: deletes, inserts: inserts, moves: moves, reloads: reloads,
+                    oldCount: old.count, newCount: new.count)
+    }
+
+    /// Positions of a longest strictly increasing subsequence of `values` - the rows that need no
+    /// move. Patience sorting, so a list of any length costs next to nothing.
+    private static func longestRunInOrder(_ values: [Int]) -> Set<Int> {
+        guard !values.isEmpty else {
+            return []
+        }
+        var tailPosition: [Int] = []
+        var previous = [Int](repeating: -1, count: values.count)
+        for (position, value) in values.enumerated() {
+            var low = 0
+            var high = tailPosition.count
+            while low < high {
+                let middle = (low + high) / 2
+                if values[tailPosition[middle]] < value {
+                    low = middle + 1
+                } else {
+                    high = middle
+                }
+            }
+            if low > 0 {
+                previous[position] = tailPosition[low - 1]
+            }
+            if low == tailPosition.count {
+                tailPosition.append(position)
+            } else {
+                tailPosition[low] = position
+            }
+        }
+        var result: Set<Int> = []
+        var walk = tailPosition.last ?? -1
+        while walk >= 0 {
+            result.insert(walk)
+            walk = previous[walk]
+        }
+        return result
+    }
+}
+
+public extension UITableView {
+
+    /// Redraws rows without moving what the reader is looking at.
+    ///
+    /// Fix: reloading a row throws away the height the table was holding for it, and with rows
+    /// that size themselves that height is re-worked from scratch. A tick arriving on a message
+    /// far up the conversation would then grow or shrink the content by the difference, and the
+    /// list slid under the reader for a change to something they could not even see. The place
+    /// they are looking at is put back afterwards: the foot of the conversation if that is where
+    /// they were, otherwise the row at the top of the screen, kept exactly where it was.
+    ///
+    /// A finger on the list outranks all of this - restoring an offset mid-flick would stop the
+    /// scroll dead - so while the list is moving under its own or the reader's power this is an
+    /// ordinary reload.
+    func reloadRowsKeepingPlace(at indexPaths: [IndexPath]) {
+        guard !indexPaths.isEmpty else {
+            return
+        }
+        guard !isDragging, !isDecelerating, window != nil else {
+            reloadRows(at: indexPaths, with: .none)
+            return
+        }
+        let lowest = -adjustedContentInset.top
+        let bottomOffset = max(lowest, contentSize.height + adjustedContentInset.bottom - bounds.height)
+        let wasAtBottom = bottomOffset - contentOffset.y <= 8
+        let anchor = indexPathsForVisibleRows?.first
+        let anchorDistanceFromTop = anchor.map { rectForRow(at: $0).minY - contentOffset.y }
+
+        UIView.performWithoutAnimation {
+            reloadRows(at: indexPaths, with: .none)
+            layoutIfNeeded()
+        }
+
+        var target: CGFloat?
+        if wasAtBottom {
+            target = max(lowest, contentSize.height + adjustedContentInset.bottom - bounds.height)
+        } else if let anchor = anchor, let distance = anchorDistanceFromTop,
+                  anchor.section < numberOfSections,
+                  anchor.row < numberOfRows(inSection: anchor.section) {
+            target = max(lowest, rectForRow(at: anchor).minY - distance)
+        }
+        if let target = target, abs(target - contentOffset.y) > 0.5 {
+            setContentOffset(CGPoint(x: contentOffset.x, y: target), animated: false)
+        }
+    }
+}
+
+/// The "unread from here" band, drawn above the first message the reader has not seen.
+///
+/// Fix: this used to be a small green pill with white text floating in the middle of the row,
+/// which said only "Unread Messages". WhatsApp's is the reference: a band the full width of the
+/// list, sheer white so the conversation shows through it, black text, and it says how many
+/// messages are waiting below it. The three chat screens each drew their own copy of the old
+/// pill; they all call this now, so the band and the room a row leaves for it can only be
+/// described once.
+/// How a day is written on the divider between messages, once it is too old to be named
+/// ("Today", "Yesterday", a weekday).
+///
+/// Fix: that divider always read "Tue, 24 Aug", with no year on it, so a conversation scrolled
+/// back far enough showed an August from any year as if it were this one. Past the turn of the
+/// year the day is written as a full date instead, the same "dd/MM/yy" the chat list already
+/// uses for its older rows.
+enum ChatDayLabel {
+
+    static let sameYear = "EE, dd MMM"
+    static let otherYear = "dd/MM/yy"
+
+    /// The format to write `date` in, judged against the year running now.
+    static func format(for date: Date, calendar: Calendar = Calendar.current) -> String {
+        let year = calendar.component(.year, from: date)
+        let thisYear = calendar.component(.year, from: Date())
+        return year == thisYear ? sameYear : otherYear
+    }
+}
+
+enum UnreadMarker {
+
+    /// Sheer white with black on it, the same family as the floating date pill above it - see
+    /// DateHeaderVisibility.
+    static var background: UIColor { return UIColor.white.withAlphaComponent(0.75) }
+    static var text: UIColor { return .black }
+
+    /// The band's own height, the gap above it (below the day's date) and the gap below it
+    /// (above the first unread bubble).
+    static let height: CGFloat = 32
+    static let gapAbove: CGFloat = 10
+    static let gapBelow: CGFloat = 14
+    /// What a row carrying the band has to leave above its bubble: all three together. The band
+    /// and the bubble are both placed from the top of the row, so they cannot drift apart.
+    static var totalTopInset: CGFloat { return gapAbove + height + gapBelow }
+
+    /// "1 unread message", "3 unread messages", or the plain wording when the count is unknown.
+    static func title(count: Int) -> String {
+        guard count > 0 else {
+            return "Unread Messages".localized()
+        }
+        let wording = count == 1 ? "%d unread message" : "%d unread messages"
+        return String(format: wording.localized(), count)
+    }
+
+    /// Draws the band across the top of a row.
+    @discardableResult
+    static func install(in contentView: UIView, count: Int, fontSize: CGFloat) -> UIView {
+        let band = UIView()
+        band.backgroundColor = background
+        band.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(band)
+        NSLayoutConstraint.activate([
+            band.topAnchor.constraint(equalTo: contentView.topAnchor, constant: gapAbove),
+            band.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            band.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            band.heightAnchor.constraint(equalToConstant: height)
+        ])
+
+        let label = UILabel()
+        label.text = title(count: count)
+        label.textAlignment = .center
+        label.textColor = text
+        label.font = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        band.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerYAnchor.constraint(equalTo: band.centerYAnchor),
+            label.centerXAnchor.constraint(equalTo: band.centerXAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: band.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: band.trailingAnchor, constant: -12)
+        ])
+        return band
+    }
+}
+
+final class DateHeaderVisibility {
+
+    /// How the pill looks: white enough to read black text on, sheer enough to see the
+    /// conversation through.
+    static var pillBackground: UIColor { return UIColor.white.withAlphaComponent(0.85) }
+    static var pillText: UIColor { return .black }
+
+    static let lingerAfterScroll: TimeInterval = 0.35
+    static let fadeOut: TimeInterval = 0.25
+    static let fadeIn: TimeInterval = 0.1
+
+    /// A header the table has built, and the day it stands for. Held weakly - the table makes a
+    /// fresh one whenever a day comes back on screen, and the old ones must be free to go.
+    private struct Tracked {
+        weak var view: UIView?
+        let section: Int
+    }
+
+    private var tracked: [Tracked] = []
+    /// Whether the floating date is currently out of the way.
+    private var isPinnedHeaderHidden = false
+    private var hideWork: DispatchWorkItem?
+
+    /// Follow a header the table has just built.
+    func track(_ header: UIView, section: Int, in tableView: UITableView) {
+        tracked.removeAll { $0.view == nil }
+        tracked.append(Tracked(view: header, section: section))
+        // Whether this one is the floating date cannot be answered before it has been laid out,
+        // so it starts visible - which is right for every header that is not floating, and right
+        // for the floating one too while the list is moving, which is when headers are built.
+        header.alpha = 1
+        // And once the layout has happened, ask properly. This catches the one case the line
+        // above gets wrong: a message arriving while the reader sits still, which rebuilds the
+        // headers with nothing scrolling afterwards to correct them.
+        DispatchQueue.main.async { [weak self, weak tableView] in
+            guard let self = self, let tableView = tableView else {
+                return
+            }
+            self.refresh(in: tableView, animated: false)
+        }
+    }
+
+    /// The list moved. `isDragging` is the finger: while it is down the date stays up, however
+    /// long the reader holds still.
+    ///
+    /// Every movement re-arms the countdown, so this one call covers a fling's deceleration and
+    /// a programmatic scroll as well - both of which move the list without ever telling anybody
+    /// they have finished.
+    func listDidMove(isDragging: Bool, in tableView: UITableView) {
+        show(in: tableView)
+        if isDragging {
+            hideWork?.cancel()
+            hideWork = nil
+        } else {
+            scheduleHide(in: tableView)
+        }
+    }
+
+    /// The finger left the screen and nothing is still moving.
+    func listDidSettle(in tableView: UITableView) {
+        scheduleHide(in: tableView)
+    }
+
+    private func show(in tableView: UITableView) {
+        hideWork?.cancel()
+        hideWork = nil
+        guard isPinnedHeaderHidden else {
+            // Still worth a pass with no animation: which header floats changes as the list
+            // moves, and one that has just stopped floating has to be given its place back.
+            refresh(in: tableView, animated: false)
+            return
+        }
+        isPinnedHeaderHidden = false
+        refresh(in: tableView, animated: true, duration: DateHeaderVisibility.fadeIn)
+    }
+
+    private func scheduleHide(in tableView: UITableView) {
+        hideWork?.cancel()
+        let work = DispatchWorkItem { [weak self, weak tableView] in
+            guard let self = self, let tableView = tableView, !self.isPinnedHeaderHidden else {
+                return
+            }
+            self.isPinnedHeaderHidden = true
+            self.refresh(in: tableView, animated: true, duration: DateHeaderVisibility.fadeOut)
+        }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + DateHeaderVisibility.lingerAfterScroll, execute: work)
+    }
+
+    /// Gives every header the alpha its own position asks for.
+    private func refresh(in tableView: UITableView, animated: Bool, duration: TimeInterval = 0) {
+        tracked.removeAll { $0.view == nil }
+        var changes: [(UIView, CGFloat)] = []
+        for item in tracked {
+            guard let view = item.view, view.superview != nil else {
+                continue
+            }
+            let wanted: CGFloat = (isPinnedHeaderHidden && isFloating(view, in: tableView)) ? 0 : 1
+            if view.alpha != wanted {
+                changes.append((view, wanted))
+            }
+        }
+        guard !changes.isEmpty else {
+            return
+        }
+        guard animated else {
+            for (view, alpha) in changes {
+                view.alpha = alpha
+            }
+            return
+        }
+        UIView.animate(withDuration: duration, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            for (view, alpha) in changes {
+                view.alpha = alpha
+            }
+        }
+    }
+
+    /// Whether a header has left its own place to hang at the top of the list.
+    ///
+    /// Fix: this used to ask the table where the section's first row is drawn. Asking a table
+    /// whose rows size themselves for exact geometry makes it work that geometry out there and
+    /// then: the guessed heights it is carrying are replaced by measured ones, the content
+    /// height changes, and the list moves under whoever is reading it. And the question was
+    /// asked from the scroll callback and again for every header the table built, so a chat
+    /// being opened asked it dozens of times while its heights were still guesses - which is
+    /// what made a freshly opened chat drop by a row and then recover.
+    ///
+    /// The same question is answered from what the table has already drawn. A header the table
+    /// is holding at the top sits exactly on the line where the visible area begins; one that is
+    /// where it belongs does not. Nothing has to be computed to see that.
+    private func isFloating(_ header: UIView, in tableView: UITableView) -> Bool {
+        let pinLine = tableView.contentOffset.y + tableView.adjustedContentInset.top
+        return abs(header.frame.minY - pinLine) < 1
+    }
+}
+
 final class ReadMoreTap: UITapGestureRecognizer {
 
     let messageId: String

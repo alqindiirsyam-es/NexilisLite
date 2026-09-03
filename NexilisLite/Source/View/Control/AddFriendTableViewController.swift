@@ -97,6 +97,9 @@ class AddFriendTableViewController: UITableViewController {
     }
     
     @objc func scanQR(sender: Any) {
+        if APIS.blockedByCallInProgress() {
+            return
+        }
         let scannerVC = QRScannerController()
         scannerVC.onQRCodeDetected = { qrCode in
 //            print("Detected QR Code: \(qrCode)")

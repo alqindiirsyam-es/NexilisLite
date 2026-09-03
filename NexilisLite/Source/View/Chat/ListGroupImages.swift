@@ -69,9 +69,9 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
         tableViewImages.anchor(top: self.view.topAnchor, left: self.view.safeAreaLayoutGuide.leftAnchor, bottom: self.view.bottomAnchor, right: self.view.safeAreaLayoutGuide.rightAnchor)
         tableViewImages.contentInsetAdjustmentBehavior = .never
         
-        DispatchQueue.main.async {[self] in
-            tableViewImages.scrollToRow(at: IndexPath(row: imageTapped, section: 0), at: .top, animated: false)
-        }
+        // The jump to the tapped picture is made once the rows have been laid out - see
+        // jumpToTappedImage. Doing it here, before any of them has a real height, is what put the
+        // third and fourth picture of a collage somewhere other than where they were tapped.
         
         let center: NotificationCenter = NotificationCenter.default
         center.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
@@ -152,9 +152,39 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
         }
     }
 
+    /// How many times the jump to the tapped picture has been tried.
+    ///
+    /// Fix: the jump was made from viewDidLoad, before a single row had been laid out. Rows here
+    /// are as tall as the picture they hold - `heightForRowAt` works that out from each
+    /// thumbnail's own proportions - so before the pictures have been measured the offset is built
+    /// out of guesses: near enough for the first row or two, and further out with every row after
+    /// it. That is why tapping the third or fourth picture of a collage opened somewhere else.
+    ///
+    /// Jumping once the rows have real heights lands on the right one. The heights settle over a
+    /// pass or two, because laying out the rows it lands on is what gives them their heights, so
+    /// this repeats until the offset stops moving - and gives up rather than chase it for ever.
+    private var jumpAttempts = 0
+
+    private func jumpToTappedImage() {
+        guard jumpAttempts < 5, let target = imageTapped, target > 0,
+              tableViewImages.numberOfRows(inSection: 0) > target else {
+            return
+        }
+        let wanted = tableViewImages.rectForRow(at: IndexPath(row: target, section: 0)).minY
+            - tableViewImages.contentInset.top
+        guard abs(tableViewImages.contentOffset.y - wanted) > 1 else {
+            // Already there: nothing more to chase.
+            jumpAttempts = 5
+            return
+        }
+        jumpAttempts += 1
+        tableViewImages.scrollToRow(at: IndexPath(row: target, section: 0), at: .top, animated: false)
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         applyTableInsets()
+        jumpToTappedImage()
         let height = (navigationController?.navigationBar.frame.maxY ?? 88) + 40
         headerScrim.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: height)
         headerScrimMask.frame = headerScrim.bounds

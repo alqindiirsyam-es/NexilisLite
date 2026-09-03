@@ -56,6 +56,8 @@
 "Text coppied to clipboard" = "Teks disalin ke papan klip";
 "Image coppied to clipboard" = "Gambar disalin ke papan klip";
 "Unread Messages" = "Pesan yang belum dibaca";
+"%d unread message" = "%d pesan belum dibaca";
+"%d unread messages" = "%d pesan belum dibaca";
 "Interactive chatbot. Coming soon" = "Chatbot interaktif. Segera akan datang";
 "Start Conversation" = "Mulai Percakapan";
 
@@ -111,7 +113,6 @@
 "You must set your profile to use this feature" = "Kamu harus mengatur profil Anda untuk menggunakan fitur ini";
 "Create Group" = "Buat Grup";
 "Add Friends" = "Tambah Teman";
-"Favorite Messages" = "Pesan Favorit";
 "Broadcast Message" = "Pesan Siaran";
 "Live Streaming" = "Siaran Langsung";
 "Save" = "Simpan";
@@ -225,7 +226,7 @@
 "Chat with a Representative" = "Obrolan";
 "Video Call a Representative" = "Panggilan Video";
 "Call a Representative" = "Panggilan Suara";
-"Unfavorite all messages" = "Hapus semua pesan favorit";
+"Unstar all messages" = "Hapus bintang semua pesan";
 "Successfully changed name" = "Berhasil mengubah nama";
 "Please select your Consultation Topic:" = "Silakan pilih Topik Konsultasi kamu:";
 "Please select the type of topic that you chosen" = "Silakan pilih jenis topik yang kamu pilih";
@@ -325,7 +326,6 @@
 "images" = "gambar";
 "Forward All" = "Teruskan Semua";
 "Delete All" = "Hapus Semua";
-"Resend" = "Kirim Ulang";
 "Unable to access your primary device" = "Tidak dapat mengakses perangkat utama kamu";
 "To verify your identity for signing in on a new device, we need access to your main device. Please turn on your primary device. If it's not accessible, contact us to undergo a KYC verification process." = "Untuk memverifikasi identitas kamu untuk masuk di perangkat baru, kami memerlukan akses ke perangkat utama kamu. Silakan nyalakan perangkat utama kamu. Jika tidak dapat diakses, hubungi kami untuk menjalani proses verifikasi KYC.";
 "We value your security" = "Kami menghargai keamanan kamu";
@@ -430,11 +430,12 @@
 "does not store, share, or assign your camera input to third parties under any circumstances." = "Tidak menyimpan, membagikan, atau memberikan akses rekaman kamera Anda kepada pihak ketiga dalam keadaan apa pun.";
 "An audio call is in progress" = "Panggilan suara sedang berlangsung";
 "A video call is in progress" = "Panggilan video sedang berlangsung";
+"The camera and the microphone belong to the call until it ends." = "Kamera dan mikrofon dipakai panggilan sampai panggilan selesai.";
 "Archive" = "Arsipkan";
 "Delete chat" = "Hapus obrolan";
 "All Media" = "Semua Media";
 "Go to Message" = "Lihat di Obrolan";
-"Delete message?" = "Hapus pesan?";
+"Delete messages?" = "Hapus pesan?";
 "Media" = "Media";
 "Links" = "Tautan";
 "Docs" = "Dokumen";
@@ -456,3 +457,13 @@
 "Write a status" = "Tulis status";
 "Microphone access is needed to record" = "Izin mikrofon diperlukan untuk merekam";
 "Failed to save the recording" = "Gagal menyimpan rekaman";
+
+"Slide to cancel" = "Geser untuk membatalkan";
+"Hold to record a video note" = "Tahan untuk merekam video note";
+"Camera and microphone access is needed to record" = "Izin kamera dan mikrofon dibutuhkan untuk merekam";
+
+"Video note" = "Video note";
+
+ "Your message was not sent." = "Pesan Anda tidak terkirim.";
+"Send again" = "Kirim lagi";
+

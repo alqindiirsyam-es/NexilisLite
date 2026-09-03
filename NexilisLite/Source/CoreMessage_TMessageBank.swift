@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import AVFoundation
 import UIKit
 
 public class CoreMessage_TMessageBank {
@@ -156,6 +157,43 @@ public class CoreMessage_TMessageBank {
         return tmessage
     }
     
+    /// The size of whatever is attached, and its length where it has one.
+    ///
+    /// Read off the file on this device at the moment of sending, which is the only moment both
+    /// are known for certain. A file that cannot be found reports nothing rather than zero: the
+    /// receiving end can tell "not sent" from "empty", and falls back to measuring the download.
+    private static func measureAttachment(image_id: String, audio_id: String, video_id: String,
+                                          file_id: String, gif_id: String) -> (duration: String, bytes: Int64) {
+        let names = [video_id, audio_id, image_id, file_id, gif_id].filter { !$0.isEmpty }
+        guard let name = names.first else { return ("", 0) }
+
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = documents.appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return ("", 0) }
+
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+
+        // Only the things that have a length are asked for one.
+        //
+        // Whole seconds, rounded DOWN, and never below one:
+        //
+        //   12.9s -> "12"   a note is as long as it has completely run, not as long as it nearly ran
+        //    0.4s -> "1"    something was recorded, and "0" would read as nothing at all
+        //
+        // Rounding to nearest was wrong on both counts - it made 12.9 into "13", claiming a second
+        // that never happened, and 0.4 into "0".
+        var duration = ""
+        if !video_id.isEmpty || !audio_id.isEmpty {
+            let seconds = CMTimeGetSeconds(AVURLAsset(url: url).duration)
+            if seconds.isFinite, seconds > 0 {
+                duration = String(max(1, Int(seconds.rounded(.down))))
+            }
+        }
+        // The size goes as it is - a plain count of bytes, 1834512 rather than "1.8 MB". Whoever
+        // reads it decides how to say it.
+        return (duration, bytes ?? 0)
+    }
+
     public static func sendMessage(message_id: String = "", l_pin: String, message_scope_id: String, status: String, message_text: String, credential: String, attachment_flag: String, ex_blog_id: String, message_large_text: String, ex_format: String, image_id: String, audio_id: String, video_id: String, file_id: String, thumb_id: String, reff_id: String, read_receipts: String, chat_id: String, is_call_center: String, call_center_id: String, opposite_pin: String, gif_id: String = "", isForwarded: String = "", isSecret: String = "", specFile: String) -> TMessage {
         let me = User.getMyPin()!
         let tmessage = TMessage()
@@ -213,6 +251,20 @@ public class CoreMessage_TMessageBank {
         tmessage.mBodies[CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE] = isForwarded
         tmessage.mBodies[CoreMessage_TMessageKey.IS_SECRET] = isSecret
         tmessage.mBodies[CoreMessage_TMessageKey.ATTACHMENT_SPECIALITY] = specFile
+
+        // How big the attachment is, and how long it runs. Measured here rather than at each of
+        // the many places that send something: every send path in the app comes through this one
+        // function, so doing it here means none of them can be forgotten - and none of them has to
+        // remember. What the other end gets is a bubble that can say "3.4 MB" or "(0:08)" before
+        // it has downloaded a thing.
+        let measured = measureAttachment(image_id: image_id, audio_id: audio_id,
+                                         video_id: video_id, file_id: file_id, gif_id: gif_id)
+        if !measured.duration.isEmpty {
+            tmessage.mBodies[CoreMessage_TMessageKey.CONTENT_DURATION] = measured.duration
+        }
+        if measured.bytes > 0 {
+            tmessage.mBodies[CoreMessage_TMessageKey.FILE_SIZE_ATTACHMENT] = String(measured.bytes)
+        }
         return tmessage
     }
     

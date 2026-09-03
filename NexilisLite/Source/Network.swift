@@ -186,8 +186,66 @@ public class Network {
         }
     }
     
+    /// A plain copy of a file that now lives only in the secure store, so it can be uploaded.
+    ///
+    /// Written under the file's own name so everything downstream - the multipart part, the byte
+    /// counts the ring is labelled with - reads the same name it would have read in the documents
+    /// folder. No biometric prompt: this runs behind a transfer nobody is watching.
+    private static func stagedFromSecureStore(named name: String) -> URL? {
+        guard !name.isEmpty,
+              var bytes = try? FileEncryption.shared.readSecure(filename: name, withoutBiometric: true),
+              !bytes.isEmpty else {
+            return nil
+        }
+        if let plain = FileEncryption.shared.decryptFileFromServer(data: bytes) {
+            bytes = plain
+        }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("nexilis.upload", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appendingPathComponent(name)
+            try bytes.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    /// Transfers on their way out, so one can be stopped.
+    ///
+    /// The request was started and thrown away - `_ = uploadHTTP(...)` - which meant a send could
+    /// be watched but never called off. Held here for as long as it runs.
+    private static var uploadsInFlight: [String: UploadRequest] = [:]
+    private static let uploadLock = DispatchQueue(label: "nexilis.uploads")
+
+    /// Stops a send. What that means for the message - that it is now one that never left - is the
+    /// conversation's to decide; this only stops the bytes.
+    @discardableResult
+    public static func cancelUpload(name: String) -> Bool {
+        var stopped = false
+        uploadLock.sync {
+            if let request = uploadsInFlight.removeValue(forKey: name) {
+                request.cancel()
+                stopped = true
+            }
+        }
+        return stopped
+    }
+
+    public static func isUploading(name: String) -> Bool {
+        var running = false
+        uploadLock.sync { running = uploadsInFlight[name] != nil }
+        return running
+    }
+
     public func uploadHTTP(name: String, completion: @escaping (Bool, Double)->()) {
-        _ = uploadHTTP(UPLOAD_URL, filename: [name], completion: completion)
+        let request = uploadHTTP(UPLOAD_URL, filename: [name]) { result, progress in
+            if !result || progress >= 100 {
+                Network.uploadLock.sync { _ = Network.uploadsInFlight.removeValue(forKey: name) }
+            }
+            completion(result, progress)
+        }
+        Network.uploadLock.sync { Network.uploadsInFlight[name] = request }
     }
     
     public func uploadHTTP(fileUrl: URL, completion: @escaping (Bool, Double)->()) {
@@ -213,6 +271,15 @@ public class Network {
                     if FileManager.default.fileExists(atPath: path) {
                         let fileURL = URL(fileURLWithPath: path)
                         filesIn.append(fileURL)
+                    } else if let stored = Network.stagedFromSecureStore(named: name) {
+                        // Fix: a file sits in the documents folder only until the send carrying it
+                        // succeeds - after that it is moved into the secure store and the plain
+                        // copy deleted. Anything that had to send it a second time found nothing
+                        // here and simply went out with no file attached at all: the server
+                        // answered 200, the message was marked sent, and what arrived had no
+                        // picture in it. Both places are asked now, the way everything else that
+                        // reads one of these files already does.
+                        filesIn.append(stored)
                     }
                 }
             }

@@ -30,15 +30,66 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     private func applyReadMore(to label: UILabel, text: String) {
         let messageId = (data["message_id"] as? String) ?? ""
         label.numberOfLines = 0
+        defer {
+            // Whether the message was folded or not, a mention in it leads to the person it
+            // names - the same as in the conversation this message was opened from.
+            label.isUserInteractionEnabled = true
+            label.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(messageTextTapped(_:))))
+        }
         guard LongMessage.isFolded(messageId, text: text) else {
-            label.attributedText = text.richText()
+            label.attributedText = text.richText(group_id: mentionGroupId)
             return
         }
-        let body = NSMutableAttributedString(attributedString: LongMessage.folded(text).richText())
+        let body = NSMutableAttributedString(attributedString: LongMessage.folded(text).richText(group_id: mentionGroupId))
         body.append(LongMessage.suffix(fontSize: 12 + offset()))
         label.attributedText = body
-        label.isUserInteractionEnabled = true
-        label.addGestureRecognizer(ReadMoreTap(messageId: messageId, target: self, action: #selector(readMoreTapped(_:))))
+        let readMore = ReadMoreTap(messageId: messageId, target: self, action: #selector(readMoreTapped(_:)))
+        // A tap on a mention belongs to the mention: without this the same touch would open the
+        // profile and unfold the message at once, since both recognizers are on this label.
+        readMore.delegate = self
+        label.addGestureRecognizer(readMore)
+    }
+
+    /// The group this message was sent in, or nothing at all for a one-to-one chat.
+    ///
+    /// A mention is only drawn as one - and only leads anywhere - when the person it names is a
+    /// member of the group the message was sent in, so this is what the text has to be built
+    /// with for mentions to show up here the way they do in the conversation.
+    private var mentionGroupId: String {
+        return isPersonal ? "" : (dataGroup["group_id"] as? String ?? "")
+    }
+
+    /// A tap on a coloured @mention in the message opens that person's profile.
+    ///
+    /// Only mentions carry the pin (see `NSAttributedString.Key.mentionPin`), so a tap anywhere
+    /// else on the message does nothing, as it did before.
+    @objc private func messageTextTapped(_ sender: UITapGestureRecognizer) {
+        guard let label = sender.view as? UILabel else { return }
+        guard let pin = LinkHighlighting.mentionPin(at: sender.location(in: label), in: label) else { return }
+        showProfile(pin: pin)
+    }
+
+    /// Opens the profile of the person a pin belongs to. "-999" and "-997" are nobody in
+    /// particular (a system message, and @All), and stay where they are.
+    private func showProfile(pin: String) {
+        let idMe = User.getMyPin() as String?
+        if pin == idMe {
+            let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
+            controller.data = pin
+            controller.flag = .me
+            navigationController?.show(controller, sender: nil)
+        } else if pin != "-999" && pin != "-997" {
+            guard let data = User.getDataCanNil(pin: pin) else {
+                return
+            }
+            let controller = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "profileView") as! ProfileViewController
+            controller.flag = .friend
+            controller.user = data
+            controller.name = data.fullName
+            controller.data = pin
+            controller.picture = data.thumb
+            navigationController?.show(controller, sender: nil)
+        }
     }
 
     @objc private func readMoreTapped(_ sender: UITapGestureRecognizer) {
@@ -898,15 +949,42 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 describeAudio(in: contAudio, named: audioChat)
             }
 
+            // A round video note is a circle, not a bubble with a picture in it. Here it is only
+            // shown - this screen is a record of a message, not a place to watch one - so it goes
+            // in as a preview with no player behind it at all.
+            if VideoNote.isNote(videoChat) {
+                containerMessage.backgroundColor = .clear
+                containerMessage.layer.shadowOpacity = 0
+                messageText.isHidden = true
+
+                let note = VideoNoteBubbleView()
+                containerMessage.addSubview(note)
+                note.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    note.topAnchor.constraint(equalTo: containerMessage.topAnchor),
+                    note.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor),
+                    note.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor),
+                    note.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor)
+                ])
+                note.configure(videoId: videoChat, thumbId: thumbChat, state: .preview)
+                return cell
+            }
             if (!thumbChat.isEmpty) {
                 // One measurement, not two: the width and the height come from the same look
                 // at the file.
                 let thumbSize = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)
                 let getHeightImage: CGFloat = thumbSize.height
                 let getWidthImage: CGFloat = thumbSize.width
-                topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 40 : getHeightImage)
+                // The one height both the picture and the text margin below it are built from, so
+                // the two can never drift apart - which is what a separate `< 40 ? 45 : h + 5`
+                // written out by hand invites.
+                let imageSlotHeight: CGFloat = getHeightImage < 40 ? 40 : getHeightImage
+                // The +5 pays for the 5pt gap the picture leaves above the text below it; without
+                // it the bubble is five short and the picture is squeezed by that much.
+                topMarginText.constant = topMarginText.constant + imageSlotHeight + 5
                 
                 containerMessage.addSubview(imageThumb)
+                imageThumb.frame = CGRect(x: 0, y: 0, width: getWidthImage, height: getHeightImage)
                 imageThumb.translatesAutoresizingMaskIntoConstraints = false
                 let dataReply = queryMessageReply(message_id: reffChat)
                 if (dataReply.count == 0) {
@@ -915,10 +993,42 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 imageThumb.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 imageThumb.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage).isActive = true
+                // Fix: the width was required, on a view already pinned to both sides of the
+                // bubble - three required constraints for one dimension, so Auto Layout broke one
+                // of them at runtime and the picture took whatever geometry that left. A preferred
+                // width and a required ceiling say the same thing without the contradiction.
+                let imgWidthConstraint = imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage)
+                imgWidthConstraint.priority = .defaultHigh
+                imgWidthConstraint.isActive = true
+                let imgMaxWidthConstraint = imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerMessage.widthAnchor, constant: -30)
+                imgMaxWidthConstraint.priority = .required
+                imgMaxWidthConstraint.isActive = true
+                // Fix: the real defect. The picture never had a height of its own - it was held
+                // between the bubble's top and the text below, and the only thing asking for a
+                // particular size was the text margin. So the height the file was measured at was
+                // never actually applied to anything: measured 329pt tall on screen against a
+                // ceiling of 305 the code had asked for, and starting 29pt above the top of the
+                // bubble, because the required top and the required bottom could not both hold and
+                // the top is the one that gave. A height, at the same priority as the margin that
+                // was bumped to match it, so the two agree instead of one being inferred from the
+                // other.
+                let imgHeightConstraint = imageThumb.heightAnchor.constraint(equalToConstant: imageSlotHeight)
+                imgHeightConstraint.priority = .defaultHigh
+                imgHeightConstraint.isActive = true
                 imageThumb.layer.cornerRadius = 5.0
                 imageThumb.clipsToBounds = true
                 imageThumb.contentMode = .scaleAspectFill
+                // Fix: an image view carries the size of the picture inside it, and this one has no
+                // height of its own - it is held between the top of the bubble and the text below.
+                // So the thumbnail's own dimensions pushed against that margin and won, and the
+                // picture grew far past its slot. It only became visible when the bubble was given
+                // its shadow: a shadow cannot be drawn by a layer that clips, so the clipping that
+                // had been quietly hiding this overflow went with it. The same four lines already
+                // hold the bubble in the editors; this screen never got them.
+                imageThumb.setContentHuggingPriority(.defaultLow, for: .vertical)
+                imageThumb.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                imageThumb.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+                imageThumb.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 
                 let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                 let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
@@ -1253,18 +1363,26 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     let audio_chat = (dataReply["audio_id"] as? String) ?? ""
                     if (attachment_flag == "0" && thumb_chat == "") {
                         contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
+                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: mentionGroupId)
                     } else if (attachment_flag == "1" || image_chat != "") {
                         if (message_text == "") {
                             contentReply.text = "📷 Photo".localized()
                         } else {
-                            contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
+                            contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: mentionGroupId)
                         }
                     } else if (attachment_flag == "2" || video_chat != "") {
                         if (message_text == "") {
-                            contentReply.text = "📹 Video".localized()
+                            // A round video note is quoted as one, with its length; an ordinary video
+                            // is quoted the way it always was.
+                            if let noteLine = VideoNote.quotedLine(videoId: video_chat,
+                                                                   font: contentReply.font,
+                                                                   colour: contentReply.textColor ?? .gray) {
+                                contentReply.attributedText = noteLine
+                            } else {
+                                contentReply.text = "📹 Video".localized()
+                            }
                         } else {
-                            contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
+                            contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: mentionGroupId)
                         }
                     } else if (attachment_flag == "6" || file_chat != ""){
                         contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
@@ -1288,11 +1406,15 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
                         if let dirPath = paths.first {
-                            let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumb_chat)
-                            let image    = UIImage(contentsOfFile: thumbURL.path)
-                            let imageThumb = UIImageView(image: image)
+                            // Only the plain file was read, which a receiver often does not have -
+                            // nobody downloads the thumbnail of a message they have only been shown
+                            // a quote of. See VideoNote.quotedStill.
+                            let imageThumb = UIImageView()
+                            VideoNote.loadQuotedStill(named: thumb_chat, into: imageThumb)
                             containerReply.addSubview(imageThumb)
-                            imageThumb.layer.cornerRadius = 2.0
+                            // A video note is round wherever it is shown, a quote included; the square corner
+                            // is what every other kind of attachment keeps.
+                            imageThumb.layer.cornerRadius = VideoNote.isNote(video_chat) ? 15.0 : 2.0
                             imageThumb.clipsToBounds = true
                             imageThumb.contentMode = .scaleAspectFill
                             imageThumb.translatesAutoresizingMaskIntoConstraints = false
@@ -1384,7 +1506,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 return "\(day) " + "days".localized() + " " + "ago".localized()
             } else {
                 let formatter = DateFormatter()
-                formatter.dateFormat = "EE, dd MMM"
+                formatter.dateFormat = ChatDayLabel.format(for: date)
                 let lang: String = SecureUserDefaults.shared.value(forKey: "i18n_language") ?? "en"
                 if lang == "id" {
                     formatter.locale = NSLocale(localeIdentifier: "id") as Locale?
@@ -1492,4 +1614,15 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
         LinkOpener.open(urlString: sender.message_id)
     }
 
+}
+
+// Fix: the message and "Read more" share one label, so the read-more tap has to stand aside for
+// a tap that landed on a mention - otherwise one touch does both.
+extension MessageInfo: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer is ReadMoreTap, let label = gestureRecognizer.view as? UILabel else {
+            return true
+        }
+        return LinkHighlighting.mentionPin(at: touch.location(in: label), in: label) == nil
+    }
 }
