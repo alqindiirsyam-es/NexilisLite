@@ -25,7 +25,7 @@ it lives in a subfolder of `NexilisLibraryiOS`, so the package is mirrored to a
 repository of its own (see *Publishing* below):
 
 ```swift
-.package(url: "https://github.com/alqindiirsyam-es/NexilisLite.git", from: "5.2.0")
+.package(url: "https://github.com/alqindiirsyam-es/NexilisLite.git", from: "6.0.1")
 ```
 
 ### Target dependency
@@ -142,10 +142,10 @@ git subtree split --prefix=NexilisLite -b spm-nexilislite
 
 git push https://github.com/alqindiirsyam-es/NexilisLite.git spm-nexilislite:main
 
-# Tag the version. SwiftPM accepts either "5.2.0" or "v5.2.0" — pick one
+# Tag the version. SwiftPM accepts either "6.0.1" or "v6.0.1" — pick one
 # convention and stick to it. Keep it in step with the CocoaPods release.
 git clone https://github.com/alqindiirsyam-es/NexilisLite.git /tmp/NexilisLite
-cd /tmp/NexilisLite && git tag 5.2.0 && git push origin 5.2.0
+cd /tmp/NexilisLite && git tag 6.0.1 && git push origin 6.0.1
 ```
 
 Keep the tag in step with `spec.version` in the podspec so CocoaPods and SPM
