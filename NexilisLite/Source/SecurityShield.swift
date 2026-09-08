@@ -18,6 +18,7 @@ import CoreTelephony
 import CryptoKit
 import MachO
 import CommonCrypto
+import NexilisZTA
 import SystemConfiguration.CaptiveNetwork
 import CoreLocation
 import Network
@@ -631,6 +632,7 @@ private class Process: NSObject, CLLocationManagerDelegate {
     
     static func checkEmulator() -> Bool {
         if Preference.getCheckEmulator() && isEmulator() {
+            SentinelSecurityGate.revoke(reason: "legacy SecurityShield emulator detection")
             DispatchQueue.main.async(execute: {
                 let alert = SecurityShield.alert(title: Preference.getCheckEmulatorAlertTitle(), message: Preference.getCheckEmulatorAlertMessage())
                 if Preference.getCheckEmulatorAction() == PreferencesKey.SECURITY_SHIELD_ALERT_CONTINUE {
@@ -653,6 +655,7 @@ private class Process: NSObject, CLLocationManagerDelegate {
     
     static func checkRootedDevice() -> Bool {
         if Preference.getCheckRooted() && isRooted() {
+            SentinelSecurityGate.revoke(reason: "legacy SecurityShield jailbreak detection")
             DispatchQueue.main.async(execute: {
                 let alert = SecurityShield.alert(title: Preference.getCheckRootedAlertTitle(), message: Preference.getCheckRootedAlertMessage())
                 if Preference.getCheckRootedAction() == PreferencesKey.SECURITY_SHIELD_ALERT_CONTINUE {
@@ -706,6 +709,7 @@ private class Process: NSObject, CLLocationManagerDelegate {
     
     static func checkTempering() -> Bool {
         if Preference.getCheckTempering() && isTempering() {
+            SentinelSecurityGate.revoke(reason: "legacy SecurityShield tamper detection")
             DispatchQueue.main.async(execute: {
                 let alert = SecurityShield.alert(title: Preference.getCheckTemperingAlertTitle(), message: Preference.getCheckTemperingAlertMessage())
                 if Preference.getCheckTemperingAction() == PreferencesKey.SECURITY_SHIELD_ALERT_CONTINUE {
@@ -727,6 +731,7 @@ private class Process: NSObject, CLLocationManagerDelegate {
     
     static func checkHooked() -> Bool {
         if Preference.getCheckHooked() && isHooked() {
+            SentinelSecurityGate.revoke(reason: "legacy SecurityShield hook detection")
             DispatchQueue.main.async(execute: {
                 let alert = SecurityShield.alert(title: Preference.getCheckHookedAlertTitle(), message: Preference.getCheckHookedAlertMessage())
                 if Preference.getCheckHookedAction() == PreferencesKey.SECURITY_SHIELD_ALERT_CONTINUE {
@@ -758,6 +763,7 @@ private class Process: NSObject, CLLocationManagerDelegate {
     
     static func checkDebugging() -> Bool {
         if Preference.getCheckDebugging() && isDebugging() {
+            SentinelSecurityGate.revoke(reason: "legacy SecurityShield debugger detection")
             DispatchQueue.main.async(execute: {
                 let alert = SecurityShield.alert(title: Preference.getCheckDebuggingAlertTitle(), message: Preference.getCheckDebuggingAlertMessage())
                 if Preference.getCheckDebuggingAction() == PreferencesKey.SECURITY_SHIELD_ALERT_CONTINUE {
@@ -780,6 +786,7 @@ private class Process: NSObject, CLLocationManagerDelegate {
     
     static func checkScreenCasting() -> Bool {
         if Preference.getCheckScreenCasting() && isScreenCasting() {
+            SentinelSecurityGate.revoke(reason: "legacy SecurityShield screen-capture detection")
             DispatchQueue.main.async(execute: {
                 let alert = SecurityShield.alert(title: Preference.getCheckScreenCastingAlertTitle(), message: Preference.getCheckScreenCastingAlertMessage())
                 if Preference.getCheckScreenCastingAction() == PreferencesKey.SECURITY_SHIELD_ALERT_CONTINUE {
@@ -802,6 +809,7 @@ private class Process: NSObject, CLLocationManagerDelegate {
     
     static func checkScreenOverlay() -> Bool {
         if Preference.getCheckScreenOverlay() && isScreenOverlay() {
+            SentinelSecurityGate.revoke(reason: "legacy SecurityShield overlay detection")
             DispatchQueue.main.async(execute: {
                 let alert = SecurityShield.alert(title: Preference.getCheckScreenOverlayAlertTitle(), message: Preference.getCheckScreenOverlayAlertMessage())
                 if Preference.getCheckScreenOverlayAction() == PreferencesKey.SECURITY_SHIELD_ALERT_CONTINUE {
@@ -953,8 +961,9 @@ private class Process: NSObject, CLLocationManagerDelegate {
     }
     
     private static func isTempering() -> Bool {
-        
-        return false
+        let guardRef = RASPGuard.shared()
+        if guardRef.lastThreatMask != 0 { return true }
+        return !guardRef.verifyCodeSignatureIntegrity()
     }
     
     private static func isDebugging() -> Bool {
@@ -2547,12 +2556,6 @@ private class Preference {
         return PreferencesKey.ss_clone_continue
     }
     
-    static func getCertificatePinningWebview() -> String {
-        if let value: String = SecureUserDefaultsSS.shared.value(forKey: "pb_certificate_pinning_webview") {
-            return value
-        }
-        return ""
-    }
 }
 
 private class PreferencesKey {
@@ -2688,17 +2691,6 @@ private class PreferencesKey {
     static let SS_CHECK_CLONED_ALERT_MESSAGE = "ss_check_cloned_alert_message"
     static let ss_clone_title = "App Clone Detected!"
     static let ss_clone_continue = "We are sorry for the inconvenience. For security reasons this app is not allowed to run in cloned instance.";
-}
-
-private class SelfSignedURLSessionSSDelegate: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate {
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
-            if let serverTrust = challenge.protectionSpace.serverTrust {
-                let credential = URLCredential(trust: serverTrust)
-                completionHandler(.useCredential, credential)
-            }
-        }
-    }
 }
 
 private class UtilsSS {
@@ -3288,7 +3280,7 @@ private class SecureUserDefaultsSS {
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: prefsKeyAlias,
             kSecValueData as String: keyData,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
         
         SecItemDelete(query as CFDictionary) // Remove if it exists
@@ -3432,9 +3424,7 @@ final class PinnedURLSessionSSDelegate: NSObject,
                     didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition,
                                                    URLCredential?) -> Void) {
-
-        guard challenge.protectionSpace.authenticationMethod
-                == NSURLAuthenticationMethodServerTrust,
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust else {
             completionHandler(.performDefaultHandling, nil)
             return
@@ -3446,73 +3436,18 @@ final class PinnedURLSessionSSDelegate: NSObject,
             return
         }
 
-        guard let serverTrust = challenge.protectionSpace.serverTrust else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-        
-        // Fix: every branch below must call completionHandler exactly once and then
-        // return. Previously, each branch already called completionHandler, but
-        // execution still fell through to an unconditional final call
-        // (`completionHandler(.useCredential, URLCredential(trust: trust))`) - that's
-        // the "completion handler called more than once" API misuse. Worse, when JSON
-        // parsing of the stored pin failed there was no else-branch at all, so the
-        // *only* call that ran was that unconditional final one - meaning a corrupted/
-        // unparseable pin silently bypassed pinning entirely (fail-open) instead of
-        // rejecting the connection (fail-closed).
-        guard let publicKeyHash = extractPublicKeyHash(from: serverTrust) else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
+        let host = challenge.protectionSpace.host.lowercased()
+        // Mutable UserDefaults pin JSON is deliberately NOT consulted. First-party hosts use
+        // the Sentinel immutable primary/backup floor plus only signature-verified rotations.
+        if RASPGuard.shared().isPinnedHost(host) {
+            guard RASPGuard.shared().serverTrust(trust, matchesPinnedSPKIForHost: host)
+                    || PinSetStore.matches(trust: trust, host: host) else {
+                RASPGuard.shared().reportPinningFailure(forHost: host)
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
         }
 
-        let domain = challenge.protectionSpace.host
-        let storedCertificate = Preference.getCertificatePinningWebview()
-        guard let jsonData = storedCertificate.data(using: .utf8) else {
-            // Fix: fail closed - don't trust the connection if the pin can't be read.
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-
-        // Fix: support both the new format (domain -> array of accepted hashes, so a
-        // certificate/key rotation can be handled by listing old+new hash together
-        // ahead of time) and the legacy format (domain -> single hash string) still
-        // possibly cached on a device from before this migration, so existing
-        // installs don't get hard-locked-out mid-migration.
-        let acceptedHashes: [String]
-        if let certJsonArray = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: [String]] {
-            acceptedHashes = certJsonArray[domain] ?? []
-        } else if let certJsonLegacy = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
-            acceptedHashes = certJsonLegacy[domain].map { [$0] } ?? []
-        } else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-
-        if acceptedHashes.contains(publicKeyHash) {
-            completionHandler(.useCredential, URLCredential(trust: serverTrust))
-        } else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-        }
-    }
-    
-    func extractPublicKeyHash(from serverTrust: SecTrust) -> String? {
-        guard let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else { return nil }
-        guard let publicKey = SecCertificateCopyKey(certificate) else { return nil }
-        
-        var error: Unmanaged<CFError>?
-        guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            return nil
-        }
-        
-        // Compute SHA-256 hash
-        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        publicKeyData.withUnsafeBytes {
-            _ = CC_SHA256($0.baseAddress, CC_LONG(publicKeyData.count), &hash)
-        }
-        
-        let hashData = Data(hash)
-        let base64Hash = hashData.base64EncodedString()
-        
-        return base64Hash
+        completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }

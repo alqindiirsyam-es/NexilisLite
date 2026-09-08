@@ -7,6 +7,17 @@
 
 import Foundation
 
+/// A row of the chat list: who it is with, and the last thing said.
+///
+/// Fix: every one of the queries below read the tick to draw from MESSAGE.status. Nothing keeps
+/// that column up to date - a delivery or read receipt arriving is written into MESSAGE_STATUS
+/// and only there (see Nexilis.updateMessageStatus) - so the tick in the list was the tick the
+/// message was first saved with and never changed again. The conversation itself has always read
+/// the newest MESSAGE_STATUS row instead, which is why the same message showed two blue ticks
+/// inside the chat and one grey one in the list. Both read the same thing now.
+///
+/// For a group there is a row per member and this takes the most recently written of them, which
+/// is what the conversation does too: the point is that the two agree.
 public class Chat: Model {
     
     public let fpin: String
@@ -171,7 +182,7 @@ public class Chat: Model {
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    b.first_name || ' ' || ifnull(b.last_name, '') as name,
                                    b.image_id as profile, b.official_account,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             join BUDDY b on (m.l_pin = b.f_pin OR m.f_pin = b.f_pin)
@@ -180,7 +191,7 @@ public class Chat: Model {
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    'Bot' as name, '' as profile, '' as official_account,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             where m.l_pin = '-999' and (m.lock IS NULL OR m.lock <> '1')
@@ -189,7 +200,7 @@ public class Chat: Model {
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    'GPT SmartBot' as name, '' as profile, '' as official_account,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             where m.l_pin = '-997' and (m.lock IS NULL OR m.lock <> '1')
@@ -199,7 +210,7 @@ public class Chat: Model {
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    '\("Lounge".localized())' as name,
                                    g.image_id as profile, g.official,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    g.group_id, g.f_name as group_name, m.is_bot
                             from MESSAGE m
                             join GROUPZ g on m.l_pin = g.group_id
@@ -208,7 +219,7 @@ public class Chat: Model {
                             select m.f_pin, m.chat_id, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    d.title, g.image_id as profile, '' as official_account,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    g.group_id, g.f_name as group_name, m.is_bot
                             from MESSAGE m
                             join DISCUSSION_FORUM d on m.chat_id = d.chat_id
@@ -265,7 +276,7 @@ public class Chat: Model {
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    b.first_name || ' ' || ifnull(b.last_name, '') as name,
                                    b.image_id as profile, b.official_account,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             join BUDDY b on (
@@ -282,7 +293,7 @@ public class Chat: Model {
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    'Bot' as name, '' as profile, '' as official_account,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             where m.l_pin = '-999'
@@ -291,7 +302,7 @@ public class Chat: Model {
                             select m.f_pin, m.l_pin, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    'GPT SmartBot' as name, '' as profile, '' as official_account,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    '' as group_id, '' as group_name, m.is_bot
                             from MESSAGE m
                             where m.l_pin = '-997'
@@ -301,7 +312,7 @@ public class Chat: Model {
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    '\("Lounge".localized())' as name,
                                    g.image_id as profile, g.official,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    g.group_id, g.f_name as group_name, m.is_bot
                             from MESSAGE m
                             join GROUPZ g on m.l_pin = g.group_id
@@ -310,7 +321,7 @@ public class Chat: Model {
                             select m.f_pin, m.chat_id, m.message_id, m.message_text, m.server_date,
                                    m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id,
                                    d.title, g.image_id as profile, '' as official_account,
-                                   m.status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
+                                   ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.thumb_id, m.audio_id, m.gif_id,
                                    g.group_id, g.f_name as group_name, m.is_bot
                             from MESSAGE m
                             join DISCUSSION_FORUM d on m.chat_id = d.chat_id
@@ -391,10 +402,11 @@ public class Chat: Model {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 var lastQuery = ""
-                var text = withText
-                if text.contains("~"){
-                    text = withText.component(1, separatedBy: "~").trimmingCharacters(in: .whitespaces)
-                }
+                // Fix: this used to cut the text at a tilde, because the screen above wrote one
+                // into its search field as a marker and it arrived here along with the words. The
+                // marker is gone, and cutting at a tilde now only means a reader who types one
+                // cannot search for it.
+                let text = withText.trimmingCharacters(in: .whitespaces)
                 if isImage {
                     lastQuery = "m.image_id IS NOT NULL AND m.image_id != ''"
                 } else if isDoc {
@@ -419,36 +431,36 @@ public class Chat: Model {
                 }
 
                 var query = """
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0\(extraCondition)
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, BUDDY b where ms.l_pin = b.f_pin and ms.message_id = m.message_id and m.is_call_center = 0\(extraCondition)
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and ms.message_id = m.message_id\(extraCondition)
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'Bot' name, '' profile, '', ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-999' and ms.message_id = m.message_id\(extraCondition)
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and ms.message_id = m.message_id\(extraCondition)
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, 'GPT SmartBot' name, '' profile, '', ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m where ms.l_pin = '-997' and ms.message_id = m.message_id\(extraCondition)
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and ms.message_id = m.message_id and m.is_call_center = 0\(extraCondition)
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, '\("Lounge".localized())' name, b.image_id profile, b.official, ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, GROUPZ b where ms.l_pin = b.group_id and ms.message_id = m.message_id and m.is_call_center = 0\(extraCondition)
                             union
-                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id and m.is_call_center = 0\(extraCondition)
+                            select m.f_pin, ms.l_pin, ms.message_id, ms.counter, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.title, c.image_id profile, '', ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, ms.pinned, m.is_bot from MESSAGE_SUMMARY ms, MESSAGE m, DISCUSSION_FORUM b, GROUPZ c where b.group_id = c.group_id and ms.l_pin = b.chat_id and ms.message_id = m.message_id and m.is_call_center = 0\(extraCondition)
                             order by 6 desc
                             """
                 if !lastQuery.isEmpty {
                     query = "select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.credential, m.lock, m.audio_id, m.gif_id, m.l_pin, m.chat_id from MESSAGE m JOIN BUDDY b ON m.f_pin = b.f_pin where \(lastQuery) and m.is_call_center = 0 and m.credential <> '1' order by 6 desc"
                 } else if isUnread && !text.isEmpty {
                     query = """
-                            select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, m.status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, 0 pinned, m.is_bot, m.l_pin
+                            select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.first_name || ' ' || ifnull(b.last_name, '') name, b.image_id profile, b.official_account, ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.audio_id, m.gif_id, '' group_id, '' group_name, 0 pinned, m.is_bot, m.l_pin
                             from MESSAGE m
                             JOIN BUDDY b ON m.f_pin = b.f_pin
                             where m.is_call_center = 0
                               and (m.message_text LIKE '%\(text)%' OR b.first_name LIKE '%\(text)%' OR b.last_name LIKE '%\(text)%')
                               and exists (select 1 from MESSAGE_SUMMARY ms where ms.l_pin = b.f_pin and ms.counter > 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0"))
                             union all
-                            select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.f_name name, b.image_id profile, b.official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, 0 pinned, m.is_bot, m.l_pin
+                            select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, b.f_name name, b.image_id profile, b.official, ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.audio_id, m.gif_id, b.group_id, b.f_name group_name, 0 pinned, m.is_bot, m.l_pin
                             from MESSAGE m
                             JOIN GROUPZ b ON m.l_pin = b.group_id
                             where m.is_call_center = 0
                               and (m.message_text LIKE '%\(text)%' OR b.f_name LIKE '%\(text)%')
                               and exists (select 1 from MESSAGE_SUMMARY ms where ms.l_pin = b.group_id and ms.counter > 0 \(isArchived ? "and ms.archived <> 0" : "and ms.archived = 0"))
                             union all
-                            select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, d.title name, c.image_id profile, '' official, m.status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, 0 pinned, m.is_bot, m.l_pin
+                            select m.f_pin, m.opposite_pin, m.message_id, m.thumb_id, m.message_text, m.server_date, m.image_id, m.video_id, m.file_id, m.attachment_flag, m.message_scope_id, d.title name, c.image_id profile, '' official, ifnull((select s.status from MESSAGE_STATUS s where s.message_id = m.message_id order by s._id desc limit 1), m.status) status, m.credential, m.lock, m.audio_id, m.gif_id, c.group_id, c.f_name group_name, 0 pinned, m.is_bot, m.l_pin
                             from MESSAGE m
                             JOIN DISCUSSION_FORUM d ON m.l_pin = d.chat_id
                             JOIN GROUPZ c ON d.group_id = c.group_id
@@ -496,12 +508,40 @@ public class Chat: Model {
                                         groupName: cursorData.string(forColumnIndex: 20) ?? "",
                                         pinned: cursorData.longLongInt(forColumnIndex: 21),
                                         isBot: Int(cursorData.string(forColumnIndex: 22) ?? "0") ?? 0)
-                        if chat.pin.isEmpty && !lastQuery.isEmpty {
-                            chat.pin = cursorData.string(forColumnIndex: 18) ?? ""
-                            let chatId = cursorData.string(forColumnIndex: 19) ?? ""
-                            if !chatId.isEmpty {
-                                chat.pin = chatId
+                        // Fix: a result of the attachment filters pointed at the wrong
+                        // conversation, and was titled with the wrong name. `opposite_pin` is not
+                        // the other side of the conversation - it is the pin that names the
+                        // conversation *for whoever receives the message*, so on my own copy of
+                        // something I sent it holds my own pin (that is what the sending paths
+                        // write into it for a one-to-one chat). Read literally it sent every
+                        // attachment I had sent myself to a conversation with myself, and named
+                        // the row after me. The same reading was already worked out once, where
+                        // an arriving message is filed into the conversation list; it is applied
+                        // here so a filter result answers with the conversation the chat list
+                        // would answer with.
+                        // The two queries that read `opposite_pin` are the ones that need it;
+                        // the aggregate query above reads the conversation straight out of
+                        // MESSAGE_SUMMARY and is already right. They do not carry `l_pin` in the
+                        // same column.
+                        let readsOppositePin = !lastQuery.isEmpty
+                        if readsOppositePin || (isUnread && !text.isEmpty) {
+                            let me = User.getMyPin() ?? ""
+                            let listenerPin = cursorData.string(forColumnIndex: readsOppositePin ? 18 : 23) ?? ""
+                            let isPersonal = chat.messageScope == MessageScope.WHISPER
+                                || chat.messageScope == MessageScope.CALL
+                                || chat.messageScope == MessageScope.MISSED_CALL
+                            var conversation = chat.pin
+                            if conversation.isEmpty, readsOppositePin {
+                                let chatId = cursorData.string(forColumnIndex: 19) ?? ""
+                                conversation = isPersonal
+                                    ? chat.fpin
+                                    : (chatId.isEmpty ? listenerPin : chatId)
                             }
+                            // My own pin never names a conversation of mine: the other side does.
+                            if isPersonal, !me.isEmpty, conversation == me {
+                                conversation = listenerPin != me ? listenerPin : chat.fpin
+                            }
+                            chat.pin = conversation
                         }
                         chats.append(chat)
                     }

@@ -163,6 +163,21 @@ public class TMessage {
         data.append(Character(C_HEADER))
         data.append(mL_PIN)
         data.append(Character(C_HEADER))
+
+        // No Sentinel binding travels here, deliberately.
+        //
+        // NX-03 wanted the proprietary transport bound to the same server-issued authorization as
+        // HTTP, and this used to append `_zta_session_b64`, `_zta_audit_head` and `_zta_posture`.
+        // But a token in a message body is not a control - it is a control only once the reader
+        // validates it, and the reader here is the UCPaaS backend, a system with no connection to
+        // the ZTA service. `ServerZTAiOS/zta-server-ios.js` never sees a TMessage; making this a real check
+        // needs UCPaaS to hold a session store synced with ZTA, which is what
+        // SERVER_REFERENCE/sentinel_security_gateway.py sketches and nothing implements.
+        //
+        // So the fields bought nothing and cost bytes on every message, while letting the closure
+        // matrix claim a transport was bound when it was not - the same false-closed problem that
+        // hid three unreachable controls in this layer for months. Re-adding is one condition,
+        // and it belongs in the release that ships the validator, not before it.
         data.append(toString(body: mBodies))
         data.append(Character(C_HEADER))
         if let media = String(data: Data(getMedia()), encoding: .windowsCP1250) {

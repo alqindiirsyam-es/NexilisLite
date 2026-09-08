@@ -84,9 +84,42 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         return CGFloat(fontSize)
     }
     
+    /// Says that this conversation is the one on screen, so nothing raises a card about it.
+    ///
+    /// Fix: the same pair as in the two chat editors. Written once while the screen was built and
+    /// deleted only when it was popped, the registration was wrong for every other way of leaving
+    /// - and worse, the deletion took whatever was stored, including the registration a chat
+    /// underneath had already made on its way back in.
+    private func registerAsOpenConversation() {
+        SecureUserDefaults.shared.set(openConversationValue, forKey: "inEditorPersonal")
+        SecureUserDefaults.shared.removeValue(forKey: "inEditorGroup")
+    }
+
+    private func unregisterAsOpenConversation() {
+        let stored: String? = SecureUserDefaults.shared.value(forKey: "inEditorPersonal") ?? nil
+        guard stored == openConversationValue else {
+            return
+        }
+        SecureUserDefaults.shared.removeValue(forKey: "inEditorPersonal")
+    }
+
+    private var openConversationValue: String {
+        return (dataPerson["f_pin"] ?? "") ?? ""
+    }
+
+    public override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        registerAsOpenConversation()
+    }
+
+    public override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        unregisterAsOpenConversation()
+    }
+
     public override func viewDidDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
-            SecureUserDefaults.shared.removeValue(forKey: "inEditorPersonal")
+            unregisterAsOpenConversation()
             NotificationCenter.default.removeObserver(self)
             super.viewDidDisappear(true)
             self.removeFromParent()

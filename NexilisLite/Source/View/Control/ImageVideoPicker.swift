@@ -40,11 +40,25 @@ open class ImageVideoPicker: NSObject {
     }
     
     public func present(source sourceView: Source) {
-        // The camera is the call's for as long as it lasts; the photo library is not, and is
-        // left alone.
-        if (sourceView == .imageCamera || sourceView == .videoCamera), APIS.blockedByCallInProgress() {
+        // Fix: the camera was put on screen without ever asking for it. iOS answers that with a
+        // black view and says nothing, and a permission already refused stays refused - so the
+        // reader taps the camera, gets a black rectangle, and has nowhere to go. Asked for first
+        // now, and the camera opens on the far side of the answer, so allowing it is one tap
+        // rather than two. A refusal offers Settings. The photo library needs none of this and is
+        // left alone. APIS.withCapture also covers our own call holding the camera, which is what
+        // the check that used to be here did.
+        guard sourceView == .imageCamera || sourceView == .videoCamera else {
+            openPicker(source: sourceView)
             return
         }
+        // A video from the camera records sound, so it needs the microphone as well; a photo
+        // does not.
+        APIS.withCapture(sourceView == .videoCamera ? .cameraAndMicrophone : .camera) { [weak self] in
+            self?.openPicker(source: sourceView)
+        }
+    }
+
+    private func openPicker(source sourceView: Source) {
         if UIBarButtonItem.appearance().titleTextAttributes(for: .normal) != nil {
             isBlackCancelButton = UIBarButtonItem.appearance().titleTextAttributes(for: .normal)?.values.first as! NSObject == UIColor.black
         }

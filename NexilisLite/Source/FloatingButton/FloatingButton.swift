@@ -288,7 +288,7 @@ public class FloatingButton: UIView, UIGestureRecognizerDelegate {
         if urlFb.isEmpty {
             return
         }
-        let task = URLSession.shared.dataTask(with: URL(string: (urlFb))!) { dataImage, response, error in
+        let task = Utils.sharedSession.dataTask(with: URL(string: (urlFb))!) { dataImage, response, error in
             if let error = error {
                 print("Failed to load data: \(error)")
                 return

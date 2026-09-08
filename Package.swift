@@ -42,7 +42,11 @@ let package = Package(
         .package(url: "https://github.com/sqlcipher/SQLCipher.swift.git", from: "4.11.0"),
         // Its own package, so an app that also depends on nuSDKService directly
         // does not collide with this one on a duplicate target name.
-        .package(url: "https://github.com/alqindiirsyam-es/nuSDKService.git", from: "5.0.2")
+        .package(url: "https://github.com/alqindiirsyam-es/nuSDKService.git", from: "5.0.2"),
+        // Sentinel/ZTA hardening. NexilisLite's public API names its types
+        // (APIS.configureSentinel takes a NexilisZTAConfiguration), so it is a
+        // declared dependency rather than something a consumer can do without.
+        .package(url: "https://github.com/alqindiirsyam-es/NexilisZTA.git", from: "1.3.0")
     ],
     targets: [
         // MARK: - Vendored dependencies (no upstream SPM support)
@@ -81,6 +85,7 @@ let package = Package(
             name: "NexilisLite",
             dependencies: [
                 .product(name: "nuSDKService", package: "nuSDKService"),
+                .product(name: "NexilisZTA", package: "NexilisZTA"),
                 "FMDB",
                 "Popover",
                 "Alamofire",

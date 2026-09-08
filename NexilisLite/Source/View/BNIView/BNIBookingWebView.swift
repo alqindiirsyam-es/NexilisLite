@@ -11,6 +11,7 @@ import WebKit
 import Speech
 import CommonCrypto
 import nuSDKService
+import NexilisZTA
 @_implementationOnly import NotificationBannerSwift
 public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScrollViewDelegate, UIGestureRecognizerDelegate, WKScriptMessageHandler, SFSpeechRecognizerDelegate, ImageVideoPickerDelegate {
     var webView: WKWebView!
@@ -62,7 +63,11 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
         let backButton = UIBarButtonItem(image: UIImage(systemName: "chevron.backward"), style: .plain, target: self, action: #selector(self.didTapExit))
         self.navigationItem.leftBarButtonItem = backButton
         
-        let configuration = WKWebViewConfiguration()
+        // Hardened at the source instead of a bare WKWebViewConfiguration: fraudulent-website
+        // warning on, no window the page opens by itself, JavaScript on because this page is
+        // the app's own and its bridge needs it. See SecureWebViewFactory for what a page
+        // without a bridge gets instead.
+        let configuration = SecureWebViewFactory.firstPartyBridgeConfig()
         configuration.allowsInlineMediaPlayback = true
         loadContentBlocker(into: configuration) { [self] in
             DispatchQueue.main.async {
@@ -872,15 +877,10 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
             return
         }
         if !audioEngine.isRunning {
-            let goAudioCall = Nexilis.checkMicPermission()
-            if !goAudioCall{
-                let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow microphone permission in your settings".localized(), preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {_ in
-                    if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                    }
-                }))
-                self.navigationController?.present(alert, animated: true, completion: nil)
+            // Asked through the one gate, so the wording and the way out are the same everywhere -
+            // see APIS.showMicrophoneRefused.
+            guard Nexilis.checkMicPermission() else {
+                APIS.showMicrophoneRefused()
                 return
             }
             alertController = LibAlertController(title: "Start Recording".localized(), message: "Say something, I'm listening!".localized(), preferredStyle: .alert)
@@ -1034,25 +1034,43 @@ public class BNIBookingWebView: UIViewController, WKNavigationDelegate, UIScroll
 
             DispatchQueue.main.async {
                 if isValid {
-                    self.allowedURLs.insert(url.absoluteString)
-                    self.loadingURL = false
-//                    print("return 6 \(url.absoluteString)")
-                    decisionHandler(.allow)
-                } else {
+                    // The chain is valid. Whether this app knows the host is a separate question,
+                    // and the one the reader answers: a pinned host is verified by pin, a host the
+                    // reader approved before is remembered, and anything else is asked about once.
                     let host = url.host ?? ""
-                    // Fix: delegates to CertificatePinningHelper.swift - domain is
-                    // now rendered bold+underlined in the alert message, and the
-                    // "Yes" action correctly writes back the current pin storage
-                    // format (array of hashes per domain) instead of silently
-                    // failing when it's no longer a single-string dictionary.
-                    let alert = CertificatePinningHelper.buildUntrustedCertificateAlert(
+                    if CertificatePinningHelper.isHostTrustedForNavigation(host) {
+                        self.allowedURLs.insert(url.absoluteString)
+                        self.loadingURL = false
+                        decisionHandler(.allow)
+                        return
+                    }
+                    let unknown = CertificatePinningHelper.buildUnknownURLAlert(
                         domain: host,
-                        blockedCertificateHash: self.blockedCertificate,
-                        onTrust: {
+                        onApprove: {
                             self.allowedURLs.insert(url.absoluteString)
                             self.loadingURL = false
                             decisionHandler(.allow)
                         },
+                        onCancel: {
+                            self.loadingURL = false
+                            decisionHandler(.cancel)
+                        }
+                    )
+                    if self.presentedViewController == nil {
+                        self.present(unknown, animated: true, completion: nil)
+                    } else {
+                        // No prompt means no approval. Refusing is the only answer that does not
+                        // decide on the reader's behalf.
+                        self.loadingURL = false
+                        decisionHandler(.cancel)
+                    }
+                } else {
+                    let host = url.host ?? ""
+                    // Pin mismatches on protected hosts are terminal for this navigation.
+                    // There is deliberately no trust/continue closure to re-wire later.
+                    let alert = CertificatePinningHelper.buildUntrustedCertificateAlert(
+                        domain: host,
+                        blockedCertificateHash: self.blockedCertificate,
                         onCancel: {
                             self.loadingURL = false
                             decisionHandler(.cancel)
@@ -1107,38 +1125,37 @@ enum CertificatePinningHelper {
     }
 
     static func evaluate(challenge: URLAuthenticationChallenge) -> EvaluationResult {
-        guard let serverTrust = challenge.protectionSpace.serverTrust else {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let serverTrust = challenge.protectionSpace.serverTrust else {
+            return EvaluationResult(disposition: .performDefaultHandling, credential: nil, mismatchedHash: nil)
+        }
+
+        var trustError: CFError?
+        guard SecTrustEvaluateWithError(serverTrust, &trustError) else {
             return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: nil)
         }
 
-        guard let publicKeyHash = extractPublicKeyHash(from: serverTrust) else {
-            return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: nil)
+        let domain = challenge.protectionSpace.host.lowercased()
+        guard RASPGuard.shared().isPinnedHost(domain) else {
+            // A generic browser may visit arbitrary public sites. Those are protected by normal
+            // platform PKI/ATS; they must never become trusted by writing a local pin override.
+            return EvaluationResult(disposition: .useCredential,
+                                    credential: URLCredential(trust: serverTrust),
+                                    mismatchedHash: nil)
         }
 
-        let domain = challenge.protectionSpace.host
-        let storedCertificate = Utils.getCertificatePinningWebview()
-        guard let jsonData = storedCertificate.data(using: .utf8) else {
-            // Fix: fail closed instead of never calling completionHandler at all.
-            return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: nil)
+        let hash = extractPublicKeyHash(from: serverTrust)
+        if RASPGuard.shared().serverTrust(serverTrust, matchesPinnedSPKIForHost: domain)
+            || PinSetStore.matches(trust: serverTrust, host: domain) {
+            return EvaluationResult(disposition: .useCredential,
+                                    credential: URLCredential(trust: serverTrust),
+                                    mismatchedHash: nil)
         }
 
-        // Fix: accept either the new array-of-hashes format (rotation-safe) or the
-        // legacy single-hash-string format, so a device that still has the old format
-        // cached doesn't get hard-locked-out mid-migration.
-        let acceptedHashes: [String]
-        if let certJsonArray = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: [String]] {
-            acceptedHashes = certJsonArray[domain] ?? []
-        } else if let certJsonLegacy = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
-            acceptedHashes = certJsonLegacy[domain].map { [$0] } ?? []
-        } else {
-            return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: nil)
-        }
-
-        if acceptedHashes.contains(publicKeyHash) {
-            return EvaluationResult(disposition: .useCredential, credential: URLCredential(trust: serverTrust), mismatchedHash: nil)
-        } else {
-            return EvaluationResult(disposition: .cancelAuthenticationChallenge, credential: nil, mismatchedHash: publicKeyHash)
-        }
+        RASPGuard.shared().reportPinningFailure(forHost: domain)
+        return EvaluationResult(disposition: .cancelAuthenticationChallenge,
+                                credential: nil,
+                                mismatchedHash: hash)
     }
 
     // MARK: - SPKI hashing
@@ -1240,8 +1257,91 @@ enum CertificatePinningHelper {
     /// itself is still an NSObject/KVC-compliant class accepting unknown keys through
     /// its underlying key-value coding without raising for this specific case (Apple
     /// has kept `attributedMessage` stable since iOS 9).
-    static func buildUntrustedCertificateAlert(domain: String, blockedCertificateHash: String?, onTrust: @escaping () -> Void, onCancel: @escaping () -> Void) -> UIAlertController {
-        let template = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nDo you wish to proceed to <<domain>> and trust the website's security certificate?\n\nNote: Adding a website to the trusted list may increase your risk of security vulnerability".localized()
+    static func buildUntrustedCertificateAlert(domain: String, blockedCertificateHash: String?, onCancel: @escaping () -> Void) -> UIAlertController {
+        let template = "You're about to access a website that is not currently trusted by your Nexilis Browser. This website's security certificate is not recognized.\n\nThe connection to <<domain>> has been blocked because its security certificate does not match the trusted pin.".localized()
+        let messageText = template.replacingOccurrences(of: "<<domain>>", with: domain)
+
+        let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
+                                       message: messageText,
+                                       preferredStyle: .alert)
+
+        let attributedMessage = NSMutableAttributedString(string: messageText)
+        if let range = messageText.range(of: domain) {
+            let nsRange = NSRange(range, in: messageText)
+            attributedMessage.addAttributes([
+                .font: UIFont.boldSystemFont(ofSize: 13),
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ], range: nsRange)
+        }
+        alert.setValue(attributedMessage, forKey: "attributedMessage")
+
+        // A pin mismatch on a protected host is never user-overridable. Persisting the
+        // presented attacker key as a new pin turned a single click into permanent MITM trust.
+        alert.addAction(UIAlertAction(title: "Close".localized(), style: .cancel) { _ in onCancel() })
+        return alert
+    }
+
+    // MARK: - Unknown-URL prompt
+    //
+    // Nothing here changes what is trusted or what is checked. `evaluate` above is the whole of
+    // that, and it is unchanged: the pinned hosts are verified against the pin set, every other
+    // host is verified by platform PKI and ATS, and no answer the reader gives is written anywhere
+    // that certificate validation can read. The prompt is a warning, not a trust decision.
+    //
+    // The reader's yes lives in memory for the life of the process and is forgotten on relaunch.
+    // The predecessor of this code persisted it, and persisted it as a certificate hash treated
+    // afterwards as that host's pin - so one tap on an attacker's page bought permanent trust for
+    // the domain. Persisting anything here is what made that possible, so nothing is persisted.
+    private static let approvalLock = NSLock()
+    private static var approvedHostsThisSession = Set<String>()
+
+    /// Whether this host may be opened without asking the reader.
+    ///
+    /// The log line is here rather than at the eight call sites, and it is the quickest way to
+    /// answer "why did no prompt appear": a host on `nexilis.io` or `newuniverse.io` is pinned, so
+    /// it is verified by pin and never asked about. The app's own tab pages are on exactly those
+    /// domains, which is why opening a tab for the first time shows nothing.
+    static func isHostTrustedForNavigation(_ host: String) -> Bool {
+        let wanted = host.lowercased()
+        guard !wanted.isEmpty else { return false }
+        if RASPGuard.shared().isPinnedHost(wanted) {
+            NXLogger.network.publicInfo("[WebView] \(wanted): pinned host, no prompt")
+            return true
+        }
+        approvalLock.lock()
+        let approved = approvedHostsThisSession.contains(wanted)
+        approvalLock.unlock()
+        NXLogger.network.publicInfo("[WebView] \(wanted): \(approved ? "approved this session, no prompt" : "unknown host, prompting")")
+        return approved
+    }
+
+    private static func rememberApprovalForSession(_ host: String) {
+        let wanted = host.lowercased()
+        guard !wanted.isEmpty else { return }
+        approvalLock.lock()
+        approvedHostsThisSession.insert(wanted)
+        approvalLock.unlock()
+    }
+
+    /// Forgets every approval made in this process, so the reader is asked again.
+    static func forgetSessionApprovals() {
+        approvalLock.lock()
+        approvedHostsThisSession.removeAll()
+        approvalLock.unlock()
+    }
+
+    /// The "Warning Unknown Url!" prompt, for a host outside the pinned set whose certificate
+    /// chain is otherwise valid.
+    ///
+    /// Approving records the host, never the certificate. That is the difference from the version
+    /// this replaces: the old one wrote the key the site happened to present in as that host's
+    /// pin, so one tap on an attacker's page bought permanent trust for the domain. Here nothing
+    /// about validation changes, so a later MITM on an approved host is still refused by platform
+    /// PKI and ATS.
+    static func buildUnknownURLAlert(domain: String,
+                                     onApprove: @escaping () -> Void,
+                                     onCancel: @escaping () -> Void) -> UIAlertController {
+        let template = "You're about to access a website that is not currently trusted by your Nexilis Browser.\n\nDo you wish to proceed to <<domain>>?\n\nNote: only continue if you recognize this address.".localized()
         let messageText = template.replacingOccurrences(of: "<<domain>>", with: domain)
 
         let alert = UIAlertController(title: "Warning Unknown Url!".localized(),
@@ -1259,41 +1359,10 @@ enum CertificatePinningHelper {
         alert.setValue(attributedMessage, forKey: "attributedMessage")
 
         alert.addAction(UIAlertAction(title: "Yes".localized(), style: .default) { _ in
-            if let hash = blockedCertificateHash {
-                trustDomain(domain: domain, hash: hash)
-            }
-            onTrust()
+            rememberApprovalForSession(domain)
+            onApprove()
         })
         alert.addAction(UIAlertAction(title: "No".localized(), style: .cancel) { _ in onCancel() })
         return alert
-    }
-
-    // Fix: the "Yes, trust this site" action used to decode the stored pin JSON as
-    // [String: String] and overwrite the whole thing with a single new hash per
-    // domain. Since the certificate-pinning storage now uses [String: [String]]
-    // (array of accepted hashes per domain - see CHANGELOG #5/#6), that decode would
-    // silently fail (no else branch), meaning "trust this site" stopped working
-    // entirely once a device had the new array-format pin stored. Fixed to read
-    // either format and always write back in the current array format, appending
-    // the new hash rather than dropping whatever else was already pinned.
-    private static func trustDomain(domain: String, hash: String) {
-        let stored = Utils.getCertificatePinningWebview()
-        var dict: [String: [String]] = [:]
-        if let jsonData = stored.data(using: .utf8) {
-            if let arrayFormat = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: [String]] {
-                dict = arrayFormat
-            } else if let legacyFormat = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
-                dict = legacyFormat.mapValues { [$0] }
-            }
-        }
-        var hashesForDomain = dict[domain] ?? []
-        if !hashesForDomain.contains(hash) {
-            hashesForDomain.append(hash)
-        }
-        dict[domain] = hashesForDomain
-        if let jsonData = try? JSONSerialization.data(withJSONObject: dict, options: []),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            Utils.setCertificatePinningWebview(value: jsonString)
-        }
     }
 }

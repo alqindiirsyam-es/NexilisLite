@@ -7,9 +7,10 @@
 //
 
 import Foundation
+import AudioToolbox
 import UIKit
 import FMDB
-@_implementationOnly import NotificationBannerSwift
+import NotificationBannerSwift
 import nuSDKService
 import CoreLocation
 import CryptoKit
@@ -18,6 +19,7 @@ import AVFoundation
 import AVKit
 import PDFKit
 import SDWebImage
+import NexilisZTA
 //import var CommonCrypto.CC_MD5_DIGEST_LENGTH
 //import func CommonCrypto.CC_MD5
 //import typealias CommonCrypto.CC_LONG
@@ -390,32 +392,10 @@ public final class Utils {
         return dateFormatter.string(from: todaysDate as Date)
     }
     
-    public static func setCertificatePinningWebview(value: String) {
-        SecureUserDefaults.shared.set(value, forKey: "pb_certificate_pinning_webview")
-    }
+    // Sentinel remediation (NX-11/NX-14): certificate trust is never persisted in mutable
+    // application preferences. First-party trust comes only from the configured pin floor and
+    // signature-verified rotation envelopes in NexilisZTA.PinSetStore.
 
-    public static func getCertificatePinningWebview() -> String {
-        if let value: String = SecureUserDefaults.shared.value(forKey: "pb_certificate_pinning_webview") {
-            return value
-        }
-        return ""
-    }
-
-    // Fix: the hardcoded default pin used to only ever get written once
-    // (`if getCertificatePinningWebview().isEmpty`). That meant any device that had
-    // already run the app even a single time kept whatever value was seeded back
-    // then FOREVER - a corrected/updated default in a later app version would never
-    // reach existing installs. This version counter lets `connect()` detect "the
-    // hardcoded default changed since what's on this device" and force a refresh,
-    // without needing to wipe the user's other stored settings.
-    public static func setCertificatePinningSeedVersion(_ version: Int) {
-        SecureUserDefaults.shared.set(version, forKey: "pb_certificate_pinning_seed_version")
-    }
-
-    public static func getCertificatePinningSeedVersion() -> Int {
-        return SecureUserDefaults.shared.value(forKey: "pb_certificate_pinning_seed_version") ?? 0
-    }
-    
     public static func setWhitelistFileExt(value: String) {
         SecureUserDefaults.shared.set(value, forKey: "pb_whitelist_file_ext")
     }
@@ -632,7 +612,10 @@ public final class Utils {
             if chat.messageScope == "18" {
                 return showNSMutableAttributedString(("📄 Form"))
             }
-            let nameFile = chat.messageText.components(separatedBy: "|")[0]
+            // Fix: read straight off the front of message_text, so a document that arrived
+            // without a name in there left the chat list showing a bare page icon and nothing
+            // beside it. The same place the bubble asks knows where else to look.
+            let nameFile = Utils.documentName(messageText: chat.messageText, file: chat.file)
             let dataText = chat.messageText.component(1, separatedBy: "|")
             if !dataText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return ("📄 " + dataText).richText(group_id: chat.pin)
@@ -812,6 +795,27 @@ public final class Utils {
         return "0"
     }
     
+    /// Which envelope the server expects for secure-folder payloads: "1" legacy fixed-IV,
+    /// "2" NXG1 random-nonce.
+    ///
+    /// This exists because the obvious signal - "has the server stopped sending an IV?" - is not
+    /// available. `secure_folder_encrypt_key_iv` is also half the SQLCipher password (see
+    /// Database.setDBInstance, which keys with `key + keyIv`), so clearing it server-side to move
+    /// a host onto NXG1 would take its database with it. The two decisions need two switches.
+    ///
+    /// Defaults to legacy, so a server that never sends this leaves every host exactly where it
+    /// is today.
+    public static func setSecureFolderEnvelope(value: String) {
+        SecureUserDefaults.shared.set(value, forKey: "secure_folder_envelope")
+    }
+
+    public static func getSecureFolderEnvelope() -> String {
+        if let value: String = SecureUserDefaults.shared.value(forKey: "secure_folder_envelope") {
+            return value
+        }
+        return "1"
+    }
+
     public static func setTOTPSecret(value: String) {
         SecureUserDefaults.shared.set(value, forKey: "totp_secret")
     }
@@ -839,6 +843,10 @@ public final class Utils {
         request.httpMethod = "GET"
         request.setValue(Utils.getUserAgent(), forHTTPHeaderField: "User-Agent")
         request.setValue(Utils.getCookiesMobile(), forHTTPHeaderField: "Cookie")
+        guard SentinelSecurityGate.attachAuthorization(to: &request) else {
+            completion(nil, nil, NSError(domain: "NexilisSentinel", code: -7201, userInfo: [NSLocalizedDescriptionKey: "Sentinel authorization is not valid"]))
+            return
+        }
         //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
         let task = self.sharedSession.dataTask(with: request, completionHandler: completion)
         task.resume()
@@ -904,6 +912,10 @@ public final class Utils {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
         }
         request.httpBody = jsonData
+        guard SentinelSecurityGate.attachAuthorization(to: &request) else {
+            completion(nil, nil, NSError(domain: "NexilisSentinel", code: -7201, userInfo: [NSLocalizedDescriptionKey: "Sentinel authorization is not valid"]))
+            return
+        }
         //print("DATA SEND MOBILE \(Utils.getUserAgent()) <> \(Utils.getCookiesMobile())")
         let task = session.dataTask(with: request, completionHandler: completion)
         task.resume()
@@ -3542,6 +3554,16 @@ public class SecureUserDefaults {
         cache.removeValue(forKey: key)
         cacheLock.unlock()
     }
+
+    /// Duress/tamper wipe: remove both persistent ciphertext and already-decrypted process cache.
+    public func clearAllStoredValues() {
+        cacheLock.lock()
+        cache.removeAll(keepingCapacity: false)
+        cacheLock.unlock()
+        if let bundleID = Bundle.main.bundleIdentifier {
+            defaults.removePersistentDomain(forName: bundleID)
+        }
+    }
 }
 
 public class MessageScope {
@@ -3609,6 +3631,12 @@ class SecureField : UITextField {
 /// nothing has to be torn down and set up again on the way past.
 final class MediaPageCell: UICollectionViewCell, UIScrollViewDelegate {
     let zoomView = UIScrollView()
+    /// Called whenever this page is zoomed or panned.
+    ///
+    /// A video's player is a layer of the viewer's own, held above the pages rather than inside
+    /// one - so it hears nothing about a pinch on the page beneath it. This is how it is told:
+    /// the poster is what the page zooms, and the player is put wherever the poster goes.
+    var onZoomChanged: (() -> Void)?
     let imageView = SDAnimatedImageView()
     private let videoBadge = UIImageView(image: UIImage(systemName: "play.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 56, weight: .regular)))
     private var loadingName: String?
@@ -3658,6 +3686,7 @@ final class MediaPageCell: UICollectionViewCell, UIScrollViewDelegate {
         zoomView.setZoomScale(1.0, animated: false)
         imageView.image = nil
         loadingName = nil
+        onZoomChanged = nil
     }
 
     /// Video pages show their poster here; the player itself belongs to the screen, which puts
@@ -3730,6 +3759,13 @@ final class MediaPageCell: UICollectionViewCell, UIScrollViewDelegate {
         let vertical = size.height < bounds.height ? (bounds.height - size.height) / 2 : 0
         let horizontal = size.width < bounds.width ? (bounds.width - size.width) / 2 : 0
         scrollView.contentInset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
+        onZoomChanged?()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // Panning a picture that has been zoomed in moves it under the reader's finger, and a
+        // video has to travel with it.
+        onZoomChanged?()
     }
 }
 
@@ -3854,6 +3890,9 @@ extension MediaViewerViewController: UICollectionViewDataSource, UICollectionVie
         if collectionView === pager {
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "page", for: indexPath)
             (cell as? MediaPageCell)?.configure(with: item, isVideoHost: indexPath.item == currentStripIndex)
+            (cell as? MediaPageCell)?.onZoomChanged = { [weak self] in
+                self?.positionVideoHost()
+            }
             return cell
         }
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "strip", for: indexPath)
@@ -4075,6 +4114,16 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         tap.cancelsTouchesInView = false
         tap.delegate = self
         view.addGestureRecognizer(tap)
+
+        // Double tap to zoom, the way WhatsApp does it: in on the spot that was tapped, and out
+        // again on the next one. The single tap waits for this to fail, so a double tap no
+        // longer flickers the chrome on its way to zooming.
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapZoom(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.cancelsTouchesInView = false
+        doubleTap.delegate = self
+        view.addGestureRecognizer(doubleTap)
+        tap.require(toFail: doubleTap)
 
         // Pan gesture for swipe-to-dismiss
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
@@ -4379,11 +4428,83 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     /// until the scroll settled - which is what made leaving a video look broken rather than
     /// merely slow. It now tracks its page exactly, and slides away with it.
     private func positionVideoHost() {
-        guard videoPageIndex >= 0, pager != nil, pager.bounds.width > 0 else {
+        // Fix: the player was placed over the whole page and left there, so a pinch zoomed the
+        // page underneath it - the poster - while the video itself stayed exactly where it was.
+        // What the reader saw growing was the still behind the video. The player is put on the
+        // poster's own rectangle now, so the two are one thing: zoom the page and the video
+        // zooms, drag it and the video travels with it.
+        guard pager != nil, !stripItems.isEmpty else {
+            // Opened on a single item, with no pages to turn: the screen's own scroll view is
+            // what zooms, and its picture is what the player follows.
+            if imageView.superview != nil {
+                setVideoHostFrame(scrollView.convert(imageView.frame, to: view))
+            }
             return
         }
+        guard videoPageIndex >= 0, pager.bounds.width > 0 else {
+            return
+        }
+        if let cell = pager.cellForItem(at: IndexPath(item: videoPageIndex, section: 0)) as? MediaPageCell {
+            setVideoHostFrame(cell.zoomView.convert(cell.imageView.frame, to: view))
+            return
+        }
+        // The page is not built yet - off screen, or mid-swipe. Its own rectangle is still known.
         let x = CGFloat(videoPageIndex) * pager.bounds.width - pager.contentOffset.x
-        videoHost.frame = CGRect(x: x, y: 0, width: view.bounds.width, height: view.bounds.height)
+        setVideoHostFrame(CGRect(x: x, y: 0, width: view.bounds.width, height: view.bounds.height))
+    }
+
+    /// Whether the picture on screen is zoomed in past its resting size.
+    private var isCurrentPageZoomed: Bool {
+        if pager != nil, !stripItems.isEmpty,
+           let cell = pager.cellForItem(at: IndexPath(item: currentStripIndex, section: 0)) as? MediaPageCell {
+            return cell.zoomView.zoomScale > cell.zoomView.minimumZoomScale + 0.01
+        }
+        return scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
+    }
+
+    /// Zooms in on what was double tapped, and back out when it is double tapped again.
+    ///
+    /// The point matters: zooming to the middle of the screen puts whatever the reader was
+    /// pointing at somewhere else entirely. What they tapped is what ends up under their finger.
+    @objc private func handleDoubleTapZoom(_ gesture: UITapGestureRecognizer) {
+        let zoom: UIScrollView
+        let content: UIView
+        if pager != nil, !stripItems.isEmpty,
+           let cell = pager.cellForItem(at: IndexPath(item: currentStripIndex, section: 0)) as? MediaPageCell {
+            zoom = cell.zoomView
+            content = cell.imageView
+        } else {
+            zoom = scrollView
+            content = imageView
+        }
+        guard zoom.isUserInteractionEnabled, zoom.maximumZoomScale > zoom.minimumZoomScale else {
+            return
+        }
+        if zoom.zoomScale > zoom.minimumZoomScale + 0.01 {
+            zoom.setZoomScale(zoom.minimumZoomScale, animated: true)
+            return
+        }
+        let point = gesture.location(in: content)
+        let scale = zoom.maximumZoomScale
+        let size = CGSize(width: zoom.bounds.width / scale, height: zoom.bounds.height / scale)
+        zoom.zoom(to: CGRect(x: point.x - size.width / 2,
+                             y: point.y - size.height / 2,
+                             width: size.width,
+                             height: size.height),
+                  animated: true)
+    }
+
+    private func setVideoHostFrame(_ frame: CGRect) {
+        guard frame.width > 0, frame.height > 0 else {
+            return
+        }
+        videoHost.frame = frame
+        // No implicit animation: a layer resized inside a pinch would arrive a frame behind the
+        // fingers doing the pinching.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer?.frame = videoHost.bounds
+        CATransaction.commit()
     }
 
     /// The picture on screen right now, for a transition to grow out of or shrink back into.
@@ -4822,6 +4943,11 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else {
             return true
         }
+        // Not while the picture is zoomed in: the drag is the reader moving around inside it,
+        // and taking the viewer away from under them would be the last thing they asked for.
+        if isCurrentPageZoomed {
+            return false
+        }
         // Downwards only. Anything more sideways than down is the reader turning a page, and
         // the pager is already listening for it.
         let velocity = pan.velocity(in: view)
@@ -4858,7 +4984,9 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         layoutVideoControls()
         layoutTopScrim()
         layoutStripInsets()
-        playerLayer?.frame = view.bounds
+        // Fix: this put the player back across the whole screen on every layout pass, undoing the
+        // placement that keeps it on its own page - and, now, on the poster it is zoomed with.
+        positionVideoHost()
     }
 
     /// Lets the first and the last thumbnail reach the middle of the strip.
@@ -5450,6 +5578,7 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         let vertical = size.height < bounds.height ? (bounds.height - size.height) / 2 : 0
         let horizontal = size.width < bounds.width ? (bounds.width - size.width) / 2 : 0
         scrollView.contentInset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
+        positionVideoHost()
     }
 
     /// The strip follows the pager as it moves, not once it has arrived: how far along the
@@ -8142,31 +8271,129 @@ public final class VoiceNoteBar: UIView, AVAudioRecorderDelegate, AVAudioPlayerD
 
     // MARK: Recording
 
-    public func begin(completion: @escaping (Bool) -> Void) {
+    /// Why a recording could not be started.
+    ///
+    /// Fix: this used to answer with a plain true or false, and the screens above it reported
+    /// every false as "Microphone access is needed to record". Three quite different things
+    /// produce a false - a call holding the microphone, permission actually refused, and the
+    /// audio session refusing to go active - so the one message the reader got was right by luck
+    /// at best, and there is no console on a device to tell them apart with. Each says what it is.
+    public enum StartFailure {
+        /// Permission refused, or never granted. The only one Settings can fix.
+        case denied
+        /// Something else holds the microphone - a call, most likely.
+        case busy
+        /// The microphone is ours to use and iOS still would not start it.
+        case audioSessionRefused
+        /// Another app is holding the microphone - a call in WhatsApp, or the phone itself.
+        /// Nothing in Settings changes this; the other call has to end.
+        case heldByAnotherApp
+    }
+
+    public func begin(completion: @escaping (StartFailure?) -> Void) {
         // The last word on the microphone, whoever asked and from where: a call has it.
         if APIS.blockedByCallInProgress() {
-            completion(false)
+            completion(.busy)
             return
         }
-        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+        VoiceNoteBar.askMicrophone { [weak self] granted in
+            // Back on the main thread here, and only here: the answer arrives on a queue of
+            // iOS's own, and everything below it is UI and an audio session.
             DispatchQueue.main.async {
-                guard granted, let self = self, self.start() else {
-                    completion(false)
-                    return
-                }
-                completion(true)
+            guard granted else {
+                completion(.denied)
+                return
+            }
+            guard let self = self else {
+                completion(.audioSessionRefused)
+                return
+            }
+            switch self.start() {
+            case .started:
+                completion(nil)
+            case .heldByAnotherApp:
+                completion(.heldByAnotherApp)
+            case .refused:
+                completion(.audioSessionRefused)
+            }
             }
         }
     }
 
+    /// Asks for the microphone, through whichever API this system has.
+    ///
+    /// AVAudioSession's own request is the one that was here, and it is the one Apple replaced in
+    /// iOS 17 - AVAudioApplication owns this now. The older call still works, but the newer one is
+    /// what the system is built around, so it is the one asked where there is one.
+    /// The answer arrives on whichever queue iOS chooses, and it is left there.
+    ///
+    /// Fix: this used to hand the answer on with DispatchQueue.main.async, which looks harmless
+    /// and is not: Nexilis.checkMicPermission waits on a semaphore for this answer, and it is
+    /// called from button handlers on the main thread. Dispatching the answer to a main queue
+    /// that is blocked waiting for it is a deadlock - the app freezes for good, on the one path
+    /// where the microphone had never been asked for. Whoever needs the main thread now says so
+    /// where they need it.
+    static func askMicrophone(_ answer: @escaping (Bool) -> Void) {
+        if #available(iOS 17.0, *) {
+            AVAudioApplication.requestRecordPermission(completionHandler: answer)
+        } else {
+            AVAudioSession.sharedInstance().requestRecordPermission(answer)
+        }
+    }
+
+    /// Where the microphone permission stands.
+    ///
+    /// Its own three answers rather than either framework's, because the type that carries them
+    /// belongs to iOS 17 and this app runs on 15 - naming it in a signature would drag the whole
+    /// call behind an availability check for no reason.
+    enum MicrophoneStatus {
+        case granted
+        case denied
+        case notAsked
+    }
+
+    static var microphoneStatus: MicrophoneStatus {
+        if #available(iOS 17.0, *) {
+            switch AVAudioApplication.shared.recordPermission {
+            case .granted: return .granted
+            case .denied: return .denied
+            default: return .notAsked
+            }
+        }
+        switch AVAudioSession.sharedInstance().recordPermission {
+        case .granted: return .granted
+        case .denied: return .denied
+        default: return .notAsked
+        }
+    }
+
+    /// Whether the microphone has already been refused, so the screen can offer Settings rather
+    /// than asking again - a refused permission is never asked for a second time by iOS.
+    static var microphoneRefused: Bool {
+        return microphoneStatus == .denied
+    }
+
+    /// What happened when the microphone was asked for.
+    enum Started {
+        case started
+        /// Another app has the microphone. iOS says which of its refusals this is; see
+        /// APIS.isMicrophoneHeldElsewhere.
+        case heldByAnotherApp
+        case refused
+    }
+
     @discardableResult
-    private func start() -> Bool {
+    private func start() -> Started {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
             try session.setActive(true)
         } catch {
-            return false
+            // Fix: every failure here was one failure, and the screen above reported all of them
+            // as a permission problem. A call in another app takes the microphone exclusively and
+            // iOS refuses this outright - which is not permission, and is not something Settings
+            // can put right. iOS says as much in the error; it was being thrown away.
+            return APIS.isMicrophoneHeldElsewhere(error) ? .heldByAnotherApp : .refused
         }
         let name = "VoiceNote_\(Date().currentTimeMillis())_\(segments.count).m4a"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
@@ -8181,11 +8408,11 @@ public final class VoiceNoteBar: UIView, AVAudioRecorderDelegate, AVAudioPlayerD
             made.delegate = self
             made.isMeteringEnabled = true
             guard made.record() else {
-                return false
+                return .refused
             }
             recorder = made
         } catch {
-            return false
+            return APIS.isMicrophoneHeldElsewhere(error) ? .heldByAnotherApp : .refused
         }
         isPaused = false
         applyLayout(forPaused: false)
@@ -8194,7 +8421,7 @@ public final class VoiceNoteBar: UIView, AVAudioRecorderDelegate, AVAudioPlayerD
         meter = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             self?.tick()
         }
-        return true
+        return .started
     }
 
     private func tick() {
@@ -8592,7 +8819,12 @@ public enum AudioDurationStore {
         guard let url = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
             return nil
         }
-        let found = Int(CMTimeGetSeconds(AVURLAsset(url: url).duration).rounded())
+        var found = Int(CMTimeGetSeconds(AVURLAsset(url: url).duration).rounded())
+        if found <= 0 {
+            // A bare AAC stream from Android, which AVURLAsset will not open at all - see
+            // RawAudioLevels. Without this the quote said "Voice Message" with no length after it.
+            found = RawAudioLevels.seconds(url: url) ?? 0
+        }
         guard found > 0 else {
             return nil
         }
@@ -8832,8 +9064,24 @@ public final class AudioBubbleContent: UIView {
     /// a five-minute one are the same width, and only the drawing inside them differs.
     public static let trackWidth: CGFloat = 132
 
-    public init(incoming: Bool, isVoiceNote: Bool, bubbleColour: UIColor, traits: UITraitCollection, fontOffset: CGFloat) {
+    /// Whether the line runs to the row's own trailing edge instead of keeping the fixed length.
+    ///
+    /// A bubble wants the fixed length: a five-second note and a five-minute one are the same
+    /// width there, and two screens showing the same note come out the same size. A row in a list
+    /// wants the opposite - it has a panel's whole width to fill, and the reference fills it, so
+    /// the waveform there runs to the right-hand edge.
+    private let stretchesTrack: Bool
+
+    public init(incoming: Bool,
+                isVoiceNote: Bool,
+                bubbleColour: UIColor,
+                traits: UITraitCollection,
+                fontOffset: CGFloat,
+                stretchesTrack: Bool = false) {
         self.isVoiceNote = isVoiceNote
+        // Only for a row laid out the reader's way round: a mirrored one gives its trailing edge
+        // to the sender's picture, so there is nothing there for a line to run to.
+        self.stretchesTrack = stretchesTrack && !incoming
         super.init(frame: .zero)
         backgroundColor = .clear
         // The picture stands 44pt and would otherwise sit hard against the top and bottom of the
@@ -8936,7 +9184,17 @@ public final class AudioBubbleContent: UIView {
             // The waveform is the track: the slider keeps the thumb and every bit of the seeking it
             // already did, and simply stops drawing a line of its own.
             addSubview(wave)
-            wave.anchor(left: playButton.rightAnchor, paddingLeft: 12, centerY: centerYAnchor, width: AudioBubbleContent.trackWidth, height: 26)
+            wave.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                wave.leadingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: 12),
+                wave.centerYAnchor.constraint(equalTo: centerYAnchor),
+                wave.heightAnchor.constraint(equalToConstant: 26)
+            ])
+            if self.stretchesTrack {
+                wave.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+            } else {
+                wave.widthAnchor.constraint(equalToConstant: AudioBubbleContent.trackWidth).isActive = true
+            }
             slider.minimumTrackTintColor = .clear
             slider.maximumTrackTintColor = .clear
         } else {
@@ -8946,7 +9204,17 @@ public final class AudioBubbleContent: UIView {
             slider.setMaximumTrackImage(Utils.sliderTrack(colour: onDarkBubble ? UIColor(white: 1, alpha: 0.18) : UIColor(white: 0, alpha: 0.15)), for: .normal)
         }
         addSubview(slider)
-        slider.anchor(left: playButton.rightAnchor, paddingLeft: 12, centerY: centerYAnchor, width: AudioBubbleContent.trackWidth, height: 26)
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            slider.leadingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: 12),
+            slider.centerYAnchor.constraint(equalTo: centerYAnchor),
+            slider.heightAnchor.constraint(equalToConstant: 26)
+        ])
+        if self.stretchesTrack {
+            slider.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+        } else {
+            slider.widthAnchor.constraint(equalToConstant: AudioBubbleContent.trackWidth).isActive = true
+        }
         // Fix: the line used to be pinned to both ends of the row, which gave the row no width of
         // its own at all - so how wide the bubble came out was decided by the message label behind
         // it, which is hidden and has nothing to do with the audio. Two screens showing the same
@@ -8955,7 +9223,10 @@ public final class AudioBubbleContent: UIView {
         if incoming {
             avatarBox.leadingAnchor.constraint(equalTo: slider.trailingAnchor, constant: 12).isActive = true
             avatarBox.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
-        } else {
+        } else if !self.stretchesTrack {
+            // Only when the line is a known length. A stretching one takes its width from whoever
+            // put the row on screen, and asking for both is what leaves the picture stretched into
+            // a stadium while Auto Layout decides which of the two to break.
             trailingAnchor.constraint(equalTo: slider.trailingAnchor).isActive = true
         }
 
@@ -9478,6 +9749,24 @@ public final class VideoTranscoder {
         return Int(min(max(wanted, 600_000), 2_000_000))
     }
 
+    /// The same, but held to a number of bytes the finished file has to come in under.
+    ///
+    /// The budget is the server's - see MessageLimits.videoBytes - and the length is what is
+    /// actually being written, which is the trimmed length rather than the whole clip. A tenth
+    /// is left aside for the container's own bookkeeping and the sound, and there is a floor:
+    /// below about a fifth of a megabit the picture stops being worth sending, so a clip too
+    /// long for its budget is encoded at the floor and reported as still too big rather than
+    /// turned into mud.
+    public static func targetBitrate(for track: AVAssetTrack, fittingBytes maxBytes: Int, seconds: Double, muted: Bool) -> Int {
+        let heuristic = targetBitrate(for: track)
+        guard maxBytes > 0, seconds > 0.1 else {
+            return heuristic
+        }
+        let forSound: Double = muted ? 0 : 64_000
+        let fromBudget = (Double(maxBytes) * 8 * 0.9) / seconds - forSound
+        return Int(min(Double(heuristic), max(fromBudget, 200_000)))
+    }
+
     public init() {}
 
     public func cancel() {
@@ -9486,10 +9775,13 @@ public final class VideoTranscoder {
         writer?.cancelWriting()
     }
 
+    /// `maxBytes` is what the finished file has to fit inside; pass 0 to leave the bitrate to
+    /// the heuristic alone.
     public func start(source: URL,
                destination: URL,
                timeRange: CMTimeRange?,
                muted: Bool,
+               maxBytes: Int = 0,
                progress: @escaping (Double) -> Void,
                completion: @escaping (Bool) -> Void) {
         let asset = AVURLAsset(url: source)
@@ -9524,7 +9816,10 @@ public final class VideoTranscoder {
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: VideoTranscoder.targetBitrate(for: videoTrack),
+                AVVideoAverageBitRateKey: VideoTranscoder.targetBitrate(for: videoTrack,
+                                                                        fittingBytes: maxBytes,
+                                                                        seconds: CMTimeGetSeconds(span.duration),
+                                                                        muted: muted),
                 AVVideoMaxKeyFrameIntervalKey: 60,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
             ]
@@ -9628,6 +9923,8 @@ public enum AudioWaveformStore {
 
     private static var known: [String: [CGFloat]] = [:]
     private static var asking: Set<String> = []
+    /// Files on this device that could not be read at all, so they are not read again and again.
+    private static var unreadable: Set<String> = []
     /// Everyone still waiting on a read that is already running, by file.
     private static var waiting: [String: [([CGFloat]) -> Void]] = [:]
     private static let queue = DispatchQueue(label: "nexilis.waveform", qos: .utility)
@@ -9642,6 +9939,9 @@ public enum AudioWaveformStore {
             completion(already)
             return
         }
+        guard !unreadable.contains(key) else {
+            return
+        }
         // Fix: a second asker arriving while the first read was still running was turned away with
         // nothing - its completion was dropped, and only the first one was ever answered. A bubble
         // rebuilt during the read, which a checkmark landing on a note just sent is enough to do,
@@ -9654,10 +9954,18 @@ public enum AudioWaveformStore {
         asking.insert(key)
         queue.async {
             let found = measure(url: url)
+            let exists = FileManager.default.fileExists(atPath: url.path)
             DispatchQueue.main.async {
                 asking.remove(key)
                 let callers = waiting.removeValue(forKey: key) ?? []
                 guard !found.isEmpty else {
+                    // Fix: nothing was remembered about a failure, so a file that cannot be read
+                    // was opened and read again on every single pass of the row - and a row is
+                    // redrawn for every tick, every download, every reload. Remembered only when
+                    // the file is actually there: one that is still arriving deserves another try.
+                    if exists {
+                        unreadable.insert(key)
+                    }
                     return
                 }
                 known[key] = found
@@ -9670,7 +9978,14 @@ public enum AudioWaveformStore {
         let asset = AVURLAsset(url: url)
         guard let track = asset.tracks(withMediaType: .audio).first,
               let reader = try? AVAssetReader(asset: asset) else {
-            return []
+            // Fix: a voice note recorded on Android is a bare AAC stream - MediaRecorder's
+            // AAC_ADTS, under a name ending .aac - and a bare stream is not a container.
+            // AVURLAsset picks its parser from the file's type and has no parser for one, so it
+            // finds no audio track at all and the line came back empty; nothing else ever asked
+            // again, so those notes drew a blank line for good. AVAudioPlayer sniffs the bytes
+            // instead of the name, which is why the same file plays and shows its length. The
+            // level of a layer below does the same, given a hint about what it is looking at.
+            return RawAudioLevels.measure(url: url)
         }
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
             AVFormatIDKey: Int(kAudioFormatLinearPCM),
@@ -11076,5 +11391,1959 @@ public enum LongMessage {
         return NSAttributedString(string: "\u{2026} " + "Read more".localized(),
                                   attributes: [.foregroundColor: UIColor.mainColor,
                                                .font: UIFont.systemFont(ofSize: fontSize, weight: .medium)])
+    }
+}
+
+/// What the server allows a message to carry: how long the text may be, and how big a picture,
+/// a video or a document may be.
+///
+/// Pulled from the server rather than decided here - see Nexilis.pullInstantMessaging - and kept
+/// on the device so a send never has to wait for the network to find out. Every value falls back
+/// to the same default the Android build uses, so the two behave alike when the server says
+/// nothing: a thousand characters, 250 KB for a picture, two and a half megabytes for a video,
+/// 250 KB for a document.
+///
+/// The numbers from the server are plain bytes for the three attachment kinds and a count of
+/// characters for the text, which is how the server sends them.
+public struct MessageLimits {
+
+    /// What WhatsApp allows, which is what these fall back to when the server says nothing.
+    ///
+    /// A message runs to 65,536 characters there - effectively no limit for anything a person
+    /// types. A picture or a video attached as media is capped at sixteen megabytes, and a file
+    /// attached as a document at two gigabytes, because a document is sent whole while media is
+    /// compressed on the way. The compressing is why a photo sent through WhatsApp lands at a
+    /// few hundred kilobytes and not at the sixteen megabytes it is allowed: the ceiling is a
+    /// ceiling, and the 1280-pixel pass below is what actually does the work.
+    public static let defaultTextCharacters = 65_536
+    public static let defaultImageBytes = 16 * 1024 * 1024
+    public static let defaultVideoBytes = 16 * 1024 * 1024
+    public static let defaultDocumentBytes = 2 * 1024 * 1024 * 1024
+
+    /// How long the text of one message may be, in characters.
+    public static var textCharacters: Int {
+        return stored("subscription_text") ?? defaultTextCharacters
+    }
+
+    /// How big a picture may be once it has been compressed, in bytes.
+    public static var imageBytes: Int {
+        return stored("subscription_image") ?? defaultImageBytes
+    }
+
+    /// How big a video may be once it has been compressed, in bytes.
+    public static var videoBytes: Int {
+        return stored("subscription_video") ?? defaultVideoBytes
+    }
+
+    /// How big a document may be, in bytes. Documents are sent as they are, so this one is a
+    /// limit rather than a target.
+    public static var documentBytes: Int {
+        return stored("subscription_document") ?? defaultDocumentBytes
+    }
+
+    /// A value the server sent, or nothing. Zero means "no limit set", the way it does on the
+    /// Android side, and is treated as nothing.
+    private static func stored(_ key: String) -> Int? {
+        guard let raw: String = SecureUserDefaults.shared.value(forKey: key) else {
+            return nil
+        }
+        guard let value = Double(raw.trimmingCharacters(in: .whitespaces)), value > 0 else {
+            return nil
+        }
+        return Int(value)
+    }
+
+    static func store(_ raw: String, forKey key: String) {
+        SecureUserDefaults.shared.set(raw, forKey: key)
+    }
+
+    /// "250 KB", "16 MB", "2 GB" - what an alert says the limit is.
+    public static func readable(bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .binary
+        formatter.isAdaptive = false
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
+    /// How big a file on disk is, or nothing if it cannot be measured.
+    public static func fileSize(of url: URL) -> Int? {
+        return (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+    }
+
+    /// Compresses a picture down to what the server allows a message to carry.
+    ///
+    /// The one implementation of this in the app - the conversation's attachment screen and the
+    /// share sheet's hand-over both come here, so a picture sent from inside the app and one
+    /// sent from another app come out the same.
+    ///
+    /// Fix: what was here aimed at a megabyte written into the code, and it went about it by
+    /// re-encoding its own output at a fixed quality over and over. Re-encoding a JPEG that has
+    /// already been through the encoder gives back a file of much the same size, so the loop
+    /// either stopped making progress or ran until UIImage refused the data. Each attempt starts
+    /// from the original picture now: quality first, because that costs the least to look at,
+    /// then the size of the picture itself once quality alone cannot get there.
+    public static func compressedImageData(_ image: UIImage, maxBytes: Int? = nil, maxDimension: CGFloat = 1280) -> Data? {
+        let budget = maxBytes ?? imageBytes
+        var dimension = maxDimension
+        var best: Data?
+        // Four rounds of taking a third off the longest edge is enough to bring anything a phone
+        // can take under a quarter of a megabyte.
+        for _ in 0..<4 {
+            let resized = downscaled(image, maxDimension: dimension)
+            for quality in [0.7, 0.55, 0.4, 0.28, 0.18] as [CGFloat] {
+                guard let data = resized.jpegData(compressionQuality: quality) else {
+                    continue
+                }
+                best = data
+                if budget <= 0 || data.count <= budget {
+                    return data
+                }
+            }
+            dimension = (dimension * 0.7).rounded()
+            if dimension < 240 {
+                break
+            }
+        }
+        // Nothing fitted. The smallest thing tried is still better than the original, and the
+        // caller decides whether that is good enough to send.
+        return best
+    }
+
+    /// The picture at no more than `maxDimension` on its longest edge, keeping its proportions.
+    public static func downscaled(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        guard size.width > 0, size.height > 0,
+              max(size.width, size.height) > maxDimension else {
+            return image
+        }
+        let ratio = size.width / size.height
+        let target = ratio > 1
+            ? CGSize(width: maxDimension, height: (maxDimension / ratio).rounded())
+            : CGSize(width: (maxDimension * ratio).rounded(), height: maxDimension)
+        return UIGraphicsImageRenderer(size: target).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+    }
+
+    /// Whether a document on disk is bigger than the server allows.
+    public static func exceedsDocumentLimit(_ url: URL) -> Bool {
+        let limit = documentBytes
+        guard limit > 0 else {
+            return false
+        }
+        guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize else {
+            // Nothing readable to measure - let the send itself deal with it.
+            return false
+        }
+        return size > limit
+    }
+
+    /// Whether an edit to a text field keeps it inside the limit.
+    ///
+    /// Answered from what the field would hold afterwards, so a deletion is always allowed and a
+    /// paste that would carry it over the line is refused whole - the way it reads better than
+    /// silently keeping the first thousand characters of what someone pasted.
+    public static func textFits(current: String, range: NSRange, replacement: String) -> Bool {
+        let limit = textCharacters
+        guard limit > 0 else {
+            return true
+        }
+        let after = (current as NSString).length - range.length + (replacement as NSString).length
+        return after <= limit
+    }
+}
+
+/// The look of the list of names that drops in above the text field when a message is being
+/// written with an "@" in it.
+///
+/// One place for what the two editors both have to agree on: how tall a row is, because the
+/// height of the whole list is worked out from it, and the bot's picture, which used to be read
+/// off disk and decoded again for every row of every redraw - and the list redraws on every
+/// keystroke.
+public struct ChatMentionList {
+
+    /// The height of one row, and the unit the list's own height is counted in.
+    public static let rowHeight: CGFloat = 44
+    /// How wide the picture is drawn, in points.
+    public static let avatarSize: CGFloat = 32
+
+    /// The bot's picture, decoded once.
+    ///
+    /// Fix: this was a gif read with Data(contentsOf:) and decoded through CGImageSource inside
+    /// cellForRow - on the main thread, for every row, on every reload, and the list reloads on
+    /// every keystroke.
+    public static let botAvatar: UIImage? = {
+        let bundles = [Bundle.resourceBundle(for: Nexilis.self), Bundle.resourcesMediaBundle(for: Nexilis.self)]
+        for bundle in bundles {
+            guard let url = bundle.url(forResource: "pb_gpt_bot", withExtension: "gif"),
+                  let data = try? Data(contentsOf: url),
+                  let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let frame = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+                continue
+            }
+            return UIImage(cgImage: frame).circleMasked
+        }
+        return nil
+    }()
+}
+
+/// Reads audio that AVFoundation will not open, one layer down.
+///
+/// A voice note recorded on Android arrives as a bare AAC stream - MediaRecorder's `AAC_ADTS`,
+/// written to a name ending `.aac` - and a bare stream carries no container. AVURLAsset chooses
+/// its parser from the file's type, has none for a raw stream, and reports no audio track at all.
+/// AudioFile will open the same bytes when it is told what they are, which is what the type hint
+/// below is for; ExtAudioFile then hands back plain samples, converting as it goes.
+///
+/// Used as the fallback for the waveform and for the length. Playback never needed it:
+/// AVAudioPlayer sniffs the bytes rather than the name, which is why these notes have always
+/// played and shown their length while drawing an empty line.
+enum RawAudioLevels {
+
+    /// The formats worth guessing at, in order. Nothing is guessed until AVFoundation has already
+    /// failed, so the cost of a wrong guess is one refused open.
+    private static let hints: [AudioFileTypeID] = [
+        kAudioFileAAC_ADTSType,
+        kAudioFileM4AType,
+        kAudioFileMPEG4Type,
+        kAudioFileAMRType,
+        kAudioFileMP3Type,
+        0
+    ]
+
+    /// How many bars are worth reading. The view resamples whatever it is given, so this only has
+    /// to be more than any bubble will draw.
+    private static let wanted = 200
+    /// What the samples are converted to on the way out: one channel, 16-bit, at a rate that
+    /// every encoder can be resampled to.
+    private static let clientRate: Double = 44_100
+
+    /// The loudest point of each slice of the recording, from 0 to 1, or nothing if the file
+    /// cannot be read this way either.
+    static func measure(url: URL) -> [CGFloat] {
+        guard let file = open(url) else {
+            return []
+        }
+        defer {
+            AudioFileClose(file)
+        }
+        var wrapped: ExtAudioFileRef?
+        guard ExtAudioFileWrapAudioFileID(file, false, &wrapped) == noErr,
+              let reader = wrapped else {
+            return []
+        }
+        defer {
+            ExtAudioFileDispose(reader)
+        }
+        var client = AudioStreamBasicDescription(
+            mSampleRate: clientRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 2,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 2,
+            mChannelsPerFrame: 1,
+            mBitsPerChannel: 16,
+            mReserved: 0)
+        guard ExtAudioFileSetProperty(reader,
+                                      kExtAudioFileProperty_ClientDataFormat,
+                                      UInt32(MemoryLayout<AudioStreamBasicDescription>.size),
+                                      &client) == noErr else {
+            return []
+        }
+
+        // How many samples belong to one bar. Worked out from the length the file reports, and
+        // falling back to a fixed slice when it will not say - a stream with no header count is
+        // exactly the case being handled here.
+        let per = max(1, framesPerBar(reader))
+
+        var loudest: [CGFloat] = []
+        var peak: Int16 = 0
+        var counted = 0
+        let chunk = 4096
+        var samples = [Int16](repeating: 0, count: chunk)
+        while true {
+            var frames = UInt32(chunk)
+            var status = noErr
+            samples.withUnsafeMutableBytes { raw in
+                var list = AudioBufferList(
+                    mNumberBuffers: 1,
+                    mBuffers: AudioBuffer(mNumberChannels: 1,
+                                          mDataByteSize: UInt32(raw.count),
+                                          mData: raw.baseAddress))
+                status = ExtAudioFileRead(reader, &frames, &list)
+                guard status == noErr, frames > 0 else {
+                    return
+                }
+                // Read here, inside the borrow, rather than off the array afterwards.
+                let values = raw.bindMemory(to: Int16.self)
+                for index in 0..<Int(frames) {
+                    let level = Int16(clamping: Int(values[index].magnitude))
+                    if level > peak {
+                        peak = level
+                    }
+                    counted += 1
+                    if counted >= per {
+                        loudest.append(CGFloat(peak) / CGFloat(Int16.max))
+                        peak = 0
+                        counted = 0
+                    }
+                }
+            }
+            guard status == noErr, frames > 0 else {
+                break
+            }
+        }
+        // Whatever is left of the last, part-filled slice still belongs to the line.
+        if counted > 0 {
+            loudest.append(CGFloat(peak) / CGFloat(Int16.max))
+        }
+        guard !loudest.isEmpty else {
+            return []
+        }
+        // Lifted the same way the AVFoundation path lifts it: speech rarely reaches full scale,
+        // and without this every voice note looks like a whisper.
+        let top = loudest.max() ?? 1
+        let lift = top > 0.01 ? min(4, 0.95 / top) : 1
+        return loudest.map { min(1, max(0.07, $0 * lift)) }
+    }
+
+    /// How long the recording runs, in seconds, or nothing if it cannot be read.
+    static func seconds(url: URL) -> Int? {
+        guard let file = open(url) else {
+            return nil
+        }
+        defer {
+            AudioFileClose(file)
+        }
+        var format = AudioStreamBasicDescription()
+        var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        guard AudioFileGetProperty(file, kAudioFilePropertyDataFormat, &formatSize, &format) == noErr,
+              format.mSampleRate > 0 else {
+            return nil
+        }
+        var frames: Int64 = 0
+        var framesSize = UInt32(MemoryLayout<Int64>.size)
+        guard AudioFileGetProperty(file, kAudioFilePropertyAudioDataPacketCount, &framesSize, &frames) == noErr else {
+            return nil
+        }
+        let perPacket = format.mFramesPerPacket > 0 ? Double(format.mFramesPerPacket) : 1024
+        let length = Int((Double(frames) * perPacket / format.mSampleRate).rounded())
+        return length > 0 ? length : nil
+    }
+
+    private static func open(_ url: URL) -> AudioFileID? {
+        for hint in hints {
+            var file: AudioFileID?
+            if AudioFileOpenURL(url as CFURL, .readPermission, hint, &file) == noErr, let file = file {
+                return file
+            }
+        }
+        return nil
+    }
+
+    /// The number of converted samples one bar of the line stands for.
+    private static func framesPerBar(_ reader: ExtAudioFileRef) -> Int {
+        var frames: Int64 = 0
+        var framesSize = UInt32(MemoryLayout<Int64>.size)
+        guard ExtAudioFileGetProperty(reader, kExtAudioFileProperty_FileLengthFrames, &framesSize, &frames) == noErr,
+              frames > 0 else {
+            // A quarter of a second a bar: for anything up to about a minute that lands near
+            // enough, and the view resamples what it is handed anyway.
+            return Int(clientRate / 4)
+        }
+        var source = AudioStreamBasicDescription()
+        var sourceSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        guard ExtAudioFileGetProperty(reader, kExtAudioFileProperty_FileDataFormat, &sourceSize, &source) == noErr,
+              source.mSampleRate > 0 else {
+            return max(1, Int(frames) / wanted)
+        }
+        // The count the file reports is in its own samples; the bars are counted in converted ones.
+        let converted = Double(frames) * clientRate / source.mSampleRate
+        return max(1, Int(converted) / wanted)
+    }
+}
+
+extension Utils {
+
+    /// The line a quote shows for whatever a message was carrying.
+    ///
+    /// Fix: each of the six places that draw a quote worked its own way through the same chain of
+    /// tests, and the chain began with "no attachment flag and no thumbnail, so this is plain
+    /// text". That test is far looser than it reads: a message whose flag happens to be 0 or blank
+    /// - which is every attachment saved by a path that did not set one - was answered with its
+    /// own message text, and a document's message text is a filename and a caption joined by a
+    /// bar, or nothing at all. So a reply to a document drew a quote with nothing in it. The same
+    /// shape of gap has now been found three times, once for voice notes, once for animated
+    /// pictures and once for documents, because the chain is written out six times over.
+    ///
+    /// What a message carries is decided here, once, from the slots rather than from the flag -
+    /// the slots are filled by whoever sent it and the flag is not. Returns nil only when the
+    /// message really is plain text, which is the caller's own business to render, because each of
+    /// the six draws mentions and links its own way.
+    public static func quotedAttachmentLine(attachmentFlag: String,
+                                            thumb: String,
+                                            image: String,
+                                            video: String,
+                                            file: String,
+                                            audio: String,
+                                            gif: String,
+                                            messageText: String,
+                                            font: UIFont,
+                                            colour: UIColor) -> NSAttributedString? {
+        let caption = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !audio.isEmpty || attachmentFlag == "60" {
+            return audioPreviewLine(attachmentFlag: attachmentFlag,
+                                    audioName: audio,
+                                    font: font,
+                                    colour: colour)
+        }
+        if !gif.isEmpty {
+            return plain(caption.isEmpty ? "🎬 GIF" : caption, font: font, colour: colour)
+        }
+        if !image.isEmpty || attachmentFlag == "1" {
+            return caption.isEmpty ? plain("📷 " + "Photo".localized(), font: font, colour: colour) : nil
+        }
+        if !video.isEmpty || attachmentFlag == "2" {
+            if caption.isEmpty {
+                if let note = VideoNote.quotedLine(videoId: video, font: font, colour: colour) {
+                    return note
+                }
+                return plain("📹 " + "Video".localized(), font: font, colour: colour)
+            }
+            return nil
+        }
+        if !file.isEmpty || attachmentFlag == "6" {
+            // The document, and then whatever was written with it. The label above this is capped
+            // at three lines, so a long name takes two of them and the caption what is left -
+            // which is the shape asked for: the sender, the document, and what they said about it.
+            var line = "📄 " + documentName(messageText: messageText, file: file)
+            let written = messageText.component(1, separatedBy: "|")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !written.isEmpty {
+                line += "\n" + written
+            }
+            return plain(line, font: font, colour: colour)
+        }
+        switch attachmentFlag {
+        case "11":
+            return plain("❤️ " + "Sticker".localized(), font: font, colour: colour)
+        case "27":
+            return plain("📄 " + "Live Streaming".localized(), font: font, colour: colour)
+        case "26":
+            return plain("📄 " + "Seminar".localized(), font: font, colour: colour)
+        case "25":
+            return plain("📄 " + "Video Conference Room".localized(), font: font, colour: colour)
+        default:
+            break
+        }
+        // Nothing carried and nothing written: a quote with nothing in it is what the reader was
+        // shown, and saying so is better than a blank box.
+        if caption.isEmpty, !thumb.isEmpty {
+            return plain("📷 " + "Photo".localized(), font: font, colour: colour)
+        }
+        return caption.isEmpty ? plain("Message".localized(), font: font, colour: colour) : nil
+    }
+
+    /// What to call a document in a quote.
+    ///
+    /// The text of a document message is its filename and its caption joined by a bar, which is
+    /// this app's own convention - a document from elsewhere may carry only a caption, or nothing.
+    /// The name it was saved under is the last resort, with the prefix this app adds to every
+    /// attachment taken off.
+    /// What a document message is called.
+    ///
+    /// The name lives at the front of message_text, as "name|caption" - that is how iOS sends a
+    /// document and how Android used to send one. When it is not there, the stored file id is the
+    /// next best thing, and it usually carries the original name inside it.
+    public static func documentName(messageText: String, file: String) -> String {
+        // Fix: the part before the bar was taken as the name whether or not there *was* a bar - and
+        // with no bar, that part is the whole message text, which is the caption. So a document sent
+        // with a few paragraphs written alongside it was named after those paragraphs: the card
+        // showed the first line and a half of a release note where the file name belongs, the badge
+        // printed four letters of a word from the middle of it, and the type read TXT because the
+        // text happened to end in a sentence rather than an extension. The bar is what makes the
+        // front half a name; without one there is no name in the message text at all, and the file
+        // itself is what to ask.
+        if messageText.contains("|") {
+            let written = messageText.components(separatedBy: "|")[0]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !written.isEmpty {
+                return written
+            }
+        }
+        guard !file.isEmpty else {
+            // Nothing to go on: not the message, not a file. Whatever was written is better than
+            // nothing at all.
+            let written = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return written.isEmpty ? "Document".localized() : written
+        }
+        // "Nexilis_1757000000000_report.xlsx" is stored; "report.xlsx" is what it is called.
+        var name = file
+        let parts = file.components(separatedBy: "_")
+        if parts.count > 2, parts[0] == "Nexilis" {
+            name = parts.dropFirst(2).joined(separator: "_")
+        }
+        return withoutStoredSuffix(name)
+    }
+
+    /// A stored name carries an id the server hung on the end of it - "report-1A06B520A5D.xlsx" -
+    /// and that is machine bookkeeping rather than part of what anybody called the file.
+    ///
+    /// Taken off only when it is unmistakably that: a dash, then eight to sixteen upper-case
+    /// hexadecimal digits, then the extension and nothing else. A name that genuinely ends that way
+    /// is not something anybody types.
+    private static func withoutStoredSuffix(_ name: String) -> String {
+        let parts = name.split(separator: ".")
+        guard parts.count > 1, let extensionPart = parts.last else {
+            return name
+        }
+        let stem = parts.dropLast().joined(separator: ".")
+        guard let dash = stem.lastIndex(of: "-") else {
+            return name
+        }
+        let suffix = stem[stem.index(after: dash)...]
+        // At least one of A to F in it, so a run of digits alone is left alone: "report-20260904"
+        // is a date somebody wrote, and eight digits are perfectly good hexadecimal.
+        guard suffix.count >= 8, suffix.count <= 16,
+              suffix.allSatisfy({ $0.isHexDigit && !$0.isLowercase }),
+              suffix.contains(where: { $0.isLetter }) else {
+            return name
+        }
+        let kept = String(stem[stem.startIndex..<dash]).trimmingCharacters(in: .whitespaces)
+        return kept.isEmpty ? name : "\(kept).\(extensionPart)"
+    }
+
+    /// A document's own extension, lower case, or nothing when its name has none.
+    ///
+    /// Kept apart from documentType(named:), which answers what to *write* beside the size and so
+    /// has opinions - a long tail becomes TXT, no dot at all becomes FILE. The badge needs the
+    /// extension itself, to know what colour the thing is.
+    public static func documentExtension(of name: String) -> String {
+        let parts = name.split(separator: ".")
+        guard parts.count > 1, let last = parts.last else {
+            return ""
+        }
+        let tail = last.lowercased()
+        // Fix: whatever followed the last dot was taken as the extension. A document's name is
+        // often a sentence with dots in it - a release note, a date, a numbered list - so the tail
+        // was a word, and four letters of that word were printed on the badge. A name that carries
+        // no extension has to be allowed to say so, and an extension is short and has no spaces or
+        // punctuation in it.
+        guard tail.count <= 5, tail.allSatisfy({ $0.isLetter || $0.isNumber }) else {
+            return ""
+        }
+        return tail
+    }
+
+    /// What a document is, from its name where the name says and from the file's own first bytes
+    /// where it does not.
+    public static func documentKind(named name: String, file: String) -> String {
+        let fromName = documentExtension(of: name)
+        if !fromName.isEmpty {
+            return fromName
+        }
+        return DocumentBadge.sniffedKind(ofFileNamed: file)
+    }
+
+    /// What the line under a document's name calls its type.
+    public static func documentType(of kind: String) -> String {
+        return kind.isEmpty ? "FILE" : kind.uppercased()
+    }
+
+    /// The type shown beside a document's size: its own extension, in capitals.
+    ///
+    /// Fix: every screen worked this out as "split the name on a dot and take the last piece",
+    /// which answers with the whole name when there is no dot in it - so a document that arrived
+    /// without a name was labelled with whatever scrap of text was in its place. Worse, the same
+    /// line indexed that split at count - 1 without looking, and splitting an empty name gives an
+    /// empty list: a document with no name at all took the app down rather than drawing plainly.
+    public static func documentType(named name: String) -> String {
+        // Fix: anything longer than four characters was called TXT. That rule was inherited, and it
+        // manufactures a fact: a spreadsheet whose name ends in a word was labelled a text file, in
+        // a line that reads as though the app knows. Saying FILE says the truth - that the name
+        // does not say - and where the file itself is at hand, documentKind(named:file:) asks it.
+        return documentType(of: documentExtension(of: name))
+    }
+
+    private static func plain(_ text: String, font: UIFont, colour: UIColor) -> NSAttributedString {
+        return NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: colour])
+    }
+}
+
+/// The panel a quote sits on inside a bubble, and the colours to write on it.
+///
+/// The document card is that same panel by design - the reader should read them as one kind of
+/// thing tucked inside a bubble - so both ask here rather than each carrying its own literal.
+public enum BubblePanel {
+
+    /// Dark mode turns the overlay over. WhatsApp's dark bubble is a deep green, so lifting it
+    /// still leaves somewhere dark to write on; ours is a bright blue (#367dd9), and lifting that
+    /// leaves white text at 2.2:1 - unreadable. Darkening instead moves the panel away from the
+    /// bubble the same way, and the text goes to 87% for the same reason WhatsApp can afford 60%
+    /// and we cannot.
+    public static func ground(dark: Bool) -> UIColor {
+        return dark ? .black.withAlphaComponent(0.22) : UIColor(white: 0.784, alpha: 0.22)
+    }
+
+    public static func text(dark: Bool) -> UIColor {
+        return dark ? .white.withAlphaComponent(0.87) : .black.withAlphaComponent(0.77)
+    }
+
+    /// What is written under the name - the size and the type - which is the same text one step
+    /// quieter.
+    public static func secondaryText(dark: Bool) -> UIColor {
+        return dark ? .white.withAlphaComponent(0.62) : .black.withAlphaComponent(0.55)
+    }
+}
+
+/// The little page a document wears, in the colour of its own kind with its extension written on
+/// it.
+///
+/// Fix: every document, whatever it was, wore the same grey page glyph. A folder of attachments
+/// was a column of identical grey marks, and the only way to tell a spreadsheet from a slide deck
+/// was to read the file name. WhatsApp gives each kind its own colour and writes the extension on
+/// the page, and that is what is drawn here.
+///
+/// The colours are the ones every platform shares for these types - the red of a PDF, the blue of
+/// a Word file, the green of a spreadsheet, the orange of a deck. A web search turned up no
+/// published values for WhatsApp's own set, so these are matched to the conventions rather than
+/// sampled from it.
+public enum DocumentBadge {
+
+    private static let palette: [String: UInt32] = [
+        "pdf": 0xD7373F,
+        "doc": 0x2B579A, "docx": 0x2B579A, "rtf": 0x2B579A, "odt": 0x2B579A, "pages": 0x2B579A,
+        "xls": 0x217346, "xlsx": 0x217346, "xlsm": 0x217346, "csv": 0x217346, "ods": 0x217346,
+        "numbers": 0x217346,
+        "ppt": 0xC43E1C, "pptx": 0xC43E1C, "odp": 0xC43E1C, "key": 0xC43E1C,
+        "txt": 0x6B7A85, "log": 0x6B7A85, "md": 0x6B7A85,
+        "zip": 0x8A6D3B, "rar": 0x8A6D3B, "7z": 0x8A6D3B, "tar": 0x8A6D3B, "gz": 0x8A6D3B,
+        "mp3": 0x8250A8, "wav": 0x8250A8, "m4a": 0x8250A8, "aac": 0x8250A8, "ogg": 0x8250A8,
+        "mp4": 0x2A7B9B, "mov": 0x2A7B9B, "avi": 0x2A7B9B, "mkv": 0x2A7B9B, "3gp": 0x2A7B9B,
+        "html": 0xE44D26, "htm": 0xE44D26,
+        "json": 0x565F89, "xml": 0x565F89, "yml": 0x565F89, "yaml": 0x565F89,
+        "apk": 0x3B8F52, "ipa": 0x555B63, "exe": 0x555B63, "dmg": 0x555B63
+    ]
+
+    /// The grey this screen drew every document in, kept for the kinds that have no colour of
+    /// their own.
+    private static let unknown: UInt32 = 0x798F9A
+
+    private static var drawn: [String: UIImage] = [:]
+    private static let lock = NSLock()
+
+    private static var sniffed: [String: String] = [:]
+
+    /// What a file itself says it is, read from its first few thousand bytes and remembered.
+    ///
+    /// Asked only when the name does not say. A name is the cheap answer and usually the right
+    /// one; this is for the documents that arrive named after their contents rather than their
+    /// format - which is most of the ones people write by hand.
+    ///
+    /// Only a plain copy on disk is read. Reading one out of the secure store means decrypting the
+    /// whole file, which is not a price a row being drawn should pay; those keep to what the name
+    /// says.
+    public static func sniffedKind(ofFileNamed file: String) -> String {
+        guard !file.isEmpty else {
+            return ""
+        }
+        lock.lock()
+        let known = sniffed[file]
+        lock.unlock()
+        if let known = known {
+            return known
+        }
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(file)
+        var kind = ""
+        if let handle = try? FileHandle(forReadingFrom: url) {
+            let head = (try? handle.read(upToCount: 4096)) ?? Data()
+            try? handle.close()
+            kind = kindOf(head)
+        }
+        lock.lock()
+        sniffed[file] = kind
+        lock.unlock()
+        return kind
+    }
+
+    private static func kindOf(_ head: Data) -> String {
+        let bytes = [UInt8](head.prefix(8))
+        guard bytes.count >= 4 else {
+            return ""
+        }
+        if bytes.starts(with: [0x25, 0x50, 0x44, 0x46]) { return "pdf" }
+        if bytes.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "png" }
+        if bytes.starts(with: [0xFF, 0xD8, 0xFF]) { return "jpg" }
+        if bytes.starts(with: [0x47, 0x49, 0x46]) { return "gif" }
+        if bytes.starts(with: [0x52, 0x61, 0x72, 0x21]) { return "rar" }
+        if bytes.starts(with: [0x37, 0x7A, 0xBC, 0xAF]) { return "7z" }
+        if bytes.starts(with: [0x49, 0x44, 0x33]) { return "mp3" }
+        if head.count >= 8, Array(head[4..<8]) == Array("ftyp".utf8) { return "mp4" }
+        if bytes.starts(with: [0x50, 0x4B, 0x03, 0x04]) {
+            // A spreadsheet, a document and a deck are all zips, and what tells them apart is the
+            // name of the folder their first entries sit in - which is right at the front of the
+            // file, in with the header this has already read.
+            let text = String(decoding: head, as: UTF8.self)
+            if text.contains("xl/") { return "xlsx" }
+            if text.contains("word/") { return "docx" }
+            if text.contains("ppt/") { return "pptx" }
+            return "zip"
+        }
+        return ""
+    }
+
+    public static func colour(of extensionText: String) -> UIColor {
+        let key = extensionText.lowercased()
+        let hex = palette[key] ?? unknown
+        return UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255,
+                       green: CGFloat((hex >> 8) & 0xFF) / 255,
+                       blue: CGFloat(hex & 0xFF) / 255,
+                       alpha: 1)
+    }
+
+    /// What is written on the page. Four characters is what fits, and every extension worth
+    /// naming fits in four.
+    public static func label(of extensionText: String) -> String {
+        let trimmed = extensionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "FILE"
+        }
+        return String(trimmed.prefix(4)).uppercased()
+    }
+
+    /// The page itself: a rounded leaf in the kind's colour with a corner turned down and the
+    /// extension across the foot. Drawn once per kind and size, and kept.
+    public static func image(of extensionText: String, size: CGSize) -> UIImage {
+        let key = "\(label(of: extensionText))-\(Int(size.width))x\(Int(size.height))"
+        lock.lock()
+        let known = drawn[key]
+        lock.unlock()
+        if let known = known {
+            return known
+        }
+        let colour = colour(of: extensionText)
+        let text = label(of: extensionText)
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            let fold = min(size.width, size.height) * 0.34
+            let radius: CGFloat = 3
+            // The leaf, with the top-right corner cut away where it is turned down.
+            let page = UIBezierPath()
+            page.move(to: CGPoint(x: radius, y: 0))
+            page.addLine(to: CGPoint(x: size.width - fold, y: 0))
+            page.addLine(to: CGPoint(x: size.width, y: fold))
+            page.addLine(to: CGPoint(x: size.width, y: size.height - radius))
+            page.addQuadCurve(to: CGPoint(x: size.width - radius, y: size.height),
+                              controlPoint: CGPoint(x: size.width, y: size.height))
+            page.addLine(to: CGPoint(x: radius, y: size.height))
+            page.addQuadCurve(to: CGPoint(x: 0, y: size.height - radius),
+                              controlPoint: CGPoint(x: 0, y: size.height))
+            page.addLine(to: CGPoint(x: 0, y: radius))
+            page.addQuadCurve(to: CGPoint(x: radius, y: 0), controlPoint: .zero)
+            page.close()
+            colour.setFill()
+            page.fill()
+            // The corner, turned down: the same colour lightened, the way a folded sheet catches
+            // more light than the face of it.
+            let turned = UIBezierPath()
+            turned.move(to: CGPoint(x: size.width - fold, y: 0))
+            turned.addLine(to: CGPoint(x: size.width - fold, y: fold))
+            turned.addLine(to: CGPoint(x: size.width, y: fold))
+            turned.close()
+            UIColor.white.withAlphaComponent(0.38).setFill()
+            turned.fill()
+            // And the extension across the foot of it.
+            let font = UIFont.systemFont(ofSize: max(7, size.height * 0.27), weight: .heavy)
+            let written = NSAttributedString(string: text, attributes: [
+                .font: font,
+                .foregroundColor: UIColor.white,
+                .kern: -0.3
+            ])
+            var bounds = written.boundingRect(with: size, options: [.usesLineFragmentOrigin], context: nil)
+            // Squeezed to fit rather than clipped: a four-letter extension on a small page is
+            // wider than the page, and half a word is worse than a small one.
+            if bounds.width > size.width - 4 {
+                let squeezed = UIFont.systemFont(ofSize: font.pointSize * (size.width - 4) / bounds.width,
+                                                 weight: .heavy)
+                let refitted = NSAttributedString(string: text, attributes: [
+                    .font: squeezed, .foregroundColor: UIColor.white, .kern: -0.3
+                ])
+                bounds = refitted.boundingRect(with: size, options: [.usesLineFragmentOrigin], context: nil)
+                refitted.draw(at: CGPoint(x: (size.width - bounds.width) / 2,
+                                          y: size.height - bounds.height - size.height * 0.13))
+                return
+            }
+            written.draw(at: CGPoint(x: (size.width - bounds.width) / 2,
+                                     y: size.height - bounds.height - size.height * 0.13))
+        }
+        lock.lock()
+        drawn[key] = image
+        lock.unlock()
+        return image
+    }
+}
+
+// MARK: - Link previews
+
+/// Which hosts this app pins, and which are simply the public web.
+///
+/// Fix: the one session delegate this app had refuses any host it holds no pin for, and the pin
+/// map holds the app's own servers. That is right for the app's own servers and impossible
+/// anywhere else - nobody can pin techcrunch.com - so a link preview asked for a page and had the
+/// connection cancelled before a byte of it arrived, and the picture the card wanted was
+/// cancelled the same way. Pinning is kept exactly where a pin exists; everywhere else the
+/// system's own trust store answers, which is what it is for.
+final class PublicWebTrustDelegate: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate {
+
+    private let pinned = PinnedURLSessionNexilisDelegate()
+
+    static func isPinned(host: String) -> Bool {
+        // Sentinel remediation (NX-14): the mutable preference map this used to read is gone.
+        // RASPGuard holds the same answer and is the one nobody can edit from the device.
+        guard !host.isEmpty else { return false }
+        return RASPGuard.shared().isPinnedHost(host.lowercased())
+    }
+
+    /// A session for reading public pages and pictures: pinned where the app has a pin, the
+    /// system's own trust everywhere else.
+    static func session(timeout: TimeInterval = 15) -> URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = timeout
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        return URLSession(configuration: config,
+                          delegate: PublicWebTrustDelegate(),
+                          delegateQueue: nil)
+    }
+
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition,
+                                                  URLCredential?) -> Void) {
+        if PublicWebTrustDelegate.isPinned(host: challenge.protectionSpace.host) {
+            pinned.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+            return
+        }
+        completionHandler(.performDefaultHandling, nil)
+    }
+}
+
+/// What a link turns out to be, once the page behind it has been read.
+///
+/// Fix: a link in a message was drawn as an eighty-point strip with a small square picture at its
+/// left, whatever the link was, and most of the time there was no picture in it at all. Why there
+/// is always one in WhatsApp's card is worth writing down, because it is the whole of this: a site
+/// does not hand its title and its picture to whoever asks, it publishes them as Open Graph tags -
+/// og:title, og:description, og:image - in a page it serves to link-unfurling crawlers. Instagram,
+/// Facebook and their like serve a bare application shell to anything that looks like a browser
+/// and the tags only to a crawler; the framework this app asked with sent the default URLSession
+/// user agent, which looks like neither, so nothing came back. Asked as a crawler, the same page
+/// comes back with the tags on it - and for a video, with og:video and its duration, which is how
+/// a card can say "Reels 2:23" without playing anything.
+public struct LinkPreviewFacts {
+
+    public var link = ""
+    public var title = ""
+    public var blurb = ""
+    public var imageUrl = ""
+    public var imageSize = CGSize.zero
+    public var iconUrl = ""
+    public var siteName = ""
+    /// "Reels", "Shorts", "TikTok", "Video" - empty when the link is not a video at all.
+    public var videoLabel = ""
+    public var seconds = 0
+
+    public init() {}
+
+    public var isVideo: Bool {
+        return !videoLabel.isEmpty
+    }
+
+    /// What is written on the last line of the card: the site, as short as it can be said.
+    public var domain: String {
+        var host = URL(string: link)?.host ?? ""
+        if host.isEmpty {
+            host = link.components(separatedBy: "/").first ?? link
+        }
+        if host.lowercased().hasPrefix("www.") {
+            host = String(host.dropFirst(4))
+        }
+        return host.lowercased()
+    }
+
+    /// Nothing came back that is worth drawing a card for.
+    public var isEmpty: Bool {
+        return title.isEmpty && imageUrl.isEmpty
+    }
+
+    /// The picture is big enough to be the card rather than a thumbnail beside it. A site icon or
+    /// a small logo is not, and WhatsApp keeps those to the left of the title; so does this. A
+    /// picture whose size never came back is treated as small, because a card built around a
+    /// picture that turns out to be a favicon is worse than a row with a favicon in it.
+    public var hasLargePicture: Bool {
+        guard !imageUrl.isEmpty else {
+            return false
+        }
+        return min(imageSize.width, imageSize.height) >= 200
+    }
+
+    /// How tall the picture is against its width, as the card will draw it.
+    public var pictureRatio: CGFloat {
+        guard imageSize.width > 0, imageSize.height > 0 else {
+            return 0.524
+        }
+        return imageSize.height / imageSize.width
+    }
+
+    /// The duration as a card writes it: 2:23, or 1:02:23 for the long ones.
+    public var spokenDuration: String {
+        guard seconds > 0 else {
+            return ""
+        }
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        let s = seconds % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%d:%02d", m, s)
+    }
+}
+
+/// The LINK_PREVIEW table, read and written in one place.
+///
+/// The three keys the rest of the app already reads - title, description, imageUrl - are written
+/// exactly as they were, so the starred list, the search results and the chat list preview keep
+/// working off the same row. What is new sits alongside them under a version, and a row without
+/// that version is read as absent so it is fetched again: the rows already on a device were
+/// written without a crawler's user agent and are mostly a title and nothing else.
+public enum LinkPreviewStore {
+
+    static let version = 2
+
+    private static func quoted(_ text: String) -> String {
+        return text.replacingOccurrences(of: "'", with: "''")
+    }
+
+    public static func json(of facts: LinkPreviewFacts) -> String? {
+        var body: [String: Any] = [:]
+        body["v"] = version
+        body["title"] = facts.title
+        body["description"] = facts.blurb
+        body["imageUrl"] = facts.imageUrl
+        body["link"] = facts.link
+        body["imageWidth"] = Int(facts.imageSize.width)
+        body["imageHeight"] = Int(facts.imageSize.height)
+        body["iconUrl"] = facts.iconUrl
+        body["siteName"] = facts.siteName
+        body["videoLabel"] = facts.videoLabel
+        body["seconds"] = facts.seconds
+        guard let data = try? JSONSerialization.data(withJSONObject: body, options: []) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// What the table has to say about a link. "Nothing on it" has to be told apart from "not
+    /// asked yet", or a page that turns out to have no title and no picture would be asked for
+    /// again every time a row carrying it is built.
+    public enum Answer {
+        case notAsked
+        case nothingOnIt
+        case read(LinkPreviewFacts)
+    }
+
+    public static func answer(link: String) -> Answer {
+        return answer(fromJSON: readRow(link: link))
+    }
+
+    public static func answer(fromJSON text: String) -> Answer {
+        guard !text.isEmpty,
+              let data = text.data(using: .utf8),
+              let body = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any],
+              (body["v"] as? Int) == version else {
+            return .notAsked
+        }
+        guard let facts = facts(fromBody: body) else {
+            return .nothingOnIt
+        }
+        return .read(facts)
+    }
+
+    /// The facts held in a stored row, or nil when there is nothing usable in it - which covers a
+    /// row from before this version, a row that says the page had nothing on it, and a row whose
+    /// picture the old code would have thrown away.
+    public static func facts(fromJSON text: String) -> LinkPreviewFacts? {
+        guard !text.isEmpty,
+              let data = text.data(using: .utf8),
+              let body = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any],
+              (body["v"] as? Int) == version else {
+            return nil
+        }
+        return facts(fromBody: body)
+    }
+
+    private static func facts(fromBody body: [String: Any]) -> LinkPreviewFacts? {
+        if (body["none"] as? Bool) == true {
+            return nil
+        }
+        var facts = LinkPreviewFacts()
+        facts.link = body["link"] as? String ?? ""
+        facts.title = body["title"] as? String ?? ""
+        facts.blurb = body["description"] as? String ?? ""
+        facts.imageUrl = body["imageUrl"] as? String ?? ""
+        facts.iconUrl = body["iconUrl"] as? String ?? ""
+        facts.siteName = body["siteName"] as? String ?? ""
+        facts.videoLabel = body["videoLabel"] as? String ?? ""
+        facts.seconds = body["seconds"] as? Int ?? 0
+        let w = CGFloat(body["imageWidth"] as? Int ?? 0)
+        let h = CGFloat(body["imageHeight"] as? Int ?? 0)
+        facts.imageSize = CGSize(width: w, height: h)
+        return facts.isEmpty ? nil : facts
+    }
+
+    /// The row for a link as it stands, without touching the network.
+    public static func stored(link: String) -> LinkPreviewFacts? {
+        return facts(fromJSON: readRow(link: link))
+    }
+
+    private static func readRow(link: String) -> String {
+        var text = ""
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            if let cursor = Database.shared.getRecords(
+                fmdb: fmdb,
+                query: "select data_link from LINK_PREVIEW where link='\(quoted(link))'"), cursor.next() {
+                text = cursor.string(forColumnIndex: 0) ?? ""
+                cursor.close()
+            }
+        })
+        return text
+    }
+
+    static func write(_ facts: LinkPreviewFacts) {
+        guard let json = json(of: facts) else {
+            return
+        }
+        keep(link: facts.link, json: json)
+    }
+
+    /// A page that had nothing on it is remembered as such, so twenty cells asking about the same
+    /// link do not each go and ask the internet again.
+    static func writeNothing(link: String) {
+        var body: [String: Any] = ["v": version, "none": true, "link": link]
+        body["title"] = ""
+        body["description"] = ""
+        guard let data = try? JSONSerialization.data(withJSONObject: body, options: []),
+              let json = String(data: data, encoding: .utf8) else {
+            return
+        }
+        keep(link: link, json: json)
+    }
+
+    private static func keep(link: String, json: String) {
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            do {
+                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "LINK_PREVIEW", cvalues: [
+                    "id": "\(Date().currentTimeMillis().toHex())",
+                    "link": link,
+                    "data_link": json,
+                    "retry": 0
+                ], replace: true)
+            } catch {
+                rollback.pointee = true
+            }
+        })
+    }
+}
+
+/// Reads the page behind a link the way a link-unfurling crawler reads it.
+public enum LinkPreviewFetcher {
+
+    /// The one thing that decides whether a card has a picture on it. See LinkPreviewFacts: a
+    /// browser's user agent gets the application shell, an app's gets the same, and a crawler's
+    /// gets the Open Graph tags. This one says plainly what it is and where it comes from.
+    private static let crawler = "Mozilla/5.0 (compatible; OneAppBot/1.0; +https://nexilis.io)"
+
+    /// The second way of asking, for the sites that refuse the first. See fetch(link:then:).
+    private static let browser = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+
+    private static var inFlight = Set<String>()
+    private static let lock = NSLock()
+
+    /// Asks once per link, however many rows want it, and calls back on the main queue. The flag
+    /// says whether there is anything new to draw.
+    ///
+    /// Fix: it used to call back either way, and a screen that rebuilt its row on being called
+    /// rebuilt it for nothing whenever a page turned out to have nothing on it - which for a
+    /// restricted Google Drive link is every time. Rebuilding a row in a self-sizing list
+    /// re-measures it, and re-measuring rows moves the content under the reader: a conversation
+    /// full of Drive links jumped a second or two after it opened, with no card to show for it.
+    public static func fetch(link: String, then: @escaping (Bool) -> Void) {
+        lock.lock()
+        if inFlight.contains(link) {
+            lock.unlock()
+            return
+        }
+        inFlight.insert(link)
+        lock.unlock()
+
+        func finish(_ gained: Bool) {
+            lock.lock()
+            inFlight.remove(link)
+            lock.unlock()
+            DispatchQueue.main.async {
+                then(gained)
+            }
+        }
+
+        guard let url = address(of: link) else {
+            LinkPreviewStore.writeNothing(link: link)
+            finish(false)
+            return
+        }
+
+        // The card's shape follows the picture's shape, so the picture is measured before the
+        // card is ever drawn - a card built at one size and then filled with a picture of another
+        // shape is a card that jumps. Sites that publish og:image:width have already answered
+        // this and are taken at their word.
+        func keep(_ facts: LinkPreviewFacts) {
+            guard facts.imageSize == .zero, !facts.imageUrl.isEmpty else {
+                LinkPreviewStore.write(facts)
+                finish(true)
+                return
+            }
+            var measured = facts
+            LinkPreviewImage.fetch(facts.imageUrl) { image in
+                if let image = image, image.size.width > 0 {
+                    measured.imageSize = image.size
+                }
+                // The picture is answered on the main queue; writing a row is not something to do
+                // there.
+                DispatchQueue.global(qos: .utility).async {
+                    LinkPreviewStore.write(measured)
+                    finish(true)
+                }
+            }
+        }
+
+        // Fix: there are two families of site and they want opposite things. Instagram, Facebook
+        // and Threads hand the Open Graph tags to a crawler and a bare application shell to
+        // anything that looks like a browser; LinkedIn and everything behind a scraping defence
+        // do the reverse and answer a crawler with a refusal - LinkedIn answers 999 - while a
+        // browser gets the public page with the tags on it. So the page is asked for plainly
+        // first, as what this is; only when that comes back with nothing at all is it asked for
+        // again the way a browser would ask, which is the one thing those sites will answer.
+        ask(url, as: crawler) { html, landed in
+            if let html = html, let landed = landed {
+                let facts = read(html: html, link: link, landedOn: landed)
+                if !facts.isEmpty {
+                    keep(facts)
+                    return
+                }
+            }
+            ask(url, as: browser) { second, landedAgain in
+                // A page that could not be reached is not a page with nothing on it: nothing is
+                // written down, so the next row carrying this link asks again.
+                guard let second = second, let landedAgain = landedAgain else {
+                    finish(false)
+                    return
+                }
+                let facts = read(html: second, link: link, landedOn: landedAgain)
+                guard !facts.isEmpty else {
+                    LinkPreviewStore.writeNothing(link: link)
+                    finish(false)
+                    return
+                }
+                keep(facts)
+            }
+        }
+    }
+
+    private static func ask(_ url: URL, as agent: String, then: @escaping (String?, URL?) -> Void) {
+        var request = URLRequest(url: url)
+        request.setValue(agent, forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue(Locale.preferredLanguages.first ?? "en", forHTTPHeaderField: "Accept-Language")
+        let session = PublicWebTrustDelegate.session()
+        let task = session.dataTask(with: request) { data, response, _ in
+            session.finishTasksAndInvalidate()
+            guard let data = data, !data.isEmpty else {
+                then(nil, nil)
+                return
+            }
+            let html = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .isoLatin1)
+                ?? ""
+            then(html, (response as? HTTPURLResponse)?.url ?? url)
+        }
+        task.resume()
+    }
+
+    /// The first link in a message, as the screens that draw one look for it: the first line
+    /// with something link-shaped on it, and the first word of that line that is a link.
+    public static func firstLink(in message: String) -> String {
+        // Asked of every text bubble as it is built, and almost none of them carry a link: the
+        // cheap test comes before the two passes over the message.
+        guard message.contains("http") || message.contains("www.") else {
+            return ""
+        }
+        var written = message
+        // Some messages carry the app's own business after a black square.
+        if written.contains("\u{25A0}") {
+            written = written.components(separatedBy: "\u{25A0}")[0]
+        }
+        let lines = written.components(separatedBy: "\n")
+        guard let line = lines.first(where: {
+            $0.contains("www.") || $0.contains("http://") || $0.contains("https://")
+        }) else {
+            return ""
+        }
+        let words = line.components(separatedBy: " ")
+        guard let word = words.first(where: {
+            ($0.starts(with: "www.") && $0.components(separatedBy: ".").count > 2)
+                || ($0.starts(with: "http://") && $0.components(separatedBy: ".").count > 1)
+                || ($0.starts(with: "https://") && $0.components(separatedBy: ".").count > 1)
+        }) else {
+            return ""
+        }
+        return word.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// What was written in the message, as something that can be asked for.
+    static func address(of link: String) -> URL? {
+        var text = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.lowercased().hasPrefix("www.") {
+            text = "https://" + text
+        }
+        guard text.lowercased().hasPrefix("http://") || text.lowercased().hasPrefix("https://") else {
+            return nil
+        }
+        if let url = URL(string: text) {
+            return url
+        }
+        // A link with a space or a stray character in it still has a page behind it.
+        return URL(string: text.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? text)
+    }
+
+    // MARK: reading the page
+
+    static func read(html: String, link: String, landedOn: URL) -> LinkPreviewFacts {
+        let tags = metaTags(in: html)
+        var facts = LinkPreviewFacts()
+        facts.link = link
+        facts.title = first(of: ["og:title", "twitter:title"], in: tags)
+            ?? unescape(match(html, pattern: "<title[^>]*>([\\s\\S]*?)</title>", group: 1) ?? "")
+        facts.title = facts.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A search page's description is the whole of its front page and says nothing about the
+        // link - the rule was already here for Google and it is kept. Instagram's is a tally of
+        // likes and comments rather than anything the page says, which is why WhatsApp's card for
+        // a reel has a title and no second paragraph.
+        let host = (landedOn.host ?? "").lowercased()
+        if !host.contains("google."), !host.contains("instagram.com") {
+            facts.blurb = (first(of: ["og:description", "twitter:description", "description"], in: tags) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        facts.siteName = (first(of: ["og:site_name", "application-name"], in: tags) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // The page's own picture where there is one, and the still of the video off the address
+        // for the one site that puts the video's name in its address - a link that arrives
+        // shortened, or with the tags withheld, still has a picture that way.
+        let published = first(of: ["og:image:secure_url", "og:image:url", "og:image", "twitter:image",
+                                   "twitter:image:src"], in: tags)
+        facts.imageUrl = absolute(published ?? youtubeThumbnail(of: landedOn) ?? "", against: landedOn)
+        if published != nil {
+            let width = CGFloat(Int(first(of: ["og:image:width", "twitter:image:width"], in: tags) ?? "") ?? 0)
+            let height = CGFloat(Int(first(of: ["og:image:height", "twitter:image:height"], in: tags) ?? "") ?? 0)
+            if width > 0, height > 0 {
+                facts.imageSize = CGSize(width: width, height: height)
+            }
+        }
+        facts.iconUrl = absolute(iconAddress(in: html) ?? "", against: landedOn)
+
+        facts.videoLabel = videoLabel(of: landedOn, tags: tags)
+        if facts.isVideo {
+            facts.seconds = duration(html: html, tags: tags)
+        }
+        return facts
+    }
+
+    /// Every meta tag on the page, by the name it goes under. The first of a repeated name wins:
+    /// a page that lists several og:image tags lists the one it means first.
+    private static func metaTags(in html: String) -> [String: String] {
+        var found: [String: String] = [:]
+        guard let tag = try? NSRegularExpression(pattern: "<meta\\s[^>]*>", options: [.caseInsensitive]) else {
+            return found
+        }
+        let text = html as NSString
+        // Fix: this stopped after the first six hundred thousand characters, on the reasoning
+        // that a page's head comes first. YouTube's does not - its og:title sits at character
+        // seven hundred thousand, behind the script that carries the player - so every YouTube
+        // link came back with nothing on it. The whole page is read; it is read once per link,
+        // off the main thread.
+        tag.enumerateMatches(in: html, options: [],
+                             range: NSRange(location: 0, length: text.length)) { result, _, _ in
+            guard let range = result?.range else {
+                return
+            }
+            let one = text.substring(with: range)
+            guard let name = match(one, pattern: "(?:property|name|itemprop)\\s*=\\s*[\"']([^\"']+)[\"']", group: 1),
+                  let value = match(one, pattern: "content\\s*=\\s*[\"']([^\"']*)[\"']", group: 1) else {
+                return
+            }
+            let key = name.lowercased().trimmingCharacters(in: .whitespaces)
+            if found[key] == nil, !value.isEmpty {
+                found[key] = unescape(value)
+            }
+        }
+        return found
+    }
+
+    private static func first(of names: [String], in tags: [String: String]) -> String? {
+        for name in names {
+            if let value = tags[name], !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func iconAddress(in html: String) -> String? {
+        guard let tag = try? NSRegularExpression(pattern: "<link\\s[^>]*>", options: [.caseInsensitive]) else {
+            return nil
+        }
+        let text = html as NSString
+        var best: String?
+        tag.enumerateMatches(in: html, options: [],
+                             range: NSRange(location: 0, length: text.length)) { result, _, stop in
+            guard let range = result?.range else {
+                return
+            }
+            let one = text.substring(with: range)
+            guard let rel = match(one, pattern: "rel\\s*=\\s*[\"']([^\"']+)[\"']", group: 1)?.lowercased(),
+                  rel.contains("icon"),
+                  let href = match(one, pattern: "href\\s*=\\s*[\"']([^\"']+)[\"']", group: 1) else {
+                return
+            }
+            if best == nil || rel.contains("apple-touch") {
+                best = unescape(href)
+            }
+            if rel.contains("apple-touch") {
+                stop.pointee = true
+            }
+        }
+        return best
+    }
+
+    /// What kind of video a link is, when it is one at all.
+    private static func videoLabel(of url: URL, tags: [String: String]) -> String {
+        let host = (url.host ?? "").lowercased()
+        let path = url.path.lowercased()
+        let kind = (tags["og:type"] ?? "").lowercased()
+        let saysVideo = kind.hasPrefix("video")
+            || tags["og:video"] != nil
+            || tags["og:video:url"] != nil
+            || tags["og:video:secure_url"] != nil
+            || (tags["twitter:card"] ?? "") == "player"
+        if host.contains("instagram.com") || host.contains("facebook.com") || host.contains("fb.watch") {
+            if path.hasPrefix("/reel") || path.contains("/reel/") || path.contains("/reels/") {
+                return "Reels"
+            }
+            return saysVideo ? "Video".localized() : ""
+        }
+        if host.contains("youtube.com") || host.contains("youtu.be") {
+            if path.hasPrefix("/shorts") {
+                return "Shorts"
+            }
+            return saysVideo || path.hasPrefix("/watch") || host.contains("youtu.be") ? "Video".localized() : ""
+        }
+        if host.contains("tiktok.com") {
+            return "TikTok"
+        }
+        if host.contains("vimeo.com") || host.contains("dailymotion.com") || host.contains("twitch.tv") {
+            return saysVideo ? "Video".localized() : ""
+        }
+        return saysVideo ? "Video".localized() : ""
+    }
+
+    /// How long the video is, from whichever of the several places a site writes it.
+    private static func duration(html: String, tags: [String: String]) -> Int {
+        for name in ["og:video:duration", "video:duration", "duration"] {
+            if let written = tags[name] {
+                if let plain = Int(written.prefix(while: { $0.isNumber })), plain > 0 {
+                    return plain
+                }
+                if let spelled = isoSeconds(written), spelled > 0 {
+                    return spelled
+                }
+            }
+        }
+        if let written = match(html, pattern: "itemprop=\"duration\"[^>]*content=\"([^\"]+)\"", group: 1),
+           let spelled = isoSeconds(written), spelled > 0 {
+            return spelled
+        }
+        if let written = match(html, pattern: "\"lengthSeconds\"\\s*:\\s*\"?(\\d+)\"?", group: 1),
+           let plain = Int(written), plain > 0 {
+            return plain
+        }
+        if let written = match(html, pattern: "\"video_duration\"\\s*:\\s*([0-9.]+)", group: 1),
+           let plain = Double(written), plain > 0 {
+            return Int(plain.rounded())
+        }
+        return 0
+    }
+
+    /// PT3M34S, which is how a page spells three and a half minutes.
+    private static func isoSeconds(_ text: String) -> Int? {
+        guard text.uppercased().hasPrefix("PT") else {
+            return nil
+        }
+        var total = 0
+        var number = ""
+        for character in text.uppercased().dropFirst(2) {
+            if character.isNumber {
+                number.append(character)
+                continue
+            }
+            let value = Int(number) ?? 0
+            number = ""
+            switch character {
+            case "H": total += value * 3600
+            case "M": total += value * 60
+            case "S": total += value
+            default: break
+            }
+        }
+        return total > 0 ? total : nil
+    }
+
+    /// The still of a video, straight from the address, for the one site that puts the video's
+    /// name in its address.
+    static func youtubeThumbnail(of url: URL) -> String? {
+        let host = (url.host ?? "").lowercased()
+        var code = ""
+        if host.contains("youtube.com") {
+            if url.path.lowercased().hasPrefix("/shorts") {
+                code = url.lastPathComponent
+            } else if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+                      let value = items.first(where: { $0.name == "v" })?.value {
+                code = value
+            }
+        } else if host.contains("youtu.be") {
+            code = url.lastPathComponent
+        }
+        guard !code.isEmpty, code.count > 5 else {
+            return nil
+        }
+        return "https://img.youtube.com/vi/\(code)/hqdefault.jpg"
+    }
+
+    private static func absolute(_ address: String, against page: URL) -> String {
+        guard !address.isEmpty else {
+            return ""
+        }
+        if address.lowercased().hasPrefix("http://") || address.lowercased().hasPrefix("https://") {
+            return address
+        }
+        if address.hasPrefix("//") {
+            return (page.scheme ?? "https") + ":" + address
+        }
+        return URL(string: address, relativeTo: page)?.absoluteString ?? ""
+    }
+
+    private static func match(_ text: String, pattern: String, group: Int) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let whole = text as NSString
+        guard let found = regex.firstMatch(in: text, options: [],
+                                           range: NSRange(location: 0, length: whole.length)),
+              found.numberOfRanges > group,
+              found.range(at: group).location != NSNotFound else {
+            return nil
+        }
+        return whole.substring(with: found.range(at: group))
+    }
+
+    /// A page writes its title with entities in it - &amp;, &#064;, &#x2022; - and a card that
+    /// draws them as written reads like source code.
+    static func unescape(_ text: String) -> String {
+        guard text.contains("&") else {
+            return text
+        }
+        var out = text
+        let plain = ["&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&apos;": "'",
+                     "&#39;": "'", "&#039;": "'", "&nbsp;": " ", "&hellip;": "\u{2026}",
+                     "&mdash;": "\u{2014}", "&ndash;": "\u{2013}", "&rsquo;": "\u{2019}",
+                     "&lsquo;": "\u{2018}", "&ldquo;": "\u{201C}", "&rdquo;": "\u{201D}"]
+        for (from, to) in plain {
+            out = out.replacingOccurrences(of: from, with: to, options: [.caseInsensitive])
+        }
+        guard out.contains("&#"), let regex = try? NSRegularExpression(pattern: "&#(x?)([0-9A-Fa-f]+);") else {
+            return out
+        }
+        let whole = out as NSString
+        var built = ""
+        var read = 0
+        for found in regex.matches(in: out, options: [], range: NSRange(location: 0, length: whole.length)) {
+            built += whole.substring(with: NSRange(location: read, length: found.range.location - read))
+            read = found.range.location + found.range.length
+            let hex = whole.substring(with: found.range(at: 1)).lowercased() == "x"
+            let digits = whole.substring(with: found.range(at: 2))
+            if let value = UInt32(digits, radix: hex ? 16 : 10), let scalar = Unicode.Scalar(value) {
+                built.append(Character(scalar))
+            }
+        }
+        built += whole.substring(from: read)
+        return built
+    }
+}
+
+/// The pictures a card draws.
+///
+/// Fix: these went straight to the app's shared image cache, and that cache reads and decrypts
+/// from disk whenever what is asked for is not in memory - `isSecureExists`, `readSecure`,
+/// `decryptFileFromServer`, `UIImage(data:)`, all of it on whichever thread asked. A list asks
+/// once per row as the rows come into view, which put an encrypted read and an image decode
+/// between two frames of a scroll. Nothing here touches the disk or the network on the calling
+/// thread any more: what is in memory is answered at once, and everything else is answered later
+/// from a queue of its own. The same address asked for twice is fetched once, and an address that
+/// answers with something that is not a picture is not asked for again.
+public enum LinkPreviewImage {
+
+    private static let held: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 60
+        return cache
+    }()
+    private static var waiting: [String: [(UIImage?) -> Void]] = [:]
+    private static var refused = Set<String>()
+    /// Pictures this device does not hold, so a list does not go back to the disk for them.
+    private static var absent = Set<String>()
+    private static let lock = NSLock()
+    // Serial on purpose: what it reads it decrypts, and one file at a time off the main thread is
+    // what a scrolling list needs - not many at once competing for the same store.
+    private static let readers = DispatchQueue(label: "io.nexilis.linkpreview.pictures",
+                                               qos: .utility)
+
+    /// What is in memory, and only that. Safe to call from a row being built mid-scroll.
+    static func cached(_ address: String) -> UIImage? {
+        guard !address.isEmpty else {
+            return nil
+        }
+        return held.object(forKey: address as NSString)
+    }
+
+    /// What this device already has, without asking the network for anything - which is what a
+    /// list that must not fetch can still show. Answers on the main queue, and remembers what it
+    /// did not find so a scroll back and forth does not read the disk again for it.
+    static func onDisk(_ address: String, then: @escaping (UIImage?) -> Void) {
+        guard !address.isEmpty else {
+            then(nil)
+            return
+        }
+        if let ready = cached(address) {
+            then(ready)
+            return
+        }
+        lock.lock()
+        let known = absent.contains(address)
+        lock.unlock()
+        guard !known else {
+            then(nil)
+            return
+        }
+        readers.async {
+            let image = ImageCache.shared.image(forKey: address)
+            lock.lock()
+            if let image = image {
+                held.setObject(image, forKey: address as NSString)
+            } else {
+                absent.insert(address)
+            }
+            lock.unlock()
+            DispatchQueue.main.async {
+                then(image)
+            }
+        }
+    }
+
+    /// Answers on the main queue. Reads from disk, and asks the network, from a queue of its own.
+    static func fetch(_ address: String, then: @escaping (UIImage?) -> Void) {
+        guard !address.isEmpty else {
+            then(nil)
+            return
+        }
+        if let ready = cached(address) {
+            then(ready)
+            return
+        }
+        lock.lock()
+        if refused.contains(address) {
+            lock.unlock()
+            then(nil)
+            return
+        }
+        if waiting[address] != nil {
+            waiting[address]?.append(then)
+            lock.unlock()
+            return
+        }
+        waiting[address] = [then]
+        lock.unlock()
+
+        /// `answered` tells a picture that is not there from one that could not be reached: the
+        /// first is settled for good, the second is worth asking about again later.
+        func settle(_ image: UIImage?, answered: Bool) {
+            lock.lock()
+            let callers = waiting.removeValue(forKey: address) ?? []
+            if let image = image {
+                held.setObject(image, forKey: address as NSString)
+                absent.remove(address)
+            } else if answered {
+                refused.insert(address)
+            }
+            lock.unlock()
+            DispatchQueue.main.async {
+                for caller in callers {
+                    caller(image)
+                }
+            }
+        }
+
+        readers.async {
+            // What this device already has, read where reading is allowed to take its time.
+            if let onDisk = ImageCache.shared.image(forKey: address) {
+                settle(onDisk, answered: true)
+                return
+            }
+            guard let url = URL(string: address) else {
+                settle(nil, answered: true)
+                return
+            }
+            var request = URLRequest(url: url)
+            request.setValue("image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+            let session = PublicWebTrustDelegate.session()
+            let task = session.dataTask(with: request) { data, _, _ in
+                session.finishTasksAndInvalidate()
+                guard let data = data else {
+                    settle(nil, answered: false)
+                    return
+                }
+                guard let image = UIImage(data: data) else {
+                    settle(nil, answered: true)
+                    return
+                }
+                ImageCache.shared.save(image: image, forKey: address)
+                settle(image, answered: true)
+            }
+            task.resume()
+        }
+    }
+
+    static func load(_ address: String, into view: UIImageView, stillWanted: @escaping () -> Bool) {
+        guard !address.isEmpty else {
+            view.image = nil
+            return
+        }
+        if let ready = cached(address) {
+            view.image = ready
+            return
+        }
+        view.image = nil
+        fetch(address) { image in
+            guard let image = image, stillWanted() else {
+                return
+            }
+            view.image = image
+        }
+    }
+}
+
+/// A link, drawn the way WhatsApp draws one: the page's own picture across the top at the shape
+/// the picture is, its title under that, a line of what the page says about itself, and the site
+/// it came from on the last line. A video says so with a play mark, and says which kind of video
+/// and how long it runs.
+///
+/// The card measures itself - `height(for:width:)` answers before anything is built - because the
+/// bubble around it has to know how tall it will be to place the message text under it, and a row
+/// that guesses is a row that jumps when the guess turns out wrong.
+public final class LinkPreviewCard: UIView {
+
+    private let picture = UIImageView()
+    private let badge = UIView()
+    private let badgeGlyph = UIImageView()
+    private let badgeText = UILabel()
+    private let heading = UILabel()
+    private let blurb = UILabel()
+    private let footGlyph = UIImageView()
+    private let foot = UILabel()
+    private let favicon = UIImageView()
+
+    private var facts = LinkPreviewFacts()
+    private var compact = false
+
+    private static let pad: CGFloat = 10
+    private static let thumb: CGFloat = 56
+
+    private static var headingFont: UIFont {
+        return .systemFont(ofSize: 14 + String.offset(), weight: .semibold)
+    }
+    /// A card with nothing to say about the page under the title gives the title the line it
+    /// would have taken - which is how a reel's card reads, three lines of the caption and the
+    /// site under it.
+    private static func headingLines(_ facts: LinkPreviewFacts, compact: Bool) -> Int {
+        if compact {
+            return 2
+        }
+        return facts.blurb.isEmpty ? 3 : 2
+    }
+    private static var blurbFont: UIFont {
+        return .systemFont(ofSize: 13 + String.offset())
+    }
+    private static var footFont: UIFont {
+        return .systemFont(ofSize: 12 + String.offset())
+    }
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        build()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        build()
+    }
+
+    private func build() {
+        layer.cornerRadius = 6
+        clipsToBounds = true
+        // The card is read, not touched: what a tap on it does belongs to the bubble around it,
+        // which already knows how to open the link.
+        isUserInteractionEnabled = false
+
+        picture.contentMode = .scaleAspectFill
+        picture.clipsToBounds = true
+        picture.backgroundColor = UIColor(white: 0.5, alpha: 0.15)
+        addSubview(picture)
+
+        // Fix: a play circle was drawn over the middle of the picture as well as the mark on the
+        // badge below it, so a video card carried the same sign twice - two play triangles on one
+        // still. The badge is the one that says something the picture does not: which kind of
+        // video it is and how long it runs.
+        badge.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        badge.layer.cornerRadius = 4
+        badge.isHidden = true
+        addSubview(badge)
+        badgeGlyph.contentMode = .scaleAspectFit
+        badge.addSubview(badgeGlyph)
+        badgeText.font = .systemFont(ofSize: 12, weight: .semibold)
+        badgeText.textColor = .white
+        badge.addSubview(badgeText)
+
+        heading.numberOfLines = 2
+        heading.font = LinkPreviewCard.headingFont
+        addSubview(heading)
+
+        blurb.numberOfLines = 2
+        blurb.font = LinkPreviewCard.blurbFont
+        addSubview(blurb)
+
+        footGlyph.contentMode = .scaleAspectFit
+        addSubview(footGlyph)
+        foot.numberOfLines = 1
+        foot.font = LinkPreviewCard.footFont
+        addSubview(foot)
+
+        favicon.contentMode = .scaleAspectFit
+        favicon.layer.cornerRadius = 3
+        favicon.clipsToBounds = true
+        addSubview(favicon)
+    }
+
+    /// Fills the card in. The panel it sits on is the one the quote and the document card sit on,
+    /// so the three cannot drift apart.
+    public func show(_ facts: LinkPreviewFacts, dark: Bool) {
+        self.facts = facts
+        compact = !facts.hasLargePicture
+        backgroundColor = BubblePanel.ground(dark: dark)
+
+        heading.text = facts.title
+        heading.numberOfLines = LinkPreviewCard.headingLines(facts, compact: compact)
+        heading.textColor = BubblePanel.text(dark: dark)
+        blurb.text = facts.blurb
+        blurb.textColor = BubblePanel.secondaryText(dark: dark)
+        blurb.isHidden = compact || facts.blurb.isEmpty
+        // A card too small to carry a picture cannot carry a play mark over one either, so what
+        // kind of video it is is said on the last line instead - the reader still learns it is a
+        // reel and how long it runs.
+        var written = facts.domain
+        if compact, facts.isVideo {
+            let spoken = facts.spokenDuration
+            written += " · " + (spoken.isEmpty ? facts.videoLabel : "\(facts.videoLabel) \(spoken)")
+        }
+        foot.text = written
+        foot.textColor = BubblePanel.secondaryText(dark: dark)
+        footGlyph.image = UIImage(systemName: "link")?
+            .withTintColor(BubblePanel.secondaryText(dark: dark), renderingMode: .alwaysOriginal)
+
+        picture.isHidden = facts.imageUrl.isEmpty
+        let wanted = facts.imageUrl
+        if !wanted.isEmpty {
+            LinkPreviewImage.load(wanted, into: picture, stillWanted: { [weak self] in
+                return self?.facts.imageUrl == wanted
+            })
+        } else {
+            picture.image = nil
+        }
+
+        let icon = facts.iconUrl
+        favicon.isHidden = icon.isEmpty || compact
+        if !favicon.isHidden {
+            LinkPreviewImage.load(icon, into: favicon, stillWanted: { [weak self] in
+                return self?.facts.iconUrl == icon
+            })
+        } else {
+            favicon.image = nil
+        }
+
+        let showsVideo = facts.isVideo && !compact && !facts.imageUrl.isEmpty
+        badge.isHidden = !showsVideo
+        if showsVideo {
+            badgeGlyph.image = UIImage(systemName: facts.videoLabel == "Reels" || facts.videoLabel == "Shorts"
+                                       ? "play.rectangle.fill" : "play.circle.fill")?
+                .withTintColor(.white, renderingMode: .alwaysOriginal)
+            let spoken = facts.spokenDuration
+            if spoken.isEmpty {
+                badgeText.text = facts.videoLabel
+            } else if facts.videoLabel == "Video".localized() {
+                badgeText.text = spoken
+            } else {
+                badgeText.text = "\(facts.videoLabel) · \(spoken)"
+            }
+        }
+        setNeedsLayout()
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        let width = bounds.width
+        let pad = LinkPreviewCard.pad
+        if compact {
+            let thumb = facts.imageUrl.isEmpty ? 0 : LinkPreviewCard.thumb
+            picture.frame = CGRect(x: 0, y: (bounds.height - thumb) / 2, width: thumb, height: thumb)
+            picture.layer.cornerRadius = 0
+            let left = thumb > 0 ? thumb + pad : pad
+            let textWidth = max(width - left - pad, 30)
+            let headingHeight = LinkPreviewCard.measure(facts.title, font: LinkPreviewCard.headingFont,
+                                                        width: textWidth,
+                                                        lines: LinkPreviewCard.headingLines(facts, compact: true))
+            let footHeight = ceil(LinkPreviewCard.footFont.lineHeight)
+            let block = headingHeight + 3 + footHeight
+            var y = max((bounds.height - block) / 2, pad)
+            heading.frame = CGRect(x: left, y: y, width: textWidth, height: headingHeight)
+            y += headingHeight + 3
+            layoutFoot(left: left, y: y, width: textWidth, height: footHeight, room: width - pad)
+            return
+        }
+
+        let pictureHeight = LinkPreviewCard.pictureHeight(for: facts, width: width)
+        picture.frame = CGRect(x: 0, y: 0, width: width, height: pictureHeight)
+
+        if !badge.isHidden {
+            let text = badgeText.text ?? ""
+            let textWidth = ceil((text as NSString).size(withAttributes: [.font: badgeText.font!]).width)
+            let badgeWidth = 6 + 14 + 4 + textWidth + 6
+            badge.frame = CGRect(x: 8, y: pictureHeight - 8 - 22, width: badgeWidth, height: 22)
+            badgeGlyph.frame = CGRect(x: 6, y: 4, width: 14, height: 14)
+            badgeText.frame = CGRect(x: 24, y: 0, width: textWidth, height: 22)
+        }
+
+        let textWidth = max(width - pad * 2, 30)
+        var y = pictureHeight + 8
+        let headingHeight = LinkPreviewCard.measure(facts.title, font: LinkPreviewCard.headingFont,
+                                                    width: textWidth,
+                                                    lines: LinkPreviewCard.headingLines(facts, compact: false))
+        heading.frame = CGRect(x: pad, y: y, width: textWidth, height: headingHeight)
+        y += headingHeight
+        if !blurb.isHidden {
+            let blurbHeight = LinkPreviewCard.measure(facts.blurb, font: LinkPreviewCard.blurbFont,
+                                                      width: textWidth, lines: 2)
+            y += 3
+            blurb.frame = CGRect(x: pad, y: y, width: textWidth, height: blurbHeight)
+            y += blurbHeight
+        }
+        y += 5
+        layoutFoot(left: pad, y: y, width: textWidth, height: ceil(LinkPreviewCard.footFont.lineHeight),
+                   room: width - pad)
+    }
+
+    private func layoutFoot(left: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, room: CGFloat) {
+        let glyph: CGFloat = min(height, 14)
+        footGlyph.frame = CGRect(x: left, y: y + (height - glyph) / 2, width: glyph, height: glyph)
+        var textWidth = width - glyph - 5
+        if !favicon.isHidden {
+            let side: CGFloat = 18
+            favicon.frame = CGRect(x: room - side, y: y + (height - side) / 2, width: side, height: side)
+            textWidth -= side + 6
+        }
+        foot.frame = CGRect(x: left + glyph + 5, y: y, width: max(textWidth, 20), height: height)
+    }
+
+    /// How tall the picture is drawn. A page's picture can be any shape at all, and a card that
+    /// followed it exactly would be a strip for a banner and a whole screen for a reel; so the
+    /// shape is kept between a wide still and a tall one, and the picture fills what it is given.
+    static func pictureHeight(for facts: LinkPreviewFacts, width: CGFloat) -> CGFloat {
+        guard !facts.imageUrl.isEmpty else {
+            return 0
+        }
+        let ratio = min(max(facts.pictureRatio, 0.5), 1.34)
+        return (width * ratio).rounded()
+    }
+
+    /// The width a card is drawn at inside a bubble: wide enough for a picture to be worth
+    /// looking at, and narrow enough that the bubble holding it still fits where a bubble goes.
+    public static func width(inViewOfWidth width: CGFloat) -> CGFloat {
+        return max(180, min((width * 0.68).rounded(), width - 140))
+    }
+
+    public static func height(for facts: LinkPreviewFacts, width: CGFloat) -> CGFloat {
+        let pad = LinkPreviewCard.pad
+        let footHeight = ceil(footFont.lineHeight)
+        if facts.hasLargePicture {
+            var height = pictureHeight(for: facts, width: width)
+            let textWidth = max(width - pad * 2, 30)
+            height += 8
+            height += measure(facts.title, font: headingFont, width: textWidth,
+                              lines: headingLines(facts, compact: false))
+            let blurbHeight = measure(facts.blurb, font: blurbFont, width: textWidth, lines: 2)
+            if blurbHeight > 0 {
+                height += 3 + blurbHeight
+            }
+            height += 5 + footHeight + pad
+            return ceil(height)
+        }
+        let thumb = facts.imageUrl.isEmpty ? 0 : LinkPreviewCard.thumb
+        let left = thumb > 0 ? thumb + pad : pad
+        let textWidth = max(width - left - pad, 30)
+        let block = pad + measure(facts.title, font: headingFont, width: textWidth,
+                                  lines: headingLines(facts, compact: true))
+            + 3 + footHeight + pad
+        return ceil(max(block, thumb))
+    }
+
+    static func measure(_ text: String, font: UIFont, width: CGFloat, lines: Int) -> CGFloat {
+        guard !text.isEmpty else {
+            return 0
+        }
+        let box = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil)
+        return min(ceil(box.height), ceil(font.lineHeight * CGFloat(lines)))
     }
 }

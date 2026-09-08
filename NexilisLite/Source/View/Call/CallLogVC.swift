@@ -264,18 +264,14 @@ public class CallLogVC: UIViewController, UITableViewDataSource, UITableViewDele
                 self.view.makeToast("Feature disabled..".localized(), duration: 3)
                 return
             }
+            // Fix: only the camera was tested here. A video call with the camera allowed and the
+            // microphone refused went ahead - a call nobody could be heard on. Either one refused
+            // stops it now, and the alert names whichever it was and offers Settings, which is the
+            // only place that can undo a refusal. See APIS.showCaptureRefused.
             let goAudioCall = Nexilis.checkMicPermission()
             let goVideoCall = Nexilis.checkCameraPermission()
-            if goVideoCall == 0 {
-                let alert = LibAlertController(title: "Attention!".localized(), message: !goAudioCall && goVideoCall == 0 ? "Please allow microphone & camera permission in your settings".localized() : !goAudioCall ? "Please allow microphone permission in your settings".localized() : "Please allow camera permission in your settings", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {_ in
-                    if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                    }
-                }))
-                self.navigationController?.present(alert, animated: true, completion: nil)
-                return
-            } else if goVideoCall == -1 {
+            if !goAudioCall || goVideoCall == 0 {
+                APIS.showCaptureRefused(microphone: !goAudioCall, camera: goVideoCall == 0)
                 return
             }
             if !CheckConnection.isConnectedToNetwork() {

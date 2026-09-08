@@ -717,14 +717,17 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 nameFile.textColor = .black
                 nameFile.numberOfLines = 2
                 nameFile.anchor(top: container.topAnchor, left: imageFile.rightAnchor, right: container.rightAnchor, paddingTop: 5, paddingLeft: 10, paddingRight: 5)
-                nameFile.text = data.messageText.components(separatedBy: "|")[0]
+                // Fix: a document that arrived without a name in its message text drew a blank
+                // line here, and the type below was read by indexing a split of that nothing,
+                // which is a crash. One place answers for both now.
+                let documentName = Utils.documentName(messageText: data.messageText, file: data.file)
+                nameFile.text = documentName
                 
                 let fileSub = UILabel()
                 let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                 let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
                 let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                let arrExtFile = (data.messageText.components(separatedBy: "|")[0]).split(separator: ".")
-                let finalExtFile = arrExtFile[arrExtFile.count - 1]
+                let finalExtFile = Utils.documentType(named: documentName)
                 if let dirPath = paths.first {
                     let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(data.file)
                     if FileManager.default.fileExists(atPath: fileURL.path) {

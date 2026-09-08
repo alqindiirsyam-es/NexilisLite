@@ -405,6 +405,8 @@ public class CoreMessage_TMessageKey {
     public static let COUNT_FOLLOWER = "A171"
     public static let COUNT_FOLLOWING = "A172"
     public static let ATTACHMENT_SPECIALITY = "A180";
+    /// A document's own name, as the sender knows it, separate from the stored file id.
+    public static let REAL_NAME_FILE_ID = "A181";
     public static let NEW_RACI_R = "new_r"
     public static let NEW_RACI_A = "new_a"
     public static let NEW_RACI_C = "new_c"

@@ -18,9 +18,11 @@ import SDWebImage
 import CryptoKit
 import WebKit
 import CommonCrypto
+import NexilisZTA
+import AudioToolbox
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "6.0.1"
+    public static var cpaasVersion = "6.0.4"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -146,6 +148,10 @@ public class Nexilis: NSObject {
     }
     
     public static func connect(apiKey: String, userId:String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
+        guard SentinelSecurityGate.isAuthorized else {
+            delegate.onFailed(error: "Sentinel authorization is required before Nexilis.connect().")
+            return
+        }
         showFB = showButton
         Nexilis.fromMAB = fromMAB
         floatingButton = FloatingButton()
@@ -161,42 +167,24 @@ public class Nexilis: NSObject {
         do {
             try MasterKeyUtil.shared.generateAndStoreMasterKey()
             try MasterKeyUtil.shared.generateAndStorePrefsKey()
-            // Fix: the previous hardcoded/obfuscated default pin for "newuniverse.io"
-            // decrypted to a hash that matches NEITHER the (buggy) raw-key hash the
-            // app used to compute NOR the correct SPKI hash of the certificate
-            // actually served today (verified via openssl). It was simply stale/wrong
-            // from the start, so pinning could never succeed for that domain no
-            // matter how correct the runtime hashing code was.
-            //
-            // Fix: each domain now maps to an ARRAY of accepted hashes rather than a
-            // single string, so a future certificate/key rotation can be handled by
-            // adding the new hash ahead of time (both old and new accepted during the
-            // transition) instead of instantly locking out every user the moment
-            // Let's Encrypt rotates the leaf certificate.
-            //
-            // Fix: bumped to a plain (non-obfuscated) literal - a Subject Public Key
-            // Info hash is not a secret (it's derived from the public certificate
-            // anyone can fetch via openssl), so the custom cipher added no real
-            // protection, only made the value painful to audit/update/rotate.
-            let pinningSeedVersion = 3
-            if Utils.getCertificatePinningWebview().isEmpty || Utils.getCertificatePinningSeedVersion() < pinningSeedVersion {
-                let cert: [String: [String]] = [
-                    // Fix: confirmed via on-device log (RSA 2048, computed at runtime)
-                    // AND cross-checked independently against `openssl s_client -connect
-                    // nexilis.io:443 ... | openssl dgst -sha256 | openssl base64` - see
-                    // CHANGELOG. The previous value here (from the old obfuscated seed)
-                    // never matched the live server and made pinning impossible for the
-                    // domain the app actually connects to.
-                    "nexilis.io": ["tIAA8SPvbLBRxOAeQYkymqN3MhVpPuJFAbfLxihiMAU="],
-                    "newuniverse.io": ["XFRSd92XlkDObEZQZnAC8eULRrmHCTW4prdwSBYr/N4="]
-                ]
-                if let jsonData = try? JSONSerialization.data(withJSONObject: cert, options: []),
-                   let jsonString = String(data: jsonData, encoding: .utf8) {
-                    Utils.setCertificatePinningWebview(value: jsonString)
-                    Utils.setCertificatePinningSeedVersion(pinningSeedVersion)
-                }
-            }
+            // Certificate trust is configured by SentinelSecurityGate/RASPGuard.
+            // Legacy mutable pin seeds are intentionally not written.
         } catch {
+            // At app mode 1 the master key IS the mode: it is Keychain-bound to the current
+            // biometric set, and SecItemAdd refuses that on a device with none enrolled or no
+            // passcode set. Swallowing that left the app running with no key at all - an empty
+            // chat list, no stored media, no database - and nothing anywhere saying why. The
+            // session does not start, and the host is told what happened.
+            //
+            // Modes 2 and 3 keep the best-effort behaviour they have always had: their key needs
+            // no user presence, so a failure here is not the mode being impossible on this device.
+            if NXSecurityPolicy.bindsKeysToUserAuth() {
+                let reason = error.localizedDescription
+                DispatchQueue.main.async {
+                    delegate.onFailed(error: "Secure storage could not be prepared on this device. \(reason)")
+                }
+                return
+            }
         }
         
         let api: String? = SecureUserDefaults.shared.value(forKey: "apiKey") ?? nil
@@ -204,7 +192,17 @@ public class Nexilis: NSObject {
             SecureUserDefaults.shared.set(apiKey, forKey: "apiKey")
         }
         
+        // Opens the authentication window that mode 1's main-thread reads reuse, and repairs a
+        // key still protected for a mode this launch is no longer running in. Off the main queue,
+        // because that is the whole point. At modes 2 and 3 with a key that already matches, it
+        // is one silent Keychain attribute lookup.
+        MasterKeyUtil.shared.primeSecureStorage()
+
         Utils.setAppMode(value: Utils.selectedAppMode)
+        // Keep the Sentinel policy on the same number as the persisted app mode. A host that set
+        // it through APIS.setAppMode already pushed it; this covers the path where the mode was
+        // restored from preferences rather than set this launch.
+        NXSecurityPolicy.mode = NXAppMode(rawValue: Utils.getAppMode()) ?? .regular
         
         IncomingThread.default.run()
         
@@ -415,6 +413,9 @@ public class Nexilis: NSObject {
             sendVersionToBE()
             getPullPrefs()
             getFeatureAccess()
+            // What a message may carry. Throttled, so this costs one small request per app start
+            // at most - see pullInstantMessagingIfStale.
+            pullInstantMessagingIfStale()
 
             startSecurityShield(apiKey: apiKey)
 
@@ -722,6 +723,83 @@ public class Nexilis: NSObject {
         }
     }
     
+    // MARK: - What a message may carry
+
+    private static var isPullingInstantMessaging = false
+    /// How long a pulled set of limits is trusted for.
+    ///
+    /// These are subscription settings: they change when somebody changes a plan, not minute to
+    /// minute. The Android build asks the server every single time a chat is opened, which is a
+    /// request per conversation for an answer that is the same all day. Once at start-up and at
+    /// most once every six hours after that is the same information for a fraction of the
+    /// traffic - and because the answer is kept on the device, a send never waits for it.
+    private static let instantMessagingMaxAge: TimeInterval = 6 * 60 * 60
+
+    /// Pulls the limits if what is on the device is older than `instantMessagingMaxAge`.
+    ///
+    /// Safe to call often - from a launch, from coming back to the app - because almost every
+    /// call does nothing at all.
+    public static func pullInstantMessagingIfStale() {
+        if let last: String = SecureUserDefaults.shared.value(forKey: "subscription_pulled_at"),
+           let millis = Double(last),
+           Date().timeIntervalSince1970 - millis / 1000 < instantMessagingMaxAge {
+            return
+        }
+        pullInstantMessaging()
+    }
+
+    /// Asks the server how long a message may be and how big its attachments may be, and keeps
+    /// the answer.
+    ///
+    /// The same values the Android build pulls in ChatView.pullInstantMessaging. What is not
+    /// taken here is taken nowhere: the reply also carries the download and retention policy and
+    /// the file-type restriction, which this build does not act on yet.
+    public static func pullInstantMessaging() {
+        if isPullingInstantMessaging {
+            return
+        }
+        isPullingInstantMessaging = true
+        DispatchQueue.global(qos: .utility).async {
+            defer {
+                isPullingInstantMessaging = false
+            }
+            guard let response = Nexilis.writeAndWait(message: CoreMessage_TMessageBank.pullInstantMessaging(), timeout: 5000),
+                  response.isOk() else {
+                // Left alone on a failure: whatever is on the device carries on being used, and
+                // the next launch or the next return to the app tries again.
+                return
+            }
+            let data = response.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
+            guard let bytes = data.data(using: .utf8),
+                  let array = try? JSONSerialization.jsonObject(with: bytes, options: []) as? [[String: Any]] else {
+                return
+            }
+            // Every entry is read, not just the first: the server sends one object per setting.
+            var seen = false
+            for entry in array {
+                for (key, storeKey) in [("text", "subscription_text"),
+                                        ("image", "subscription_image"),
+                                        ("video", "subscription_video"),
+                                        ("document", "subscription_document")] {
+                    guard let raw = entry[key] else {
+                        continue
+                    }
+                    // A number or a string, depending on the setting and the server.
+                    let text = raw as? String ?? "\(raw)"
+                    guard !text.isEmpty, Double(text) != nil else {
+                        continue
+                    }
+                    MessageLimits.store(text, forKey: storeKey)
+                    seen = true
+                }
+            }
+            guard seen else {
+                return
+            }
+            SecureUserDefaults.shared.set("\(Date().currentTimeMillis())", forKey: "subscription_pulled_at")
+        }
+    }
+
     static var isGettingFeatureAccess: Bool = false
     static func getFeatureAccess() {
         if isGettingFeatureAccess {
@@ -773,6 +851,13 @@ public class Nexilis: NSObject {
                                 }
                                 if let ad = jsonData["authentication_duration"] as? String {
                                     Utils.setAuthenticationDuration(value: ad)
+                                }
+                                if let sfe = jsonData["secure_folder_envelope"] as? String {
+                                    // Which wire format the backend wants for secure-folder
+                                    // payloads. Absent, the client stays on legacy - see
+                                    // Utils.getSecureFolderEnvelope for why this is not simply
+                                    // derived from whether an IV was sent.
+                                    Utils.setSecureFolderEnvelope(value: sfe)
                                 }
                                 if let sfek = jsonData["secure_folder_encrypt_key"] as? String {
                                     keyTemp = sfek
@@ -1377,6 +1462,7 @@ public class Nexilis: NSObject {
     
     public static var isProcessWriteSync = false
     public static func writeSync(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
+        guard SentinelSecurityGate.isAuthorized else { return nil }
         if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
             return nil
         }
@@ -1400,6 +1486,7 @@ public class Nexilis: NSObject {
     }
     
     public static func write(message: TMessage, timeout: Int = 15 * 1000) -> String? {
+        guard SentinelSecurityGate.isAuthorized else { return nil }
         do {
             if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
                 return nil
@@ -1423,6 +1510,7 @@ public class Nexilis: NSObject {
     }
     
     public static func writeDraw(data: String, timeout: Int = 15 * 1000) -> String? {
+        guard SentinelSecurityGate.isAuthorized else { return nil }
         do {
             if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
                 return nil
@@ -1439,6 +1527,7 @@ public class Nexilis: NSObject {
     }
     
     public static func response(packetId: String, message: TMessage, timeout: Int = 15 * 1000) -> String? {
+        guard SentinelSecurityGate.isAuthorized else { return nil }
         var result: String? = nil
         do {
             if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
@@ -1453,6 +1542,7 @@ public class Nexilis: NSObject {
     }
     
     public static func responseString(packetId: String, message: String, timeout: Int = 15 * 1000) -> String? {
+        guard SentinelSecurityGate.isAuthorized else { return nil }
         var result: String? = nil
         do {
             if !API.bInetConnAvailable() || API.nGetCLXConnState() == 0 {
@@ -1874,6 +1964,33 @@ public class Nexilis: NSObject {
                 let is_forwarded_message = message.getBodyAsLong(key: CoreMessage_TMessageKey.IS_FORWARDED_MESSAGE, default_value: 0)
                 let opposite_pin = message.getBody(key: CoreMessage_TMessageKey.OPPOSITE_PIN, default_value: "")
                 let is_bot = message.getBodyAsInteger(key: CoreMessage_TMessageKey.IS_BOT, default_value: 0)
+                // Fix: a document sent from Android arrived with no name on it. Every screen here
+                // reads a document's name off the front of message_text, as "name|caption" -
+                // which is how this app sends one, and how Android used to send one. Android now
+                // leaves message_text to the caption alone and carries the real name in a field
+                // of its own, so nothing ever reached the bubble: it drew a blank name, and with
+                // no name there was nothing to give the card its width, so the whole thing
+                // collapsed into a grey square with a document icon and a stray scrap of text in
+                // it. The name is put back where the rest of the app already looks for it, so one
+                // place answers for every screen that draws a document - the bubble, the reply
+                // container, the starred list, the search results and the chat list preview.
+                let carriedText = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_TEXT, default_value: "").toNormalString()
+                let carriedFileId = message.getBody(key: CoreMessage_TMessageKey.FILE_ID, default_value: "")
+                let carriedFileName = message.getBody(key: CoreMessage_TMessageKey.REAL_NAME_FILE_ID, default_value: "").toNormalString()
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let namedText: String = {
+                    guard !carriedFileId.isEmpty, !carriedFileName.isEmpty else {
+                        return carriedText
+                    }
+                    // Already in the shape the app reads, and the sender's own name for it is
+                    // there: nothing to do.
+                    if !carriedText.components(separatedBy: "|")[0]
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return carriedText
+                    }
+                    let caption = carriedText.hasPrefix("|") ? String(carriedText.dropFirst()) : carriedText
+                    return "\(carriedFileName)|\(caption)"
+                }()
                 //print("prepare save db")
                 if !messageExist || (lastEditedMessageExist == 0 && lastLockedMessageExist != "1") {
                     do {
@@ -1886,7 +2003,7 @@ public class Nexilis: NSObject {
                             "message_scope_id" : scope,
                             "server_date" : message.getBody(key: CoreMessage_TMessageKey.SERVER_DATE, default_value : String(Date().currentTimeMillis())),
                             "status" : status,
-                            "message_text" : message.getBody(key : CoreMessage_TMessageKey.MESSAGE_TEXT, default_value : "").toNormalString(),
+                            "message_text" : namedText,
                             "audio_id" : message.getBody(key : CoreMessage_TMessageKey.AUDIO_ID, default_value : ""),
                             "video_id" : message.getBody(key : CoreMessage_TMessageKey.VIDEO_ID, default_value : ""),
                             "image_id" : message.getBody(key : CoreMessage_TMessageKey.IMAGE_ID, default_value : ""),
@@ -2051,39 +2168,7 @@ public class Nexilis: NSObject {
             if inEditorPersonal == "-999"{
                 return
             }
-            let container = UIView()
-            container.backgroundColor = .gray
-            let profileImage = UIImageView()
-            profileImage.frame.size = CGSize(width: 60, height: 60)
-            container.addSubview(profileImage)
-            profileImage.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                profileImage.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8.0),
-                profileImage.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                profileImage.widthAnchor.constraint(equalToConstant: 60),
-                profileImage.heightAnchor.constraint(equalToConstant: 60),
-            ])
-            
-            let title = UILabel()
-            container.addSubview(title)
-            title.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                title.leadingAnchor.constraint(equalTo: profileImage.trailingAnchor, constant: 8.0),
-                title.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                title.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8.0)
-            ])
-            title.font = UIFont.systemFont(ofSize: 14)
-            title.text = nameReq.trimmingCharacters(in: .whitespaces) + " " + "has requested to be your friend".localized()
-            title.textColor = .white
-            title.numberOfLines = 0
-            
-            if Nexilis.shared.floating != nil {
-                Nexilis.shared.floating.dismiss()
-            }
-            Nexilis.shared.floating = FloatingNotificationBanner(customView: container)
-            Nexilis.shared.floating.bannerHeight = UIScreen.main.bounds.height / 6 - 10
-            Nexilis.shared.floating.transparency = 0.9
-            Nexilis.shared.floating.onTap = {
+            let openBotChat: () -> Void = {
                 let editorPersonalVC = AppStoryBoard.Palio.instance.instantiateViewController(identifier: "editorPersonalVC") as! EditorPersonal
                 editorPersonalVC.hidesBottomBarWhenPushed = true
                 editorPersonalVC.unique_l_pin = "-999"
@@ -2106,64 +2191,20 @@ public class Nexilis: NSObject {
                     UIApplication.shared.visibleViewController?.present(navigationController, animated: true, completion: nil)
                 }
             }
-            
-            if profile != "" {
-                profileImage.circle()
-                do {
-                    let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                    let file = documentDir.appendingPathComponent(profile)
-                    if FileManager().fileExists(atPath: file.path) {
-                        profileImage.image = UIImage(contentsOfFile: file.path)
-                        profileImage.backgroundColor = .clear
-                    } else if FileEncryption.shared.isSecureExists(filename: profile) {
-                        do {
-                            if var data = try FileEncryption.shared.readSecure(filename: profile) {
-                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                if dataDecrypt != nil {
-                                    data = dataDecrypt!
-                                }
-                                profileImage.image = UIImage(data: data)
-                                profileImage.backgroundColor = .clear
-                            }
-                        } catch {
-                            
-                        }
-                    } else {
-                        Download().startHTTP(forKey: profile) { (name, progress) in
-                            guard progress == 100 else {
-                                return
-                            }
-                            
-                            DispatchQueue.main.async {
-                                if FileEncryption.shared.isSecureExists(filename: profile) {
-                                    do {
-                                        if var data = try FileEncryption.shared.readSecure(filename: profile) {
-                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                            if dataDecrypt != nil {
-                                                data = dataDecrypt!
-                                            }
-                                            profileImage.image = UIImage(data: data)
-                                            profileImage.backgroundColor = .clear
-                                        }
-                                    } catch {
-                                        
-                                    }
-                                }
-                                Nexilis.shared.floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
-                                return
-                            }
-                        }
-                    }
-                } catch {}
-                profileImage.contentMode = .scaleAspectFill
-            } else {
-                profileImage.circle()
-                profileImage.image = UIImage(systemName: "person")
-                profileImage.contentMode = .scaleAspectFit
-                profileImage.backgroundColor = .lightGray
-                profileImage.tintColor = .white
-            }
-            Nexilis.shared.floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
+
+            let avatar = UIImageView()
+            avatar.contentMode = .scaleAspectFit
+            avatar.backgroundColor = .lightGray
+            avatar.tintColor = .white
+            InAppBanner.fillAvatar(avatar, withPictureNamed: profile, fallback: UIImage(systemName: "person"))
+
+            InAppBanner.shared.present(InAppBanner.Content(
+                conversationId: "-999",
+                title: nameReq.trimmingCharacters(in: .whitespaces),
+                body: NSAttributedString(string: "has requested to be your friend".localized(),
+                                         attributes: [.font: UIFont.systemFont(ofSize: 14)]),
+                avatar: avatar,
+                onTap: openBotChat))
         }
     }
     
@@ -2833,48 +2874,60 @@ public class Nexilis: NSObject {
         }
     }
     
+    /// Whether this app may use the microphone, asking for it if it has not been asked before.
+    ///
+    /// Fix: the waiting was done on `Nexilis.dispatch`, a DispatchGroup shared with the connection
+    /// code - Callback's connectionStateChanged calls `leave()` on it whenever the connection
+    /// changes state. A reconnect while the permission prompt was up released this wait early and
+    /// over-released the group. It waits on one of its own now, which nothing else can touch.
+    ///
+    /// The wait itself stays: iOS calls these completions on a queue of its own, never the main
+    /// queue, so a caller on the main thread is not waiting on itself. Every caller reads the
+    /// answer straight away, and there is no answer to read until the reader has given one.
     public static func checkMicPermission() -> Bool {
-        var permissionCheck: Bool = false
-
-        switch AVAudioSession.sharedInstance().recordPermission {
+        var granted = false
+        switch VoiceNoteBar.microphoneStatus {
         case .granted:
-            permissionCheck = true
+            granted = true
         case .denied:
-            permissionCheck = false
-        case .undetermined:
-            Nexilis.dispatch = DispatchGroup()
-            Nexilis.dispatch?.enter()
-            AVAudioSession.sharedInstance().requestRecordPermission({ (granted) in
-                if granted {
-                    permissionCheck = true
-                } else {
-                    permissionCheck = false
-                }
-                if let dispatch = Nexilis.dispatch {
-                    dispatch.leave()
-                }
-            })
-            Nexilis.dispatch?.wait()
-            Nexilis.dispatch = nil
+            granted = false
         default:
-            break
+            let wait = DispatchSemaphore(value: 0)
+            VoiceNoteBar.askMicrophone { answer in
+                granted = answer
+                wait.signal()
+            }
+            wait.wait()
         }
-
-        return permissionCheck
+        return granted
     }
     
+    /// Whether this app may use the camera: 1 for yes, 0 for no.
+    ///
+    /// Fix: when the camera had never been asked for, this fired the request with an empty
+    /// completion handler and returned -1 straight away - and every caller reads -1 as "do
+    /// nothing and return". So the reader tapped a video call, was asked for the camera, allowed
+    /// it, and nothing happened: they had to tap the button a second time. The answer is waited
+    /// for, so allowing it and getting the call are one tap. -1 is never returned any more; the
+    /// callers' own handling of it is left where it is, harmlessly, rather than editing sixteen
+    /// call sites for a value none of them will see again.
     public static func checkCameraPermission() -> Int {
-        var permissionCheck: Int = -1
-        if AVCaptureDevice.authorizationStatus(for: .video) ==  .authorized {
-            permissionCheck = 1
-        } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
-            permissionCheck = 0
-        } else {
-            AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
-               
-            })
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return 1
+        case .notDetermined:
+            var granted = false
+            let wait = DispatchSemaphore(value: 0)
+            // Called on a queue of iOS's own, never the main queue - see checkMicPermission.
+            AVCaptureDevice.requestAccess(for: .video) { answer in
+                granted = answer
+                wait.signal()
+            }
+            wait.wait()
+            return granted ? 1 : 0
+        default:
+            return 0
         }
-        return permissionCheck
     }
     
     public static func disclaimerConsent(
@@ -2964,8 +3017,6 @@ public class Nexilis: NSObject {
     weak open var timelineDelegate: TimelineDelegate?
     
     weak open var connectionDelegate: ConnectionDelegate?
-    
-    var floating: FloatingNotificationBanner!
     
     var stateUnfriend = ""
     
@@ -3763,15 +3814,51 @@ extension Nexilis: MessageDelegate {
                                 }
                             }
                         } else if fileType == BroadcastViewController.FILE_TYPE_VIDEO {
-                            //https://qmera.io/filepalio/image/
-                            let player = AVPlayer(url: URL(string: "https://nexilis.io/get_file?account=\(Nexilis.sAPIKey)&image=\(video)")!)
-                            let playerVC = AVPlayerViewController()
-                            playerVC.player = player
-                            playerVC.modalPresentationStyle = .custom
-                            if UIApplication.shared.visibleViewController?.navigationController != nil {
-                                UIApplication.shared.visibleViewController?.navigationController?.present(playerVC, animated: true, completion: nil)
+                            // Sentinel remediation (NX-10): never stream first-party media through
+                            // AVPlayer's independent network stack. Download through the centrally pinned,
+                            // ZTA-authorized transport, materialize a short-lived local plaintext file, then play it.
+                            //
+                            // That short-lived plaintext file is the one thing .hsa will not do: the whole
+                            // point of that mode is that decrypted content never lands on disk outside the
+                            // secure store. There it is served to AVPlayer straight from memory instead -
+                            // see SecureMediaPlayback. Modes 2 and 3 keep the temporary file they have
+                            // always used; there is no reason to change how a shipping host plays media.
+                            func presentDownloadedVideo(_ videoId: String) {
+                                guard SentinelSecurityGate.isAuthorized else { return }
+                                do {
+                                    guard var secureData = try FileEncryption.shared.readSecure(filename: videoId) else { return }
+                                    if let decrypted = FileEncryption.shared.decryptFileFromServer(data: secureData) {
+                                        secureData = decrypted
+                                    }
+                                    let playerVC = AVPlayerViewController()
+                                    if NXSecurityPolicy.isHSA() {
+                                        guard let item = SecureMediaPlayback.playerItem(for: secureData,
+                                                                                        filename: videoId,
+                                                                                        retainedBy: playerVC) else { return }
+                                        playerVC.player = AVPlayer(playerItem: item)
+                                    } else {
+                                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(videoId)
+                                        try? FileManager.default.removeItem(at: tempURL)
+                                        try secureData.write(to: tempURL, options: [.atomic, .completeFileProtection])
+                                        playerVC.player = AVPlayer(url: tempURL)
+                                    }
+                                    playerVC.modalPresentationStyle = .custom
+                                    if UIApplication.shared.visibleViewController?.navigationController != nil {
+                                        UIApplication.shared.visibleViewController?.navigationController?.present(playerVC, animated: true, completion: nil)
+                                    } else {
+                                        UIApplication.shared.visibleViewController?.present(playerVC, animated: true, completion: nil)
+                                    }
+                                } catch {
+                                    return
+                                }
+                            }
+                            if FileEncryption.shared.isSecureExists(filename: video) {
+                                presentDownloadedVideo(video)
                             } else {
-                                UIApplication.shared.visibleViewController?.present(playerVC, animated: true, completion: nil)
+                                Download().startHTTP(forKey: video) { _, progress in
+                                    guard progress >= 100 else { return }
+                                    DispatchQueue.main.async { presentDownloadedVideo(video) }
+                                }
                             }
                         } else if fileType == BroadcastViewController.FILE_TYPE_DOCUMENT {
                             if let dirPath = paths.first {
@@ -3905,19 +3992,12 @@ extension Nexilis: MessageDelegate {
             })
             let acceptAction = UIAlertAction(title: "I'll handle the customer".localized(), style: .default, handler: {(_) in
                 APIS.isHasFormCS = false
+                // Fix: the microphone was only insisted on for a voice channel. A video
+                // channel was accepted with the microphone refused, which is a call nobody can
+                // be heard on - the channel is checked below, and both are needed for either.
                 let goAudioCall = Nexilis.checkMicPermission()
-                if !goAudioCall && channel == "1" {
-                    let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow microphone permission in your settings".localized(), preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                        if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                            UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                        }
-                    }))
-                    if UIApplication.shared.visibleViewController?.navigationController != nil {
-                        UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                    } else {
-                        UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                    }
+                if !goAudioCall {
+                    APIS.showMicrophoneRefused()
                     DispatchQueue.global().async {
                         DispatchQueue.global().async {
                             _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: channel, l_pin: pin))
@@ -3928,39 +4008,14 @@ extension Nexilis: MessageDelegate {
                     return
                 }
                 if channel == "2" {
-                    var permissionCheck = -1
-                    if AVCaptureDevice.authorizationStatus(for: .video) ==  .authorized {
-                        permissionCheck = 1
-                    } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
-                        permissionCheck = 0
-                    } else {
-                        Nexilis.dispatch = DispatchGroup()
-                        Nexilis.dispatch?.enter()
-                        AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
-                            if granted == true {
-                                permissionCheck = 1
-                            } else {
-                                permissionCheck = 0
-                            }
-                            if let dispatch = Nexilis.dispatch {
-                                dispatch.leave()
-                            }
-                        })
-                        Nexilis.dispatch?.wait()
-                        Nexilis.dispatch = nil
-                    }
+                    // Fix: a second copy of the camera check lived here, waiting on
+                    // Nexilis.dispatch - the DispatchGroup the connection code also calls
+                    // leave() on, so a reconnect while the prompt was up released this wait
+                    // early. The one checker waits on a semaphore of its own, and never returns
+                    // the "not asked yet" answer that used to make this do nothing at all.
+                    let permissionCheck = Nexilis.checkCameraPermission()
                     if permissionCheck == 0 {
-                        let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow camera permission in your settings".localized(), preferredStyle: .alert)
-                        alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                            if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                                UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                            }
-                        }))
-                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                            UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                        } else {
-                            UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                        }
+                        APIS.showCameraRefused()
                         DispatchQueue.global().async {
                             DispatchQueue.global().async {
                                 _ = Nexilis.write(message: CoreMessage_TMessageBank.timeOutRequestCallCenter(channel: channel, l_pin: pin))
@@ -4262,19 +4317,12 @@ extension Nexilis: MessageDelegate {
             })
             let acceptAction = UIAlertAction(title: "Accept".localized(), style: .default, handler: {(_) in
                 listCCIdInv.removeAll(where: {$0 == id})
+                // Fix: the microphone was only insisted on for a voice channel. A video
+                // channel was accepted with the microphone refused, which is a call nobody can
+                // be heard on - the channel is checked below, and both are needed for either.
                 let goAudioCall = Nexilis.checkMicPermission()
-                if !goAudioCall && channel == "1" {
-                    let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow microphone permission in your settings".localized(), preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                        if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                            UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                        }
-                    }))
-                    if UIApplication.shared.visibleViewController?.navigationController != nil {
-                        UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                    } else {
-                        UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                    }
+                if !goAudioCall {
+                    APIS.showMicrophoneRefused()
                     DispatchQueue.global().async {
                         if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 0, ticket_id: id)) {
                             if result.isOk() {
@@ -4285,40 +4333,15 @@ extension Nexilis: MessageDelegate {
                     return
                 }
                 if channel == "2" {
-                    var permissionCheck = -1
-                    if AVCaptureDevice.authorizationStatus(for: .video) ==  .authorized {
-                        permissionCheck = 1
-                    } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
-                        permissionCheck = 0
-                    } else {
-                        Nexilis.dispatch = DispatchGroup()
-                        Nexilis.dispatch?.enter()
-                        AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
-                            if granted == true {
-                                permissionCheck = 1
-                            } else {
-                                permissionCheck = 0
-                            }
-                            if let dispatch = Nexilis.dispatch {
-                                dispatch.leave()
-                            }
-                        })
-                        Nexilis.dispatch?.wait()
-                        Nexilis.dispatch = nil
-                    }
+                    // Fix: a second copy of the camera check lived here, waiting on
+                    // Nexilis.dispatch - the DispatchGroup the connection code also calls
+                    // leave() on, so a reconnect while the prompt was up released this wait
+                    // early. The one checker waits on a semaphore of its own, and never returns
+                    // the "not asked yet" answer that used to make this do nothing at all.
+                    let permissionCheck = Nexilis.checkCameraPermission()
                     
                     if permissionCheck == 0 {
-                        let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow camera permission in your settings".localized(), preferredStyle: .alert)
-                        alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                            if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                                UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                            }
-                        }))
-                        if UIApplication.shared.visibleViewController?.navigationController != nil {
-                            UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                        } else {
-                            UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                        }
+                        APIS.showCameraRefused()
                         DispatchQueue.global().async {
                             if let result = Nexilis.writeSync(message: CoreMessage_TMessageBank.acceptCCRoomInvite(l_pin: pin, type: 0, ticket_id: id)) {
                                 if result.isOk() {
@@ -4712,7 +4735,16 @@ extension Nexilis: MessageDelegate {
 //                    return
 //                }
                 if message.getBody(key: messageScopeId) == MessageScope.WHISPER || message.getBody(key: messageScopeId) == MessageScope.FORM || message.getBody(key: messageScopeId) == MessageScope.CHATROOM {
-                    if inEditorPersonal == sender || (inEditorPersonal != nil && inEditorPersonal!.contains(",")) {
+                    // The conversation the reader has open announces nothing about itself.
+                    //
+                    // Fix: the second half of this used to read "any stored value with a comma in
+                    // it silences every personal card". That value was the list of people on a
+                    // call, written into the same key by the call screens, and nothing cleared it
+                    // when the call ended - so one conference call could leave in-app
+                    // notifications silent for good. The people on a call are checked by name
+                    // now, and only while a call is actually up: see the call test further down,
+                    // which has to be asked on the main thread.
+                    if inEditorPersonal == sender {
                         return
                     }
                     if(nameUser == nil) {
@@ -4799,47 +4831,9 @@ extension Nexilis: MessageDelegate {
                 if nameUser == nil && threadIdentifier == "-999" {
                     nameUser = "Bot"
                 }
-                DispatchQueue.main.async { [self] in
-                    let container = UIView()
-                    container.backgroundColor = .gray
-                    let profileImage = UIImageView()
-                    profileImage.frame.size = CGSize(width: 60, height: 60)
-                    container.addSubview(profileImage)
-                    profileImage.translatesAutoresizingMaskIntoConstraints = false
-                    NSLayoutConstraint.activate([
-                        profileImage.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8.0),
-                        profileImage.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                        profileImage.widthAnchor.constraint(equalToConstant: 60),
-                        profileImage.heightAnchor.constraint(equalToConstant: 60),
-                    ])
-                    
-                    let title = UILabel()
-                    container.addSubview(title)
-                    title.translatesAutoresizingMaskIntoConstraints = false
-                    NSLayoutConstraint.activate([
-                        title.leadingAnchor.constraint(equalTo: profileImage.trailingAnchor, constant: 8.0),
-                        title.topAnchor.constraint(equalTo: container.topAnchor, constant: 20.0),
-                    ])
-                    title.font = UIFont.systemFont(ofSize: 14)
-                    title.text = nameUser ?? "Unknown"
-                    title.textColor = .white
-                    
-                    let subtitle = UILabel()
-                    container.addSubview(subtitle)
-                    subtitle.translatesAutoresizingMaskIntoConstraints = false
-                    NSLayoutConstraint.activate([
-                        subtitle.leadingAnchor.constraint(equalTo: profileImage.trailingAnchor, constant: 8.0),
-                        subtitle.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -15.0),
-                        subtitle.topAnchor.constraint(equalTo: title.bottomAnchor),
-                    ])
-                    subtitle.font = UIFont.systemFont(ofSize: 12)
-                    subtitle.attributedText = text.richText()
-                    subtitle.textColor = .white
-                    
-                    if floating != nil {
-                        return
-                    }
-                    
+                DispatchQueue.main.async {
+                    // Screens that own the whole display, and an alert waiting to be answered:
+                    // a card dropping over any of those is in the way rather than helpful.
                     if UIApplication.shared.visibleViewController is UINavigationController {
                         let nc = UIApplication.shared.visibleViewController as! UINavigationController
                         if nc.visibleViewController is QmeraStreamingViewController {
@@ -4851,307 +4845,49 @@ extension Nexilis: MessageDelegate {
                     if UIApplication.shared.visibleViewController is UIAlertController {
                         return
                     }
-                    
-                    displayNotif()
-                    
-                    func displayNotif() {
-                        floating = FloatingNotificationBanner(customView: container)
-                        floating.bannerHeight = UIScreen.main.bounds.height / 6 - 10
-                        floating.transparency = 0.9
-                        
-                        if threadIdentifier == "-999" {
-                            if !Utils.getIconDock().isEmpty {
-                                let dataImage = try? Data(contentsOf: URL(string: Utils.getUrlDock()!)!) //make sure your image in this url does exist, otherwise unwrap in a if let check / try-catch
-                                if dataImage != nil {
-                                    profileImage.image = UIImage(data: dataImage!)
-                                }
-                            } else {
-                                profileImage.image = UIImage(named: "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                            }
-                        } else if profile != "" {
-                            profileImage.circle()
-                            do {
-                                let documentDir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                                let file = documentDir.appendingPathComponent(profile)
-                                if FileManager().fileExists(atPath: file.path) {
-                                    profileImage.image = UIImage(contentsOfFile: file.path)
-                                    profileImage.backgroundColor = .clear
-                                } else if FileEncryption.shared.isSecureExists(filename: profile) {
-                                    do {
-                                        if var data = try FileEncryption.shared.readSecure(filename: profile) {
-                                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                            if dataDecrypt != nil {
-                                                data = dataDecrypt!
-                                            }
-                                            profileImage.image = UIImage(data: data)
-                                            profileImage.backgroundColor = .clear
-                                        }
-                                    } catch {
-                                        
-                                    }
-                                } else {
-                                    Download().startHTTP(forKey: profile) { (name, progress) in
-                                        guard progress == 100 else {
-                                            return
-                                        }
-                                        
-                                        DispatchQueue.main.async { [self] in
-                                            if FileEncryption.shared.isSecureExists(filename: profile) {
-                                                do {
-                                                    if var data = try FileEncryption.shared.readSecure(filename: profile) {
-                                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                                                        if dataDecrypt != nil {
-                                                            data = dataDecrypt!
-                                                        }
-                                                        profileImage.image = UIImage(data: data)
-                                                        profileImage.backgroundColor = .clear
-                                                    }
-                                                } catch {
-                                                    
-                                                }
-                                            }
-                                            if !onGoingCC.isEmpty {
-                                                floating.autoDismiss = false
-                                            }
-                                            floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
-                                            floating.onTap = {
-                                                self.floating = nil
-                                                showNotif()
-                                            }
-                                            var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"
-                                            if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == MessageScope.GROUP {
-                                                soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
-                                            }
-                                            do {
-                                                var nameSound = soundId.component(1, separatedBy: ":").replacingOccurrences(of: " ", with: "_")
-                                                var fromPref = false
-                                                if nameSound.contains("_(Default)") {
-                                                    if !Utils.getDefaultIncomingMsg().isEmpty {
-                                                        nameSound = Utils.getDefaultIncomingMsg()
-                                                        fromPref = true
-                                                    } else {
-                                                        nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
-                                                    }
-                                                }
-                                                var soundURL: URL?
-                                                if fromPref {
-                                                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                                                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                                                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                                                    if let dirPath = paths.first {
-                                                        let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(nameSound)
-                                                        if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: nameSound) {
-                                                            Download().startHTTP(forKey: nameSound,downloadUrl: Utils.getURLBase() + "filepalio/ringtone/") { (name, progress) in
-                                                                guard progress == 100 else {
-                                                                    return
-                                                                }
-                                                                playAudio()
-                                                            }
-                                                        } else {
-                                                            playAudio()
-                                                        }
-                                                        
-                                                        func playAudio() {
-                                                            if FileManager.default.fileExists(atPath: audioURL.path) {
-                                                                do {
-                                                                    do {
-                                                                        try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-                                                                        try AVAudioSession.sharedInstance().setActive(true)
-                                                                    } catch {
-                                                                        
-                                                                    }
-                                                                    Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: audioURL)
-                                                                    Nexilis.sharedAudioPlayer?.prepareToPlay()
-                                                                    Nexilis.sharedAudioPlayer?.play()
-                                                                } catch {
-                                                                    
-                                                                }
-                                                            } else if FileEncryption.shared.isSecureExists(filename: nameSound) {
-                                                                do {
-                                                                    if var audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
-                                                                        let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: audioData)
-                                                                        if dataDecrypt != nil {
-                                                                            audioData = dataDecrypt!
-                                                                        }
-                                                                        let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                                                                        let tempPath = cachesDirectory.appendingPathComponent(nameSound)
-                                                                        try audioData.write(to: tempPath)
-                                                                        do {
-                                                                            do {
-                                                                                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-                                                                                try AVAudioSession.sharedInstance().setActive(true)
-                                                                            } catch {
-                                                                                
-                                                                            }
-                                                                            Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: tempPath)
-                                                                            Nexilis.sharedAudioPlayer?.prepareToPlay()
-                                                                            Nexilis.sharedAudioPlayer?.play()
-                                                                        } catch {
-                                                                            
-                                                                        }
-                                                                    }
-                                                                } catch {
-                                                                    
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                } else {
-                                                    soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
-                                                    if soundURL == nil {
-                                                        soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
-                                                    }
-                                                    do {
-                                                        do {
-                                                            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-                                                            try AVAudioSession.sharedInstance().setActive(true)
-                                                        } catch {
-                                                            
-                                                        }
-                                                        Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
-                                                        Nexilis.sharedAudioPlayer?.prepareToPlay()
-                                                        Nexilis.sharedAudioPlayer?.play()
-                                                    } catch {
-                                                        
-                                                    }
-                                                }
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: {
-                                                    self.floating = nil
-                                                })
-                                            } catch {
-                                                
-                                            }
-                                        }
-                                    }
+                    // On a call with this person: what they are saying belongs to the call screen,
+                    // not to a card over it. Only the people on the call, and only while it is up.
+                    if InAppBanner.isCallInProgress,
+                       let onCall: String = SecureUserDefaults.shared.value(forKey: "inCallMembers"),
+                       onCall.components(separatedBy: ",").contains(sender) {
+                        return
+                    }
+
+                    let isPersonal = message.getBody(key: messageScopeId) == MessageScope.WHISPER
+                    let avatar = UIImageView()
+                    avatar.contentMode = .scaleAspectFit
+                    avatar.backgroundColor = .lightGray
+                    avatar.tintColor = .white
+                    if threadIdentifier == "-999" {
+                        avatar.image = UIImage(named: "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                        avatar.backgroundColor = .clear
+                        // Fix: the dock's icon was fetched with a synchronous Data(contentsOf:)
+                        // on the main thread, so a slow server froze the app for as long as it
+                        // took. The card goes up with the bundled mark and takes the fetched one
+                        // whenever it lands.
+                        if !Utils.getIconDock().isEmpty, let dock = Utils.getUrlDock(), let url = URL(string: dock) {
+                            DispatchQueue.global(qos: .utility).async {
+                                guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else {
                                     return
                                 }
-                            } catch {}
-                            profileImage.contentMode = .scaleAspectFill
-                        } else {
-                            profileImage.circle()
-                            if message.getBody(key: messageScopeId) == MessageScope.WHISPER {
-                                profileImage.image = UIImage(systemName: "person")
-                            } else {
-                                profileImage.image = UIImage(systemName: "person.3")
-                            }
-                            profileImage.contentMode = .scaleAspectFit
-                            profileImage.backgroundColor = .lightGray
-                            profileImage.tintColor = .white
-                        }
-                        
-                        floating.show(queuePosition: .front, bannerPosition: .top, queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1), on: nil, edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0), cornerRadius: 8.0, shadowColor: .clear, shadowOpacity: .zero, shadowBlurRadius: .zero, shadowCornerRadius: .zero, shadowOffset: .zero, shadowEdgeInsets: nil)
-    //                    let vibrateMode: Bool = SecureUserDefaults.shared.value(forKey: "vibrateMode") ?? false
-                        var soundId: String = SecureUserDefaults.shared.value(forKey: "newNotifSoundPersonal") ?? "001:Nexilis Message (Default)"
-                        if message.getBody(key: CoreMessage_TMessageKey.MESSAGE_SCOPE_ID) == MessageScope.GROUP {
-                            soundId = SecureUserDefaults.shared.value(forKey: "newNotifSoundGroup") ?? "001:Nexilis Message (Default)"
-                        }
-                        do {
-                            var nameSound = soundId.component(1, separatedBy: ":").replacingOccurrences(of: " ", with: "_")
-                            var fromPref = false
-                            if nameSound.contains("_(Default)") {
-                                if !Utils.getDefaultIncomingMsg().isEmpty {
-                                    nameSound = Utils.getDefaultIncomingMsg()
-                                    fromPref = true
-                                } else {
-                                    nameSound = nameSound.replacingOccurrences(of: "_(Default)", with: "")
+                                DispatchQueue.main.async {
+                                    avatar.image = image
+                                    avatar.contentMode = .scaleAspectFill
                                 }
                             }
-                            var soundURL: URL?
-                            if fromPref {
-                                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                                if let dirPath = paths.first {
-                                    let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(nameSound)
-                                    if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: nameSound) {
-                                        Download().startHTTP(forKey: nameSound,downloadUrl: Utils.getURLBase() + "filepalio/ringtone/") { (name, progress) in
-                                            guard progress == 100 else {
-                                                return
-                                            }
-                                            playAudio()
-                                        }
-                                    } else {
-                                        playAudio()
-                                    }
-                                    
-                                    func playAudio() {
-                                        if FileManager.default.fileExists(atPath: audioURL.path) {
-                                            do {
-                                                do {
-                                                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-                                                    try AVAudioSession.sharedInstance().setActive(true)
-                                                } catch {
-                                                    
-                                                }
-                                                Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: audioURL)
-                                                Nexilis.sharedAudioPlayer?.prepareToPlay()
-                                                Nexilis.sharedAudioPlayer?.play()
-                                            } catch {
-                                                
-                                            }
-                                        } else if FileEncryption.shared.isSecureExists(filename: nameSound) {
-                                            do {
-                                                if var audioData = try FileEncryption.shared.readSecure(filename: nameSound) {
-                                                    let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: audioData)
-                                                    if dataDecrypt != nil {
-                                                        audioData = dataDecrypt!
-                                                    }
-                                                    let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                                                    let tempPath = cachesDirectory.appendingPathComponent(nameSound)
-                                                    try audioData.write(to: tempPath)
-                                                    do {
-                                                        do {
-                                                            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-                                                            try AVAudioSession.sharedInstance().setActive(true)
-                                                        } catch {
-                                                            
-                                                        }
-                                                        Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: tempPath)
-                                                        Nexilis.sharedAudioPlayer?.prepareToPlay()
-                                                        Nexilis.sharedAudioPlayer?.play()
-                                                    } catch {
-                                                        
-                                                    }
-                                                }
-                                            } catch {
-                                                
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                soundURL = Bundle.resourceBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
-                                if soundURL == nil {
-                                    soundURL = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: nameSound, withExtension: "mp3")
-                                }
-                                do {
-                                    do {
-                                        try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-                                        try AVAudioSession.sharedInstance().setActive(true)
-                                    } catch {
-                                        
-                                    }
-                                    Nexilis.sharedAudioPlayer = try AVAudioPlayer(contentsOf: soundURL!)
-                                    Nexilis.sharedAudioPlayer?.prepareToPlay()
-                                    Nexilis.sharedAudioPlayer?.play()
-                                } catch {
-                                    
-                                }
-                            }
-                        } catch {
-                            
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: {
-                            self.floating = nil
-                        })
-//                        if !onGoingCC.isEmpty {
-//                            floating.autoDismiss = false
-//                        }
-                        floating.onTap = {
-                            self.floating = nil
-                            showNotif()
-                        }
+                    } else {
+                        InAppBanner.fillAvatar(avatar,
+                                               withPictureNamed: profile,
+                                               fallback: UIImage(systemName: isPersonal ? "person" : "person.3"))
                     }
+
+                    InAppBanner.shared.present(InAppBanner.Content(
+                        conversationId: threadIdentifier,
+                        title: nameUser ?? "Unknown",
+                        body: text.richText(fontSize: 14),
+                        avatar: avatar,
+                        onTap: { showNotif() }))
                     func showNotif() {
                         if UIApplication.shared.visibleViewController is UINavigationController {
                             let nc = UIApplication.shared.visibleViewController as! UINavigationController
@@ -5187,7 +4923,7 @@ extension Nexilis: MessageDelegate {
                             return
                         }
                         if !onGoingCC.isEmpty {
-                            floating.dismiss()
+                            InAppBanner.shared.dismissAll()
                         }
                         Database.shared.database?.inTransaction({ (fmdb, rollback) in
                             do {
@@ -5412,17 +5148,6 @@ extension Nexilis: QLPreviewControllerDataSource {
     }
 }
 
-public class SelfSignedURLSessionDelegate: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate {
-    public func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
-            if let serverTrust = challenge.protectionSpace.serverTrust {
-                let credential = URLCredential(trust: serverTrust)
-                completionHandler(.useCredential, credential)
-            }
-        }
-    }
-}
-
 final class PinnedURLSessionNexilisDelegate: NSObject,
     URLSessionTaskDelegate, URLSessionDataDelegate {
     func urlSession(_ session: URLSession,
@@ -5448,46 +5173,20 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
             return
         }
 
-        // Fix: every branch below must call completionHandler exactly once and then
-        // return. Previously, each branch already called completionHandler, but
-        // execution still fell through to an unconditional final call
-        // (`completionHandler(.useCredential, URLCredential(trust: trust))`) - that's
-        // the "completion handler called more than once" API misuse. Worse, when JSON
-        // parsing of the stored pin failed there was no else-branch at all, so the
-        // *only* call that ran was that unconditional final one - meaning a corrupted/
-        // unparseable pin silently bypassed pinning entirely (fail-open) instead of
-        // rejecting the connection (fail-closed).
-        guard let publicKeyHash = extractPublicKeyHash(from: serverTrust) else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
+        let domain = challenge.protectionSpace.host.lowercased()
+        guard RASPGuard.shared().isPinnedHost(domain) else {
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
             return
         }
 
-        let domain = challenge.protectionSpace.host
-        let storedCertificate = Utils.getCertificatePinningWebview()
-        guard let jsonData = storedCertificate.data(using: .utf8) else {
-            // Fix: fail closed - don't trust the connection if the pin can't be read.
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-
-        // Fix: support both the new format (domain -> array of accepted hashes, so a
-        // certificate/key rotation can be handled by listing old+new hash together
-        // ahead of time) and the legacy format (domain -> single hash string) still
-        // possibly cached on a device from before this migration, so existing
-        // installs don't get hard-locked-out mid-migration.
-        let acceptedHashes: [String]
-        if let certJsonArray = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: [String]] {
-            acceptedHashes = certJsonArray[domain] ?? []
-        } else if let certJsonLegacy = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: String] {
-            acceptedHashes = certJsonLegacy[domain].map { [$0] } ?? []
-        } else {
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-
-        if acceptedHashes.contains(publicKeyHash) {
+        // One trust policy for every first-party transport: immutable primary/backup pins from
+        // Sentinel configuration plus signature-verified additive rotations. Mutable local pin
+        // JSON is never an authorization source.
+        if RASPGuard.shared().serverTrust(serverTrust, matchesPinnedSPKIForHost: domain)
+            || PinSetStore.matches(trust: serverTrust, host: domain) {
             completionHandler(.useCredential, URLCredential(trust: serverTrust))
         } else {
+            RASPGuard.shared().reportPinningFailure(forHost: domain)
             completionHandler(.cancelAuthenticationChallenge, nil)
         }
     }
@@ -5524,7 +5223,14 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
         0x01, 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22, 0x03, 0x62, 0x00
     ]
 
-    private func spkiHeader(keyType: String, sizeInBits: Int) -> [UInt8]? {
+    static func isTrustedPinnedHost(trust: SecTrust, host: String) -> Bool {
+        let domain = host.lowercased()
+        guard RASPGuard.shared().isPinnedHost(domain) else { return true }
+        return RASPGuard.shared().serverTrust(trust, matchesPinnedSPKIForHost: domain)
+            || PinSetStore.matches(trust: trust, host: domain)
+    }
+
+    private static func spkiHeader(keyType: String, sizeInBits: Int) -> [UInt8]? {
         if keyType == (kSecAttrKeyTypeRSA as String) {
             switch sizeInBits {
             case 2048: return PinnedURLSessionNexilisDelegate.rsa2048Asn1Header
@@ -5542,7 +5248,7 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
         return nil
     }
 
-    func extractPublicKeyHash(from serverTrust: SecTrust) -> String? {
+    static func extractPublicKeyHash(from serverTrust: SecTrust) -> String? {
         guard let certificate = SecTrustGetCertificateAtIndex(serverTrust, 0) else { return nil }
         guard let publicKey = SecCertificateCopyKey(certificate) else { return nil }
 
@@ -5554,7 +5260,7 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
         guard let attributes = SecKeyCopyAttributes(publicKey) as? [CFString: Any],
               let keyType = attributes[kSecAttrKeyType] as? String,
               let sizeInBits = attributes[kSecAttrKeySizeInBits] as? Int,
-              let header = spkiHeader(keyType: keyType, sizeInBits: sizeInBits) else {
+              let header = Self.spkiHeader(keyType: keyType, sizeInBits: sizeInBits) else {
             // Fix: unknown/unsupported key type or size - fail closed instead of
             // silently hashing the wrong (raw, non-SPKI) bytes and always mismatching.
             return nil
@@ -5574,5 +5280,498 @@ final class PinnedURLSessionNexilisDelegate: NSObject,
         let base64Hash = hashData.base64EncodedString()
 
         return base64Hash
+    }
+}
+
+// MARK: - The in-app notification banner
+
+/// The card that drops in from the top when something arrives for a conversation the reader is
+/// not looking at: the in-app half of a notification.
+///
+/// Everything about how one is shown lives here - the queue, the look, the sound, and what
+/// happens when several arrive at once - so the three places that raise one (a message, a friend
+/// request, someone adding you back) all behave the same way.
+final class InAppBanner {
+
+    static let shared = InAppBanner()
+
+    /// What a banner has to say, kept whole so one can be held back and shown later.
+    struct Content {
+        /// Which conversation it belongs to. A second message from the same one is folded into
+        /// the banner already on screen instead of queueing behind it.
+        var conversationId: String
+        var title: String
+        var body: NSAttributedString
+        /// Built by whoever raises the banner, which is also what fills it in when the picture
+        /// has to be fetched first: the banner holds the view, so a late arrival still lands.
+        var avatar: UIImageView
+        /// How many more went unannounced behind this one.
+        var alsoWaiting: Int = 0
+        var onTap: (() -> Void)?
+    }
+
+    /// One queue for the whole app.
+    ///
+    /// Fix: every banner used to be shown with a queue of its own, built inline at the call. A
+    /// queue only holds the banners handed to it, so nothing ever queued - each new banner was
+    /// pushed to the front of an empty queue and simply covered the one before it. What actually
+    /// kept the screen from filling up was a flag saying "one is already showing, drop this one",
+    /// cleared three seconds later, which meant a second message inside those three seconds was
+    /// announced by nothing at all.
+    private let queue = NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1)
+
+    /// The height of the card itself, under the strip left clear for the notch.
+    private static let cardHeight: CGFloat = 76
+    /// How long one stays up.
+    private static let onScreen: TimeInterval = 4.0
+    /// At most one tone in this long, however many messages land.
+    private static let soundInterval: TimeInterval = 1.5
+    /// How many conversations are ever left waiting their turn. Anything beyond this is dropped
+    /// rather than shown a minute late - the chat list has it, and so does the badge.
+    private static let maxWaiting = 3
+    /// The tone iOS plays for a message that arrives while you are already looking at Messages:
+    /// short, quiet, and over before it is in the way. The long ringtone from settings belongs
+    /// to the notification the system raises when the app is not on screen.
+    private static let chimeSoundId: SystemSoundID = 1003
+    /// Whether a message that lands during a call is allowed to make a sound.
+    ///
+    /// WhatsApp lets it, and the complaints about that are easy to find. During a call the tone
+    /// goes out on the call's own audio route, so a phone held to the ear takes it at call
+    /// volume, with no volume of its own to turn down and no way to duck it. iOS's own Messages
+    /// stays quiet through a call, and so does this: the card still drops in and the wrist still
+    /// gets a tap, which is what tells the reader something arrived. Turn this on to have it the
+    /// way WhatsApp has it.
+    private static let chimesDuringCall = false
+
+    private var waiting: [Content] = []
+    private var showing: (banner: FloatingNotificationBanner, content: Content)?
+    private var showingLabels: (title: UILabel, body: UILabel, extra: UILabel)?
+    private var lastSoundAt: Date?
+
+    // The catch-up window, see beginCatchUp().
+    private var catchUpUntil: Date?
+    private var heldContent: Content?
+    private var heldCount = 0
+    private var settleTimer: Timer?
+
+    private init() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(onBannerDidDisappear(_:)),
+            name: BaseNotificationBanner.BannerDidDisappear,
+            object: nil)
+    }
+
+    // MARK: - Raising one
+
+    /// Announces something, now or as soon as the banner in front of it has had its turn.
+    func present(_ content: Content) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.present(content) }
+            return
+        }
+        // Still catching up on a backlog: hold this one and let the settle decide.
+        if let until = catchUpUntil {
+            if Date() < until {
+                hold(content)
+                return
+            }
+            flushHeld(andPresent: content)
+            return
+        }
+        // Already saying something about this conversation: say the new thing instead, and give
+        // the card its time back. Two cards for one conversation is noise.
+        if let current = showing, current.content.conversationId == content.conversationId {
+            fold(content, into: current.banner, replacing: current.content)
+            return
+        }
+        // Waiting its turn: replace what it was going to say.
+        if let index = waiting.firstIndex(where: { $0.conversationId == content.conversationId }) {
+            var updated = content
+            updated.alsoWaiting = waiting[index].alsoWaiting + 1
+            waiting[index] = updated
+            return
+        }
+        guard showing == nil else {
+            waiting.append(content)
+            if waiting.count > InAppBanner.maxWaiting {
+                waiting.removeFirst()
+            }
+            return
+        }
+        show(content)
+    }
+
+    /// Takes down whatever is up and forgets what was queued behind it.
+    func dismissAll() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.dismissAll() }
+            return
+        }
+        waiting.removeAll()
+        heldContent = nil
+        heldCount = 0
+        settleTimer?.invalidate()
+        settleTimer = nil
+        showing?.banner.dismiss()
+        showing = nil
+        showingLabels = nil
+    }
+
+    // MARK: - Coming back to the app
+
+    /// Opens a window in which arrivals are gathered rather than announced one by one.
+    ///
+    /// Fix: coming back to the app used to switch the in-app banners off outright for thirty
+    /// seconds. The reasoning was sound - a minimised app that has been away a while comes back
+    /// to a burst of messages, and one banner each would bury the screen - but the cure was
+    /// worse: for half a minute after every single return to the app, nothing announced itself
+    /// at all, whether it was a backlog of fifty or the one message that had just arrived.
+    /// The burst is gathered instead, and the moment it goes quiet the newest is shown, with a
+    /// count of what came with it.
+    func beginCatchUp(seconds: TimeInterval = 6.0) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.beginCatchUp(seconds: seconds) }
+            return
+        }
+        catchUpUntil = Date().addingTimeInterval(seconds)
+    }
+
+    /// The app is going away: nothing is owed to a screen nobody is looking at.
+    func endCatchUp() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.endCatchUp() }
+            return
+        }
+        catchUpUntil = nil
+        heldContent = nil
+        heldCount = 0
+        settleTimer?.invalidate()
+        settleTimer = nil
+    }
+
+    private func hold(_ content: Content) {
+        heldContent = content
+        heldCount += 1
+        settleTimer?.invalidate()
+        // Shown when the burst goes quiet, or when the window runs out - whichever comes first,
+        // so a backlog that keeps arriving is still announced rather than waited on forever.
+        let quiet = 0.9
+        let remaining = max(0.1, catchUpUntil?.timeIntervalSinceNow ?? quiet)
+        settleTimer = Timer.scheduledTimer(withTimeInterval: min(quiet, remaining), repeats: false) { [weak self] _ in
+            self?.flushHeld(andPresent: nil)
+        }
+    }
+
+    private func flushHeld(andPresent next: Content?) {
+        settleTimer?.invalidate()
+        settleTimer = nil
+        catchUpUntil = nil
+        let count = heldCount
+        let gathered = heldContent
+        heldContent = nil
+        heldCount = 0
+        if var held = gathered {
+            // The newest of the burst is the one worth showing; the rest are a number beside it.
+            held.alsoWaiting = max(0, count - 1)
+            present(held)
+        }
+        if let next = next {
+            present(next)
+        }
+    }
+
+    // MARK: - Showing one
+
+    private func show(_ content: Content) {
+        // The reader may have opened this very conversation while the card was waiting - held
+        // back through a burst, or queued behind another one. Asked again at the last moment,
+        // because the answer at the moment the message arrived is not the answer now.
+        guard !isConversationOpen(content.conversationId) else {
+            if !waiting.isEmpty {
+                show(waiting.removeFirst())
+            }
+            return
+        }
+        let card = makeCard(for: content)
+        let banner = FloatingNotificationBanner(customView: card.view)
+        banner.bannerHeight = reservedTopSpacing + InAppBanner.cardHeight
+        banner.duration = InAppBanner.onScreen
+        banner.haptic = .light
+        banner.onTap = { [weak self] in
+            // Opening a conversation answers the rest of them: anything queued behind this card
+            // is stale by the time the reader comes back out. The card itself is left to the
+            // library to take away, which is what advances the queue - see onBannerDidDisappear.
+            self?.waiting.removeAll()
+            content.onTap?()
+        }
+        showing = (banner, content)
+        showingLabels = card.labels
+        applyExtra(content.alsoWaiting)
+        banner.show(queuePosition: .back,
+                    bannerPosition: .top,
+                    queue: queue,
+                    on: nil,
+                    edgeInsets: UIEdgeInsets(top: 8.0, left: 8.0, bottom: 0, right: 8.0),
+                    cornerRadius: 18.0,
+                    shadowColor: .black,
+                    shadowOpacity: 0.16,
+                    shadowBlurRadius: 12.0,
+                    shadowCornerRadius: 18.0,
+                    shadowOffset: UIOffset(horizontal: 0, vertical: 4),
+                    shadowEdgeInsets: nil)
+        playChime()
+    }
+
+    /// A newer message for the conversation already on screen: the card says the new thing, and
+    /// its time starts again.
+    private func fold(_ content: Content, into banner: FloatingNotificationBanner, replacing previous: Content) {
+        var updated = content
+        updated.alsoWaiting = previous.alsoWaiting + 1
+        showing = (banner, updated)
+        showingLabels?.title.text = updated.title
+        showingLabels?.body.attributedText = updated.body
+        applyExtra(updated.alsoWaiting)
+        banner.resetDuration()
+        playChime()
+    }
+
+    private func applyExtra(_ count: Int) {
+        guard let extra = showingLabels?.extra else {
+            return
+        }
+        extra.text = count > 0 ? "+\(count)" : nil
+        extra.isHidden = count <= 0
+    }
+
+    private func forget(_ banner: FloatingNotificationBanner) {
+        guard showing?.banner === banner else {
+            return
+        }
+        showing = nil
+        showingLabels = nil
+    }
+
+    @objc private func onBannerDidDisappear(_ notification: Notification) {
+        guard let banner = notification.object as? FloatingNotificationBanner,
+              showing?.banner === banner else {
+            return
+        }
+        forget(banner)
+        guard !waiting.isEmpty else {
+            return
+        }
+        show(waiting.removeFirst())
+    }
+
+    // MARK: - The sound
+
+    /// A short, quiet tone, and only one of them however many messages land at once.
+    ///
+    /// Fix: the old path built an AVAudioPlayer for the ringtone from settings on every single
+    /// banner - a second and a half of music - and to play it, it set the app's audio session to
+    /// .playback and made it active. That stops whatever the reader had playing, and it plays
+    /// over the ring/silent switch. Nothing here touches the audio session: a system sound is
+    /// mixed in over whatever else is going on, and goes quiet when the phone is set to silent.
+    /// The ringtone from settings is still what the system plays for a notification raised while
+    /// the app is not on screen - that is where a long, distinctive tone belongs.
+    private func playChime() {
+        if InAppBanner.isCallInProgress, !InAppBanner.chimesDuringCall {
+            return
+        }
+        let now = Date()
+        if let last = lastSoundAt, now.timeIntervalSince(last) < InAppBanner.soundInterval {
+            return
+        }
+        lastSoundAt = now
+        AudioServicesPlaySystemSound(InAppBanner.chimeSoundId)
+    }
+
+    // MARK: - The look
+
+    /// Builds the card: a picture, who it is from, and what they said - the shape an iOS
+    /// notification has, rather than the grey block a sixth of the screen tall that was here.
+    private func makeCard(for content: Content) -> (view: UIView, labels: (title: UILabel, body: UILabel, extra: UILabel)) {
+        let container = UIView()
+        // Left clear on purpose: the library paints the strip above the card with this colour,
+        // and the blur below draws the card itself.
+        container.backgroundColor = .clear
+
+        let background = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterial))
+        background.translatesAutoresizingMaskIntoConstraints = false
+        background.layer.cornerRadius = 18
+        background.layer.cornerCurve = .continuous
+        background.clipsToBounds = true
+        container.addSubview(background)
+
+        let avatar = content.avatar
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatar.layer.cornerRadius = 22
+        avatar.clipsToBounds = true
+        background.contentView.addSubview(avatar)
+
+        let title = UILabel()
+        title.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+        title.textColor = .label
+        title.text = content.title
+        title.lineBreakMode = .byTruncatingTail
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        // How many more went unannounced behind this one, off to the right of the name where a
+        // notification carries its time.
+        let extra = UILabel()
+        extra.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        extra.textColor = .secondaryLabel
+        extra.setContentHuggingPriority(.required, for: .horizontal)
+        extra.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let body = UILabel()
+        body.numberOfLines = 2
+        body.textColor = .secondaryLabel
+        body.attributedText = content.body
+        body.lineBreakMode = .byTruncatingTail
+
+        let header = UIStackView(arrangedSubviews: [title, extra])
+        header.axis = .horizontal
+        header.alignment = .firstBaseline
+        header.spacing = 8
+
+        // Centred rather than pinned top and bottom: the card is a fixed height and the text is
+        // not, so anything nailed to both edges is one long message away from a broken layout.
+        let text = UIStackView(arrangedSubviews: [header, body])
+        text.axis = .vertical
+        text.spacing = 2
+        text.translatesAutoresizingMaskIntoConstraints = false
+        background.contentView.addSubview(text)
+
+        NSLayoutConstraint.activate([
+            background.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            background.topAnchor.constraint(equalTo: container.topAnchor),
+            background.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            avatar.leadingAnchor.constraint(equalTo: background.contentView.leadingAnchor, constant: 12),
+            avatar.centerYAnchor.constraint(equalTo: background.contentView.centerYAnchor),
+            avatar.widthAnchor.constraint(equalToConstant: 44),
+            avatar.heightAnchor.constraint(equalToConstant: 44),
+
+            text.leadingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: 12),
+            text.trailingAnchor.constraint(equalTo: background.contentView.trailingAnchor, constant: -14),
+            text.centerYAnchor.constraint(equalTo: background.contentView.centerYAnchor)
+        ])
+
+        extra.isHidden = true
+        return (container, (title: title, body: body, extra: extra))
+    }
+
+    /// Whether the conversation a card is about is the one the reader has open.
+    ///
+    /// The chat screens keep this in two keys as they come and go - see
+    /// registerAsOpenConversation in EditorPersonal and EditorGroup.
+    private func isConversationOpen(_ conversationId: String) -> Bool {
+        guard !conversationId.isEmpty else {
+            return false
+        }
+        let personal: String? = SecureUserDefaults.shared.value(forKey: "inEditorPersonal") ?? nil
+        if personal == conversationId {
+            return true
+        }
+        guard let group: [String] = SecureUserDefaults.shared.value(forKey: "inEditorGroup") ?? nil,
+              group.count == 2 else {
+            return false
+        }
+        // A group's lounge is addressed by the group's own id, a topic by the topic's - so the
+        // two have to be told apart rather than both matched against the pair.
+        return group[1].isEmpty ? group[0] == conversationId : group[1] == conversationId
+    }
+
+    /// Whether a call is up: on screen, or minimised to the strip or the bubble.
+    ///
+    /// Asked of the screens themselves rather than of the call bookkeeping, so it is true for
+    /// every way a call can be running - dialled from here, answered from the lock screen, or
+    /// put aside while the reader does something else.
+    static var isCallInProgress: Bool {
+        if MiniCallBannerManager.shared.isShowing || MiniVideoCallManager.shared.isShowing {
+            return true
+        }
+        var top = UIApplication.shared.visibleViewController
+        if let navigation = top as? UINavigationController {
+            top = navigation.visibleViewController
+        }
+        return top is QmeraAudioViewController || top is QmeraVideoViewController
+    }
+
+    /// The strip the library keeps clear at the top for the status bar and the notch, which is
+    /// part of the height it is given. Worked out the way the library works it out, so the card
+    /// underneath is the size asked for rather than whatever is left over.
+    private var reservedTopSpacing: CGFloat {
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { $0.isKeyWindow })
+        let insets = window?.safeAreaInsets ?? .zero
+        if insets.top > 50 {
+            return 44 + 16
+        }
+        if insets.bottom > 0 {
+            return 40
+        }
+        let statusBar = window?.windowScene?.statusBarManager?.statusBarFrame.height ?? 20
+        return 10 + statusBar
+    }
+}
+
+extension InAppBanner {
+
+    /// Puts a profile picture on a banner - from disk, from the secure store, or from the server
+    /// if it takes that - without keeping the banner waiting for it.
+    ///
+    /// Fix: the banner used to be shown from inside the download's own callback, so a message
+    /// from someone whose picture was not on the device yet announced itself only once that
+    /// picture had been fetched, and not at all if the fetch failed. The card goes up straight
+    /// away with the outline, and the picture drops into it whenever it lands.
+    static func fillAvatar(_ imageView: UIImageView, withPictureNamed name: String, fallback: UIImage?) {
+        imageView.image = fallback
+        imageView.contentMode = fallback == nil ? .scaleAspectFill : .scaleAspectFit
+        guard !name.isEmpty else {
+            return
+        }
+        if let documentDir = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true) {
+            let file = documentDir.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: file.path), let image = UIImage(contentsOfFile: file.path) {
+                apply(image, to: imageView)
+                return
+            }
+        }
+        if let image = secureImage(named: name) {
+            apply(image, to: imageView)
+            return
+        }
+        Download().startHTTP(forKey: name) { _, progress in
+            guard progress == 100 else {
+                return
+            }
+            DispatchQueue.main.async {
+                if let image = secureImage(named: name) {
+                    apply(image, to: imageView)
+                }
+            }
+        }
+    }
+
+    private static func secureImage(named name: String) -> UIImage? {
+        guard FileEncryption.shared.isSecureExists(filename: name),
+              let stored = ((try? FileEncryption.shared.readSecure(filename: name)) ?? nil) else {
+            return nil
+        }
+        let data = FileEncryption.shared.decryptFileFromServer(data: stored) ?? stored
+        return UIImage(data: data)
+    }
+
+    private static func apply(_ image: UIImage, to imageView: UIImageView) {
+        imageView.image = image
+        imageView.contentMode = .scaleAspectFill
+        imageView.backgroundColor = .clear
     }
 }

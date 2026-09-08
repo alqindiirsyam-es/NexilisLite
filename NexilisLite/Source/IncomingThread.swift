@@ -600,108 +600,21 @@ class IncomingThread {
     }
 
     private func showAddFriendBanner(fPin: String, fullName: String, profileThumbId: String) {
-        let container = UIView()
-        container.backgroundColor = .gray
-        let profileImage = UIImageView()
-        profileImage.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(profileImage)
-        NSLayoutConstraint.activate([
-            profileImage.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            profileImage.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            profileImage.widthAnchor.constraint(equalToConstant: 60),
-            profileImage.heightAnchor.constraint(equalToConstant: 60),
-        ])
+        let avatar = UIImageView()
+        avatar.contentMode = .scaleAspectFit
+        avatar.backgroundColor = .lightGray
+        avatar.tintColor = .white
+        // Fix: three copies of "find this picture, and if it is not here fetch it" lived in three
+        // files, each with its own idea of when the banner was allowed to appear. There is one
+        // now, and it never holds the banner back - see InAppBanner.fillAvatar.
+        InAppBanner.fillAvatar(avatar, withPictureNamed: profileThumbId, fallback: UIImage(systemName: "person"))
 
-        let titleLabel = UILabel()
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = UIFont.systemFont(ofSize: 14)
-        titleLabel.text = fullName + " " + "added you as friend".localized()
-        titleLabel.textColor = .white
-        titleLabel.numberOfLines = 0
-        container.addSubview(titleLabel)
-        NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: profileImage.trailingAnchor, constant: 8),
-            titleLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            titleLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8)
-        ])
-
-        if Nexilis.shared.floating != nil { Nexilis.shared.floating.dismiss() }
-        Nexilis.shared.floating = FloatingNotificationBanner(customView: container)
-        Nexilis.shared.floating.bannerHeight = UIScreen.main.bounds.height / 6 - 10
-        Nexilis.shared.floating.transparency = 0.9
-
-        self.loadProfileImage(thumbId: profileThumbId, into: profileImage) {
-            self.showBanner()
-        }
-    }
-
-    private func loadProfileImage(thumbId: String, into imageView: UIImageView, completion: @escaping () -> Void) {
-        guard !thumbId.isEmpty else {
-            imageView.circle()
-            imageView.image = UIImage(systemName: "person")
-            imageView.contentMode = .scaleAspectFit
-            imageView.backgroundColor = .lightGray
-            imageView.tintColor = .white
-            completion()
-            return
-        }
-        imageView.circle()
-        imageView.contentMode = .scaleAspectFill
-
-        // Cek file di background, update UI di main
-        DispatchQueue.global(qos: .userInitiated).async {
-            if let documentDir = try? FileManager.default.url(
-                for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true) {
-                let file = documentDir.appendingPathComponent(thumbId)
-                if FileManager().fileExists(atPath: file.path),
-                   let img = UIImage(contentsOfFile: file.path) {
-                    DispatchQueue.main.async {
-                        imageView.image = img
-                        imageView.backgroundColor = .clear
-                        completion()
-                    }
-                    return
-                }
-            }
-            if FileEncryption.shared.isSecureExists(filename: thumbId),
-               let data = try? FileEncryption.shared.readSecure(filename: thumbId) {
-                let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) ?? data
-                let img = UIImage(data: decrypted)
-                DispatchQueue.main.async {
-                    imageView.image = img
-                    imageView.backgroundColor = .clear
-                    completion()
-                }
-                return
-            }
-            // Download jika tidak ada
-            Download().startHTTP(forKey: thumbId) { (_, progress) in
-                guard progress == 100 else { return }
-                DispatchQueue.global(qos: .userInitiated).async {
-                    if FileEncryption.shared.isSecureExists(filename: thumbId),
-                       let data = try? FileEncryption.shared.readSecure(filename: thumbId) {
-                        let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) ?? data
-                        DispatchQueue.main.async {
-                            imageView.image = UIImage(data: decrypted)
-                            imageView.backgroundColor = .clear
-                            completion()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func showBanner() {
-        Nexilis.shared.floating.show(
-            queuePosition: .front, bannerPosition: .top,
-            queue: NotificationBannerQueue(maxBannersOnScreenSimultaneously: 1),
-            on: nil,
-            edgeInsets: UIEdgeInsets(top: 8, left: 8, bottom: 0, right: 8),
-            cornerRadius: 8, shadowColor: .clear, shadowOpacity: .zero,
-            shadowBlurRadius: .zero, shadowCornerRadius: .zero,
-            shadowOffset: .zero, shadowEdgeInsets: nil
-        )
+        InAppBanner.shared.present(InAppBanner.Content(
+            conversationId: fPin,
+            title: fullName,
+            body: NSAttributedString(string: "added you as friend".localized(),
+                                     attributes: [.font: UIFont.systemFont(ofSize: 14)]),
+            avatar: avatar))
     }
     
     private func inquiry(message: TMessage) {

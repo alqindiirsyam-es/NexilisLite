@@ -84,6 +84,17 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             // what is kept here belongs to the main thread alone.
             return dataMessages.filter({ $0["chat_date"] as? String ?? "" == date })
         }
+        guard let indexes = messageIndexes(onDate: date) else {
+            return []
+        }
+        return indexes.compactMap { $0 < dataMessages.count ? dataMessages[$0] : nil }
+    }
+
+    /// One section's positions, without gathering the messages themselves.
+    ///
+    /// Asking for a section's messages builds an array of them, and the table asks about one
+    /// row at a time - so a single row's question used to gather its whole day.
+    private func messageIndexes(onDate date: String) -> [Int]? {
         if messageIndexesByDate == nil || messageIndexesByDateCount != dataMessages.count {
             var grouped: [String: [Int]] = [:]
             for (index, message) in dataMessages.enumerated() {
@@ -95,10 +106,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 self?.messageIndexesByDate = nil
             }
         }
-        guard let indexes = messageIndexesByDate?[date] else {
-            return []
-        }
-        return indexes.compactMap { $0 < dataMessages.count ? dataMessages[$0] : nil }
+        return messageIndexesByDate?[date]
     }
 
     public var dataMessageForward: [[String: Any?]]?
@@ -142,6 +150,16 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     // reach the end of the loaded messages as rarely as possible, not to make the trip there
     // cheaper.
     private static let olderMessagePageSize: Int64 = 100
+    /// How far ahead of the top of the loaded conversation a page is read, in screens.
+    ///
+    /// Two screens: near the top, but not at it. Eight screens was tried and it reads a page at
+    /// the start of almost every flick, which is a page read the reader had no need of - and
+    /// every page read is work done on the main thread while they are scrolling. Four hundred
+    /// points was the other extreme, and at the speed of a flick that is two or three frames'
+    /// warning, which is no warning at all. Two screens is close enough that a page is read only
+    /// when the reader is genuinely heading for the end of what is loaded, and far enough that
+    /// the read is over well before they get there.
+    private static let olderMessageLead: CGFloat = 2
     /// Database offset of the oldest message currently loaded.
     private var loadedOffset: Int64 = 0
     /// How many database rows the loaded window covers. Not the same as dataMessages.count -
@@ -223,6 +241,50 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// instead of guessing - which is what keeps the scroll position steady when older
     /// messages are inserted above.
     private var measuredRowHeights: [String: CGFloat] = [:]
+    /// What each message's own text measures, kept so a row costs that measurement once.
+    private var textBubbleHeights: [String: CGFloat] = [:]
+    /// The width the text is really laid out at, learned from a bubble that has been built - one
+    /// for the reader's own bubbles, one for everybody else's. See learnTextWidth.
+    private var textWidths: [Bool: CGFloat] = [:]
+    /// What each row was reckoned at before its kind's learned difference was added.
+    private var rawRowGuesses: [String: CGFloat] = [:]
+    /// What this conversation's reckonings are out by, per kind of bubble and per side of the
+    /// conversation. See learnRowHeight.
+    private var corrections: [String: HeightCorrection] = [:]
+    /// How much of each row's reckoning was its text, so the proportional half of the learned
+    /// difference has something to work on.
+    private var rawTextParts: [String: CGFloat] = [:]
+    /// Held while a collage's list of pictures is being raised from the bottom edge: a navigation
+    /// controller does not keep its delegate.
+    private var risingCollageTransition: AnyObject?
+    /// The measurements above, added up, so a row never built can be guessed at from what this
+    /// conversation's rows really come to rather than from a fixed number.
+    private var measuredHeightTotal: CGFloat = 0
+    private var measuredHeightSamples = 0
+    /// Settled once enough rows have been measured, and not moved again.
+    ///
+    /// Fix: this was the running average itself, recomputed on every read. A guess that keeps
+    /// changing is worse than a guess that is merely wrong: the table asks it again for every row
+    /// it has not built whenever the rows are reloaded, so a moving average moves the height of
+    /// hundreds of rows at once, and with them the whole content and everything worked out from
+    /// it. That is why the list was unsteady exactly when messages first came on screen - opening
+    /// a chat, and reading a page of older ones - because that is when rows are measured and the
+    /// average moves. Forty rows is a good enough sample; after that the answer stops moving.
+    private var settledRowHeightEstimate: CGFloat?
+    private static let rowHeightSampleSize = 40
+    private var averageMeasuredRowHeight: CGFloat {
+        if let settled = settledRowHeightEstimate {
+            return settled
+        }
+        guard measuredHeightSamples > 0, !measuredRowHeights.isEmpty else {
+            return 72
+        }
+        let average = measuredHeightTotal / CGFloat(measuredHeightSamples)
+        if measuredHeightSamples >= Self.rowHeightSampleSize {
+            settledRowHeightEstimate = average
+        }
+        return average
+    }
     var buttonScrollToBottom = UIButton()
     let indicatorCounterBSTB = UIView()
     let labelCounter = UILabel()
@@ -262,6 +324,99 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     var tempListMentionInTextField:[User] = []
     var showingLink = ""
     var isAlwaysHideLinkPreview = false
+
+    /// What is already known about each link in this conversation.
+    ///
+    /// Fix: every bubble carrying a link read the LINK_PREVIEW table as it was built, and a row
+    /// is built again every time it comes back into view - so a conversation full of links did a
+    /// SQLite transaction per link on every pass of the scroll, on the main thread. What a link
+    /// says only changes when this screen changes it, and where it does the entry is dropped.
+    private var linkAnswers: [String: LinkPreviewStore.Answer] = [:]
+    /// Links seen on screen whose page has not been read yet, against the message each sits on.
+    private var linksToRead: [String: String] = [:]
+    private var linkReadPassScheduled = false
+
+    private func linkAnswer(for link: String) -> LinkPreviewStore.Answer {
+        if let held = linkAnswers[link] {
+            return held
+        }
+        let answer = LinkPreviewStore.answer(link: link)
+        // A conversation scrolled long enough would otherwise hold every link it ever passed.
+        if linkAnswers.count > 300 {
+            linkAnswers.removeAll()
+        }
+        linkAnswers[link] = answer
+        return answer
+    }
+
+    /// Fix: the page behind a link was asked for from inside the row that carried it. Scrolling
+    /// past twenty links therefore started twenty page fetches and twenty pictures behind them,
+    /// each one a URLSession and a delegate built on the main thread while the finger was still
+    /// moving, and each answer rebuilt a row. A link seen on screen is only noted here; the
+    /// reading happens once the list is still, two at a time, and only for the links still on
+    /// screen by then.
+    private func noteLinkToRead(_ link: String, messageId: String) {
+        guard !link.isEmpty, !messageId.isEmpty else {
+            return
+        }
+        linksToRead[link] = messageId
+        scheduleLinkReadPass()
+    }
+
+    private func scheduleLinkReadPass() {
+        guard !linkReadPassScheduled, !linksToRead.isEmpty else {
+            return
+        }
+        linkReadPassScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.linkReadPassScheduled = false
+            self?.readLinksNowOnScreen()
+        }
+    }
+
+    private func readLinksNowOnScreen() {
+        guard let table = tableChatView, !linksToRead.isEmpty else {
+            return
+        }
+        guard !table.isDragging, !table.isDecelerating else {
+            scheduleLinkReadPass()
+            return
+        }
+        let onScreen = Set((table.indexPathsForVisibleRows ?? []).compactMap {
+            message(at: $0)?["message_id"] as? String
+        })
+        // What has scrolled away is forgotten rather than fetched; it is noted again if it comes
+        // back. What is left over waits for the next pass instead of going out all at once.
+        linksToRead = linksToRead.filter { onScreen.contains($0.value) }
+        for (link, messageId) in linksToRead.prefix(2) {
+            linksToRead.removeValue(forKey: link)
+            readLink(link, messageId: messageId)
+        }
+        scheduleLinkReadPass()
+    }
+
+    private func readLink(_ link: String, messageId: String) {
+        LinkPreviewFetcher.fetch(link: link) { [weak self] gained in
+            // Nothing was learned - a restricted Drive link, an address that is not one, a site
+            // that answered with nothing - so there is nothing to draw and no row is touched.
+            guard gained, let self = self, let table = self.tableChatView else {
+                return
+            }
+            self.linkAnswers.removeValue(forKey: link)
+            guard !table.isDragging, !table.isDecelerating,
+                  let indexPath = self.indexPath(forMessageId: messageId),
+                  table.indexPathsForVisibleRows?.contains(indexPath) == true else {
+                return
+            }
+            // A card appearing makes its row taller, and a row above the reader getting taller
+            // pushes what they are reading down the screen. The message they were looking at is
+            // put back where it was, the same way it is when the keyboard changes the room.
+            let anchor = self.listAnchor
+            table.reloadRows(at: [indexPath], with: .none)
+            table.layoutIfNeeded()
+            self.restore(anchor)
+        }
+    }
     var timerCheckLink: Timer?
     var lastPositionCursorMention = 0
     var lastTextLength = 0
@@ -616,16 +771,119 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     ///
     /// The same thing `referenceMessageId` does when this screen is opened fresh - but this one
     /// works on a conversation already loaded, where that has long since been read.
-    func highlightMessage(_ messageId: String) {
-        _ = ensureMessageLoaded(messageId: messageId)
-        guard let indexPath = indexPath(forMessageId: messageId) else {
+    /// The name a collage's tiles answer to, so the one picture a quote was about can be found
+    /// again inside the row that stands for all of them.
+    private static let collageTileName = "collageTile-"
+
+    /// Takes the reader to a quoted or pinned message and flashes it.
+    ///
+    /// Fix: the row was found by walking the loaded list for the message's own id, and a picture
+    /// gathered into a collage has no row of its own - the collage's row stands for all of them,
+    /// and the members are taken out of the list when they join it. So a quote of a picture that
+    /// ended up in a collage found nothing, returned, and the tap did nothing at all.
+    /// indexPath(forMessageId:) already knows to answer with the collage's row, and once there
+    /// the one picture the quote was about is flashed inside it - so the tap points at the
+    /// picture, not merely at the group it ended up in.
+    ///
+    /// The jump itself is not animated. A quote can be thousands of points away, and an animated
+    /// scroll over that distance is a long blur of other people's messages; the reference arrives
+    /// at once, in a single frame, and the flash is what says where.
+    private func jumpToQuotedMessage(messageId: String) {
+        guard !messageId.isEmpty else {
+            return
+        }
+        ensureMessageLoaded(messageId: messageId)
+        guard let indexPath = indexPath(forMessageId: messageId), let row = message(at: indexPath) else {
             return
         }
         tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: false)
-        tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            self?.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
+        // A row that has just been scrolled to has no cell until the table has laid itself out,
+        // and there is nothing to flash without one.
+        tableChatView.layoutIfNeeded()
+        // A quote of a picture that ended up in a collage: what the reader asked for is that one
+        // picture, so the collage's own list of pictures is raised over the conversation and put
+        // at the one they named. The conversation underneath has already been taken to the collage,
+        // so closing the list lands on the bubble the quote was about rather than wherever they
+        // were reading before.
+        // Not when there is nowhere to raise it: a conversation loaded behind another screen
+        // purely to answer for it has no stack of its own, and there the flash below is all there
+        // is to give.
+        if navigationController != nil, let rowId = row["message_id"] as? String, rowId != messageId,
+           let members = groupImages[rowId],
+           let member = members.firstIndex(where: { $0.messageId == messageId }) {
+            let opening = ObjectGesture()
+            opening.listImageFromGrouping = members
+            opening.indexImageTapped = member
+            opening.isInitiator = (row["f_pin"] as? String) == User.getMyPin()
+            opening.risesFromBottom = true
+            imageGroupingTapped(opening)
+            return
         }
+        flashBubble(at: indexPath, row: row, quoted: messageId)
+    }
+
+    /// Marks the bubble that was jumped to, and the picture inside it when the bubble is a
+    /// collage: the bubble lightens for half a second the way the reference does, and the one
+    /// picture the quote named brightens and fades.
+    private func flashBubble(at indexPath: IndexPath, row: [String: Any?], quoted: String) {
+        guard let cell = tableChatView.cellForRow(at: indexPath),
+              cell.contentView.subviews.count > 1 else {
+            return
+        }
+        let containerMessage = cell.contentView.subviews[1]
+        let isMine = (row["f_pin"] as? String) == User.getMyPin()
+        let bubbleColour: UIColor = isMine ? .blueBubbleColor : .whiteBubbleColor
+        // Fix: what the bubble goes back to used to be worked out again from whose message it is,
+        // with one exception written in for stickers - and a sticker is not the only bubble here
+        // that is transparent. A round video note is another, and a collage was a third the moment
+        // this path could reach one. What it goes back to is simply what it was.
+        let resting = containerMessage.backgroundColor ?? .clear
+        containerMessage.backgroundColor = bubbleColour.withAlphaComponent(0.3)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            containerMessage.backgroundColor = resting
+        }
+        guard (row["message_id"] as? String) != quoted,
+              let members = groupImages[row["message_id"] as? String ?? ""],
+              let member = members.firstIndex(where: { $0.messageId == quoted }) else {
+            return
+        }
+        var tiles: [Int: UIView] = [:]
+        for tile in containerMessage.subviews {
+            guard let name = tile.accessibilityIdentifier, name.hasPrefix(EditorGroup.collageTileName),
+                  let index = Int(name.dropFirst(EditorGroup.collageTileName.count)) else {
+                continue
+            }
+            tiles[index] = tile
+        }
+        // Past the fourth there are no tiles of their own: the rest of the run is behind the last
+        // one, and that is where the reader is pointed.
+        guard let target = tiles[min(member, tiles.count - 1)] else {
+            return
+        }
+        let glow = UIView()
+        glow.backgroundColor = UIColor.white.withAlphaComponent(0.55)
+        glow.isUserInteractionEnabled = false
+        glow.layer.cornerRadius = target.layer.cornerRadius
+        target.addSubview(glow)
+        glow.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            glow.topAnchor.constraint(equalTo: target.topAnchor),
+            glow.bottomAnchor.constraint(equalTo: target.bottomAnchor),
+            glow.leadingAnchor.constraint(equalTo: target.leadingAnchor),
+            glow.trailingAnchor.constraint(equalTo: target.trailingAnchor)
+        ])
+        UIView.animate(withDuration: 0.35, delay: 0.35, options: [.curveEaseOut], animations: {
+            glow.alpha = 0
+        }, completion: { _ in
+            glow.removeFromSuperview()
+        })
+    }
+
+    func highlightMessage(_ messageId: String) {
+        // Fix: this painted the whole row yellow for a second, which is neither what a quote tap
+        // does two screens over nor what the reference does. One flash, in one place, whichever
+        // way the reader arrived.
+        jumpToQuotedMessage(messageId: messageId)
     }
 
     func reveal(messageId: String, from presenter: UIViewController?) {
@@ -793,14 +1051,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
 
     /// Brings a message into view, reading the page it lives on first if it is not loaded.
     func goToMessage(messageId: String) {
-        guard !messageId.isEmpty else {
-            return
-        }
-        _ = ensureMessageLoaded(messageId: messageId)
-        guard let indexPath = indexPath(forMessageId: messageId) else {
-            return
-        }
-        tableChatView.scrollToRow(at: indexPath, at: .middle, animated: true)
+        jumpToQuotedMessage(messageId: messageId)
     }
 
     /// Turns the star on a message on or off, in the database and in what is on screen.
@@ -1048,6 +1299,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             return
         }
         isPreview = false
+        // It is a conversation being read now, so it stops announcing its own messages. Done
+        // here as well as in viewWillAppear: a preview that is opened is already on screen, and
+        // viewWillAppear will not come round again for it.
+        registerAsOpenConversation()
         // The navigation bar is about to say the name properly; two headers would be one too many.
         previewHeader?.removeFromSuperview()
         previewHeader = nil
@@ -1332,14 +1587,46 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         return files
     }
 
+    /// The documents directory, asked for once rather than once per row.
+    ///
+    /// Fix: every caller of this asked NSSearchPathForDirectoriesInDomains for itself, and a page
+    /// of a hundred messages asked it several hundred times. It does not change while the app is
+    /// running.
+    private static let documentsPath: String = {
+        return NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first ?? ""
+    }()
+
+    /// Whether a file is on this device.
+    ///
+    /// Fix: two filesystem questions per call, and the collage grouping asks it twice for every
+    /// pair of pictures in a run - so one page of images went through the filesystem hundreds of
+    /// times over, on the main thread, while the reader was scrolling. The answer is remembered
+    /// for the life of the screen: a file that has arrived does not leave again, and one that has
+    /// not is asked for again when its download reports in, which redraws the row anyway.
     private func isFilePresent(_ filename: String) -> Bool {
-        let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
-        guard let dirPath = paths.first else {
+        guard !filename.isEmpty else {
             return false
         }
-        let url = URL(fileURLWithPath: dirPath).appendingPathComponent(filename)
-        return FileManager.default.fileExists(atPath: url.path) || FileEncryption.shared.isSecureExists(filename: filename)
+        if let known = filePresence[filename] {
+            return known
+        }
+        let path = Self.documentsPath
+        guard !path.isEmpty else {
+            return false
+        }
+        let url = URL(fileURLWithPath: path).appendingPathComponent(filename)
+        let here = FileManager.default.fileExists(atPath: url.path)
+            || FileEncryption.shared.isSecureExists(filename: filename)
+        // Only a yes is worth keeping. A no can become a yes the moment a download lands, and
+        // remembering that would leave the bubble offering to fetch a file it already has.
+        if here {
+            filePresence[filename] = true
+        }
+        return here
     }
+
+    /// Files already found on this device, so the filesystem is asked once each.
+    private var filePresence: [String: Bool] = [:]
 
     /// Files this screen has tried to fetch and could not. Left alone by the sweep from then on.
     private var unreachableFiles = Set<String>()
@@ -1629,6 +1916,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         return CGFloat(fontSize)
     }
     
+    public override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Off screen is off screen, whether that is the reader going back, opening another
+        // conversation over this one, or stepping into this one's own members list.
+        unregisterAsOpenConversation()
+    }
+
     public override func viewDidDisappear(_ animated: Bool) {
         // Nothing left playing, and no timer left running, behind a conversation that has
         // been left - a repeating timer outlives the screen that made it.
@@ -1643,7 +1937,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         for timer in self.timerCredential.values {
             timer.invalidate()
         }
-        SecureUserDefaults.shared.removeValue(forKey: "inEditorGroup")
+        // Fix: this cleared the key whoever it belonged to, from viewDidDisappear - which lands
+        // after the screen underneath has already registered itself.
+        self.unregisterAsOpenConversation()
         NotificationCenter.default.removeObserver(self)
         self.removeFromParent()
         var l_pin = self.dataGroup["group_id"]  as? String ?? ""
@@ -1773,10 +2069,43 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// The chat list hides the bar for itself, so opening a chat from there showed this every
     /// single time. Done before the screen appears, the messages are laid out under a header
     /// that is already there, and nothing moves.
+
+    // MARK: - Which conversation is open
+
+    /// What this screen writes into "inEditorGroup": the group, and the topic within it.
+    private var openConversationValue: [String] {
+        return [dataGroup["group_id"] as? String ?? "", dataTopic["chat_id"] as? String ?? ""]
+    }
+
+    /// Says that this conversation is the one on screen, so nothing raises a card about it.
+    ///
+    /// Fix: see the same pair in EditorPersonal. Written once at load and deleted only on a pop,
+    /// the registration was wrong in every case where a chat was left by any other means - and it
+    /// never displaced the personal chat registered before it, so a message from the person whose
+    /// chat you had opened earlier stayed silent while you read a group.
+    private func registerAsOpenConversation() {
+        SecureUserDefaults.shared.set(openConversationValue, forKey: "inEditorGroup")
+        // One conversation is on screen at a time.
+        SecureUserDefaults.shared.removeValue(forKey: "inEditorPersonal")
+    }
+
+    /// Takes back the registration, and only ever this screen's own.
+    private func unregisterAsOpenConversation() {
+        let stored: [String]? = SecureUserDefaults.shared.value(forKey: "inEditorGroup") ?? nil
+        guard stored == openConversationValue else {
+            return
+        }
+        SecureUserDefaults.shared.removeValue(forKey: "inEditorGroup")
+    }
+
     public override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         prepareNavigationBar()
         addPreviewHeaderIfNeeded()
+        // A preview is not a conversation being read - see isPreview.
+        if !isPreview {
+            registerAsOpenConversation()
+        }
         // The placement is settled here, while the push animation still covers the screen,
         // rather than over the layout passes that follow it - see settleInitialBottomNow.
         settleInitialBottomNow()
@@ -1809,6 +2138,21 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         for delay in [0.1, 0.25, 0.5, 0.8] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.applyPendingInitialBottomScroll()
+            }
+        }
+        // Fix: a chat with unread messages opens parked at the first of them, which is not the
+        // bottom - so the button that takes the reader to the end belongs on screen from the
+        // start, and it never was. The one place that asked for it ran inside the load, before
+        // the table had laid out: it measured a content height of nothing, concluded the list
+        // was already at its end, and asked for nothing. And had it asked, addButtonScrollToBottom
+        // returns early during the load by design. It is asked again once the placement has
+        // settled, by the same test that decides it while scrolling.
+        for delay in [0.35, 0.9, 1.6] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self, !self.isInitialLoading, !self.isPreview else {
+                    return
+                }
+                self.checkNewMessage(tableView: self.tableChatView)
             }
         }
 //        let indexPath = tableChatView.indexPathsForVisibleRows?.first
@@ -1923,6 +2267,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         center.addObserver(self, selector: #selector(onFailedSendMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.failedSendMessage), object: nil)
         center.addObserver(self, selector: #selector(onUpdatedMessage(notification:)), name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil)
         center.addObserver(self, selector: #selector(onCheckNewMessages(notification:)), name: NSNotification.Name(rawValue: "checkNewMessagesNexilis"), object: nil)
+        // Coming back to the app is reading whatever is on screen - see
+        // markVisibleMessagesRead.
+        center.addObserver(self, selector: #selector(onAppBecameActive(notification:)), name: UIApplication.didBecomeActiveNotification, object: nil)
         
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
@@ -1944,7 +2291,40 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         tableMention.register(UITableViewCell.self, forCellReuseIdentifier: "cellMention")
         tableMention.dataSource = self
         tableMention.delegate = self
-        tableMention.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
+        // Fix: the list carried a top inset of -25, which pulls its rows up by 25 points inside
+        // a frame that is exactly as tall as the rows are - so the last 25 points of the last
+        // row sat below the bottom edge and could only be reached by scrolling a list nobody
+        // thinks to scroll. There is no header to make room for; there never was.
+        tableMention.contentInset = .zero
+        // The height of the list is worked out as 44 points a row, so say so rather than leaving
+        // it to whatever the storyboard's estimate happens to be.
+        tableMention.rowHeight = ChatMentionList.rowHeight
+        tableMention.estimatedRowHeight = ChatMentionList.rowHeight
+        tableMention.separatorInset = UIEdgeInsets(top: 0, left: 52, bottom: 0, right: 0)
+        tableMention.keyboardDismissMode = .none
+        tableMention.showsVerticalScrollIndicator = false
+        // A card, the way the rest of the input area is drawn, rather than a bare table sitting
+        // against the wallpaper.
+        tableMention.backgroundColor = traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        tableMention.layer.cornerRadius = 12
+        tableMention.layer.cornerCurve = .continuous
+        tableMention.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        tableMention.clipsToBounds = true
+        // Fix: where this list sat was worked out by hand, in eight different places, from the
+        // keyboard's height plus the text field's height plus a hand-picked 25 - and then nudged
+        // by another number every time the input area grew or shrank: +40 when a reply preview
+        // opened, -50 when it closed, +120 when a link preview opened, -80 when it closed. The
+        // numbers did not agree with each other or with the bars they were standing in for, so
+        // the error accumulated: with a reply preview and a link preview both up, the bottom of
+        // the list ended up underneath them. It is pinned to the top of the input area now.
+        // Whatever that area happens to contain - a reply preview, a link preview, both, or a
+        // keyboard under it - the list sits on top of it and nothing has to be calculated.
+        contraintBottomMention.isActive = false
+        tableMention.bottomAnchor.constraint(equalTo: viewTextfield.topAnchor).isActive = true
+        // The storyboard leaves it 150 tall so it can be seen while the screen is being laid
+        // out. Hiding it used to be a matter of pushing it off the bottom of the screen; now it
+        // is away when it has no height, so it has to start with none.
+        heightTableMention.constant = 0
         
         tableChatView.rowHeight = UITableView.automaticDimension
         // A concrete estimate rather than automaticDimension: with the automatic one the
@@ -1978,7 +2358,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     
     public func afterUnfriend() {
         DispatchQueue.main.async {
-            SecureUserDefaults.shared.removeValue(forKey: "inEditorGroup")
+            self.unregisterAsOpenConversation()
             NotificationCenter.default.removeObserver(self)
         }
     }
@@ -2141,6 +2521,10 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             updateCounter(counter: counter)
         }
 
+        // Kept whatever the table's scrollability, so switching scrolling off - which some
+        // gestures do to hold the list still - cannot drop the inset the content is laid out
+        // against and shift the whole conversation by it.
+        tableChatView.contentInsetAdjustmentBehavior = .always
         tableChatView.delegate = self
         // Pull a row right to reply to it, left for its info - see ChatBubbleSwipe.
         bubbleSwipe = ChatBubbleSwipe(tableView: tableChatView, canPerform: { [weak self] indexPath, direction in
@@ -2533,10 +2917,29 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     ///   - limit: how many rows, or -1 for "everything from `offset` on".
     ///   - prepend: older messages go in front of what is already loaded; new ones behind it.
     ///   - marksFirstAsUnread: the first row read becomes the "unread from here" marker.
-    private func getData(offset: Int64 = 0, limit: Int64 = -1, prepend: Bool = false, marksFirstAsUnread: Bool = false) {
+    ///
+    /// `olderThan` and `newerOrEqual` are the second way in, and the reason for it: paging by
+    /// position means `ORDER BY server_date LIMIT n OFFSET m`, and SQLite answers that by walking
+    /// and discarding m rows every single time. The deeper the reader has scrolled, the longer
+    /// that takes - a conversation of a few thousand messages spends the better part of a second
+    /// in there, on the main thread, which is the freeze in the middle of a fling. Given a date
+    /// range instead, the same read is an index range: a hundred rows touched, and the same cost
+    /// however deep it is.
+    private func getData(offset: Int64 = 0, limit: Int64 = -1, prepend: Bool = false, marksFirstAsUnread: Bool = false,
+                         olderThan: String? = nil, newerOrEqual: String? = nil) {
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
-                let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where \(self.messageWhereClause()) order by server_date asc LIMIT \(limit) OFFSET \(offset)"
+                // Either a date range - an index range, cheap at any depth - or the old position
+                // window. See the note on getData for why the second one is worth avoiding.
+                var window = "order by server_date asc LIMIT \(limit) OFFSET \(offset)"
+                if let olderThan = olderThan {
+                    var bounds = "AND server_date < \(olderThan)"
+                    if let newerOrEqual = newerOrEqual {
+                        bounds += " AND server_date >= \(newerOrEqual)"
+                    }
+                    window = "\(bounds) order by server_date asc"
+                }
+                let query = "SELECT message_id, f_pin, l_pin, message_scope_id, server_date, status, message_text, audio_id, video_id, image_id, thumb_id, read_receipts, chat_id, file_id, attachment_flag, reff_id, lock, is_stared, blog_id, credential, last_edited, gif_id, is_forwarded_message, attachment_speciality, is_pinned FROM MESSAGE where \(self.messageWhereClause()) \(window)"
                 if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: query) {
                     var tempImages: [ImageGrouping] = []
                     var idxOff = 0
@@ -2629,25 +3032,23 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                         row[TypeDataMessage.is_call_center] = cursorData.string(forColumnIndex: 20)
                         row[TypeDataMessage.call_center_id] = cursorData.string(forColumnIndex: 21)
                         row[TypeDataMessage.opposite_pin] = cursorData.string(forColumnIndex: 22)
-                        let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                        let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                        let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                        if let dirPath = paths.first {
-                            let videoURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["video_id"]  as? String ?? "")
-                            let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(row["file_id"]  as? String ?? "")
-                            if ((row["video_id"]  as? String ?? "") != "") {
-                                if FileManager.default.fileExists(atPath: videoURL.path) || FileEncryption.shared.isSecureExists(filename: row["video_id"]  as? String ?? ""){
-                                    row["progress"] = 100.0
-                                } else {
-                                    row["progress"] = 0.0
-                                }
-                            } else {
-                                if FileManager.default.fileExists(atPath: fileURL.path) || FileEncryption.shared.isSecureExists(filename: row["file_id"]  as? String ?? ""){
-                                    row["progress"] = 100.0
-                                } else {
-                                    row["progress"] = 0.0
-                                }
-                            }
+                        // Fix: this asked the filesystem where the documents directory is, and
+                        // then whether two files exist, for every single row of every page - and
+                        // the second of those two was asked even for a message carrying no file
+                        // at all, which is a stat on the documents directory itself, a hundred
+                        // times a page, for an answer that means nothing. A page read while the
+                        // reader was flinging the list therefore spent its time in the
+                        // filesystem, on the main thread, and that is the stall that stopped the
+                        // scroll. The directory is looked up once for the whole app and the
+                        // question is only asked of rows that actually carry something.
+                        let carriedVideo = row["video_id"] as? String ?? ""
+                        let carriedFile = row["file_id"] as? String ?? ""
+                        if !carriedVideo.isEmpty {
+                            row["progress"] = isFilePresent(carriedVideo) ? 100.0 : 0.0
+                        } else if !carriedFile.isEmpty {
+                            row["progress"] = isFilePresent(carriedFile) ? 100.0 : 0.0
+                        } else {
+                            row["progress"] = 0.0
                         }
                         row["chat_date"] = chatDate(stringDate: row["server_date"]  as? String ?? "")
                         
@@ -2746,6 +3147,7 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     private func loadInitialMessages() {
         let total = countMessages()
         let pageSize = max(EditorGroup.initialMessagePageSize, Int64(counter) + 10)
+        reachedOldestMessage = false
         loadedOffset = max(0, total - pageSize)
         loadedCount = total - loadedOffset
         isWindowAtNewest = true
@@ -2796,8 +3198,47 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     }
 
     /// Whether there are older messages left in the database.
+    /// Set once a page of older messages comes back short: there is nothing further back.
+    ///
+    /// Fix: whether there was more to read was answered by `loadedOffset > 0`, a number kept in
+    /// step by counting rows in the database. The counting is what this is here to avoid - see
+    /// loadOlderMessages - so the end of the conversation is recognised by reaching it instead.
+    private var reachedOldestMessage = false
+
     private var hasOlderMessages: Bool {
-        return loadedOffset > 0
+        return !reachedOldestMessage && loadedOffset > 0
+    }
+
+    /// The date of the oldest message this screen is holding, which is where the next page back
+    /// begins. Read from what is in hand, so it costs nothing.
+    private var oldestLoadedDate: String? {
+        // Checked for being a number, not merely non-empty: it is written straight into the
+        // query, and anything else there would make a nonsense of it rather than an error.
+        guard let date = dataMessages.first(where: {
+            Int64((($0["server_date"] as? String) ?? "").trimmingCharacters(in: .whitespaces)) != nil
+        })?["server_date"] as? String else {
+            return nil
+        }
+        return date.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The date one page further back, found by walking at most a page of index entries.
+    ///
+    /// This is the whole trick. Asking for "a hundred rows, skipping the two thousand before
+    /// them" makes SQLite walk two thousand rows to throw them away. Asking for "the hundredth
+    /// row back from here" walks a hundred index entries and stops. The page itself is then read
+    /// as a date range, which is another index range.
+    private func dateOnePageBack(before date: String, pageSize: Int64) -> String? {
+        var found: String?
+        Database.shared.database?.inTransaction({ (fmdb, rollback) in
+            let query = "SELECT server_date FROM MESSAGE where \(self.messageWhereClause())"
+                + " AND server_date < \(date) order by server_date desc LIMIT 1 OFFSET \(pageSize - 1)"
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query), cursor.next() {
+                found = cursor.string(forColumnIndex: 0)
+                cursor.close()
+            }
+        })
+        return found
     }
 
     /// Re-derives where the loaded window sits from the messages actually in hand.
@@ -2835,10 +3276,23 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         if let lastEmptyOlderPage = lastEmptyOlderPage, Date().timeIntervalSince(lastEmptyOlderPage) < 0.5 {
             return
         }
+        // Never under momentum. The read itself is cheap; what is not cheap is putting the list
+        // back afterwards, because writing the scroll position from outside ends a fling where
+        // it stands. Every caller is either finger-down or at rest, and this is what makes that
+        // a guarantee rather than an arrangement.
+        if tableChatView.isDecelerating, !tableChatView.isDragging {
+            return
+        }
         isLoadingOlderMessages = true
         defer { isLoadingOlderMessages = false }
-        refreshWindowBounds()
-        guard hasOlderMessages else {
+        // Fix: refreshWindowBounds() used to run here, and it asks the database to count the
+        // conversation twice - once for the oldest message on screen and once for the newest.
+        // Those two counts, plus the page read's own OFFSET walk, meant three passes over the
+        // whole conversation for every page turn, all of them on the main thread while the
+        // reader was scrolling. That is the second the list stood still for. Nothing here needs
+        // an exact position any more: the page is read by date. The bounds are still corrected
+        // whenever a message arrives, which is the only thing that moves them.
+        guard let upperBound = oldestLoadedDate else {
             return
         }
         let rowsBeforeLoad = dataMessages.count
@@ -2862,14 +3316,33 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             anchorDistanceFromTop = tableChatView.rectForRow(at: anchorIndexPath).minY - tableChatView.contentOffset.y
         }
 
-        let newOffset = max(0, loadedOffset - EditorGroup.olderMessagePageSize)
-        let batch = loadedOffset - newOffset
-        getData(offset: newOffset, limit: batch, prepend: true)
-        loadedOffset = newOffset
-        loadedCount += batch
+        // The lower edge of the page, or nothing when fewer than a page remains - in which
+        // case the range is open-ended and this is the last page there is.
+        let lowerBound = dateOnePageBack(before: upperBound, pageSize: EditorGroup.olderMessagePageSize)
+        if lowerBound == nil {
+            reachedOldestMessage = true
+        }
+        getData(prepend: true, olderThan: upperBound, newerOrEqual: lowerBound)
+        let added = Int64(dataMessages.count - rowsBeforeLoad)
+        // Kept arithmetically rather than counted. It is used for the other direction and for
+        // bridging a jump, both of which re-derive what they need.
+        loadedOffset = max(0, loadedOffset - added)
+        loadedCount += added
 
-        lastEmptyOlderPage = dataMessages.count == rowsBeforeLoad ? Date() : nil
+        lastEmptyOlderPage = added == 0 ? Date() : nil
 
+        // Fix: the rows were handed to the table as a list of insertions and deletions rather
+        // than a reload, to save rebuilding the cells on screen - and it left blank bubbles
+        // behind. A batch update settles over the turn of the run loop that follows it, and the
+        // scroll position is put back inside the same turn: the table was asked for rows it had
+        // not finished re-numbering, answered that those rows did not exist, and drew them
+        // empty - and an empty cell it believes in stays empty until something reloads it. The
+        // saving was small in any case. A reload discards the cells on screen but only builds
+        // the handful that are visible, and the ones it takes out of the reuse pool are the same
+        // cells it just put there, so their bubbles are recognised and kept. What made a reload
+        // expensive here was being asked for an estimated height for every row of the whole
+        // conversation while each of those answers walked the whole conversation - and that is
+        // what message(at:) no longer does.
         UIView.performWithoutAnimation {
             tableChatView.reloadData()
             tableChatView.layoutIfNeeded()
@@ -2913,6 +3386,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         measuredRowHeights.removeAll()
         // Rows the reader was last on are gone with the window; anything still holding that
         // index would be reading into a list that no longer has it.
+        // The window is being replaced, so whether the oldest message had been reached is a
+        // fact about a window that no longer exists.
+        reachedOldestMessage = false
         currentIndexpath = nil
         loadedOffset = newOffset
         loadedCount = limit
@@ -2931,6 +3407,9 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         measuredRowHeights.removeAll()
         // Rows the reader was last on are gone with the window; anything still holding that
         // index would be reading into a list that no longer has it.
+        // The window is being replaced, so whether the oldest message had been reached is a
+        // fact about a window that no longer exists.
+        reachedOldestMessage = false
         currentIndexpath = nil
         loadedOffset = newOffset
         loadedCount = total - newOffset
@@ -3034,9 +3513,11 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         guard !tableChatView.isDragging, !tableChatView.isDecelerating else {
             return
         }
-        // Only worth doing when the end of what is loaded is within a few screens; further
-        // away there is nothing to gain by reading more.
-        guard tableChatView.contentOffset.y < tableChatView.frame.height * 3 else {
+        // Only worth doing when the end of what is loaded is within reach of a flick; further
+        // away there is nothing to gain by reading more. This is also where a fling that outran
+        // its loaded conversation is caught: it rubber-bands at the top of what is loaded, and
+        // the page is read here, once it has come to rest.
+        guard tableChatView.contentOffset.y < tableChatView.frame.height * EditorGroup.olderMessageLead else {
             return
         }
         loadOlderMessages()
@@ -3121,15 +3602,20 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         guard indexPath.section >= 0, indexPath.section < dataDates.count, indexPath.row >= 0 else {
             return nil
         }
+        // Fix: this walked the whole loaded conversation, comparing every message's date as it
+        // went, to answer where one row was - and the table asks it for every row it has
+        // whenever the rows change. Reading a page therefore cost a scan of the entire chat per
+        // row of the entire chat. The positions kept for the day sections lead straight to it.
         let date = dataDates[indexPath.section]
-        var row = 0
-        for message in dataMessages where message["chat_date"] as? String ?? "" == date {
-            if row == indexPath.row {
-                return message
-            }
-            row += 1
+        guard Thread.isMainThread else {
+            let rows = dataMessages.filter({ $0["chat_date"] as? String ?? "" == date })
+            return indexPath.row < rows.count ? rows[indexPath.row] : nil
         }
-        return nil
+        guard let indexes = messageIndexes(onDate: date), indexPath.row < indexes.count else {
+            return nil
+        }
+        let index = indexes[indexPath.row]
+        return index < dataMessages.count ? dataMessages[index] : nil
     }
 
     /// Where a message sits in the table right now.
@@ -3167,6 +3653,26 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// pass fixes both: by the time the rows around the marker have been built, their heights
     /// are measured ones, and each pass corrects what the previous pass got wrong until the
     /// row is exactly where it belongs.
+    /// The reader has taken the conversation over, so the placement it opened with is no longer
+    /// in force.
+    ///
+    /// Fix: that placement - at the newest message, or at the first unread one - is not a single
+    /// scroll but a hold. It is re-applied on every layout pass for up to two and a half seconds,
+    /// because a row's real height is only known once it has been drawn, and each pass corrects
+    /// what the last one guessed. The only thing that dropped it early was a finger dragging the
+    /// list. Starting a reply is not that: pulling a bubble across is its own gesture, and the
+    /// reply bar it opens lays the screen out again - so a reply begun inside those two and a half
+    /// seconds hit the hold on that very layout pass and threw the reader back to where the chat
+    /// had opened. Everything the reader does to a conversation is taking it over, not only
+    /// dragging it.
+    private func endOpeningPlacement() {
+        pendingUnreadMarkerScroll = nil
+        pendingUnreadMarkerDeadline = nil
+        pendingInitialScrollToBottom = false
+        initialBottomDeadline = nil
+        initialBottomStartedAt = nil
+    }
+
     private func applyPendingUnreadMarkerScroll() {
         guard let marker = pendingUnreadMarkerScroll else {
             return
@@ -3654,6 +4160,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                         addCounterAtButttonScrollToBottom()
                     }
                 }
+                // Fix: messages that landed while the app was away were spliced in and counted,
+                // and that was all - so coming back to a conversation that was already open,
+                // with the new message right there on screen, still left the chat list showing
+                // it as unread and the senders with no read mark. Once the list has settled,
+                // what is actually on screen is read.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    self?.markVisibleMessagesRead()
+                }
             }
         }
     }
@@ -3804,9 +4318,24 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 self.listTimerCredential[messageId] = 60
             }
             
-//            self.counter += 1
-            self.counter = 0
-            self.updateCounter(counter: self.counter)
+            // Fix: the unread count was cleared for every message that arrived, whether or
+            // not the reader could see it land. A message that arrives while the conversation
+            // is scrolled up - or while the app is in the background with this screen still
+            // open behind it - has not been read, and saying it had left the sender without a
+            // read mark and the chat list without its badge.
+            //
+            // The list follows the conversation down whenever it was already at the bottom,
+            // app in the background or not - what arrived while the reader was away is then the
+            // first thing in front of them when they come back, and the sweep on becoming
+            // active is what reports it as read.
+            let listWasAtBottom = self.isReaderAtBottomOfList
+            let readerSawItArrive = self.isReaderPresent && listWasAtBottom
+            if readerSawItArrive {
+                self.counter = 0
+                self.updateCounter(counter: self.counter)
+            } else {
+                self.counter += 1
+            }
             // One more of the conversation's messages is now in the loaded window.
             self.loadedCount += 1
             if let collageRow = self.foldIntoImageGroup(row) {
@@ -3880,18 +4409,33 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 self.timerCredential[messageId] = timer
             }
             
-            // FIX 4: Safe currentIndexpath access
-            if let currentIndexpath = self.currentIndexpath,
-               currentIndexpath.row == (self.dataMessages.count - 2) {
+            // Fix: whether the list followed the message down used to be decided by comparing
+            // the last visible row's position inside its own section against a count of every
+            // loaded message - two different things - and the read mark went out whenever this
+            // screen was in a window at all, background included. Both follow the one question
+            // that matters: did the reader watch it arrive.
+            if listWasAtBottom {
                 self.tableChatView.scrollToBottom()
-            }
-            if self.viewIfLoaded?.window != nil {
-                self.sendReadMessageStatus(
-                    chat_id: self.dataTopic["chat_id"] as? String ?? "",
-                    f_pin: fPin,
-                    message_scope_id: messageScopeId,
-                    message_id: messageId
-                )
+                if readerSawItArrive {
+                    self.reportedReadMessageIds.insert(messageId)
+                    self.sendReadMessageStatus(
+                        chat_id: self.dataTopic["chat_id"] as? String ?? "",
+                        f_pin: fPin,
+                        message_scope_id: messageScopeId,
+                        message_id: messageId
+                    )
+                }
+            } else {
+                // It landed below the fold: the button carries the count until the reader
+                // goes down to it.
+                if !self.buttonScrollToBottom.isDescendant(of: self.view) {
+                    self.addButtonScrollToBottom()
+                }
+                if !self.indicatorCounterBSTB.isDescendant(of: self.view) {
+                    self.addCounterAtButttonScrollToBottom()
+                } else {
+                    self.labelCounter.text = "\(self.counter)"
+                }
             }
         }
     }
@@ -4466,16 +5010,34 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         }
     }
     
+    /// How long the conversation should take to follow the keyboard, and along what curve.
+    ///
+    /// Fix: the duration was taken from the notification and used as it came. The first keyboard
+    /// of a session is announced with a duration of zero - the keyboard itself still slides up, a
+    /// beat later, but the announcement says there is nothing to animate. Taken at its word, the
+    /// conversation was moved up by a whole keyboard's height in a single frame and then sat there
+    /// waiting for the keyboard to arrive and fill the gap it had left. That is the leap on the
+    /// first reply after a chat is opened, and only the first: every reply after it finds the
+    /// keyboard already on screen, so there is no keyboard movement left to announce. A floor
+    /// under the duration costs nothing when the announcement is honest, and the curve is the
+    /// keyboard's own so the two travel together rather than merely for the same length of time.
+    private func keyboardTravel(_ info: NSDictionary) -> (duration: TimeInterval, options: UIView.AnimationOptions) {
+        let announced = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0
+        let curve = (info[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue
+        let options: UIView.AnimationOptions = curve.map { UIView.AnimationOptions(rawValue: $0 << 16) } ?? .curveEaseInOut
+        return (max(announced, 0.2), [options, .beginFromCurrentState])
+    }
+
     @objc func keyboardWillShow(notification: NSNotification) {
         if self.viewIfLoaded?.window != nil && !isEditingMessage {
+            // Nothing raises the keyboard while a chat is opening; a keyboard on screen is the
+            // reader's own doing, and it lays the list out again just as the reply bar does.
+            endOpeningPlacement()
             let info:NSDictionary = notification.userInfo! as NSDictionary
             let keyboardSize = (info[UIResponder.keyboardFrameEndUserInfoKey] as! NSValue).cgRectValue
             
             let keyboardHeight: CGFloat = keyboardSize.height
             
-            let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
-            
-            let previousBottomAttachment = self.constraintBottomAttachment.constant
             if self.constraintBottomAttachment.constant != keyboardHeight || self.constraintViewTextField.constant != keyboardHeight - 60 {
                 if self.viewSticker.isDescendant(of: self.view) {
                     self.constraintBottomAttachment.constant = 0.0
@@ -4484,25 +5046,26 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 }
 //                self.constraintViewTextField.constant = keyboardHeight - 60
                 self.constraintBottomAttachment.constant = keyboardHeight
-                if self.contraintBottomMention.constant > 0 {
-                    self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
-                }
                 self.keyboardHeightForMention = keyboardHeight
-                // How much of the list the keyboard is about to take that it was not taking
-                // already - a keyboard that only changes height (a predictive bar appearing,
-                // say) must not move the conversation by its whole height.
-                let listShrinkage = keyboardHeight - previousBottomAttachment
+                // Measured before the layout changes, exactly as on the way out. This used to
+                // work out how much of the list the keyboard was about to take that it was not
+                // taking already; holding the distance from the end of the list covers that case
+                // too, and a keyboard that merely changes height along with it.
+                let wasShowing = self.listAnchor
                 if isSearching {
                     self.constraintBottomContainerMultpileSelectSession.constant = -keyboardHeight
                 }
-                UIView.animate(withDuration: TimeInterval(duration), animations: {
+                let travel = keyboardTravel(info)
+                UIView.animate(withDuration: travel.duration, delay: 0, options: travel.options, animations: {
                     self.view.layoutIfNeeded()
                     // Fix: this used to scroll to the last remembered row, or all the way to the
                     // newest message, every time the keyboard came up - so tapping the input
                     // while reading something further up threw the reader back to the bottom.
                     // Shifting the content by exactly what the keyboard took leaves them looking
-                    // at what they were looking at.
-                    self.keepScrollPosition(whenInputGrewBy: listShrinkage)
+                    // at what they were looking at. Held against the end of the list rather than
+                    // by that shift, so a reader already at the newest message stays there
+                    // instead of being carried a keyboard's height past it.
+                    self.restore(wasShowing)
                 })
             }
         }  else if isEditingMessage {
@@ -4524,19 +5087,19 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     @objc func keyboardWillHide(notification: NSNotification) {
         if self.viewIfLoaded?.window != nil && !isEditingMessage {
             let info:NSDictionary = notification.userInfo! as NSDictionary
-            let duration: CGFloat = info[UIResponder.keyboardAnimationDurationUserInfoKey] as! NSNumber as! CGFloat
             
-            let keyboardWasTaking = self.constraintBottomAttachment.constant
+            // Measured before anything moves, and put back after - see
+            // restore(_:) for why this is not done by subtracting the
+            // keyboard's height.
+            let wasShowing = self.listAnchor
             self.constraintViewTextField.constant = 0
             self.constraintBottomAttachment.constant = 0
             self.constraintBottomContainerMultpileSelectSession.constant = 0
-            if self.contraintBottomMention.constant > 0 {
-                self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
-            }
             keyboardHeightForMention = nil
-            UIView.animate(withDuration: TimeInterval(duration), animations: {
+            let travel = keyboardTravel(info)
+            UIView.animate(withDuration: travel.duration, delay: 0, options: travel.options, animations: {
                 self.view.layoutIfNeeded()
-                self.keepScrollPosition(whenInputGrewBy: -keyboardWasTaking)
+                self.restore(wasShowing)
             })
         }
     }
@@ -4721,12 +5284,22 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             self?.endVoiceNote()
             self?.sendVoiceNote(at: url, seconds: seconds)
         }
-        bar.begin { [weak self] started in
-            guard !started else {
+        bar.begin { [weak self] failure in
+            guard let self = self, let failure = failure else {
                 return
             }
-            self?.endVoiceNote()
-            self?.view.makeToast("Microphone access is needed to record".localized(), duration: 3)
+            self.endVoiceNote()
+            switch failure {
+            case .busy:
+                // blockedByCallInProgress has already put its own alert up.
+                break
+            case .denied:
+                APIS.showMicrophoneRefused()
+            case .heldByAnotherApp:
+                APIS.showMicrophoneBusyElsewhere()
+            case .audioSessionRefused:
+                self.view.makeToast("Could not start recording. Try again.".localized(), duration: 3)
+            }
         }
     }
 
@@ -4787,6 +5360,14 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         // Nothing written means the button is a microphone, not a paper plane.
         if wantsVoiceNote {
             beginVoiceNote()
+            return
+        }
+        // The last word on the length, and the only one that is certain: typing is capped as it
+        // happens, but a draft kept from a previous visit is put back into the field whole,
+        // without ever passing the field's own test.
+        let limit = MessageLimits.textCharacters
+        if limit > 0, (textFieldSend.text ?? "").count > limit {
+            APIS.showMessageTooLong()
             return
         }
         sendChat(message_text: textFieldSend.text!, viewController: self)
@@ -5118,17 +5699,117 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     /// moving the content up by exactly what the bar took leaves the same messages on screen -
     /// which is what WhatsApp does and what "tetap di state scroll terakhir" means.
     /// Call it once the new layout is in place - it reads the height the list ends up with.
-    private func keepScrollPosition(whenInputGrewBy delta: CGFloat) {
-        guard let scrollView = tableChatView, delta != 0, scrollView.bounds.height > 0 else {
+    /// Where the reader is in the conversation: the last message showing, and how far its foot
+    /// sits from the foot of the visible area.
+    ///
+    /// This is what has to be preserved when the input area grows or shrinks. Holding the bottom
+    /// of the visible area is what makes the content rise by exactly what the bar took, which is
+    /// what leaves the same messages in front of the reader.
+    struct ListAnchor {
+        let messageId: String
+        /// The row's head, less the head of the visible area. Negative while the row begins above it.
+        let headBelowViewport: CGFloat
+        /// How tall the visible area was, so the content can be moved by exactly what the input
+        /// area took from it.
+        let viewportHeight: CGFloat
+        /// True when the list was already at its end.
+        ///
+        /// Fix: measured off a recording, opening a reply moved the content up by 380 points and
+        /// closing it moved the content back down by only 333 - a drift of about fifty points, the
+        /// height of the reply bar, on every open-and-cancel. That is what the reader sees as the
+        /// jumping, and it is exactly why it stops after the third or fourth time: the drift
+        /// carries them far enough from the end that it cannot happen again. The cause is the end
+        /// of the list itself. Coming back, the visible area grows by the keyboard and the bar, and
+        /// "put the same messages back in front of the reader" then asks for content below the
+        /// last message that does not exist - so that correction is cut short at the end while the
+        /// one going the other way is not. A list at its end belongs at its end; asking for
+        /// anything else there is asking for something the conversation does not have.
+        let wasAtEnd: Bool
+    }
+
+    /// Fix: this used to be one number, the distance from the *end of the list*, and that number
+    /// is only worth anything while the end of the list stays where it is. It does not. A row the
+    /// table has never drawn is a guess, and laying the list out again is what replaces those
+    /// guesses with measurements - so the content's total height moves between the moment the
+    /// distance is read and the moment it is put back, by as much as the guesses were wrong. In a
+    /// conversation of tall screenshots that is hundreds or thousands of points, and every one of
+    /// them was handed straight to the scroll position. That is the jump on opening a reply: not
+    /// the bar, but the arithmetic, measuring from an end that had moved.
+    ///
+    /// A row is a fixed thing. Its own position is re-read after the layout, so whatever the
+    /// heights did in between corrects itself.
+    ///
+    /// Fix: it was the *foot* of the last row showing, and a row's foot is its head plus its
+    /// height - so anchoring there anchors to a number the row does not know yet. A picture
+    /// arrives after the bubble that holds it, and the row is re-measured when it does; the foot
+    /// moves by the whole difference, and the content was moved to follow it. That is why a reply
+    /// to a picture still jumped when everything else had gone quiet, and why it was worst on a
+    /// chat just opened, where none of the pictures have landed. The head of the first row showing
+    /// moves only when the rows *above* it change, which is the one thing that does have to be
+    /// followed.
+    private var listAnchor: ListAnchor? {
+        guard let scrollView = tableChatView, scrollView.bounds.height > 0,
+              let indexPath = scrollView.indexPathsForVisibleRows?.first,
+              let messageId = message(at: indexPath)?["message_id"] as? String, !messageId.isEmpty else {
+            return nil
+        }
+        let viewportHead = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+        let lowest = -scrollView.adjustedContentInset.top
+        let highest = max(lowest, scrollView.contentSize.height
+                          + scrollView.adjustedContentInset.bottom - scrollView.bounds.height)
+        return ListAnchor(messageId: messageId,
+                          headBelowViewport: scrollView.rectForRow(at: indexPath).minY - viewportHead,
+                          viewportHeight: scrollView.bounds.height
+                            - scrollView.adjustedContentInset.top - scrollView.adjustedContentInset.bottom,
+                          wasAtEnd: highest - scrollView.contentOffset.y <= 4)
+    }
+
+    /// Fix: for a while this was a *held* place, re-applied on every layout pass for a second
+    /// after the input area changed, because the rows were still settling and one correction was
+    /// not enough. That is no longer true - the reckoning the rows are guessed at is accurate now
+    /// and it stops moving - and a held place became the problem instead of the cure. Measured off
+    /// a recording: a hundred and seventy-seven points, in one frame, once per open-and-close of a
+    /// reply, always in the moment the reply's own layout pass ran. That is a hold left over from
+    /// the keyboard closing a moment earlier, still alive, yanking the list back to where the
+    /// reader had been before they moved. Corrected once, inside the animation that moves the
+    /// layout, and never again afterwards.
+    /// Puts the message the reader was looking at back where it was, once the layout has changed.
+    ///
+    /// Both directions come out right and nothing is applied twice: the visible area gets shorter
+    /// when the keyboard or the reply bar arrives and taller when they go, and the content is
+    /// moved by exactly what was taken from it or given back - so the messages in front of the
+    /// reader are the same messages, and the bar never lands on top of them.
+    private func restore(_ anchor: ListAnchor?) {
+        guard let anchor = anchor, let scrollView = tableChatView, scrollView.bounds.height > 0,
+              let indexPath = indexPath(forMessageId: anchor.messageId),
+              indexPath.section < scrollView.numberOfSections,
+              indexPath.row < scrollView.numberOfRows(inSection: indexPath.section) else {
             return
         }
         let lowest = -scrollView.adjustedContentInset.top
-        let highest = max(lowest, scrollView.contentSize.height + scrollView.adjustedContentInset.bottom - scrollView.bounds.height)
-        let target = min(max(scrollView.contentOffset.y + delta, lowest), highest)
+        let highest = max(lowest, scrollView.contentSize.height
+                          + scrollView.adjustedContentInset.bottom - scrollView.bounds.height)
+        let target: CGFloat
+        if anchor.wasAtEnd {
+            // At the end, and the end is where it stays. Nothing else can be honoured there.
+            target = highest
+        } else {
+            let viewportHeight = scrollView.bounds.height
+                - scrollView.adjustedContentInset.top - scrollView.adjustedContentInset.bottom
+            // What the input area took from the visible area, which is what the content rises by.
+            let taken = anchor.viewportHeight - viewportHeight
+            let viewportHead = scrollView.rectForRow(at: indexPath).minY
+                - anchor.headBelowViewport + taken
+            target = min(max(viewportHead - scrollView.adjustedContentInset.top, lowest), highest)
+        }
         guard abs(target - scrollView.contentOffset.y) > 0.5 else {
             return
         }
-        scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: target), animated: false)
+        // Assigned rather than set through setContentOffset(_:animated: false): inside an
+        // animation block the assignment travels with it, where the explicit "not animated" is
+        // taken to mean not animated at all, and the content arrives a keyboard's height away
+        // from where it started in a single frame.
+        scrollView.contentOffset = CGPoint(x: scrollView.contentOffset.x, y: target)
     }
 
     private var scrollToBottomBottomConstraint: NSLayoutConstraint?
@@ -5242,9 +5923,63 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
         if !isWindowAtNewest {
             jumpToNewestPage()
         }
+        // Armed before the scroll starts, not after: the animation itself passes the top of
+        // the loaded window on the way down, and that is when the unwanted page would land.
+        isDashingToBottom = true
         tableChatView.scrollToBottom()
+        // Fix: one animated scroll to the last row was the whole of it, and a chat is exactly
+        // the list where that lands short. The rows between here and the end have never been
+        // drawn, so the table is aiming at a total worked out from estimates; and the scroll
+        // itself drives scrollViewDidScroll, which loads another page whenever it passes near
+        // either end - so the content grows underneath the animation and the end moves away
+        // from it. What is asked for instead, once the animation has had its moment, is the
+        // same hold that puts a chat at its newest message when it opens: it keeps aiming at
+        // the bottom until the heights stop changing, lets go the instant the reader touches
+        // the list, and gives up on a deadline.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self = self else {
+                return
+            }
+            self.holdAtNewestMessage()
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [self] in
+            // Fix: the button took the reader to the newest message and then only took itself
+            // away. Nothing said the messages it had been counting were read, so the senders got
+            // no read mark and the chat list kept its badge for a conversation the reader was
+            // looking at the bottom of.
+            markVisibleMessagesRead()
             removeScrollToBottomButton()
+        }
+    }
+
+    /// Set while the list is deliberately on its way to the newest message, so the loads that
+    /// serve a reader browsing upwards do not fire during the journey down and move the end of
+    /// it. Dropped the moment the reader puts a finger on the list.
+    private var isDashingToBottom = false
+
+    /// Aims at the newest message and keeps aiming until the rows stop changing size.
+    ///
+    /// The opening placement's own machinery, asked for after the fact - see
+    /// applyPendingInitialBottomScroll, which is driven from every layout pass and drops the
+    /// hold the moment the reader takes the list over. The timed passes are for the case where
+    /// no layout pass happens to follow.
+    private func holdAtNewestMessage() {
+        guard !isPreview else {
+            return
+        }
+        pendingUnreadMarkerScroll = nil
+        pendingInitialScrollToBottom = true
+        initialBottomDeadline = nil
+        initialBottomStartedAt = nil
+        initialBottomLastContentHeight = -1
+        applyPendingInitialBottomScroll()
+        for delay in [0.1, 0.25, 0.45, 0.7, 1.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.applyPendingInitialBottomScroll()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            self?.isDashingToBottom = false
         }
     }
     
@@ -5261,6 +5996,13 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
             // Looking at a preview is not reading it. Kept, and sent if it is really opened.
             deferredReadReceipts.append((chat_id, f_pin, message_scope_id, message_id))
             return
+        }
+        // Whatever goes out is remembered here, so the sweep that reports what is on screen
+        // does not report the same messages a second time. The rows in memory keep the status
+        // they were loaded with, so they cannot answer this on their own.
+        let reported = message_id.components(separatedBy: ",").filter { !$0.isEmpty }
+        DispatchQueue.main.async { [weak self] in
+            self?.reportedReadMessageIds.formUnion(reported)
         }
 
         let task = Task.detached(priority: .userInitiated) { [weak self] in
@@ -5595,80 +6337,38 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
     
     private func checkNewMessage(tableView: UITableView) {
         DispatchQueue.main.async { [self] in
-            guard let firstIndex = tableView.indexPathsForVisibleRows?.first,
-                  let lastIndex = tableView.indexPathsForVisibleRows?.last
-            else { return }
+            guard let lastIndex = tableView.indexPathsForVisibleRows?.last,
+                  lastIndex.section < dataDates.count else {
+                return
+            }
 
             currentIndexpath = lastIndex
 
-            // MARK: - Filter messages in this section
-            let sectionDate = dataDates[lastIndex.section]
-            let sectionMessages = dataMessages.filter {
-                ($0["chat_date"] as? String ?? "") == sectionDate
-            }
+            // Fix: whether the button appeared was decided by comparing the position of the
+            // FIRST visible row inside its own section against the number of rows in the LAST
+            // section - two unrelated numbers that happen to be equal often enough that the
+            // button simply did not appear while the reader was well away from the end. Only
+            // one thing matters: how far the list is from its own bottom. Measured the way the
+            // opening placement measures it, insets included, so the keyboard or the input bar
+            // cannot skew it.
+            let maxOffset = max(-tableView.adjustedContentInset.top,
+                                tableView.contentSize.height
+                                + tableView.adjustedContentInset.bottom
+                                - tableView.bounds.height)
+            let distanceFromBottom = maxOffset - tableView.contentOffset.y
 
-            guard !sectionMessages.isEmpty else { return }
-
-            // MARK: - Scroll Position
-            let contentHeight = tableView.contentSize.height
-            let visibleHeight = tableView.frame.height
-            let fullOffset = contentHeight - visibleHeight
-            let offsetY = tableView.contentOffset.y
-
-            let isLastSection = (lastIndex.section == dataDates.count - 1)
-            let isNotLastRow = (firstIndex.row != sectionMessages.count - 1)
-            let isFarFromBottom = (fullOffset - offsetY > 100)
-            let isNearBottom = (fullOffset - offsetY < 50)
-
-            // MARK: - Show "Scroll to bottom" button
-            if ((!isLastSection && isFarFromBottom) ||
-                (isLastSection && isNotLastRow && isFarFromBottom)) {
-
+            if distanceFromBottom > 100 {
                 if !buttonScrollToBottom.isDescendant(of: view) {
                     addButtonScrollToBottom()
                     addCounterAtButttonScrollToBottom()
                 }
-            }
-            // MARK: - Hide button when at bottom
-            else if isNearBottom {
+            } else if distanceFromBottom < 50 {
                 removeScrollToBottomButton()
             }
-//            // MARK: - Ensure index exists
-//            guard currentIndexpath!.row < sectionMessages.count else { return }
-//
-//            // MARK: - Messages up to visible row
-//            let visibleMessages = Array(sectionMessages[0...currentIndexpath!.row])
-//                .filter { $0["status"] as? String != "4" && $0["status"] as? String != "8" }
-//
-//            // MARK: - Send Read Status
-//            if visibleMessages.count > 0 {
-//                let myPin = User.getMyPin()
-//                var stringMessage: [String: String] = [:]
-//                for msg in visibleMessages {
-//                    if msg["f_pin"] as? String != myPin  && EditorGroup.conditionSendRead(scope: msg[TypeDataMessage.message_scope_id] as! String, fPin: msg[TypeDataMessage.f_pin] as! String, messageId: msg[TypeDataMessage.message_id] as! String) {
-//                        if stringMessage[msg["f_pin"]  as? String ?? ""] == nil {
-//                            stringMessage[msg["f_pin"]  as? String ?? ""] = msg["message_id"]  as? String ?? ""
-//                        } else {
-//                            var str1 = stringMessage[msg["f_pin"]  as? String ?? ""]!
-//                            str1 += ",\(msg["message_id"]  as? String ?? "")"
-//                            stringMessage[msg["f_pin"]  as? String ?? ""] = str1
-//                        }
-//                    }
-//                }
-//                if stringMessage.count > 0 {
-//                    for str in stringMessage {
-//                        sendReadMessageStatus(
-//                            chat_id: self.dataTopic["chat_id"]  as? String ?? "",
-//                            f_pin: str.key,
-//                            message_scope_id: MessageScope.GROUP,
-//                            message_id: str.value
-//                        )
-//                    }
-//                }
-//            }
-//
-//            // MARK: - Update Counter
-//            updateUnreadCounter()
+
+            // Whatever the reader has scrolled onto has been read: the marks go out, and the
+            // unread count follows whatever is still below them.
+            markVisibleMessagesRead()
         }
     }
     
@@ -5682,6 +6382,126 @@ public class EditorGroup: UIViewController, CLLocationManagerDelegate, UIGesture
                 indicatorCounterBSTB.removeFromSuperview()
             }
         }
+    }
+
+    // MARK: - Read marks for what is on screen
+
+    /// Message ids this screen has already reported as read.
+    ///
+    /// A read mark is written to the database, not back into `dataMessages` - the rows in memory
+    /// keep whatever status they were loaded with. Without this, every scroll would report the
+    /// same messages all over again.
+    private var reportedReadMessageIds: Set<String> = []
+
+    /// Whether the newest loaded message is on screen.
+    private var isReaderAtBottomOfList: Bool {
+        let fullOffset = tableChatView.contentSize.height - tableChatView.bounds.height
+        guard fullOffset > 0 else {
+            // Fewer messages than fit the screen: all of them are in front of the reader.
+            return true
+        }
+        return fullOffset - tableChatView.contentOffset.y < 80
+    }
+
+    /// Whether the reader is actually in front of this conversation - not a preview, not a
+    /// screen left behind under another one, and not the app sitting in the background.
+    ///
+    /// A conversation pushed under another screen keeps its window, so being in one proves
+    /// nothing on its own; what settles it is being the screen its navigation stack is showing.
+    /// Anything merely presented over it - the picture viewer, a sheet - leaves it the top of
+    /// that stack, which is right: reading carries on underneath.
+    private var isReaderPresent: Bool {
+        guard !isPreview, viewIfLoaded?.window != nil,
+              UIApplication.shared.applicationState == .active else {
+            return false
+        }
+        if let navigation = navigationController, navigation.topViewController !== self {
+            return false
+        }
+        return true
+    }
+
+    @objc func onAppBecameActive(notification: NSNotification) {
+        // Whatever landed while the app was away is on screen by now, or about to be. The
+        // layout is given a moment to settle before what is visible is counted.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.markVisibleMessagesRead()
+        }
+    }
+
+    /// Reports everything down to the last row on screen as read, and brings the unread count
+    /// in line with it.
+    ///
+    /// Fix: read marks were only ever sent when the conversation was opened, or when a message
+    /// arrived with the list already at the bottom. That left two ways in uncovered. A message
+    /// landing while the app is in the background is spliced into a conversation that is still
+    /// open - tapping the notification comes back to it with the message already there, and
+    /// nothing ever said it had been read, so the chat list kept its badge. And a message that
+    /// arrives while the reader is further up is only ever seen by scrolling down to it, which
+    /// reported nothing either. Both go through here now.
+    func markVisibleMessagesRead() {
+        guard isReaderPresent, !isInitialLoading,
+              let lastVisible = tableChatView.indexPathsForVisibleRows?.last,
+              let seen = message(at: lastVisible)?[TypeDataMessage.message_id] as? String,
+              let index = dataMessages.firstIndex(where: { $0[TypeDataMessage.message_id] as? String == seen }) else {
+            return
+        }
+        sendReadReceipts(through: index)
+        reconcileUnreadCounter(seenThrough: index)
+    }
+
+    /// One read mark for everything the reader has now seen, gathered per sender: a group's
+    /// read marks are addressed to whoever wrote the messages, not to the group.
+    private func sendReadReceipts(through index: Int) {
+        guard index >= 0, index < dataMessages.count, let idMe = User.getMyPin() else {
+            return
+        }
+        var outstanding: [String: [String]] = [:]
+        for i in 0...index {
+            let row = dataMessages[i]
+            let messageId = row[TypeDataMessage.message_id] as? String ?? ""
+            let status = row[TypeDataMessage.status] as? String ?? ""
+            let sender = row[TypeDataMessage.f_pin] as? String ?? ""
+            // 4 and 8 are the states that already mean seen; anything else has not been
+            // reported yet.
+            guard !messageId.isEmpty, !sender.isEmpty, !reportedReadMessageIds.contains(messageId),
+                  sender != idMe, status != "4", status != "8",
+                  EditorGroup.conditionSendRead(scope: row[TypeDataMessage.message_scope_id] as? String ?? "",
+                                                fPin: sender,
+                                                messageId: messageId) else {
+                continue
+            }
+            reportedReadMessageIds.insert(messageId)
+            outstanding[sender, default: []].append(readReceiptIds(for: row))
+        }
+        for (sender, ids) in outstanding {
+            sendReadMessageStatus(chat_id: dataTopic["chat_id"] as? String ?? "",
+                                  f_pin: sender,
+                                  message_scope_id: MessageScope.GROUP,
+                                  message_id: ids.joined(separator: ","))
+        }
+    }
+
+    /// What is left unread is what is still below the reader.
+    private func reconcileUnreadCounter(seenThrough index: Int) {
+        guard !isPreview, counter > 0, isWindowAtNewest else {
+            return
+        }
+        // The unread ones are the last `counter` rows of the window, so nothing changes until
+        // the reader has actually reached the first of them.
+        guard index >= dataMessages.count - counter else {
+            return
+        }
+        counter = max(0, dataMessages.count - 1 - index)
+        if counter == 0 {
+            if indicatorCounterBSTB.isDescendant(of: view) {
+                indicatorCounterBSTB.removeConstraints(indicatorCounterBSTB.constraints)
+                indicatorCounterBSTB.removeFromSuperview()
+            }
+        } else if indicatorCounterBSTB.isDescendant(of: view) {
+            labelCounter.text = "\(counter)"
+        }
+        updateCounter(counter: counter)
     }
 
     private func updateUnreadCounter() {
@@ -5814,6 +6634,14 @@ extension EditorGroup: UIDocumentPickerDelegate, DocumentPickerDelegate, QLPrevi
             let listFile = document as! [URL]
             if listFile.count > 10 {
                 APIS.showWarningMaxFile()
+                return
+            }
+            // A document is sent as it is - there is nothing to compress - so one over the
+            // server's size is refused here, before the reader has written a caption for it.
+            // The whole pick goes back, the way the Android build does it, rather than some of
+            // the files quietly going missing.
+            if listFile.contains(where: { MessageLimits.exceedsDocumentLimit($0) }) {
+                APIS.showDocumentTooLarge()
                 return
             }
             Nexilis.showLoader(text: "Scanning File...".localized())
@@ -6299,20 +7127,43 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         lastTextLength = text.count
     }
     
+    /// How much height the list of names has to work with: what is left between the top of the
+    /// input area and the header above the conversation, less a margin so it never looks wedged
+    /// against either.
+    private var roomForMentionList: CGFloat {
+        let inputTop = viewTextfield.frame.minY
+        let headerBottom = view.safeAreaInsets.top
+        let room = inputTop - headerBottom - 12
+        // A single row, if it comes to that: a list of names with nothing visible in it is worse
+        // than a cramped one.
+        return max(room, ChatMentionList.rowHeight)
+    }
+
+    /// Whether the list of names is on screen.
+    ///
+    /// Its own height answers this now: zero is away, anything else is showing. It used to be
+    /// read off the sign of the bottom constraint, which is why that constraint had to be driven
+    /// to a negative number to hide the list instead of simply being given no height.
+    private var isMentionShowing: Bool {
+        return heightTableMention != nil && heightTableMention.constant > 0
+    }
+
     private func showMention(text: String) {
-        if self.contraintBottomMention.constant < 0 {
-            if !isEditingMessage {
-                self.contraintBottomMention.constant = 25 + constraintBottomAttachment.constant + self.heightTextFieldSend.constant + self.viewTextfield.bounds.height
-                UIView.animate(withDuration: 0.5, animations: {
-                    self.view.layoutIfNeeded()
-                })
-            }
-        }
         listMentionWithText.removeAll()
         Database.shared.database?.inTransaction({ fmdb, rollback in
             do {
                 let idMe = User.getMyPin()!
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name || ' ' || ifnull(last_name, '') name FROM GROUPZ_MEMBER where group_id='\(self.dataGroup["group_id"]  as? String ?? "")' AND f_pin <> '\(idMe)' AND name LIKE '%\(text)%'") {
+                // Fix: what the reader types after the "@" went into the query as it was. An
+                // apostrophe in it - and names have apostrophes - closed the string early and
+                // the search returned nothing at all from that keystroke on; a "%" or a "_"
+                // was read as a wildcard and matched everybody. Quoted for the string, and
+                // escaped for LIKE, which needs its own escape character named.
+                let typed = text.replacingOccurrences(of: "'", with: "''")
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "%", with: "\\%")
+                    .replacingOccurrences(of: "_", with: "\\_")
+                let groupId = (self.dataGroup["group_id"] as? String ?? "").replacingOccurrences(of: "'", with: "''")
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_pin, first_name || ' ' || ifnull(last_name, '') name FROM GROUPZ_MEMBER where group_id='\(groupId)' AND f_pin <> '\(idMe)' AND name LIKE '%\(typed)%' ESCAPE '\\' ORDER BY name COLLATE NOCASE LIMIT 50") {
                     while cursor.next() {
                         let user = User(pin: "")
                         user.pin = cursor.string(forColumnIndex: 0) ?? ""
@@ -6349,14 +7200,28 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
                     }
                 }
                 if listMentionWithText.count > 0 {
-                    if listMentionWithText.count < 5 {
-                        nowHeightTableMention.constant = CGFloat(44 * listMentionWithText.count)
-                    } else {
-                        nowHeightTableMention.constant = 44 * 4
-                    }
+                    // Four and a half rows when there are more than four, so the half row showing
+                    // at the bottom says there is more to scroll to - the old four exactly looked
+                    // like the whole list however many names were behind it.
+                    let rows = min(CGFloat(listMentionWithText.count), 4.5)
+                    let wasShowing = nowHeightTableMention.constant > 0
+                    // And never taller than the room actually left above the input area. On a
+                    // 4.7" screen with the keyboard up, a reply preview and a link preview open,
+                    // four and a half rows do not fit between the input area and the header -
+                    // the list would run up under the navigation bar.
+                    nowHeightTableMention.constant = min(rows * ChatMentionList.rowHeight, roomForMentionList)
                     nowTableMention.reloadData()
+                    // Opening is worth animating; growing by a row as the reader types is not -
+                    // that would have the list breathing under every keystroke.
+                    if !wasShowing, !isEditingMessage {
+                        nowTableMention.setContentOffset(.zero, animated: false)
+                        UIView.animate(withDuration: 0.2) {
+                            self.view.layoutIfNeeded()
+                        }
+                    } else {
+                        self.view.layoutIfNeeded()
+                    }
                 } else {
-                    nowHeightTableMention.constant = 44
                     self.hideMention()
                 }
             } catch {
@@ -6367,134 +7232,86 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     private func hideMention() {
-        if self.contraintBottomMention.constant > 0 {
+        // Fix: this took away whichever of the two lists it found first. The one for editing a
+        // message is built over the top of the conversation's own, so both can be up at once -
+        // and the one left behind stayed on screen with nothing to do.
+        let wasShowing = isMentionShowing
+        if wasShowing || (heightTableEditMention != nil && heightTableEditMention.constant != 0) {
             listMentionWithText.removeAll()
             tableMention.reloadData()
-            self.contraintBottomMention.constant = 0 - self.heightTableMention.constant
-            UIView.animate(withDuration: 0.5, animations: {
+            heightTableMention.constant = 0
+            if heightTableEditMention != nil {
+                tableMentionEdit.reloadData()
+                heightTableEditMention.constant = 0
+            }
+            // Half a second was long enough to see the list still sitting there after the name
+            // had been picked, which read as a stutter rather than an animation.
+            UIView.animate(withDuration: 0.2, animations: {
                 self.view.layoutIfNeeded()
             })
-        } else if self.heightTableEditMention != nil && self.heightTableEditMention.constant != 0 {
-            listMentionWithText.removeAll()
-            tableMentionEdit.reloadData()
-            self.heightTableEditMention.constant = 0
         }
     }
     
+    /// The card above the field while a link is being written, read from the page the same way the
+    /// bubble reads it - so what is shown before sending is what will be sent.
     private func checkLink(fullText: String) {
-        if !isAlwaysHideLinkPreview {
-            var text = ""
-            let listTextSplitBreak = fullText.components(separatedBy: "\n")
-            let indexFirstLinkSplitBreak = listTextSplitBreak.firstIndex(where: { $0.contains("www.") || $0.contains("http://") || $0.contains("https://") })
-            if indexFirstLinkSplitBreak != nil {
-                let listTextSplitSpace = listTextSplitBreak[indexFirstLinkSplitBreak!].components(separatedBy: " ")
-                let indexFirstLinkSplitSpace = listTextSplitSpace.firstIndex(where: { ($0.starts(with: "www.") && $0.components(separatedBy: ".").count > 2) || ($0.starts(with: "http://") && $0.components(separatedBy: ".").count > 1) || ($0.starts(with: "https://") && $0.components(separatedBy: ".").count > 1) })
-                if indexFirstLinkSplitSpace != nil {
-                    text = listTextSplitSpace[indexFirstLinkSplitSpace!]
-                }
+        guard !isAlwaysHideLinkPreview else {
+            return
+        }
+        var text = ""
+        let listTextSplitBreak = fullText.components(separatedBy: "\n")
+        let indexFirstLinkSplitBreak = listTextSplitBreak.firstIndex(where: { $0.contains("www.") || $0.contains("http://") || $0.contains("https://") })
+        if indexFirstLinkSplitBreak != nil {
+            let listTextSplitSpace = listTextSplitBreak[indexFirstLinkSplitBreak!].components(separatedBy: " ")
+            let indexFirstLinkSplitSpace = listTextSplitSpace.firstIndex(where: { ($0.starts(with: "www.") && $0.components(separatedBy: ".").count > 2) || ($0.starts(with: "http://") && $0.components(separatedBy: ".").count > 1) || ($0.starts(with: "https://") && $0.components(separatedBy: ".").count > 1) })
+            if indexFirstLinkSplitSpace != nil {
+                text = listTextSplitSpace[indexFirstLinkSplitSpace!]
             }
-            if !text.isEmpty {
-                var stringURl = text
-                if stringURl.starts(with: "www.") {
-                    stringURl = "https://" + stringURl.replacingOccurrences(of: "www.", with: "")
-                }
-                var dataURL = ""
-                Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                    do {
-                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select data_link from LINK_PREVIEW where link='\(text)'") {
-                            while cursor.next() {
-                                if let data = cursor.string(forColumnIndex: 0) {
-                                    dataURL = data
-                                }
-                            }
-                            cursor.close()
-                        }
-                    } catch {
-                        rollback.pointee = true
-                        print("Access database error: \(error.localizedDescription)")
-                    }
-                })
-                if !dataURL.isEmpty {
-                    if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                        let imageUrl = data["imageUrl"] as? String
-                        let link = data["link"]  as? String ?? ""
-                        if imageUrl == nil || (link.contains("youtube.com") && link.contains("watch?v=") && !imageUrl!.contains("img.youtube.com/vi/")) {
-                            dataURL = ""
-                        }
-                    }
-                }
-                if !dataURL.isEmpty {
-                    if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                        let title = data["title"]  as? String ?? ""
-                        let description = data["description"]  as? String ?? ""
-                        let imageUrl = data["imageUrl"] as? String
-                        if self.showingLink != text {
-                            self.showingLink = text
-                            self.deleteLinkPreview()
-                            if !textFieldSend.text.isEmpty || textFieldSend.text.contains(text){
-                                self.buildPreviewLink(imageUrl: imageUrl, title: title, description: description, stringURl: text)
-                            }
-                        }
-                    }
-                } else {
-                    let urlConfig = URLSessionConfiguration.default
-                    let sessionDelegate = PinnedURLSessionNexilisDelegate()
-                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
-                    let slp = SwiftLinkPreview(session: session,
-                                   workQueue: SwiftLinkPreview.defaultWorkQueue,
-                                   responseQueue: DispatchQueue.main,
-                                       cache: DisabledCache.instance)
-                    let preview = slp.preview(stringURl,
-                                              onSuccess: { result in
-                        let title = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    .nilIfEmpty ?? URL(string: text)?.host ?? "Untitled"
-                        let description: String
-                        if text.contains("google.com") {
-                            description = "" // special rule for google
-                        } else {
-                            description = result.description?.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .nilIfEmpty ?? ""
-                        }
-                        let imageUrl = self.youtubeThumbnail(from: text)
-                            ?? result.image
-                            ?? result.icon
-                            ?? ""
-                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            do {
-                                var dataJson: [String: Any] = [:]
-                                dataJson["title"] = title
-                                dataJson["description"] = description
-                                dataJson["imageUrl"] = imageUrl
-                                dataJson["link"] = text
-                                guard let json = String(data: try! JSONSerialization.data(withJSONObject: dataJson, options: []), encoding: String.Encoding.utf8) else {
-                                    return
-                                }
-                                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "LINK_PREVIEW", cvalues: [
-                                    "id" : "\(Date().currentTimeMillis().toHex())",
-                                    "link" : text,
-                                    "data_link" : json,
-                                    "retry": 0
-                                ], replace: true)
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
-                            }
-                        })
-                        if self.showingLink != text {
-                            self.showingLink = text
-                            self.deleteLinkPreview()
-                            if !self.textFieldSend.text.isEmpty || self.textFieldSend.text.contains(text){
-                                self.buildPreviewLink(imageUrl: imageUrl, title: title, description: description, stringURl: text)
-                            }
-                        }
-                    },
-                    onError: { error in
-                        self.deleteLinkPreview()
-                    })
-                }
-            } else {
-                deleteLinkPreview()
+        }
+        guard !text.isEmpty else {
+            deleteLinkPreview()
+            return
+        }
+        let show: (LinkPreviewFacts) -> Void = { [weak self] facts in
+            guard let self = self, self.showingLink != text else {
+                return
             }
+            self.showingLink = text
+            self.deleteLinkPreview()
+            guard !self.textFieldSend.text.isEmpty || self.textFieldSend.text.contains(text) else {
+                return
+            }
+            self.buildPreviewLink(imageUrl: facts.imageUrl.isEmpty ? nil : facts.imageUrl,
+                                  title: facts.title,
+                                  description: facts.blurb,
+                                  stringURl: text)
+        }
+        switch linkAnswer(for: text) {
+        case .read(let facts):
+            show(facts)
+            return
+        case .nothingOnIt:
+            return
+        case .notAsked:
+            break
+        }
+        // Fix: this asked the internet again on every keystroke, and asked again from the top
+        // whenever a page came back without a title - which for the sites that answer only a
+        // crawler was every time. It is asked once, and nothing more happens if the page turns
+        // out to have nothing on it.
+        LinkPreviewFetcher.fetch(link: text) { [weak self] gained in
+            guard let self = self else {
+                return
+            }
+            if gained {
+                // What the bubbles hold about this link is now out of date.
+                self.linkAnswers.removeValue(forKey: text)
+            }
+            guard let facts = LinkPreviewStore.stored(link: text),
+                  self.textFieldSend.text.contains(text) else {
+                return
+            }
+            show(facts)
         }
     }
     
@@ -6502,9 +7319,6 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
         if !self.viewTextfield.subviews.contains(self.containerLink){
             UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
                 self.constraintTopTextField.constant = self.constraintTopTextField.constant + 80
-                if self.contraintBottomMention.constant > 0 {
-                    self.contraintBottomMention.constant = self.contraintBottomMention.constant + 80 + self.heightTextFieldSend.constant
-                }
             }, completion: nil)
         }
         
@@ -6530,7 +7344,10 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
             imagePreview.bottomAnchor.constraint(equalTo: self.containerLink.bottomAnchor).isActive = true
             imagePreview.topAnchor.constraint(equalTo: self.containerLink.topAnchor).isActive = true
             imagePreview.widthAnchor.constraint(equalToConstant: 80.0).isActive = true
-            imagePreview.loadImageAsync(with: imageUrl)
+            // Fix: pictures came down the app's own pinned session, which refuses any host it
+            // holds no pin for - and nobody pins the site a link points at, so the picture was
+            // cancelled before it arrived. See PublicWebTrustDelegate.
+            LinkPreviewImage.load(imageUrl!, into: imagePreview, stillWanted: { return true })
             imagePreview.contentMode = .scaleAspectFit
         }
         
@@ -6611,6 +7428,15 @@ extension EditorGroup: UITextViewDelegate, CustomTextViewPasteDelegate {
     }
     
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        // The server says how long a message may be - see MessageLimits, pulled by
+        // Nexilis.pullInstantMessaging. What would carry the field past it is refused whole,
+        // rather than the first N characters of a paste being kept silently, and the reader is
+        // told once instead of on every keystroke.
+        if textView == textFieldSend,
+           !MessageLimits.textFits(current: textView.text ?? "", range: range, replacement: text) {
+            APIS.showMessageTooLong()
+            return false
+        }
         if text.isEmpty {
             if listMentionInTextField.count > 0 {
                 for i in 0..<listMentionInTextField.count {
@@ -7697,8 +8523,17 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             tableMentionEdit.register(UITableViewCell.self, forCellReuseIdentifier: "cellEditMention")
             tableMentionEdit.dataSource = self
             tableMentionEdit.delegate = self
-            tableMentionEdit.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
-            tableMentionEdit.backgroundColor = .white
+            // The same list, and the same corrections - see the setup of tableMention.
+            tableMentionEdit.contentInset = .zero
+            tableMentionEdit.rowHeight = ChatMentionList.rowHeight
+            tableMentionEdit.estimatedRowHeight = ChatMentionList.rowHeight
+            tableMentionEdit.separatorInset = UIEdgeInsets(top: 0, left: 52, bottom: 0, right: 0)
+            tableMentionEdit.showsVerticalScrollIndicator = false
+            tableMentionEdit.backgroundColor = traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+            tableMentionEdit.layer.cornerRadius = 12
+            tableMentionEdit.layer.cornerCurve = .continuous
+            tableMentionEdit.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            tableMentionEdit.clipsToBounds = true
             view.addSubview(tableMentionEdit)
             tableMentionEdit.anchor(left: view.leftAnchor, bottom: editTextView.topAnchor, right: view.rightAnchor)
             heightTableEditMention = tableMentionEdit.heightAnchor.constraint(equalToConstant: 0)
@@ -8170,10 +9005,16 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
         }
     }
 
+    /// The message a reply is quoting, as much of it as the quote has to draw.
+    ///
+    /// Fix: audio_id and gif_id were not among the columns read. The quote's drawing turns on
+    /// both - so replying to a voice note drew a quote with no line in it at all, and replying to
+    /// an animated picture was quoted as "Video", since a gif travels in the video slot and only
+    /// its own field tells the two apart.
     private func queryMessageReply(message_id: String) -> [String: Any?] {
         var dataQuery: [String: Any] = [:]
         Database.shared.database?.inTransaction({ fmdb, rollback in
-            if let c = Database().getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, message_text, attachment_flag, thumb_id, image_id, video_id, file_id FROM MESSAGE where message_id='\(message_id)'"), c.next() {
+            if let c = Database().getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, message_text, attachment_flag, thumb_id, image_id, video_id, file_id, audio_id, gif_id FROM MESSAGE where message_id='\(message_id)'"), c.next() {
                 dataQuery["message_id"] = c.string(forColumnIndex: 0)
                 dataQuery["f_pin"] = c.string(forColumnIndex: 1)
                 dataQuery["message_text"] = c.string(forColumnIndex: 2)
@@ -8182,6 +9023,8 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
                 dataQuery["image_id"] = c.string(forColumnIndex: 5)
                 dataQuery["video_id"] = c.string(forColumnIndex: 6)
                 dataQuery["file_id"] = c.string(forColumnIndex: 7)
+                dataQuery["audio_id"] = c.string(forColumnIndex: 8)
+                dataQuery["gif_id"] = c.string(forColumnIndex: 9)
                 c.close()
             }
         })
@@ -8391,13 +9234,15 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             
             self.reffId = nil
             let replyBarHeight = 50 + (self.offset() * 3)
+            // Measured before the bar goes, and put back after: the list grows when it goes, so
+            // shifting the content by the bar's height corrected on top of the correction a
+            // scroll view already makes for itself - the smaller cousin of the jump the keyboard
+            // used to cause. See restore(_:).
+            let wasShowing = self.listAnchor
             UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
                 self.constraintTopTextField.constant = self.constraintTopTextField.constant - replyBarHeight
-                if self.contraintBottomMention.constant > 0 {
-                    self.contraintBottomMention.constant = self.contraintBottomMention.constant - 50
-                }
                 self.view.layoutIfNeeded()
-                self.keepScrollPosition(whenInputGrewBy: -replyBarHeight)
+                self.restore(wasShowing)
             }, completion: nil)
         }
     }
@@ -8414,9 +9259,6 @@ extension EditorGroup: UIContextMenuInteractionDelegate {
             self.containerLink.removeFromSuperview()
             UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
                 self.constraintTopTextField.constant = self.constraintTopTextField.constant - 80
-                if self.contraintBottomMention.constant > 0 {
-                    self.contraintBottomMention.constant = self.contraintBottomMention.constant - 80
-                }
             }, completion: nil)
             self.showingLink = ""
         }
@@ -8677,24 +9519,363 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         // not built yet from real numbers. That is what keeps the content from shifting under
         // the reader when a page of older messages is inserted above.
         if let messageId = message(at: indexPath)?["message_id"] as? String, cell.frame.height > 0 {
+            // The running total follows the dictionary rather than being reset wherever the
+            // dictionary is emptied: an empty dictionary is a window that has been thrown away.
+            if measuredRowHeights.isEmpty {
+                measuredHeightTotal = 0
+                measuredHeightSamples = 0
+                settledRowHeightEstimate = nil
+            }
+            let built = message(at: indexPath) ?? [:]
+            learnTextWidth(from: cell, isOwn: (built["f_pin"] as? String) == User.getMyPin())
+            if measuredRowHeights[messageId] == nil {
+                learnRowHeight(cell.frame.height, of: built, messageId: messageId)
+            }
+            let previouslyMeasured = measuredRowHeights[messageId]
             measuredRowHeights[messageId] = cell.frame.height
+            // Fix: every row fed the average, pictures included - so the number used to guess at
+            // a *text* row was pulled up by every picture in the conversation, and the guess for a
+            // text bubble was several times what a text bubble comes to. The average is now only
+            // asked of, and only answered for, the rows whose height nothing else can predict.
+            if carriedHeight(of: message(at: indexPath) ?? [:], messageId: messageId) == nil {
+                if let previouslyMeasured = previouslyMeasured {
+                    measuredHeightTotal += cell.frame.height - previouslyMeasured
+                } else {
+                    measuredHeightTotal += cell.frame.height
+                    measuredHeightSamples += 1
+                }
+            }
         }
         // Something new came into view; fetch whatever it needs once the list settles.
         scheduleAutoDownloadSweep()
     }
 
+    /// What a row is expected to come to, before it has ever been built.
+    ///
+    /// Fix: an unbuilt row was guessed at with the average of every row measured so far, and for a
+    /// bubble carrying a picture that guess is wrong by hundreds of points. Nothing corrects it
+    /// until the row is really built, and a row is built when it comes into view - so any change
+    /// that brought a picture into view moved the whole content by the difference, and the
+    /// correction that keeps the reader in place brought further pictures into view, which moved
+    /// it again. That is the jumping on a reply to a picture, and it is exactly why it showed
+    /// itself only where the pictures were new to the screen: a chat just opened, and a page of
+    /// older messages just read in. A text bubble never did it because the average is close enough
+    /// for text.
+    ///
+    /// A picture's size is already known here without building anything - imageBubbleSize reads
+    /// the thumbnail's header, not its pixels, and remembers the answer - so it is used, along
+    /// with the fixed heights the other kinds of bubble are laid out at. These are the same
+    /// numbers cellForRowAt lays them out from.
     public func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
         guard tableView == tableChatView else {
             return UITableView.automaticDimension
         }
-        if let messageId = message(at: indexPath)?["message_id"] as? String, let height = measuredRowHeights[messageId] {
+        guard let row = message(at: indexPath), let messageId = row["message_id"] as? String else {
+            return averageMeasuredRowHeight
+        }
+        if let height = measuredRowHeights[messageId] {
             return height
         }
-        return 72
+        let carried = carriedHeight(of: row, messageId: messageId)
+        // A bubble whose height still cannot be reckoned from the message alone - a link
+        // preview's card, a form, a call - keeps the average. Those are the ones left.
+        if carried == nil, !isPlainTextBubble(row) {
+            rawRowGuesses[messageId] = averageMeasuredRowHeight
+            rawTextParts[messageId] = 0
+            return averageMeasuredRowHeight
+        }
+        // Fix: the pieces below and around the picture were left out of this sum, and left out
+        // they come to some thirty points a row - the cell's own padding above and below the
+        // bubble, and the line the caption view takes even when there is no caption in it. Thirty
+        // points is small enough to look plausible and large enough to move the list every time
+        // another row is measured for the first time, which is exactly why the first few replies
+        // still jumped and the ones after them did not: by then every row within reach had been
+        // measured, and there was nothing left to correct. Every piece cellForRowAt lays out is
+        // counted here now.
+        //
+        // The cell's padding above and below the bubble.
+        var height: CGFloat = 10
+        // The room above whatever the bubble carries - the sender's name, where there is one.
+        height += ((row["f_pin"] as? String) == User.getMyPin() ? 15 : 32)
+        height += carried ?? 0
+        // The text itself - the message where the bubble carries nothing else, the caption where
+        // it does. Measured, not guessed: see textBubbleHeight. Kept apart from the rest of the
+        // sum, because it is the part the proportional half of the learned difference works on.
+        let textPart = textBubbleHeight(of: (row["message_text"] as? String) ?? "",
+                                        messageId: messageId,
+                                        isOwn: (row["f_pin"] as? String) == User.getMyPin())
+        height += textPart
+        // The margin under it.
+        height += 15
+        // A quote sits in the same room the sender's name does, and asks for at least fifty.
+        if !((row["reff_id"] as? String) ?? "").isEmpty {
+            height += 55
+        }
+        if (row[TypeDataMessage.is_forwarded] as? Int ?? 0) != 0 {
+            height += 20
+        }
+        // A message carrying an acknowledgement, a confidential one, or one with sharing rules
+        // keeps a taller foot for the mark that goes there.
+        if (row["read_receipts"] as? String) == "8" || (row["credential"] as? String) == "1"
+            || !(((row[TypeDataMessage.spec_file] as? String) ?? "").isEmpty) {
+            height += 35
+        }
+        // And the row the unread marker sits above carries the marker as well.
+        if let marker = markerCounter, marker == messageId {
+            height += UnreadMarker.totalTopInset - 5
+        }
+        rawRowGuesses[messageId] = height
+        rawTextParts[messageId] = textPart
+        let answer = corrected(raw: height, text: textPart,
+                               by: corrections[biasKey(
+                                    kind: kindTag(of: row, messageId: messageId),
+                                    isOwn: (row["f_pin"] as? String) == User.getMyPin())] ?? HeightCorrection())
+        return answer
+    }
+
+    /// One word for what a bubble carries, for the on-screen trace.
+    private func kindTag(of row: [String: Any?], messageId: String) -> String {
+        if groupImages[messageId] != nil {
+            return "collage"
+        }
+        if (row["attachment_flag"] as? String) == "11" {
+            return "sticker"
+        }
+        if !(((row["thumb_id"] as? String) ?? "").isEmpty)
+            || !(((row["image_id"] as? String) ?? "").isEmpty)
+            || !(((row["video_id"] as? String) ?? "").isEmpty)
+            || !(((row[TypeDataMessage.gif_id] as? String) ?? "").isEmpty) {
+            return "picture"
+        }
+        if !(((row["file_id"] as? String) ?? "").isEmpty) {
+            return "doc"
+        }
+        if !(((row["audio_id"] as? String) ?? "").isEmpty) {
+            return "audio"
+        }
+        return isPlainTextBubble(row) ? "text" : "other"
+    }
+
+    /// Whether a bubble is nothing but its own text - which is the one case the arithmetic above
+    /// can finish on its own.
+    ///
+    /// A link preview, a form, a call record, a contact-centre card and the rest all put something
+    /// else in the bubble whose size is not in the message, so they are left to the average.
+    private func isPlainTextBubble(_ row: [String: Any?]) -> Bool {
+        let flag = (row["attachment_flag"] as? String) ?? ""
+        guard flag.isEmpty || flag == "0" else {
+            return false
+        }
+        let scope = (row[TypeDataMessage.message_scope_id] as? String) ?? ""
+        guard scope != MessageScope.CALL, scope != MessageScope.MISSED_CALL, scope != "18" else {
+            return false
+        }
+        guard ((row["blog_id"] as? String) ?? "").isEmpty else {
+            return false
+        }
+        // A message carrying a link is drawn with the link's card under it when one was fetched,
+        // and how tall that card is is not in the message.
+        let text = ((row["message_text"] as? String) ?? "").lowercased()
+        guard !text.contains("http://"), !text.contains("https://"), !text.contains("www.") else {
+            return false
+        }
+        return true
+    }
+
+    /// The width the text is really laid out at, learned from a bubble that has been built - one
+    /// for the reader's own bubbles, one for everybody else's.
+    ///
+    /// Fix: the width was reckoned as the screen less a hundred and five points, read off the
+    /// bubble's constraints. The trace says that is a little narrow: a document with a long
+    /// caption was reckoned at 1300 points and drawn at 1156, and another at 1353 against 1227 -
+    /// twelve per cent too tall, which is what a few points of missing width does to forty lines
+    /// of wrapping. The width a bubble wraps at is not worth deriving when a bubble that has
+    /// already been drawn can simply be asked.
+    /// How far this conversation's rows really come out from what the arithmetic below reckons,
+    /// learned per kind of bubble and per side of the conversation.
+    ///
+    /// Fix: three constants have been fitted to this by now - eighteen points for the room a
+    /// sender's name takes, a width for the text to wrap at, the fold at fifty lines - and each
+    /// one was right about the samples it was fitted to and wrong about the next lot. The
+    /// arithmetic can only ever be as good as the constants that can be read out of cellForRowAt,
+    /// and some of what a bubble takes is not among them.
+    ///
+    /// So what is left over is not guessed at any more, it is measured. Every row that gets built
+    /// reports how far the reckoning was out for its kind, and the reckoning for the rows after it
+    /// carries that difference. It settles within a handful of rows, it cannot be wrong about this
+    /// conversation because this conversation is what it learns from, and it needs no constant
+    /// from me at all.
+    private func biasKey(kind: String, isOwn: Bool) -> String {
+        return isOwn ? kind + "-own" : kind
+    }
+
+    /// What the reckoning for one kind of bubble is out by, in two parts.
+    ///
+    /// Fix: it was one number, and one number cannot describe what the trace showed. A short text
+    /// bubble came out eighteen points *shorter* than reckoned while a long one came out seventy
+    /// points *taller* - both tagged the same kind, so a single average was pulled between them
+    /// and neither ever settled. They are two different errors: something fixed that every bubble
+    /// of that kind carries, and something proportional to how much text it holds, which is what a
+    /// few points of wrapping width comes to over forty lines. So both are learned, and each from
+    /// the rows that can see it - the fixed part from bubbles with little text in them, the
+    /// proportional part from the ones with a lot.
+    private struct HeightCorrection {
+        var offset: CGFloat = 0
+        var scale: CGFloat = 1
+        var offsetSamples = 0
+        var scaleSamples = 0
+        /// How many rows are enough. Six is plenty to average out one odd bubble, and few enough
+        /// that the settling is over within the first screenful.
+        static let enough = 6
+    }
+
+    /// One row has been built: what it came to is what its kind is worth.
+    ///
+    /// Fix: this went on learning for ever, and a reckoning that never stops moving is the same
+    /// trap the running average was - the one this replaced. Every row measured moved the
+    /// reckoning, which moved the height of every row of that kind not yet built, which moved the
+    /// content and everything worked out from it. Measured off a recording, the conversation crept
+    /// a hundred and seventy points down the list on every open-and-close of a reply, in clean
+    /// hundred-and-fifteen-point steps - one step for each time the reckoning shifted under it.
+    ///
+    /// So it learns and then it stops. Six rows of a kind settle it, as a plain average rather
+    /// than a decaying one so those six count equally, and after that the answer is fixed for the
+    /// life of the window. A number that does not move cannot move anything else.
+    private func learnRowHeight(_ real: CGFloat, of row: [String: Any?], messageId: String) {
+        guard real > 0, let raw = rawRowGuesses[messageId] else {
+            return
+        }
+        let text = rawTextParts[messageId] ?? 0
+        let key = biasKey(kind: kindTag(of: row, messageId: messageId),
+                          isOwn: (row["f_pin"] as? String) == User.getMyPin())
+        var correction = corrections[key] ?? HeightCorrection()
+        let error = real - corrected(raw: raw, text: text, by: correction)
+        // The fixed part is only visible on a bubble with little text in it, and the proportional
+        // part only on one with a lot - so each is learned from the rows that can see it, and each
+        // settles on its own count.
+        if text < 40 {
+            guard correction.offsetSamples < HeightCorrection.enough else {
+                return
+            }
+            correction.offsetSamples += 1
+            correction.offset = min(max(correction.offset + error / CGFloat(correction.offsetSamples), -120), 120)
+        } else {
+            guard correction.scaleSamples < HeightCorrection.enough else {
+                return
+            }
+            correction.scaleSamples += 1
+            correction.scale = min(max(correction.scale + (error / text) / CGFloat(correction.scaleSamples), 0.6), 1.6)
+        }
+        corrections[key] = correction
+    }
+
+    /// The reckoning with this kind's learned difference in it.
+    private func corrected(raw: CGFloat, text: CGFloat, by correction: HeightCorrection) -> CGFloat {
+        return max(28, (raw - text) + text * correction.scale + correction.offset)
+    }
+
+    /// Takes the real width out of a bubble the table has just built.
+    private func learnTextWidth(from cell: UITableViewCell, isOwn: Bool) {
+        guard let width = cell.contentView.subviews
+            .flatMap({ $0.subviews })
+            .compactMap({ $0 as? UITextView })
+            .map({ $0.bounds.width })
+            .max(), width > 40 else {
+            return
+        }
+        // The widest one seen, not the latest. A bubble is only as wide as its own message
+        // needs, so a short message would teach a width narrower than the one a long message
+        // wraps at - and a width too narrow is what makes a long message reckoned too tall in the
+        // first place. The widest bubble drawn so far is the one that tells the truth about where
+        // the wrapping happens.
+        guard width > (textWidths[isOwn] ?? 0) + 0.5 else {
+            return
+        }
+        textWidths[isOwn] = width
+        // What was measured at the old width is no longer an answer to anything.
+        textBubbleHeights.removeAll()
+    }
+
+    /// What a message's own text comes to, measured once and remembered.
+    ///
+    /// Fix: text was the one thing left on the average, on the reasoning that a text bubble is
+    /// only tens of points off. The on-screen trace says otherwise: guessed at 123, drawn at 289 -
+    /// a hundred and sixty-six points on a single row, and two such rows moved the whole
+    /// conversation by three hundred and fifty in the same breath as the reply bar opened. A long
+    /// message is simply tall, and no average over a conversation of short ones can know that.
+    ///
+    /// It is measured the way it is drawn - the same font, the same width the bubble gives it -
+    /// and kept, so a row costs this once and never again.
+    private func textBubbleHeight(of text: String, messageId: String, isOwn: Bool) -> CGFloat {
+        if let known = textBubbleHeights[messageId] {
+            return known
+        }
+        let font = UIFont.systemFont(ofSize: 12 + offset())
+        // The width a bubble that has been drawn actually wraps at, and until one has been drawn
+        // the bubble's constraints read off cellForRowAt: sixty points clear on one side and
+        // fifteen on the other, with the text fifteen inside the bubble at each edge.
+        let screen = view.bounds.width > 0 ? view.bounds.width : UIScreen.main.bounds.width
+        let width = textWidths[isOwn] ?? max(40, screen - 105)
+        // Fix: the whole message was measured, and a long one is not drawn whole. It is folded at
+        // fifty lines with a "Read more" under it until the reader opens it - so the trace had a
+        // message reckoned at 2001 points and drawn at 1065, nearly twice over, and a second at
+        // 1289 against 1029. Measured here the way it is drawn there: the folded text, through the
+        // same folding the bubble itself uses, and a line for the "Read more" that closes it.
+        let shown = foldIfLong(text, messageId: messageId)
+        var measured = ceil((shown as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil).height)
+        if isFolded(messageId, text: text) {
+            measured += ceil(font.lineHeight)
+        }
+        // Never less than the line the empty view still takes.
+        let height = max(measured, ceil(font.lineHeight))
+        if !messageId.isEmpty {
+            textBubbleHeights[messageId] = height
+        }
+        return height
+    }
+
+    /// How much room what a bubble carries asks for, or nil when that cannot be known from the
+    /// message alone - which is the case for plain text and for a link preview, whose height
+    /// comes from text that has to be laid out.
+    ///
+    /// The audit behind the numbers, each one taken from where cellForRowAt adds it: a collage is
+    /// a fixed square of tiles; a sticker is a fixed square; a picture, a video or an animated
+    /// picture is the size its own thumbnail says, with a floor for the ones too small to see; a
+    /// document is the fixed card; a voice note is the fixed bar. A message taken back or expired
+    /// draws none of it and falls through to the average, because what is left is a line of text.
+    private func carriedHeight(of row: [String: Any?], messageId: String) -> CGFloat? {
+        let lock = (row["lock"] as? String) ?? ""
+        guard lock != "1", lock != "2" else {
+            return nil
+        }
+        if let members = groupImages[messageId], !members.isEmpty {
+            return 220
+        }
+        if (row["attachment_flag"] as? String) == "11" {
+            return 100
+        }
+        let thumb = (row["thumb_id"] as? String) ?? ""
+        let carriesPicture = !thumb.isEmpty
+            || !(((row["image_id"] as? String) ?? "").isEmpty)
+            || !(((row["video_id"] as? String) ?? "").isEmpty)
+            || !(((row[TypeDataMessage.gif_id] as? String) ?? "").isEmpty)
+        if carriesPicture {
+            return max(imageBubbleSize(messageId: messageId, thumb: thumb).height, 40)
+        }
+        if !(((row["file_id"] as? String) ?? "").isEmpty) {
+            return 55
+        }
+        if !(((row["audio_id"] as? String) ?? "").isEmpty) {
+            return 40
+        }
+        return nil
     }
 
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        let scrolledSinceLastFrame = abs(scrollView.contentOffset.y - lastY)
         lastY = scrollView.contentOffset.y
         if scrollView == tableChatView {
             dateHeaders.listDidMove(isDragging: scrollView.isDragging, in: tableChatView)
@@ -8711,19 +9892,35 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             initialBottomDeadline = nil
             initialBottomStartedAt = nil
         }
-        // Last resort: the reader has run out of loaded messages mid-flight. Reading more here
-        // costs the deceleration, but a list that stops dead at a false end costs more.
-        if scrollView == tableChatView, !isInitialLoading, scrollView.contentOffset.y < 400, hasOlderMessages {
-            loadOlderMessages()
+        if scrollView == tableChatView, scrollView.isDragging, isDashingToBottom {
+            isDashingToBottom = false
         }
-        // The tail of a fling, where the momentum left is too small for the eye to miss. Two
-        // quick flicks in a row never let the scroll settle, so this is the only chance to
-        // refill the buffer between them - and taking 3pt/frame away is not a stop anyone
-        // sees.
-        else if scrollView == tableChatView, !isInitialLoading, hasOlderMessages,
-                scrollView.isDecelerating, !scrollView.isDragging,
-                scrolledSinceLastFrame < 4,
-                scrollView.contentOffset.y < scrollView.frame.height * 3 {
+        // Every page is read where the reader has no momentum: with the finger on the glass, or
+        // with the list at rest. Never mid-fling.
+        //
+        // Fix: there were two more triggers here, one for a fling that had nearly run out and
+        // one last resort for a fling that reached the top of what was loaded. Both read a page
+        // while the list was still moving under its own weight, and reading a page ends with the
+        // list being put back where the reader was - which writes the scroll position from
+        // outside, and that ends a fling on the spot. Measured off a recording, the scroll slowed
+        // smoothly from about six and a half thousand points a second down to four and a half,
+        // exactly as a fling should, and then went to nothing in two frames. That is not a fling
+        // ending, that is a fling being cut, and it happened once for every page read - which is
+        // the stop with no slowing down before it.
+        //
+        // So they are gone. What is left reads the page as the finger lands, and only once the
+        // reader is within olderMessageLead of the end of what is loaded. A fling that outruns
+        // that now reaches the top of what is loaded and rubber-bands there, the way the top of
+        // any list does, and the page is read the moment it settles - a soft stop at a false
+        // beginning, where there used to be a dead one mid-screen.
+        //
+        // Not while the list is being taken to its newest message, though. That journey passes
+        // the top of the loaded window on its way down, and a page inserted above the reader
+        // moves the end they are travelling towards - which is how a tap on the button used to
+        // stop short of the bottom.
+        if scrollView == tableChatView, !isInitialLoading, !pendingInitialScrollToBottom,
+           !isDashingToBottom, hasOlderMessages, scrollView.isDragging,
+           scrollView.contentOffset.y < scrollView.frame.height * EditorGroup.olderMessageLead {
             loadOlderMessages()
         }
         // And the other end, for a window a jump has moved off the newest message.
@@ -8745,6 +9942,23 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         }
     }
 
+    /// The finger has just landed. If the reader is anywhere near the end of what is loaded, the
+    /// next page is read now.
+    ///
+    /// This is the earliest warning there is, and the best moment to take it: the content is held
+    /// under the finger, so putting the list back where it was is invisible, and there is no
+    /// momentum to interrupt. Every page read from here is a page not read mid-fling.
+    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        guard scrollView == tableChatView, !isInitialLoading, !pendingInitialScrollToBottom,
+              !isDashingToBottom, hasOlderMessages else {
+            return
+        }
+        guard scrollView.contentOffset.y < scrollView.frame.height * EditorGroup.olderMessageLead else {
+            return
+        }
+        loadOlderMessages()
+    }
+
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         guard scrollView == tableChatView else {
             return
@@ -8752,6 +9966,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         dateHeaders.listDidSettle(in: tableChatView)
         prefetchOlderMessagesIfIdle()
         scheduleAutoDownloadSweep()
+        // Where the list comes to rest is the last word on what has been seen: the checks made
+        // while it was moving are throttled, so the final position can be missed.
+        markVisibleMessagesRead()
     }
 
     public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
@@ -8762,6 +9979,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         dateHeaders.listDidSettle(in: tableChatView)
         prefetchOlderMessagesIfIdle()
         scheduleAutoDownloadSweep()
+        markVisibleMessagesRead()
     }
     
     public func numberOfSections(in tableView: UITableView) -> Int {
@@ -8783,6 +10001,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         guard section >= 0, section < dataDates.count else {
             return 0
         }
+        // Counted from the same list the rows are drawn from, and no other: a count that says
+        // one more row than that list can hand over is a row drawn as an empty bubble.
         return messages(onDate: dataDates[section]).count
     }
     
@@ -9039,26 +10259,49 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         }
         if tableView == tableMention || tableView == tableMentionEdit {
             let cellMention = tableView.dequeueReusableCell(withIdentifier: tableView == tableMention ? "cellMention" : "cellEditMention", for: indexPath as IndexPath)
-            var content = cellMention.defaultContentConfiguration()
-            content.textProperties.font = UIFont.systemFont(ofSize: 11 + offset())
-            content.imageProperties.tintColor = .black
-            content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
-            if indexPath.row < listMentionWithText.count {
-                if listMentionWithText[indexPath.row].pin == "-997" {
-                    if let urlGif = Bundle.resourceBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif"), let data = try? Data(contentsOf: urlGif), let source = CGImageSourceCreateWithData(data as CFData, nil), let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
-                        let staticImage = UIImage(cgImage: cgImage)
-                        content.image = staticImage.circleMasked
-                    } else if let urlGif = Bundle.resourcesMediaBundle(for: Nexilis.self).url(forResource: "pb_gpt_bot", withExtension: "gif"), let data = try? Data(contentsOf: urlGif), let source = CGImageSourceCreateWithData(data as CFData, nil), let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
-                        let staticImage = UIImage(cgImage: cgImage)
-                        content.image = staticImage.circleMasked
-                    }
-                } else {
-                    getImage(name: listMentionWithText[indexPath.row].thumb, placeholderImage: UIImage(systemName: "person"), isCircle: true, tableView: tableView, indexPath: indexPath, completion: { result, isDownloaded, image in
-                        content.image = image
-                    })
-                }
-                content.text = listMentionWithText[indexPath.row].firstName + " " + listMentionWithText[indexPath.row].lastName
+            cellMention.backgroundColor = .clear
+            // Fix: a row could be asked for after the list behind it had already been emptied -
+            // showMention clears it and reloads on every keystroke - and the row was then drawn
+            // with no name and no picture, which is what left blank lines in the list.
+            guard indexPath.row < listMentionWithText.count else {
+                cellMention.contentConfiguration = nil
+                return cellMention
             }
+            let mentioned = listMentionWithText[indexPath.row]
+            var content = cellMention.defaultContentConfiguration()
+            // 15 rather than 11: this is a name being picked out of a list, at arm's length,
+            // and 11 point is smaller than anything else in the conversation.
+            content.textProperties.font = UIFont.systemFont(ofSize: 15 + offset())
+            content.textProperties.color = .label
+            content.textProperties.numberOfLines = 1
+            content.textProperties.lineBreakMode = .byTruncatingTail
+            content.imageProperties.tintColor = .secondaryLabel
+            content.imageProperties.maximumSize = CGSize(width: ChatMentionList.avatarSize, height: ChatMentionList.avatarSize)
+            content.imageProperties.cornerRadius = ChatMentionList.avatarSize / 2
+            content.imageToTextPadding = 12
+            content.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14)
+            if mentioned.pin == "-997" {
+                // Decoded once and held - see ChatMentionList.botAvatar.
+                content.image = ChatMentionList.botAvatar
+            } else {
+                // The completion runs straight away when the picture is on disk or already
+                // decoded, which is the case that matters here; when it is not, getImage draws
+                // this one row again once it has been fetched.
+                getImage(name: mentioned.thumb,
+                         placeholderImage: UIImage(systemName: "person.crop.circle"),
+                         isCircle: true,
+                         tableView: tableView,
+                         indexPath: indexPath,
+                         targetSize: CGSize(width: ChatMentionList.avatarSize, height: ChatMentionList.avatarSize),
+                         completion: { _, _, image in
+                    content.image = image
+                })
+            }
+            // Fix: the two names were joined with a space whether or not there was a second one,
+            // so anybody without a last name was listed with a space hanging off the end - and
+            // somebody with neither was listed as nothing at all.
+            let name = mentioned.fullName
+            content.text = name.isEmpty ? mentioned.pin : name
             cellMention.contentConfiguration = content
             return cellMention
         }
@@ -9278,6 +10521,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         }
         
+        // Who sent this, when the bubble says so at all - only incoming messages in a group
+        // carry a name, and only some of what follows has to make room for it.
+        var senderNameLabel: UILabel?
         if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
             // No picture on your own messages, so the bubble takes the room it used to leave.
             profileMessage.removeFromSuperview()
@@ -9349,10 +10595,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let pictureImage = dataProfile["image_id"]
             if dataMessages[indexPath.row]["f_pin"] as? String == "-999" {
                 if !Utils.getIconDock().isEmpty {
-                    let dataImage = try? Data(contentsOf: URL(string: Utils.getUrlDock()!)!) //make sure your image in this url does exist, otherwise unwrap in a if let check / try-catch
-                    if dataImage != nil {
-                        profileMessage.image = UIImage(data: dataImage!)
-                    }
+                    profileMessage.loadImageAsync(with: Utils.getUrlDock())
                 } else {
                     profileMessage.image = UIImage(named: "pb_button", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
                 }
@@ -9411,6 +10654,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             timeMessage.leadingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: 8).isActive = true
             
             let nameSender = UILabel()
+            // Kept, because a round video note has to be laid out below it rather than over it -
+            // see the video-note branch further down.
+            senderNameLabel = nameSender
             containerMessage.addSubview(nameSender)
             nameSender.translatesAutoresizingMaskIntoConstraints = false
             nameSender.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
@@ -10014,8 +11260,17 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let note = VideoNoteBubbleView()
             containerMessage.addSubview(note)
             note.translatesAutoresizingMaskIntoConstraints = false
+            // Fix: the circle was pinned to the top of the bubble, and in a group the sender's
+            // name is drawn there too - so the circle was laid straight over the name and covered
+            // all but its first letters. The container behind a video note is transparent, so the
+            // name has the wallpaper to sit on; the circle starts below it, which is where the
+            // name belongs above a round video anyway.
+            if let name = senderNameLabel {
+                note.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 4).isActive = true
+            } else {
+                note.topAnchor.constraint(equalTo: containerMessage.topAnchor).isActive = true
+            }
             NSLayoutConstraint.activate([
-                note.topAnchor.constraint(equalTo: containerMessage.topAnchor),
                 note.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor),
                 note.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor),
                 note.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor)
@@ -10106,6 +11361,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 let listImageThumb: [UIImageView] = (0..<tileCount).map { _ in UIImageView() }
                 for i in 0..<tileCount {
                     containerMessage.addSubview(listImageThumb[i])
+                    // Which picture of the run this tile is, so a quote of one of them can be
+                    // pointed at after the jump lands on the collage they share.
+                    listImageThumb[i].accessibilityIdentifier = "\(EditorGroup.collageTileName)\(i)"
                     listImageThumb[i].layer.cornerRadius = 5.0
                     listImageThumb[i].clipsToBounds = true
                     listImageThumb[i].contentMode = .scaleAspectFill
@@ -10452,6 +11710,18 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                     // Fix: 37 leaves room for the sender's name, which an own bubble does not
                     // show. Personal chats use 15 here and so does an own bubble now.
                     imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: isOwnMessage ? 15 : 37).isActive = true
+                } else {
+                    // Fix: with a quote (or a "Forwarded" line) above it, the picture is given no
+                    // top edge of its own - it hangs between whatever is above and the text below.
+                    // Nothing said how tall it should be, and the quote box above it had no ceiling
+                    // either, so the room meant for the picture was free for the layout to hand to
+                    // the quote instead: a reply carrying a video drew a tall empty quote with a
+                    // squeezed still under it, the camcorder mark stranded away from the picture.
+                    // The picture keeps the size it was measured at; the quote takes what its own
+                    // two lines need and no more.
+                    let imgHeightConstraint = imageThumb.heightAnchor.constraint(equalToConstant: max(getHeightImage, 40))
+                    imgHeightConstraint.priority = UILayoutPriority(751)
+                    imgHeightConstraint.isActive = true
                 }
                 imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
                 imageThumb.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
@@ -10866,8 +12136,15 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         if (!fileChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             topMarginText.constant = topMarginText.constant + 55
             
-            let arrExtFile = (originalMessageText.components(separatedBy: "|")[0]).split(separator: ".")
-            let finalExtFile = arrExtFile[arrExtFile.count - 1]
+            // Fix: the name was read straight off the front of message_text, and the type by
+            // splitting that on a dot and indexing the last piece - which is a crash for a
+            // document that arrived without a name, because splitting nothing gives nothing to
+            // index. Both now go through one place that knows where else to look.
+            let documentName = Utils.documentName(messageText: originalMessageText, file: fileChat)
+            // What kind it is: what the name says, and where the name says nothing, what the file
+            // itself says. See Utils.documentKind.
+            let documentKind = Utils.documentKind(named: documentName, file: fileChat)
+            let finalExtFile = Utils.documentType(of: documentKind)
             containerMessage.addSubview(containerViewFile)
             containerViewFile.translatesAutoresizingMaskIntoConstraints = false
             let data = queryMessageReply(message_id: reffChat)
@@ -10881,12 +12158,30 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             containerViewFile.bottomAnchor.constraint(equalTo:messageText.topAnchor, constant: -5).isActive = true
             containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
 //            containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
-            containerViewFile.backgroundColor = .black.withAlphaComponent(0.2)
+            // Fix: the card sat on a flat twenty per cent black, which on a light bubble is a
+            // slab of grey and on a dark one is nearly invisible. It is the same kind of thing a
+            // quote is - a panel tucked inside a bubble - so it sits on the same panel, and the
+            // writing on it uses the same two weights. See BubblePanel.
+            let onDarkBubble = self.traitCollection.userInterfaceStyle == .dark
+            containerViewFile.backgroundColor = BubblePanel.ground(dark: onDarkBubble)
             containerViewFile.layer.cornerRadius = 5.0
             containerViewFile.clipsToBounds = true
+            // Fix: the card took its width from the name label, so a document with a short name -
+            // or none at all - left it barely wider than its own icon, a grey square with a
+            // document glyph and a download arrow crammed into it. A floor under the width keeps
+            // it a card whatever the name turns out to be, and it gives way on a narrow screen
+            // rather than pushing the bubble past the edge.
+            let fileCardWidth = containerViewFile.widthAnchor.constraint(greaterThanOrEqualToConstant: 190)
+            fileCardWidth.priority = .defaultHigh
+            fileCardWidth.isActive = true
             
-            let imageFile = UIImageView(image: UIImage(systemName: "doc.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .bold, scale: .default)))
-            imageFile.tintColor = .docColor
+            // Fix: every document wore the same grey page, whatever it was - a column of
+            // attachments was a column of identical marks and only the file name told them
+            // apart. Each kind now has its own colour with its extension written on the page.
+            // See DocumentBadge.
+            let imageFile = UIImageView(image: DocumentBadge.image(of: documentKind,
+                                                                   size: CGSize(width: 26, height: 30)))
+            imageFile.contentMode = .scaleAspectFit
             containerViewFile.addSubview(imageFile)
             imageFile.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
@@ -10909,8 +12204,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             nameFileWidth.priority = .defaultHigh
             nameFileWidth.isActive = true
             nameFile.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
-            nameFile.textColor = .white
-            nameFile.text = originalMessageText.components(separatedBy: "|")[0]
+            nameFile.textColor = BubblePanel.text(dark: onDarkBubble)
+            nameFile.text = documentName
 
             // How big it is and what it is, on the line the name's third used to have. The size is
             // the sender's own figure where they sent one and what landed here otherwise; the type
@@ -10918,13 +12213,13 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             let fileFacts = UILabel()
             fileFacts.numberOfLines = 1
             fileFacts.font = .systemFont(ofSize: 11)
-            fileFacts.textColor = UIColor.white.withAlphaComponent(0.75)
+            fileFacts.textColor = BubblePanel.secondaryText(dark: onDarkBubble)
             fileFacts.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             var fileBytes = VideoNote.Facts.of(attachmentNamed: fileChat).bytes
             if fileBytes == 0 {
                 fileBytes = VideoNote.Facts.measuredSize(ofAttachmentNamed: fileChat)
             }
-            let fileType = finalExtFile.count > 4 ? "TXT" : finalExtFile.uppercased()
+            let fileType = finalExtFile
             fileFacts.text = fileBytes > 0
                 ? "\(VideoNote.Facts.humanSize(fileBytes)) \u{2022} \(fileType)"
                 : fileType
@@ -11094,192 +12389,73 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         let containerLinkMessage = UIView()
         var isLoadingShowLink = false
         if thumbChat.isEmpty && fileChat.isEmpty && !textChat.isEmpty {
-            var text = ""
-            let listTextSplitBreak = textChat.components(separatedBy: "\n")
-            let indexFirstLinkSplitBreak = listTextSplitBreak.firstIndex(where: { $0.contains("www.") || $0.contains("http://") || $0.contains("https://") })
-            if indexFirstLinkSplitBreak != nil {
-                let listTextSplitSpace = listTextSplitBreak[indexFirstLinkSplitBreak!].components(separatedBy: " ")
-                let indexFirstLinkSplitSpace = listTextSplitSpace.firstIndex(where: { ($0.starts(with: "www.") && $0.components(separatedBy: ".").count > 2) || ($0.starts(with: "http://") && $0.components(separatedBy: ".").count > 1) || ($0.starts(with: "https://") && $0.components(separatedBy: ".").count > 1) })
-                if indexFirstLinkSplitSpace != nil {
-                    text = listTextSplitSpace[indexFirstLinkSplitSpace!]
-                }
-            }
+            // The one place that says where a link is in a message, rather than a fourth copy
+            // of the same walk over it.
+            let text = LinkPreviewFetcher.firstLink(in: textChat)
             if !text.isEmpty {
                 isLoadingShowLink = true
-                var dataURL = ""
-                func showLink() {
-                    if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                        let title = data["title"] as? String
-                        let description = data["description"] as? String
-                        let imageUrl = data["imageUrl"] as? String
-                        let link = data["link"] as? String
-                        
-                        topMarginText.constant = topMarginText.constant + 85
-                        
-                        containerMessage.addSubview(containerLinkMessage)
-                        containerLinkMessage.translatesAutoresizingMaskIntoConstraints = false
-                        containerLinkMessage.leadingAnchor.constraint(equalTo:containerMessage.leadingAnchor, constant: 15).isActive = true
-                        if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" {
-                            containerLinkMessage.bottomAnchor.constraint(equalTo: imageSticker.topAnchor, constant: -5).isActive = true
-                        } else {
-                            containerLinkMessage.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
-                        }
-                        containerLinkMessage.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                        containerLinkMessage.heightAnchor.constraint(equalToConstant: 80.0).isActive = true
-                        containerLinkMessage.backgroundColor = .gray.withAlphaComponent(0.2)
-                        
-                        let imagePreview = UIImageView()
-                        if imageUrl != nil {
-                            containerLinkMessage.addSubview(imagePreview)
-                            imagePreview.translatesAutoresizingMaskIntoConstraints = false
-                            imagePreview.leadingAnchor.constraint(equalTo: containerLinkMessage.leadingAnchor).isActive = true
-                            imagePreview.bottomAnchor.constraint(equalTo: containerLinkMessage.bottomAnchor).isActive = true
-                            imagePreview.topAnchor.constraint(equalTo: containerLinkMessage.topAnchor).isActive = true
-                            imagePreview.widthAnchor.constraint(equalToConstant: 80.0).isActive = true
-                            imagePreview.loadImageAsync(with: imageUrl)
-                            imagePreview.contentMode = .scaleAspectFill
-                            imagePreview.clipsToBounds = true
-                        }
-                        
-                        let titlePreview = UILabel()
-                        containerLinkMessage.addSubview(titlePreview)
-                        titlePreview.translatesAutoresizingMaskIntoConstraints = false
-                        if imageUrl != nil {
-                            titlePreview.leadingAnchor.constraint(equalTo: imagePreview.trailingAnchor, constant: 5.0).isActive = true
-                        } else {
-                            titlePreview.leadingAnchor.constraint(equalTo: containerLinkMessage.leadingAnchor, constant: 5.0).isActive = true
-                        }
-                        titlePreview.topAnchor.constraint(equalTo: containerLinkMessage.topAnchor, constant: 10.0).isActive = true
-                        titlePreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -5.0).isActive = true
-                        titlePreview.text = title
-                        titlePreview.font = UIFont.systemFont(ofSize: 12.0 + offset(), weight: .bold)
-                        titlePreview.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-                        
-                        let descPreview = UILabel()
-                        containerLinkMessage.addSubview(descPreview)
-                        descPreview.translatesAutoresizingMaskIntoConstraints = false
-                        if imageUrl != nil {
-                            descPreview.leadingAnchor.constraint(equalTo: imagePreview.trailingAnchor, constant: 5.0).isActive = true
-                        } else {
-                            descPreview.leadingAnchor.constraint(equalTo: containerLinkMessage.leadingAnchor, constant: 5.0).isActive = true
-                        }
-                        descPreview.topAnchor.constraint(equalTo: titlePreview.bottomAnchor).isActive = true
-                        descPreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -5.0).isActive = true
-                        descPreview.text = description
-                        descPreview.font = UIFont.systemFont(ofSize: 12.0 + offset())
-                        descPreview.textColor = .gray
-                        descPreview.numberOfLines = 1
-                        
-                        let linkPreview = UILabel()
-                        containerLinkMessage.addSubview(linkPreview)
-                        linkPreview.translatesAutoresizingMaskIntoConstraints = false
-                        if imageUrl != nil {
-                            linkPreview.leadingAnchor.constraint(equalTo: imagePreview.trailingAnchor, constant: 5.0).isActive = true
-                        } else {
-                            linkPreview.leadingAnchor.constraint(equalTo: containerLinkMessage.leadingAnchor, constant: 5.0).isActive = true
-                        }
-                        linkPreview.topAnchor.constraint(equalTo: descPreview.bottomAnchor, constant: 8.0).isActive = true
-                        linkPreview.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor, constant: -5.0).isActive = true
-                        linkPreview.text = link
-                        linkPreview.font = UIFont.systemFont(ofSize: 10.0 + offset())
-                        linkPreview.textColor = .gray
-                        linkPreview.numberOfLines = 1
-                        
-                        if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 {
-                            showForwardedSign()
-                        }
-                        
-                        if !copySession && !forwardSession && !deleteSession && !summarizeSession {
-                            let objectTap = ObjectGesture(target: self, action: #selector(tapMessageText(_:)))
-                            objectTap.message_id = text
-                            containerLinkMessage.addGestureRecognizer(objectTap)
-                        }
+                // Fix: whatever the link was, the card under it was an eighty-point strip with a
+                // small square picture at the left - and most of the time no picture at all, for
+                // the two reasons written down beside LinkPreviewFacts. The card now follows the
+                // page: the picture across the top at the shape the picture is, the title, what
+                // the page says about itself, and the site on the last line; and a link to a
+                // video says so, which kind of video it is and how long it runs. It measures
+                // itself first, because the message text below it has to be placed under it.
+                func showLink(_ facts: LinkPreviewFacts) {
+                    let cardWidth = LinkPreviewCard.width(inViewOfWidth: self.view.frame.width)
+                    let cardHeight = LinkPreviewCard.height(for: facts, width: cardWidth)
+                    topMarginText.constant = topMarginText.constant + cardHeight + 5
+
+                    containerMessage.addSubview(containerLinkMessage)
+                    containerLinkMessage.translatesAutoresizingMaskIntoConstraints = false
+                    containerLinkMessage.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+                    if dataMessages[indexPath.row]["attachment_flag"] as? String == "11" {
+                        containerLinkMessage.bottomAnchor.constraint(equalTo: imageSticker.topAnchor, constant: -5).isActive = true
+                    } else {
+                        containerLinkMessage.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
+                    }
+                    containerLinkMessage.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+                    containerLinkMessage.heightAnchor.constraint(equalToConstant: cardHeight).isActive = true
+                    // The card is what makes a bubble carrying a link as wide as it is: a bubble
+                    // is otherwise only as wide as its text, and a picture in a narrow bubble is
+                    // not worth showing. It gives way where there is not the room, the way a
+                    // picture bubble does.
+                    let cardIsWide = containerLinkMessage.widthAnchor.constraint(equalToConstant: cardWidth)
+                    cardIsWide.priority = .defaultHigh
+                    cardIsWide.isActive = true
+
+                    let card = LinkPreviewCard()
+                    containerLinkMessage.addSubview(card)
+                    card.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        card.leadingAnchor.constraint(equalTo: containerLinkMessage.leadingAnchor),
+                        card.trailingAnchor.constraint(equalTo: containerLinkMessage.trailingAnchor),
+                        card.topAnchor.constraint(equalTo: containerLinkMessage.topAnchor),
+                        card.bottomAnchor.constraint(equalTo: containerLinkMessage.bottomAnchor)
+                    ])
+                    card.show(facts, dark: self.traitCollection.userInterfaceStyle == .dark)
+
+                    if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 {
+                        showForwardedSign()
+                    }
+
+                    if !copySession && !forwardSession && !deleteSession && !summarizeSession {
+                        let objectTap = ObjectGesture(target: self, action: #selector(tapMessageText(_:)))
+                        objectTap.message_id = text
+                        containerLinkMessage.addGestureRecognizer(objectTap)
                     }
                 }
-                Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                    do {
-                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select data_link from LINK_PREVIEW where link='\(text)'"), cursor.next() {
-                            if let data = cursor.string(forColumnIndex: 0) {
-                                dataURL = data
-                            }
-                            cursor.close()
-                        }
-                    } catch {
-                        rollback.pointee = true
-                        print("Access database error: \(error.localizedDescription)")
-                    }
-                })
-                if !dataURL.isEmpty {
-                    if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                        let imageUrl = data["imageUrl"] as? String
-                        let link = data["link"]  as? String ?? ""
-                        if imageUrl == nil || (link.contains("youtube.com") && link.contains("watch?v=") && !imageUrl!.contains("img.youtube.com/vi/")) {
-                            dataURL = ""
-                        }
-                    }
-                }
-                if !dataURL.isEmpty {
-                    if let data = try! JSONSerialization.jsonObject(with: dataURL.data(using: String.Encoding.utf8)!, options: []) as? [String: Any] {
-                        let imageUrl = data["imageUrl"] as? String
-                        let link = data["link"]  as? String ?? ""
-                        if imageUrl == nil || (link.contains("youtube.com") && link.contains("watch?v=") && !imageUrl!.contains("img.youtube.com/vi/")) {
-                            dataURL = ""
-                        }
-                    }
-                }
-                if dataURL.isEmpty {
-                    let urlConfig = URLSessionConfiguration.default
-                    let sessionDelegate = PinnedURLSessionNexilisDelegate()
-                    let session = URLSession(configuration: urlConfig, delegate: sessionDelegate, delegateQueue: nil)
-                    let slp = SwiftLinkPreview(session: session,
-                                               workQueue: SwiftLinkPreview.defaultWorkQueue,
-                                               responseQueue: DispatchQueue.main,
-                                               cache: DisabledCache.instance)
-                    let preview = slp.preview(text,
-                                              onSuccess: { result in
-                        let title = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    .nilIfEmpty ?? URL(string: text)?.host ?? "Untitled"
-                        let description: String
-                        if text.contains("google.com") {
-                            description = "" // special rule for google
-                        } else {
-                            description = result.description?.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .nilIfEmpty ?? ""
-                        }
-                        let imageUrl = self.youtubeThumbnail(from: text)
-                            ?? result.image
-                            ?? result.icon
-                            ?? ""
-                        Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                            do {
-                                var dataJson: [String: Any] = [:]
-                                dataJson["title"] = title
-                                dataJson["description"] = description
-                                dataJson["imageUrl"] = imageUrl
-                                dataJson["link"] = text
-                                guard let json = String(data: try! JSONSerialization.data(withJSONObject: dataJson, options: []), encoding: String.Encoding.utf8) else {
-                                    return
-                                }
-                                _ = try Database.shared.insertRecord(fmdb: fmdb, table: "LINK_PREVIEW", cvalues: [
-                                    "id" : "\(Date().currentTimeMillis().toHex())",
-                                    "link" : text,
-                                    "data_link" : json,
-                                    "retry": 0
-                                ], replace: true)
-                                dataURL = json
-                                showLink()
-                                DispatchQueue.main.async {
-                                    tableView.reloadRows(at: [indexPath], with: .none)
-                                }
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
-                            }
-                        })
-                    }, onError: { error in
-                    })
-                } else {
-                    showLink()
+                switch linkAnswer(for: text) {
+                case .read(let facts):
+                    showLink(facts)
+                case .nothingOnIt:
+                    // The page was read and had no title and no picture on it. WhatsApp draws
+                    // nothing in that case, and so does this - and it is not asked for again.
+                    break
+                case .notAsked:
+                    // Noted, not fetched: nothing goes out to the internet from inside a row.
+                    // See noteLinkToRead.
+                    noteLinkToRead(text, messageId: messageIdChat)
                 }
             }
         }
@@ -11300,12 +12476,10 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 // instead moves the quote away from the bubble the same way, and the text goes to
                 // 87% for the same reason WhatsApp can afford 60% and we cannot.
                 let isDarkQuote = self.traitCollection.userInterfaceStyle == .dark
-                let quoteOverlay: UIColor = isDarkQuote
-                    ? .black.withAlphaComponent(0.22)
-                    : UIColor(white: 0.784, alpha: 0.22)
-                let quotedTextColour: UIColor = isDarkQuote
-                    ? .white.withAlphaComponent(0.87)
-                    : .black.withAlphaComponent(0.77)
+                // The one place these two live, so the quote and the document card - which are the
+                // same panel by design - cannot drift apart. See BubblePanel.
+                let quoteOverlay = BubblePanel.ground(dark: isDarkQuote)
+                let quotedTextColour = BubblePanel.text(dark: isDarkQuote)
 
                 let containerReply = UIView()
                 containerMessage.addSubview(containerReply)
@@ -11325,14 +12499,26 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 }
                 containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
                 let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
-                minHeightConstraint.priority = .defaultHigh
+                // Just under the margin that sets the bubble's height, so the two are never left
+                // tied on the same priority with the layout free to pick either. What actually
+                // keeps a quote from being squeezed is its own two labels, which refuse to be
+                // compressed; this is only the look of an empty one.
+                minHeightConstraint.priority = UILayoutPriority(749)
                 minHeightConstraint.isActive = true
                 containerReply.backgroundColor = quoteOverlay
                 containerReply.layer.cornerRadius = 5
                 containerReply.clipsToBounds = true
                 
                 if (thumbChat != "" || fileChat != "") && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
+                    // Fix: this replaced the constraint that holds the message text with a fresh
+                    // one, and a fresh constraint is required - the original was deliberately
+                    // defaultHigh so that it would give way when the quote needed more room. So
+                    // the quote above a document was pinned to a fixed 50-odd points by a chain
+                    // of required constraints, and a quote that wanted three lines could not
+                    // have them: the layout resolved it by dropping the sender's name. The
+                    // priority is carried over, and the chain quote-file-text drives the height.
                     topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: topMarginText.constant + 50 + (self.offset()*3))
+                    topMarginText.priority = .defaultHigh
                 }
                 
                 let leftReply = UIView()
@@ -11389,6 +12575,16 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 // message text below it - which is the one meant to give way - does.
                 let topConstraintContent = contentReply.topAnchor.constraint(greaterThanOrEqualTo: titleReply.bottomAnchor)
                 topConstraintContent.isActive = true
+                // Fix: with the name held to the top of the box and the text to the bottom, and only a
+                // minimum between them, nothing said how tall the box should actually be - it had a
+                // floor and no ceiling. So the thumbnail's own picture size, even given the lowest say
+                // there is, was still the only thing with an opinion, and it inflated the box until the
+                // width cap stopped it: a hundred-point quote holding two lines of text, with the label
+                // stranded at the bottom. This says the box hugs its two lines, and says it firmly
+                // enough to beat a picture while still giving way to the minimum above it.
+                let hugContent = contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor)
+                hugContent.priority = UILayoutPriority(500)
+                hugContent.isActive = true
                 contentReply.font = UIFont.systemFont(ofSize: 11 + offset())
                 let message_text = data["message_text"] as? String ?? ""
                 let attachment_flag = data["attachment_flag"] as? String  ?? ""
@@ -11397,93 +12593,122 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 let video_chat = data["video_id"] as? String ?? ""
                 let file_chat = data["file_id"] as? String ?? ""
                 let audio_chat = data["audio_id"] as? String ?? ""
-                if (attachment_flag == "0" && thumb_chat == "") {
-                    contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
+                let gif_chat = data["gif_id"] as? String ?? ""
+                // Fix: this chain began with "no flag and no thumbnail, so it is plain text", and that test
+                // is looser than it reads - an attachment whose flag is 0 or blank was answered with its own
+                // message text, which for a document is a filename and a caption joined by a bar, or nothing
+                // at all. A reply to a document therefore drew a quote with nothing in it. What a message
+                // carries is decided from its slots now, in one place shared by all six quotes - see
+                // Utils.quotedAttachmentLine - and nil comes back only for a message that really is text,
+                // which is rendered here because each of the six draws mentions its own way.
+                // Held rather than activated and forgotten: a thumbnail claims the right-hand end of the
+                // quote further down, and this has to come off before it does or the two fight over the
+                // same edge.
+                let contentTrailingToContainer = contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20)
+                contentTrailingToContainer.isActive = true
+                if let carried = Utils.quotedAttachmentLine(attachmentFlag: attachment_flag,
+                                                            thumb: thumb_chat,
+                                                            image: image_chat,
+                                                            video: video_chat,
+                                                            file: file_chat,
+                                                            audio: audio_chat,
+                                                            gif: gif_chat,
+                                                            messageText: message_text,
+                                                            font: contentReply.font,
+                                                            colour: quotedTextColour) {
+                    contentReply.attributedText = carried
+                } else {
                     contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: self.dataGroup["group_id"]  as? String ?? "")
-                } else if (attachment_flag == "1" || image_chat != "") {
-                    if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
-                        contentReply.text = "📷 Photo".localized()
-                    } else {
-                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: self.dataGroup["group_id"]  as? String ?? "")
-                    }
-                } else if (attachment_flag == "2" || video_chat != "") {
-                    if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
-                        // A round video note is quoted as one, with its length; an ordinary video
-                        // is quoted the way it always was.
-                        if let noteLine = VideoNote.quotedLine(videoId: video_chat,
-                                                               font: contentReply.font,
-                                                               colour: contentReply.textColor ?? .gray) {
-                            contentReply.attributedText = noteLine
-                        } else {
-                            contentReply.text = "📹 Video".localized()
-                        }
-                    } else {
-                        contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: self.dataGroup["group_id"]  as? String ?? "")
-                    }
-                } else if (attachment_flag == "6" || file_chat != ""){
-                    contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                    contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
-                } else if (attachment_flag == "11") {
-                    contentReply.text = "❤️ Sticker"
-                } else if attachment_flag == "27" {
-                    contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                    contentReply.text = "📄 " + "Live Streaming".localized()
-                } else if attachment_flag == "26" {
-                    contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                    contentReply.text = "📄 " + "Seminar".localized()
-                } else if !audio_chat.isEmpty {
-                    // Fix: audio matched none of the branches above, so the line was left with no
-                    // text at all - a reply to a voice note quoted a blank.
-                    contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                    contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
-                                                                        audioName: audio_chat,
-                                                                        font: contentReply.font,
-                                                                        colour: quotedTextColour)
                 }
 // WhatsApp writes the quote in the foreground colour held back a little, not in a
                 // colour of its own: #303237 on that #D3E1F2 quote is black at 77%. Its dark
                 // theme does the same the other way round, white at 60%.
                 contentReply.textColor = quotedTextColour
                 
-                if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
-                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                    if let dirPath = paths.first {
-                        let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumb_chat)
-                        // Fix: this looked the picture up under `thumbChat` - the thumbnail of the
-                        // message being drawn - while loading the file for `thumb_chat`, the thumbnail of
-                        // the message being quoted. Two different pictures under one key, so a quote
-                        // could be handed the wrong still or none at all. And only the plain file was
-                        // read, which a receiver often does not have: see VideoNote.quotedStill.
-                        let imageThumb = UIImageView()
-                        VideoNote.loadQuotedStill(named: thumb_chat, into: imageThumb)
-                        containerReply.addSubview(imageThumb)
-                        // A video note is round wherever it is shown, a quote included; the square corner
-                        // is what every other kind of attachment keeps.
-                        imageThumb.layer.cornerRadius = VideoNote.isNote(video_chat) ? 15.0 : 2.0
-                        imageThumb.clipsToBounds = true
-                        imageThumb.contentMode = .scaleAspectFill
-                        imageThumb.translatesAutoresizingMaskIntoConstraints = false
-                        imageThumb.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -10).isActive = true
-                        imageThumb.centerYAnchor.constraint(equalTo: containerReply.centerYAnchor).isActive = true
-                        imageThumb.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                        imageThumb.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                        
-                        if (attachment_flag == "2") {
-                            let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
-                            imageThumb.addSubview(imagePlay)
-                            imagePlay.clipsToBounds = true
-                            imagePlay.translatesAutoresizingMaskIntoConstraints = false
-                            imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
-                            imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
-                            imagePlay.widthAnchor.constraint(equalToConstant: 10).isActive = true
-                            imagePlay.heightAnchor.constraint(equalToConstant: 10).isActive = true
-                            imagePlay.tintColor = .white
-                        }
-                        titleReply.trailingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: -20).isActive = true
-                        contentReply.trailingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: -20).isActive = true
+                // The still fills the right-hand end of the quote, full height and flush to the edge, the
+                // way the reference draws one. It is scaled to that box and cropped to it, so a picture
+                // is never drawn at whatever size it happens to be.
+                //
+                // Fix: it was a 30-point square floating ten points in from the edge, vertically centred -
+                // a stamp beside the text rather than part of the quote. The picture it was given was
+                // only ever the thumbnail, so a message whose thumbnail never arrived showed nothing at
+                // all - which is the quote that "sometimes has no picture"; the full image is the
+                // fallback now. And only a quote of a picture or a video has a still to show at all: the
+                // test that said so was lost when this block was first rewritten, so every quote grew
+                // one, and a quote of a document or of plain text grew an empty one - the grey rectangle
+                // on the right.
+                let carriesStill = attachment_flag == "1" || attachment_flag == "2"
+                    || !image_chat.isEmpty || !video_chat.isEmpty
+                if carriesStill, !VideoNote.isNote(video_chat) {
+                    let imageThumb = UIImageView()
+                    VideoNote.loadQuotedStill(named: thumb_chat.isEmpty ? image_chat : thumb_chat, into: imageThumb)
+                    containerReply.addSubview(imageThumb)
+                    imageThumb.clipsToBounds = true
+                    imageThumb.contentMode = .scaleAspectFill
+                    imageThumb.translatesAutoresizingMaskIntoConstraints = false
+                    // Fix: a picture in an image view carries its own size, and with the view pinned to the
+                    // top and the bottom of the quote that size became the quote's height - a five-hundred
+                    // point still made a four-hundred point quote, which is the tall grey box with the name
+                    // at the top and the label stranded at the bottom. Its own size is given the lowest say
+                    // there is, so the height comes from the two labels and the picture fills whatever that
+                    // turns out to be.
+                    imageThumb.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
+                    imageThumb.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+                    imageThumb.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
+                    imageThumb.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+                    // Flush to three edges, so the quote's own rounded corner is what shapes it - no radius
+                    // of its own, and nothing to keep in step with the container's.
+                    NSLayoutConstraint.activate([
+                        imageThumb.topAnchor.constraint(equalTo: containerReply.topAnchor),
+                        imageThumb.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor),
+                        imageThumb.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor),
+                        // Square, so it fills the height it was given rather than stretching into a
+                        // letterbox - the quote is only as tall as its two lines of text, and a picture
+                        // three times wider than tall is not what the reference shows. Capped as a share
+                        // of the width so it can never crowd the text out on a narrow bubble.
+                        imageThumb.widthAnchor.constraint(equalTo: imageThumb.heightAnchor),
+                        imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerReply.widthAnchor, multiplier: 0.45)
+                    ])
+
+                    // A gif travels in the video slot too, and a play badge on an animated
+                    // picture is a promise it does not keep.
+                    if (attachment_flag == "2" || !video_chat.isEmpty), gif_chat.isEmpty {
+                        let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
+                        imageThumb.addSubview(imagePlay)
+                        imagePlay.translatesAutoresizingMaskIntoConstraints = false
+                        NSLayoutConstraint.activate([
+                            imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor),
+                            imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor),
+                            imagePlay.widthAnchor.constraint(equalToConstant: 22),
+                            imagePlay.heightAnchor.constraint(equalToConstant: 22)
+                        ])
+                        imagePlay.tintColor = .white
                     }
+                    // The text gives the picture its room. The constraint that held it to the container's own
+                    // edge is taken off first: two required constraints on one edge is a conflict, and the
+                    // layout resolves those by breaking whichever it likes.
+                    contentTrailingToContainer.isActive = false
+                    titleReply.trailingAnchor.constraint(lessThanOrEqualTo: imageThumb.leadingAnchor, constant: -10).isActive = true
+                    contentReply.trailingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: -10).isActive = true
+                } else if carriesStill {
+                    // A video note is round wherever it is shown, a quote included, so it stays a small
+                    // still beside the text rather than filling the corner.
+                    let imageThumb = UIImageView()
+                    VideoNote.loadQuotedStill(named: thumb_chat, into: imageThumb)
+                    containerReply.addSubview(imageThumb)
+                    imageThumb.layer.cornerRadius = 15.0
+                    imageThumb.clipsToBounds = true
+                    imageThumb.contentMode = .scaleAspectFill
+                    imageThumb.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        imageThumb.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -10),
+                        imageThumb.centerYAnchor.constraint(equalTo: containerReply.centerYAnchor),
+                        imageThumb.widthAnchor.constraint(equalToConstant: 30),
+                        imageThumb.heightAnchor.constraint(equalToConstant: 30)
+                    ])
+                    contentTrailingToContainer.isActive = false
+                    titleReply.trailingAnchor.constraint(lessThanOrEqualTo: imageThumb.leadingAnchor, constant: -10).isActive = true
+                    contentReply.trailingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: -10).isActive = true
                 }
                 if (attachment_flag == "11") {
                     let imageSticker = UIImageView(image: UIImage(named: (message_text.component(1, separatedBy: "/")), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
@@ -11996,6 +13221,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             return
         }
         LongMessage.expand(tap.messageId)
+        // It is a different height now, so what was measured of it folded is no longer an answer.
+        textBubbleHeights.removeValue(forKey: tap.messageId)
         guard let at = indexPath(forMessageId: tap.messageId) else {
             tableChatView.reloadData()
             return
@@ -12073,6 +13300,23 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         }
     }
     
+    /// Puts the collage's list of pictures on screen, either alongside the conversation or raised
+    /// over it.
+    private func pushCollageList(_ list: ListGroupImages, rising: Bool) {
+        guard let stack = navigationController else {
+            return
+        }
+        if rising {
+            let transition = RisingPushTransition(rising: list, previous: stack.delegate)
+            transition.onFinished = { [weak self] in
+                self?.risingCollageTransition = nil
+            }
+            risingCollageTransition = transition
+            stack.delegate = transition
+        }
+        stack.pushViewController(list, animated: true)
+    }
+
     @objc func imageGroupingTapped(_ sender: ObjectGesture) {
         let listGroupingImages = ListGroupImages()
         // Opened by the conversation itself, so a picture reached through a collage lands on the
@@ -12163,7 +13407,7 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
                 handleReply(indexPath: IndexPath(row: 0, section: 0), dataMessagesImage: replyData)
             }
         }
-        self.navigationController?.pushViewController(listGroupingImages, animated: true)
+        pushCollageList(listGroupingImages, rising: sender.risesFromBottom)
     }
     
     @objc func tapAck(_ sender: ObjectGesture) {
@@ -12630,49 +13874,8 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             }
         } else {
             DispatchQueue.main.async {
-                // This is the jump to a quoted or pinned message. The message being jumped to
-                // is by nature an older one and may sit above the loaded window - without
-                // this the lookup below simply finds nothing and the tap does nothing at all.
-                self.ensureMessageLoaded(messageId: sender.message_id)
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"]  as? String ?? "" == sender.message_id})
-                if idx == nil {
-                    return
-                }
-                let section = self.dataDates.firstIndex(of: self.dataMessages[idx!]["chat_date"]  as? String ?? "")
-                if section == nil {
-                    return
-                }
-                let row = self.messages(onDate: self.dataDates[section!]).firstIndex(where: { $0["message_id"]  as? String ?? "" == self.dataMessages[idx!]["message_id"]  as? String ?? ""})
-                if row == nil {
-                    return
-                }
-                let indexPath = IndexPath(row: row!, section: section!)
-                self.tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    if let cell = self.tableChatView.cellForRow(at: indexPath) {
-                        let containerMessage = cell.contentView.subviews[1]
-                        let idMe = User.getMyPin() as String?
-                        if (self.dataMessages[idx!]["f_pin"] as? String == idMe) {
-                            containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .blueBubbleColor
-                                }
-                            }
-                        } else {
-                            containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .whiteBubbleColor
-                                }
-                            }
-                        }
-                    }
-                }
+                // The tap on a quote, or on a pinned message: go to what it names and say so.
+                self.jumpToQuotedMessage(messageId: sender.message_id)
             }
         }
     }
@@ -12986,6 +14189,9 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             dataMessages = self.messages(onDate: dataDates[indexPath.section])
         }
         if reffId.isEmpty {
+            // Not the draft-restore path below, which runs while the chat is still opening and
+            // has no business cancelling the placement it is opening with.
+            self.endOpeningPlacement()
             self.deleteReplyView()
             if dataMessagesImage.count != 0 {
                 dataMessages = [dataMessagesImage]
@@ -13006,16 +14212,14 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
             return
         }
         let replyBarHeight = 50 + (self.offset() * 3)
+        let wasShowing = self.listAnchor
         UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
             self.constraintTopTextField.constant = self.constraintTopTextField.constant + replyBarHeight
-            if self.contraintBottomMention.constant > 0 {
-                self.contraintBottomMention.constant = self.contraintBottomMention.constant + self.heightTextFieldSend.constant
-            }
             // Laid out first so the list already has its new height, then held in place - both
             // inside the same animation, so the content and the bar move together rather than
             // the list snapping first.
             self.view.layoutIfNeeded()
-            self.keepScrollPosition(whenInputGrewBy: replyBarHeight)
+            self.restore(wasShowing)
         }, completion: nil)
         
         self.viewTextfield.addSubview(self.containerPreviewReply)
@@ -13079,41 +14283,27 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         let video_chat = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
         let file_chat = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
         let audio_chat = dataMessages[indexPath.row]["audio_id"]  as? String ?? ""
-        if (attachment_flag == "0" && thumb_chat == "") {
+        let gif_chat = dataMessages[indexPath.row]["gif_id"]  as? String ?? ""
+        // Fix: this chain began with "no flag and no thumbnail, so it is plain text", and that test
+        // is looser than it reads - an attachment whose flag is 0 or blank was answered with its own
+        // message text, which for a document is a filename and a caption joined by a bar, or nothing
+        // at all. A reply to a document therefore drew a quote with nothing in it. What a message
+        // carries is decided from its slots now, in one place shared by all six quotes - see
+        // Utils.quotedAttachmentLine - and nil comes back only for a message that really is text,
+        // which is rendered here because each of the six draws mentions its own way.
+        if let carried = Utils.quotedAttachmentLine(attachmentFlag: attachment_flag,
+                                                    thumb: thumb_chat,
+                                                    image: image_chat,
+                                                    video: video_chat,
+                                                    file: file_chat,
+                                                    audio: audio_chat,
+                                                    gif: gif_chat,
+                                                    messageText: message_text,
+                                                    font: contentReply.font,
+                                                    colour: quotedTextColour) {
+            contentReply.attributedText = carried
+        } else {
             contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
-        } else if (attachment_flag == "1" || image_chat != "") {
-            if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
-                contentReply.text = "📷 Photo".localized()
-            } else {
-                contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
-            }
-        } else if (attachment_flag == "2" || video_chat != "") {
-            if (message_text.trimmingCharacters(in: .whitespacesAndNewlines) == "") {
-                // A round video note is quoted as one, with its length; an ordinary video
-                // is quoted the way it always was.
-                if let noteLine = VideoNote.quotedLine(videoId: video_chat,
-                                                       font: contentReply.font,
-                                                       colour: contentReply.textColor ?? .gray) {
-                    contentReply.attributedText = noteLine
-                } else {
-                    contentReply.text = "📹 Video".localized()
-                }
-            } else {
-                contentReply.attributedText = message_text.richText(group_id: self.dataGroup["group_id"]  as? String ?? "")
-            }
-        } else if (attachment_flag == "6" || file_chat != ""){
-            contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
-        } else if (attachment_flag == "11") {
-            contentReply.text = "❤️ Sticker"
-        } else if attachment_flag == "27" {
-            contentReply.text = "📄 " + "Live Streaming".localized()
-        } else if attachment_flag == "26" {
-            contentReply.text = "📄 " + "Seminar".localized()
-        } else if !audio_chat.isEmpty {
-            contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
-                                                                 audioName: audio_chat,
-                                                                 font: contentReply.font,
-                                                                 colour: quotedTextColour)
         }
         // Same treatment as the quote inside a bubble - 60% of the text colour, which is what
         // WhatsApp uses (--quoted-message-text). Fix: this was a flat .gray, so in dark mode it
@@ -13130,46 +14320,42 @@ extension EditorGroup: UITableViewDelegate, UITableViewDataSource, AVAudioPlayer
         buttonCancelReply.backgroundColor = .clear
         buttonCancelReply.tintColor = .mainColor
         
-        if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
-            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-            if let dirPath = paths.first {
-                let thumbURL = URL(fileURLWithPath: dirPath).appendingPathComponent(thumb_chat)
-                let image : UIImage? =  {
-                    if let img = Nexilis.imageCache.object(forKey: thumb_chat as NSString) {
-                        return img
-                    }
-                    else if let img = UIImage(contentsOfFile: thumbURL.path)?.resize(target: CGSize(width: 500, height: 500)) {
-                        Nexilis.imageCache.setObject(img, forKey: thumb_chat as NSString)
-                        return img
-                    }
-                    return nil
-                }()
-                //                let image = UIGraphicsRenderer.renderImageAt(url: thumbURL as NSURL, size: CGSize(width: 250, height: 250))
-                let imageThumb = UIImageView(image: image)
-                self.containerPreviewReply.addSubview(imageThumb)
-                // A video note is round wherever it is shown, a quote included; the square corner
-                // is what every other kind of attachment keeps.
-                imageThumb.layer.cornerRadius = VideoNote.isNote(video_chat) ? 15.0 : 2.0
-                imageThumb.clipsToBounds = true
-                imageThumb.translatesAutoresizingMaskIntoConstraints = false
-                imageThumb.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10).isActive = true
-                imageThumb.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor).isActive = true
-                imageThumb.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                imageThumb.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                
-                if (attachment_flag == "2") {
-                    let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
-                    imageThumb.addSubview(imagePlay)
-                    imagePlay.clipsToBounds = true
-                    imagePlay.translatesAutoresizingMaskIntoConstraints = false
-                    imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
-                    imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
-                    imagePlay.widthAnchor.constraint(equalToConstant: 10).isActive = true
-                    imagePlay.heightAnchor.constraint(equalToConstant: 10).isActive = true
-                    imagePlay.tintColor = .white
-                }
+        // Fix: this had its own copy of "find the picture" and it was the weakest of the four -
+        // the memory cache and the plain file on disk, and nothing else. A picture held only in
+        // secure storage was not found, one that had not been downloaded yet was never asked for,
+        // and one that arrived a moment later never appeared, because nothing was watching. The
+        // bar showed an empty square for all three. It uses the one loader now, the same as the
+        // quote inside a bubble - see VideoNote.loadQuotedStill.
+        if attachment_flag == "1" || attachment_flag == "2" || !image_chat.isEmpty || !video_chat.isEmpty {
+            let imageThumb = UIImageView()
+            VideoNote.loadQuotedStill(named: thumb_chat.isEmpty ? image_chat : thumb_chat, into: imageThumb)
+            self.containerPreviewReply.addSubview(imageThumb)
+            // A video note is round wherever it is shown, a quote included; the square corner is
+            // what every other kind of attachment keeps.
+            imageThumb.layer.cornerRadius = VideoNote.isNote(video_chat) ? 15.0 : 4.0
+            imageThumb.clipsToBounds = true
+            imageThumb.contentMode = .scaleAspectFill
+            imageThumb.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                imageThumb.trailingAnchor.constraint(equalTo: buttonCancelReply.leadingAnchor, constant: -10),
+                imageThumb.centerYAnchor.constraint(equalTo: self.containerPreviewReply.centerYAnchor),
+                imageThumb.widthAnchor.constraint(equalToConstant: 30),
+                imageThumb.heightAnchor.constraint(equalToConstant: 30)
+            ])
+
+            // A gif travels in the video slot too, and a play badge on an animated picture is a
+            // promise it does not keep.
+            if (attachment_flag == "2" || !video_chat.isEmpty), gif_chat.isEmpty {
+                let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
+                imageThumb.addSubview(imagePlay)
+                imagePlay.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor),
+                    imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor),
+                    imagePlay.widthAnchor.constraint(equalToConstant: 14),
+                    imagePlay.heightAnchor.constraint(equalToConstant: 14)
+                ])
+                imagePlay.tintColor = .white
             }
         }
         if (attachment_flag == "11") {
@@ -14553,7 +15739,22 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
             feedback?.prepare()
             // The row is being pulled sideways now; letting the list scroll underneath at the
             // same time is what makes this feel loose rather than deliberate.
-            tableView.isScrollEnabled = false
+            //
+            // Fix: this used to be isScrollEnabled = false. That reads as "hold the list still",
+            // and it does far more than that. A scroll view only takes the safe area into its
+            // adjusted inset on the axes it can actually scroll on - the default behaviour - so
+            // switching scrolling off drops the inset the content is laid out against, and the
+            // whole conversation shifts by it on the spot. Switching it back on shifts it back.
+            // That is the jumping around a bubble pull: a hundred-odd points, instantly, in and
+            // out again, and nothing in the name of the property to suggest it. Taking the
+            // table's own pan away holds the list just as still and touches nothing else.
+            tableView.panGestureRecognizer.isEnabled = false
+            // A pan that is taken away mid-coast leaves the coast running, which the old way
+            // stopped as a side effect. Asked for the offset it already has, a scroll view stops
+            // where it is without moving.
+            if tableView.isDecelerating {
+                tableView.setContentOffset(tableView.contentOffset, animated: false)
+            }
             addIcon(to: cell, direction: direction)
 
         case .changed:
@@ -14711,7 +15912,7 @@ public final class ChatBubbleSwipe: NSObject, UIGestureRecognizerDelegate {
     }
 
     private func finish() {
-        tableView?.isScrollEnabled = true
+        tableView?.panGestureRecognizer.isEnabled = true
         feedback = nil
         let cell = activeCell
         let icon = iconView

@@ -483,74 +483,38 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
             addSubviewMultipleSelect()
             tableView.reloadRows(at: [indexPath], with: .none)
         } else {
-            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-            if let dirPath = paths.first {
-                let imageId = listGroupingImages[indexPath.row].imageId
-                let imageURL = URL(fileURLWithPath: dirPath).appendingPathComponent(imageId)
-                if !FileManager.default.fileExists(atPath: imageURL.path) && !FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
-                    Download().startHTTP(forKey: listGroupingImages[indexPath.row].imageId) { (name, progress) in
-                        guard progress == 100 else {
-                            return
-                        }
-                        DispatchQueue.main.async { [self] in
-                            tableView.reloadRows(at: [indexPath], with: .none)
-                            updateEditor!(listGroupingImages, [:], false)
-                        }
+            // Fix: this built a viewer of its own here - a second viewer, with no All Media, no Go
+            // to Message, no star, forward or delete, and its own way of closing - and it only ever
+            // appeared for a picture held in the secure store. A picture sitting plainly on disk
+            // selected the row and nothing happened at all. The tap on the picture itself was moved
+            // onto the conversation's viewer a while ago and this was left behind, so a touch that
+            // landed beside the picture rather than on it, or a swipe that ended as a tap, opened
+            // the wrong screen. One viewer, whichever part of the row is touched.
+            let imageId = listGroupingImages[indexPath.row].imageId
+            let onDisk = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(imageId)
+            let isHere = FileManager.default.fileExists(atPath: onDisk.path)
+                || FileEncryption.shared.isSecureExists(filename: imageId)
+            guard isHere else {
+                // Not fetched yet, so the touch is a request for it rather than to look at it.
+                Download().startHTTP(forKey: imageId) { (name, progress) in
+                    guard progress == 100 else {
+                        return
                     }
-                } else if FileEncryption.shared.isSecureExists(filename: imageURL.lastPathComponent) {
-                    do {
-                        if var data = try FileEncryption.shared.readSecure(filename: imageURL.lastPathComponent) {
-                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: data)
-                            if dataDecrypt != nil {
-                                data = dataDecrypt!
-                            }
-                            let image = UIImage(data: data ?? Data())
-                            let imageViewer = MediaViewerViewController()
-                            imageViewer.media = .image(image ?? UIImage())
-                            
-                            let navigationController = UINavigationController(rootViewController: imageViewer)
-                            navigationController.defaultStyle()
-                            navigationController.view.backgroundColor = .clear
-                            navigationController.modalPresentationCapturesStatusBarAppearance = true
-                            navigationController.modalPresentationStyle = .overFullScreen
-                            
-                            let backAction = UIAction { _ in
-                                navigationController.dismiss(animated: true)
-                            }
-                            let backButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "chevron.backward"), primaryAction: backAction, menu: nil)
-                            imageViewer.navigationItem.leftBarButtonItem = backButton
-//                            if Nexilis.checkingAccess(key: "secure_folder_share") || sender.specFile.contains("download") || sender.specFile.contains("share") {
-//                                let shareAction = UIAction { _ in
-//                                    var activityViewController = UIActivityViewController(activityItems: [image ?? UIImage()], applicationActivities: nil)
-//                                    if type == 1 {
-//                                        activityViewController = UIActivityViewController(activityItems: [url ?? URL(string: "")!], applicationActivities: nil)
-//                                    }
-//                                    activityViewController.popoverPresentationController?.sourceView = imageViewer.view
-//                                    imageViewer.present(activityViewController, animated: true, completion: nil)
-//                                }
-//                                let shareButton = UIBarButtonItem(title: nil, image: UIImage(systemName: "square.and.arrow.up"), primaryAction: shareAction, menu: nil)
-//                                imageViewer.navigationItem.rightBarButtonItem = shareButton
-//                            }
-//                            
-//                            let name = (dataGroup["f_name"] as? String ?? "") + " (\(dataTopic["title"] as? String ?? ""))"
-//                            imageViewer.title = name
-                            
-                            let transitionDelegate = ZoomTransitioningDelegate()
-//                            transitionDelegate.originImageView = sender.imageView
-                            navigationController.transitioningDelegate = transitionDelegate
-//                            self.transitioningDelegateRef = transitionDelegate
-                            
-                            present(navigationController, animated: true) {
-                                imageViewer.animateBackgroundIn()
-                            }
-                        }
-                    } catch{
-                        
+                    DispatchQueue.main.async { [self] in
+                        tableView.reloadRows(at: [indexPath], with: .none)
+                        updateEditor!(listGroupingImages, [:], false)
                     }
                 }
+                return
             }
+            // Shown over this screen, growing out of the picture in the row that was touched, the
+            // same as tapping the picture directly.
+            guard let picture = tableView.cellForRow(at: indexPath)?.contentView.subviews
+                .compactMap({ $0 as? UIImageView }).first else {
+                return
+            }
+            openSingle?(listGroupingImages[indexPath.row].messageId, self, picture)
         }
     }
     
@@ -2255,5 +2219,93 @@ final class MediaGridTransitionDelegate: NSObject, UINavigationControllerDelegat
         // here took the edge swipe away - and the reference keeps it: the browser slides off to
         // the right under the finger with the picture waiting behind it. Only the way in zooms.
         return nil
+    }
+}
+
+/// Raises a screen up from the bottom edge.
+///
+/// A push normally comes in from the side, which reads as one more step along the same thread.
+/// Arriving at a collage from a quote is not that: the reader asked to be shown one picture, and
+/// the reference answers by lifting the page that picture is on over the conversation. The
+/// navigation stack is kept - back still works, the bar is still the bar - so only the way in
+/// changes.
+///
+/// Only the way in. Leaving is UIKit's own pop, and deliberately so: see RisingPushTransition.
+final class RisingPushAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+
+    func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
+        return 0.35
+    }
+
+    func animateTransition(using transitionContext: UIViewControllerContextTransitioning) {
+        guard let toVC = transitionContext.viewController(forKey: .to),
+              let fromVC = transitionContext.viewController(forKey: .from) else {
+            transitionContext.completeTransition(false)
+            return
+        }
+        let container = transitionContext.containerView
+        let full = container.bounds
+        container.addSubview(toVC.view)
+        toVC.view.frame = full.offsetBy(dx: 0, dy: full.height)
+        // Only the arriving screen moves. Shifting the one underneath would leave it displaced if
+        // the transition were cancelled part way, and it has nothing to say here anyway - it is
+        // simply what the page is being raised over.
+        UIView.animate(withDuration: transitionDuration(using: transitionContext),
+                       delay: 0, options: [.curveEaseOut], animations: {
+            toVC.view.frame = full
+            fromVC.view.alpha = 0.4
+        }, completion: { _ in
+            fromVC.view.alpha = 1
+            transitionContext.completeTransition(!transitionContext.transitionWasCancelled)
+        })
+    }
+}
+
+/// Lends the rising animation to one push, and hands the stack straight back.
+///
+/// Fix: this used to keep the stack and animate the pop as well, lowering the page the way it rose.
+/// That took the edge swipe away. A navigation controller only offers its own interactive pop while
+/// nobody has claimed the pop animation, and a custom animator with no interaction controller to
+/// drive it turns the swipe into an animation and a gesture running at once: two copies of the
+/// screen lying over each other, going nowhere, leaving a stray picture and a stray back button
+/// behind in the stack. Driving it properly means a gesture and a percent-driven transition of our
+/// own, to reproduce a reveal UIKit already does better. So the stack is handed back the moment the
+/// page is up, and from then on the screen behaves like any other pushed screen: swipe from the
+/// edge to go back.
+///
+/// A navigation controller holds its delegate weakly and only has room for one, so whoever had it
+/// is kept and put back.
+final class RisingPushTransition: NSObject, UINavigationControllerDelegate {
+
+    private weak var rising: UIViewController?
+    private weak var previous: UINavigationControllerDelegate?
+    /// Told when the stack has been handed back, so whoever is holding this can let it go.
+    var onFinished: (() -> Void)?
+
+    init(rising: UIViewController, previous: UINavigationControllerDelegate?) {
+        self.rising = rising
+        self.previous = previous
+    }
+
+    func navigationController(_ navigationController: UINavigationController,
+                              animationControllerFor operation: UINavigationController.Operation,
+                              from fromVC: UIViewController,
+                              to toVC: UIViewController) -> UIViewControllerAnimatedTransitioning? {
+        if operation == .push, toVC === rising {
+            return RisingPushAnimator()
+        }
+        return previous?.navigationController?(navigationController,
+                                               animationControllerFor: operation,
+                                               from: fromVC,
+                                               to: toVC)
+    }
+
+    func navigationController(_ navigationController: UINavigationController,
+                              didShow viewController: UIViewController,
+                              animated: Bool) {
+        previous?.navigationController?(navigationController, didShow: viewController, animated: animated)
+        navigationController.delegate = previous
+        onFinished?()
+        onFinished = nil
     }
 }

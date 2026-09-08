@@ -11,6 +11,7 @@ import AVFoundation
 import SDWebImage
 import QuickLook
 import WebKit
+import NexilisZTA
 
 protocol PreviewAttachmentImageVideoDelegate : NSObjectProtocol {
     func sendChatFromPreviewImage(message_text: String, attachment_flag: String, image_id: String, video_id: String, thumb_id: String, gif_id: String, file_id: String, viewController: UIViewController, specFile: String)
@@ -374,6 +375,11 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
     }
     
     func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        // The caption travels as the message's text, so it answers to the same limit.
+        if !MessageLimits.textFits(current: textView.text ?? "", range: range, replacement: text) {
+            APIS.showMessageTooLong()
+            return false
+        }
         if text.isEmpty {
             if let vc = delegate as? EditorGroup {
                 if listMentionInTextField.count > 0 {
@@ -899,6 +905,9 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                          destination: compressedURL,
                          timeRange: span,
                          muted: !att.carriesAudio,
+                         // Compressed to what the server allows a video to be, rather than to a
+                         // guess - see MessageLimits.videoBytes.
+                         maxBytes: MessageLimits.videoBytes,
                          progress: { fraction in
             Nexilis.loadingAlert.message = "\("Compressing".localized()) \(Int(fraction * 100))%"
         }, completion: { [weak self] ok in
@@ -907,7 +916,20 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             }
             self.activeTranscoder = nil
             let usable = ok && FileManager.default.fileExists(atPath: compressedURL.path)
-            self.writeVideoAttachment(att, sourceURL: usable ? compressedURL : videoURL, completion: completion)
+            // Still over the line after being compressed as far as it is worth compressing: a
+            // clip long enough for that cannot be sent at all, so it is said so rather than
+            // handed to a server that will refuse it.
+            let sending = usable ? compressedURL : videoURL
+            let limit = MessageLimits.videoBytes
+            if limit > 0,
+               let size = (try? sending.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+               size > limit {
+                try? FileManager.default.removeItem(at: compressedURL)
+                APIS.showVideoTooLarge()
+                completion()
+                return
+            }
+            self.writeVideoAttachment(att, sourceURL: sending, completion: completion)
         })
     }
 
@@ -1016,19 +1038,10 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         }
     }
 
-    func compressImageLikeWhatsApp(_ image: UIImage, maxFileSizeMB: Double = 1.0, maxDimension: CGFloat = 1280) -> Data? {
-        let resizedImage = resizeImage(image: image, maxDimension: maxDimension)
-        var compressedData = resizedImage.jpegData(compressionQuality: 0.7) ?? Data()
-        var imageSizeMB = Double(compressedData.count) / (1024.0 * 1024.0)
-        
-        while imageSizeMB > maxFileSizeMB {
-            guard let tempImage = UIImage(data: compressedData) else { break }
-            compressedData = tempImage.jpegData(compressionQuality: 0.5) ?? compressedData
-            imageSizeMB = Double(compressedData.count) / (1024.0 * 1024.0)
-//            print("Compressed to: \(imageSizeMB) MB")
-        }
-        
-        return compressedData
+    /// Kept as the name the rest of this screen calls, and now one line over the app's own
+    /// compressor - see MessageLimits.compressedImageData.
+    func compressImageLikeWhatsApp(_ image: UIImage, maxBytes: Int? = nil, maxDimension: CGFloat = 1280) -> Data? {
+        return MessageLimits.compressedImageData(image, maxBytes: maxBytes, maxDimension: maxDimension)
     }
 
     func resizeImage(image: UIImage, maxDimension: CGFloat) -> UIImage {
@@ -1955,7 +1968,11 @@ class PreviewCell: UICollectionViewCell, UIScrollViewDelegate {
             zoomScrollView.isScrollEnabled = false
             zoomScrollView.isUserInteractionEnabled = false
 
-            let webView = WKWebView(frame: contentView.bounds)
+            // A received document, rendered from disk. There is no bridge here and no reason for
+            // the file to run anything, so this is the one WebView in the app that gets the full
+            // hardened configuration: JavaScript off, nothing kept between previews.
+            let webView = WKWebView(frame: contentView.bounds,
+                                    configuration: SecureWebViewFactory.hardenedConfig())
             webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
             // penting: aktifkan scroll

@@ -17,7 +17,144 @@ import Toast_Swift
 import nuSDKService
 import AVFoundation
 import AVKit
+import WebKit
 import Intents
+import NexilisZTA
+
+/// Authoritative bridge between the host SDK and Nexilis Sentinel/ZTA.
+/// Protected networking must not proceed unless this gate has a current,
+/// server-issued ZTA authorization and the runtime posture remains clean.
+public enum SentinelSecurityGate {
+    private static let lock = NSLock()
+    private static var configuration: NexilisZTAConfiguration?
+    private static var hardWipeObserver: NSObjectProtocol?
+
+    /// Must be called before APIS.connect/Nexilis.connect in hardened builds.
+    public static func configure(_ value: NexilisZTAConfiguration) {
+        // Both stores, from one declaration. Setting only the policy left `Utils.selectedAppMode`
+        // on its static default of 3, and `Nexilis.connect` writes that into `pb_app_mode` and
+        // then re-derives the policy from it - so a host that declared its mode only through the
+        // configuration was silently downgraded to Regular the moment it connected. The Android
+        // SDK avoids the same trap by having one setter write both places (dm/API.setAppMode
+        // writes DM_SharedObj and bridges to ui/API.setAppMode).
+        //
+        // It has to be in place before anything below reads it, too: the checks in `authorize`
+        // run before APISZTA gets a configuration of its own.
+        NXSecurityPolicy.mode = value.appMode
+        Utils.selectedAppMode = value.appMode.rawValue
+        lock.lock()
+        configuration = value
+        if hardWipeObserver == nil {
+            hardWipeObserver = NotificationCenter.default.addObserver(
+                forName: .ztaHardWipeRequested, object: nil, queue: .main
+            ) { _ in
+                // Hard wipe includes process caches and browser/session state, not only files.
+                Database.shared.database = nil
+                FileEncryption.shared.hardWipeAllDocuments()
+                SecureUserDefaults.shared.clearAllStoredValues()
+                MasterKeyUtil.shared.deleteAllKeyMaterial()
+                HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+                URLCache.shared.removeAllCachedResponses()
+                let types = WKWebsiteDataStore.allWebsiteDataTypes()
+                WKWebsiteDataStore.default().removeData(ofTypes: types,
+                                                        modifiedSince: Date(timeIntervalSince1970: 0)) { }
+            }
+        }
+        lock.unlock()
+    }
+
+    /// Whether protected work may proceed.
+    ///
+    /// At `.hsa` and `.middle` this is the real thing: a clean runtime and a live server-issued
+    /// ZTA token, checked on every send, upload and download.
+    ///
+    /// At `.regular` it is always true. A host at that mode runs offline and runs with
+    /// attestation switched off by the service, and neither of those states has a token to
+    /// show - holding its chats and uploads behind one would just stop the app. What still
+    /// protects it is the local half: database and preference encryption, first-party pinning,
+    /// and a pin mismatch nobody can click through.
+    public static var isAuthorized: Bool {
+        guard NXSecurityPolicy.requiresServerChain() else { return true }
+        return APISZTA.hasValidAuthorization
+    }
+
+    public static var authorizationHeaders: [String: String] {
+        APISZTA.authorizationHeaders()
+    }
+
+    static func authorize(onFailure: @escaping (String) -> Void,
+                          onReady: @escaping () -> Void) {
+        lock.lock()
+        let cfg = configuration
+        lock.unlock()
+
+        guard let cfg else {
+            onFailure("Sentinel is not configured. Call APIS.configureSentinel(_:) before connect().")
+            return
+        }
+
+        // A host that drives the chain itself - APISZTA.configure in its own app delegate, which
+        // is what OneApp does - has already passed by the time it calls connect() from inside the
+        // ready closure. Running the chain a second time there would clear the registration it
+        // just verified with and start a second one against it.
+        // `isAuthorized` is not the question here - at .regular that is true before anything
+        // has run. What matters is whether the chain itself has already passed.
+        if APISZTA.hasValidAuthorization {
+            onReady()
+            return
+        }
+
+        // Everything below is a precondition at .hsa and .middle. At .regular the same values
+        // are optional by design - that is what the mode is for - and the chain in APISZTA
+        // decides what it can still do with what it was given.
+        if NXSecurityPolicy.requiresServerChain() {
+            guard !cfg.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                onFailure("Sentinel ZTA API key is missing.")
+                return
+            }
+            guard !cfg.primaryPin.isEmpty,
+                  !cfg.backupPin.isEmpty,
+                  cfg.primaryPin != cfg.backupPin else {
+                onFailure("Sentinel requires distinct primary and backup SPKI pins.")
+                return
+            }
+            guard cfg.appAttestEnabled else {
+                #if DEBUG && NEXILIS_ALLOW_ATTESTATION_BYPASS
+                // Explicit development-only escape hatch.
+                #else
+                onFailure("App Attest cannot be disabled at app mode 1 or 2.")
+                return
+                #endif
+            }
+        }
+
+        APISZTA.configure(cfg,
+                          showsErrorScreen: true,
+                          onFailure: { error in onFailure(error.localizedDescription) },
+                          onReady: onReady)
+    }
+
+    /// Stamps the request with the current Sentinel headers. False means the caller must not
+    /// send it at all - which only happens at `.hsa` and `.middle`, where a missing token is a
+    /// refusal. At `.regular` the headers are attached when there are any and the request goes
+    /// out either way.
+    static func attachAuthorization(to request: inout URLRequest) -> Bool {
+        guard isAuthorized else { return false }
+        for (name, value) in authorizationHeaders {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        return true
+    }
+
+    /// Ends this process' authorization. A no-op at `.regular`: there the legacy SecurityShield
+    /// policy the service configures decides what a detection does, and a "continue" action must
+    /// not be overruled from here.
+    static func revoke(reason: String) {
+        guard NXSecurityPolicy.revokesOnRuntimeThreat() else { return }
+        APISZTA.revokeLocalAuthorization(reason: reason)
+    }
+}
+
 
 /// The app's chat list screen, as far as this framework is concerned.
 ///
@@ -34,10 +171,18 @@ public protocol ChatListTab: UIViewController {
 public class APIS: NSObject {
     private static var isAlertPresented = false
     private static var transitioningDelegateRef: ZoomTransitioningDelegate?
+    /// Configure Sentinel/ZTA before opening the UCPaaS session.
+    public static func configureSentinel(_ configuration: NexilisZTAConfiguration) {
+        SentinelSecurityGate.configure(configuration)
+    }
+
     public static func connect(appName: String, apiKey: String, userName: String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
-        Nexilis.connect(apiKey: apiKey, userId: userName, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
-//        APIS.monitoredActivity()
+        SentinelSecurityGate.authorize(onFailure: { message in
+            DispatchQueue.main.async { delegate.onFailed(error: message) }
+        }, onReady: {
+            Nexilis.connect(apiKey: apiKey, userId: userName, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
+        })
     }
     
     // MARK: - App icon badge
@@ -293,26 +438,7 @@ public class APIS: NSObject {
     /// presented onto nothing. The app's own window is picked out explicitly, and the screen on
     /// top of it walked down from its root.
     private static func callAlertPresenter() -> UIViewController? {
-        let appWindow = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
-            .first(where: { !($0 is MiniVideoCallWindow) && !($0 is MiniCallBannerWindow)
-                            && !$0.isHidden && $0.rootViewController != nil })
-        guard var top = appWindow?.rootViewController else {
-            return UIApplication.shared.visibleViewController
-        }
-        for _ in 0..<20 {
-            if let presented = top.presentedViewController {
-                top = presented
-            } else if let tab = top as? UITabBarController, let selected = tab.selectedViewController {
-                top = selected
-            } else if let navigation = top as? UINavigationController, let visible = navigation.visibleViewController {
-                top = visible
-            } else {
-                break
-            }
-        }
-        return top
+        return topmostViewController()
     }
 
     /// Says that the camera and the microphone belong to the call.
@@ -2711,8 +2837,58 @@ public class APIS: NSObject {
     
     /// The screen the user is actually looking at, digging through the tab bar and the
     /// navigation stack rather than stopping at the container that holds them.
+    /// The navigation stack the reader is actually looking at.
+    ///
+    /// Fix: the notification paths asked `visibleViewController as? UINavigationController`,
+    /// which only answers when the window's root is itself a navigation controller. This app's
+    /// root is a tab bar and a chat opens inside the selected tab's own stack, so the answer was
+    /// always nil: the Editor already on screen was never found. That is why a notification for
+    /// the conversation the reader was already in opened a second copy of it on top of the
+    /// first - the check for "already here" could not see the screen it was asking about.
+    /// The screen on top of the app's own window.
+    ///
+    /// Fix: asking UIApplication for its "visible" controller finds the key window, and while a
+    /// call is minimised there is more than one window up - the answer could be the strip's or
+    /// the bubble's own window, whose root shows nothing anybody can see. A notification tapped
+    /// then would find no Editor and open a second copy of the one already on screen.
+    private static func appWindowTopController() -> UIViewController? {
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { !($0 is MiniVideoCallWindow) && !($0 is MiniCallBannerWindow)
+                            && !$0.isHidden && $0.rootViewController != nil })
+        guard var top = window?.rootViewController else {
+            return UIApplication.shared.visibleViewController
+        }
+        for _ in 0..<20 {
+            guard let presented = top.presentedViewController else {
+                break
+            }
+            top = presented
+        }
+        return top
+    }
+
+    private static func topmostNavigationController() -> UINavigationController? {
+        var controller = appWindowTopController()
+        var navigation: UINavigationController?
+        // Containers only ever nest a handful deep; the counter is here so a malformed
+        // hierarchy cannot spin this forever.
+        for _ in 0..<10 {
+            if let nav = controller as? UINavigationController {
+                navigation = nav
+                controller = nav.topViewController
+            } else if let tab = controller as? UITabBarController, let selected = tab.selectedViewController {
+                controller = selected
+            } else {
+                break
+            }
+        }
+        return navigation
+    }
+
     private static func topmostViewController() -> UIViewController? {
-        var controller = UIApplication.shared.visibleViewController
+        var controller = appWindowTopController()
         // Containers only ever nest a handful deep; the counter is here so a malformed
         // hierarchy cannot spin this forever.
         for _ in 0..<10 {
@@ -3008,8 +3184,8 @@ public class APIS: NSObject {
     /// Pushed or presented, it is now taken away by whichever means actually removes it, and the
     /// next one goes up only once it has gone.
     private static func clearShowingEditor(then present: @escaping () -> Void) {
-        let top = UIApplication.shared.visibleViewController
-        if let navigation = top as? UINavigationController {
+        let top = topmostViewController()
+        if let navigation = topmostNavigationController() {
             let stack = navigation.viewControllers
             let showingEditor = stack.last is EditorPersonal || stack.last is EditorGroup
             if showingEditor, stack.count > 1 {
@@ -3040,10 +3216,9 @@ public class APIS: NSObject {
     /// not somewhere to navigate to.
     static func isShowingConversation(_ conversationId: String) -> Bool {
         guard !conversationId.isEmpty else { return false }
-        var top = UIApplication.shared.visibleViewController
-        if let navigation = top as? UINavigationController {
-            top = navigation.viewControllers.last
-        }
+        // Walked properly - through whatever is presented, then the selected tab, then the
+        // stack - rather than hoping the window's root is a navigation controller.
+        let top = topmostViewController()
         if let personal = top as? EditorPersonal {
             return personal.unique_l_pin == conversationId
         }
@@ -3217,6 +3392,9 @@ public class APIS: NSObject {
         pendingReconcileTimer?.invalidate()
         pendingReconcileTimer = nil
         stopNotif = true
+        // Nothing is owed to a screen nobody is looking at, and a banner held back for a burst
+        // that is now over would arrive on the next return to the app looking like news.
+        InAppBanner.shared.endCatchUp()
         if Utils.getSecureFolderOffline() == "0" {
             Database.shared.database = nil
             FileEncryption.shared.aesKey = nil
@@ -3316,10 +3494,18 @@ public class APIS: NSObject {
             }
         })
         DispatchQueue.main.async {
-            stopNotif = true
-            self.notifTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { _ in
-                stopNotif = false
-            }
+            // Fix: coming back to the app used to switch the in-app banners off outright for
+            // thirty seconds. The reasoning was sound - an app that has been minimised a while
+            // comes back to a burst of messages, and a banner each would bury the screen - but
+            // the cure was worse than the illness: for half a minute after every single return
+            // to the app, nothing announced itself at all, backlog or not. The burst is gathered
+            // now instead of being thrown away, and the newest of it is shown the moment it goes
+            // quiet, carrying a count of what came with it. See InAppBanner.beginCatchUp.
+            stopNotif = false
+            notifTimer.invalidate()
+            InAppBanner.shared.beginCatchUp()
+            // Six hours old at most, whatever else happens - see pullInstantMessagingIfStale.
+            Nexilis.pullInstantMessagingIfStale()
             if !Utils.isHSAMode() && !Utils.isMiddleMode(){
                 _ = Nexilis.justInit(isChecking: true)
             }
@@ -3481,6 +3667,236 @@ public class APIS: NSObject {
         }
     }
     
+    /// The last time a limit was announced, so holding a key down does not stack alerts.
+    private static var lastLimitAlertAt: Date?
+    /// The encode a shared video is going through, kept alive for the length of it.
+    private static var shareTranscoder: VideoTranscoder?
+
+    /// Says that the message is as long as the server allows it to be.
+    static func showMessageTooLong() {
+        showLimitAlert(title: "⚠️ Message Too Long".localized(),
+                       message: "A message can be at most %@ characters long.".localized()
+                        .replacingOccurrences(of: "%@", with: "\(MessageLimits.textCharacters)"))
+    }
+
+    /// Says that a document is bigger than the server allows.
+    static func showDocumentTooLarge() {
+        showLimitAlert(title: "⚠️ File Too Large".localized(),
+                       message: "You can't attach a document larger than %@.".localized()
+                        .replacingOccurrences(of: "%@", with: MessageLimits.readable(bytes: MessageLimits.documentBytes)))
+    }
+
+
+    // MARK: - Asking for the camera and the microphone
+
+    /// What a feature needs before it can run.
+    public enum CaptureNeed {
+        case microphone
+        case camera
+        case cameraAndMicrophone
+
+        var needsCamera: Bool {
+            return self != .microphone
+        }
+
+        var needsMicrophone: Bool {
+            return self != .camera
+        }
+    }
+
+    /// Asks for whatever a feature needs, and runs it the moment it is allowed.
+    ///
+    /// Fix: every button that needed the camera or the microphone asked for it in its own way, and
+    /// no two agreed. Some blocked the calling thread on a DispatchGroup shared with the
+    /// connection code - which another part of the app calls `leave()` on, so the wait could be
+    /// released by something entirely unrelated - and then read a variable the callback had
+    /// written from whichever queue it happened to arrive on. Some, like the camera in the
+    /// attachment sheet, never asked at all and simply put a camera on screen for iOS to refuse,
+    /// which is the black screen with nothing said. And a permission already refused was reported
+    /// with a message and no way to act on it.
+    ///
+    /// Nothing waits here. The feature is handed in and run on the far side of the answer, so
+    /// being asked for permission and getting the feature are one tap rather than two; a refusal
+    /// offers the one place that can undo it; and a microphone another app is holding says so
+    /// rather than blaming permission.
+    public static func withCapture(_ need: CaptureNeed, then run: @escaping () -> Void) {
+        // Our own call comes first: it owns the microphone and the camera, and it puts up its own
+        // alert saying so.
+        if blockedByCallInProgress() {
+            return
+        }
+        let askMicrophoneThenRun: () -> Void = {
+            guard need.needsMicrophone else {
+                DispatchQueue.main.async { run() }
+                return
+            }
+            VoiceNoteBar.askMicrophone { granted in
+                // The answer comes back on a queue of iOS's own; the feature belongs on the main
+                // thread. See VoiceNoteBar.askMicrophone for why it is not hopped there instead.
+                DispatchQueue.main.async {
+                    guard granted else {
+                        showMicrophoneRefused()
+                        return
+                    }
+                    run()
+                }
+            }
+        }
+        guard need.needsCamera else {
+            askMicrophoneThenRun()
+            return
+        }
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            askMicrophoneThenRun()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    guard granted else {
+                        showCameraRefused()
+                        return
+                    }
+                    askMicrophoneThenRun()
+                }
+            }
+        default:
+            showCameraRefused()
+        }
+    }
+
+    /// Whether an audio session refused to start because another app is holding the microphone.
+    ///
+    /// A call in another app - WhatsApp, the phone itself - takes the microphone exclusively, and
+    /// iOS then refuses to let this app record at all. It is not a permission problem and there is
+    /// nothing in Settings to change: the only answer is to end the other call. These are the
+    /// codes iOS reports it with.
+    public static func isMicrophoneHeldElsewhere(_ error: Error) -> Bool {
+        let code = (error as NSError).code
+        return code == AVAudioSession.ErrorCode.insufficientPriority.rawValue
+            || code == AVAudioSession.ErrorCode.cannotInterruptOthers.rawValue
+            || code == AVAudioSession.ErrorCode.isBusy.rawValue
+    }
+
+    /// Says that another app has the microphone, which is the one case Settings cannot fix.
+    ///
+    /// A busy microphone can be reported twice for one tap - the session says it was interrupted,
+    /// and the start-up says it could not finish - so the second report inside a few seconds is
+    /// dropped rather than stacking a second alert on the first.
+    static func showMicrophoneBusyElsewhere() {
+        DispatchQueue.main.async {
+            if let last = lastLimitAlertAt, Date().timeIntervalSince(last) < 3 {
+                return
+            }
+            lastLimitAlertAt = Date()
+            let alert = LibAlertController(
+                title: "⚠️ Microphone In Use".localized(),
+                message: "Another app is using the microphone. End that call and try again.".localized(),
+                preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: nil))
+            if let navigation = UIApplication.shared.visibleViewController?.navigationController {
+                navigation.present(alert, animated: true, completion: nil)
+            } else {
+                UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
+            }
+        }
+    }
+
+    /// Says which of the two was refused, and offers the one place that can put them back.
+    ///
+    /// Fix: the sixteen buttons that need these had their own copy of this alert, and no two
+    /// agreed - one named the microphone whatever had actually been refused, another named the
+    /// camera, and the wording drifted between them. Worse, several only checked the camera: a
+    /// video call with the camera allowed and the microphone refused went ahead, and nobody could
+    /// be heard on it. One alert, and it names what is actually missing.
+    static func showCaptureRefused(microphone: Bool, camera: Bool) {
+        if microphone && camera {
+            showPermissionRefused(title: "⚠️ Camera or Microphone Off".localized(),
+                                  message: "This needs the camera and the microphone. Turn them on in Settings.".localized())
+        } else if camera {
+            showCameraRefused()
+        } else if microphone {
+            showMicrophoneRefused()
+        }
+    }
+
+    /// Says the camera was refused, and offers the one place that can put it back.
+    static func showCameraRefused() {
+        showPermissionRefused(title: "⚠️ Camera Off".localized(),
+                              message: "This needs the camera. Turn it on in Settings.".localized())
+    }
+
+    /// Says the microphone was refused, and offers the one place that can put it back.
+    ///
+    /// A permission iOS has already been refused is never asked for again - the request returns
+    /// straight away with no prompt - so a message saying "access is needed" and nothing else
+    /// leaves the reader with no way forward. Settings is the way forward.
+    static func showMicrophoneRefused() {
+        showPermissionRefused(title: "⚠️ Microphone Off".localized(),
+                              message: "Recording needs the microphone. Turn it on in Settings.".localized())
+    }
+
+    /// The same, for a recording that needs the camera as well.
+    static func showCameraOrMicrophoneRefused() {
+        showPermissionRefused(title: "⚠️ Camera or Microphone Off".localized(),
+                              message: "A video note needs the camera and the microphone. Turn them on in Settings.".localized())
+    }
+
+    private static func showPermissionRefused(title: String, message: String) {
+        DispatchQueue.main.async {
+            // The same guard as above: two buttons on one screen, or one button reported twice,
+            // must not stack two of these.
+            if let last = lastLimitAlertAt, Date().timeIntervalSince(last) < 3 {
+                return
+            }
+            lastLimitAlertAt = Date()
+            let alert = LibAlertController(title: title, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .cancel, handler: nil))
+            alert.addAction(UIAlertAction(title: "Settings".localized(), style: .default, handler: { _ in
+                guard let url = URL(string: UIApplication.openSettingsURLString) else {
+                    return
+                }
+                UIApplication.shared.open(url)
+            }))
+            if let navigation = UIApplication.shared.visibleViewController?.navigationController {
+                navigation.present(alert, animated: true, completion: nil)
+            } else {
+                UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
+            }
+        }
+    }
+
+    /// Says that an attachment is bigger than the server allows and cannot be made smaller.
+    static func showAttachmentTooLarge(limitBytes: Int) {
+        showLimitAlert(title: "⚠️ File Too Large".localized(),
+                       message: "You can't attach a file larger than %@.".localized()
+                        .replacingOccurrences(of: "%@", with: MessageLimits.readable(bytes: limitBytes)))
+    }
+
+    /// Says that a video is still bigger than the server allows even after being compressed.
+    static func showVideoTooLarge() {
+        showLimitAlert(title: "⚠️ Video Too Large".localized(),
+                       message: "You can't attach a video larger than %@, even compressed. Try a shorter clip.".localized()
+                        .replacingOccurrences(of: "%@", with: MessageLimits.readable(bytes: MessageLimits.videoBytes)))
+    }
+
+    /// One alert at a time, and not more than one every few seconds: these are raised from
+    /// typing and from picking files, both of which can repeat quickly.
+    private static func showLimitAlert(title: String, message: String) {
+        DispatchQueue.main.async {
+            if let last = lastLimitAlertAt, Date().timeIntervalSince(last) < 3 {
+                return
+            }
+            lastLimitAlertAt = Date()
+            let alert = LibAlertController(title: title, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK".localized(), style: .default, handler: nil))
+            if let navigation = UIApplication.shared.visibleViewController?.navigationController {
+                navigation.present(alert, animated: true, completion: nil)
+            } else {
+                UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
+            }
+        }
+    }
+
     static func showMessageGuardFile(mime: String) {
         alertControllerExpired = LibAlertController(
             title: "⚠️ Message Guard Announcement".localized(),
@@ -3744,6 +4160,14 @@ public class APIS: NSObject {
             let idContact = json["idContact"] as? String ?? ""
             let typeContact = json["typeContact"] as? String ?? "0"
             var data = json["data"] as? String ?? ""
+            // Held to the length the server allows. A share cannot be edited on its way through,
+            // so the tail is trimmed rather than the whole thing refused: losing the end of a
+            // long share beats losing all of it, and a message over the limit is refused by the
+            // server anyway.
+            let sharedTextLimit = MessageLimits.textCharacters
+            if sharedTextLimit > 0, data.count > sharedTextLimit {
+                data = String(data.prefix(sharedTextLimit))
+            }
 
             let imageId = json["image"] as? String ?? ""
             let videoId = json["video"] as? String ?? ""
@@ -3813,6 +4237,97 @@ public class APIS: NSObject {
                 // there is never read again, and nothing was clearing it, so every picture ever
                 // shared stayed on the device twice.
                 try? FileManager.default.removeItem(at: from)
+            }
+
+            // MARK: - What a message may carry
+            /// Holds a shared attachment to the limits the server set, and says whether it may go.
+            ///
+            /// This is where the share sheet's attachments are measured, and it has to be here:
+            /// the sheet is its own process and these limits live in this app's own preferences,
+            /// kept encrypted under a key the extension has no access to. So the sheet hands the
+            /// file over as it found it, and the limit is applied on the way in.
+            ///
+            /// A picture and a video are compressed to fit, which is what sending them means. A
+            /// document or an audio file is sent whole - there is nothing to compress - so one
+            /// over the limit is refused and said so. `false` means this attachment is not going;
+            /// the batch carries on with the next.
+            func holdToLimit(url: URL, kind: Int, completion: @escaping (Bool) -> Void) {
+                let size = MessageLimits.fileSize(of: url)
+                switch kind {
+                case 2:
+                    let limit = MessageLimits.imageBytes
+                    guard limit > 0, let size = size, size > limit else {
+                        completion(true)
+                        return
+                    }
+                    guard let picture = UIImage(contentsOfFile: url.path),
+                          let smaller = MessageLimits.compressedImageData(picture, maxBytes: limit),
+                          smaller.count <= limit,
+                          (try? smaller.write(to: url)) != nil else {
+                        APIS.showAttachmentTooLarge(limitBytes: limit)
+                        completion(false)
+                        return
+                    }
+                    completion(true)
+                case 3:
+                    let limit = MessageLimits.videoBytes
+                    guard limit > 0, let size = size, size > limit else {
+                        completion(true)
+                        return
+                    }
+                    DispatchQueue.main.async {
+                        Nexilis.showLoader(text: "Compressing".localized())
+                    }
+                    let temporary = URL(fileURLWithPath: NSTemporaryDirectory() + UUID().uuidString + ".mp4")
+                    // Held on to for the length of the encode. The transcoder's own reading block
+                    // holds itself weakly, so a local would be released the moment this returns
+                    // and the encode would stop without ever reporting back - the loader would
+                    // then stay up for good.
+                    let transcoder = VideoTranscoder()
+                    shareTranscoder = transcoder
+                    transcoder.start(source: url,
+                                     destination: temporary,
+                                     timeRange: nil,
+                                     muted: false,
+                                     maxBytes: limit,
+                                     progress: { _ in }) { ok in
+                        shareTranscoder = nil
+                        let fitted = ok && (MessageLimits.fileSize(of: temporary) ?? Int.max) <= limit
+                        if fitted {
+                            try? FileManager.default.removeItem(at: url)
+                            try? FileManager.default.moveItem(at: temporary, to: url)
+                        } else {
+                            try? FileManager.default.removeItem(at: temporary)
+                        }
+                        DispatchQueue.main.async {
+                            Nexilis.hideLoader {
+                                if !fitted {
+                                    APIS.showVideoTooLarge()
+                                }
+                                completion(fitted)
+                            }
+                        }
+                    }
+                case 7:
+                    // An animated picture is its own frames; re-encoding it is not compressing it.
+                    let limit = MessageLimits.videoBytes
+                    guard limit > 0, let size = size, size > limit else {
+                        completion(true)
+                        return
+                    }
+                    APIS.showAttachmentTooLarge(limitBytes: limit)
+                    completion(false)
+                case 4, 5:
+                    let limit = MessageLimits.documentBytes
+                    guard limit > 0, let size = size, size > limit else {
+                        completion(true)
+                        return
+                    }
+                    APIS.showAttachmentTooLarge(limitBytes: limit)
+                    completion(false)
+                default:
+                    completion(true)
+                }
             }
 
             // MARK: - Message Sender
@@ -3948,6 +4463,10 @@ public class APIS: NSObject {
                 queue = [legacy]
             }
 
+            /// Which attachments have already been measured against the limits, so the pass that
+            /// does the measuring is not repeated when the attachment comes back round.
+            var heldToLimit = Set<Int>()
+
             /// One attachment at a time, each starting the next once it has been scanned, copied
             /// and queued - the scan puts a modal loader up, so they cannot overlap.
             func process(_ index: Int) {
@@ -3965,6 +4484,28 @@ public class APIS: NSObject {
                 let entryAudio = entry["audio"] as? String ?? ""
                 let entryThumb = entry["thumb"] as? String ?? ""
                 let entryGif = entry["gif"] as? String ?? ""
+
+                // Measured against the server's limits before anything else is done with it, and
+                // compressed if that is what it takes - see holdToLimit. The attachment comes
+                // back through here once it has been dealt with.
+                if !heldToLimit.contains(index) {
+                    heldToLimit.insert(index)
+                    let carried: String
+                    switch type {
+                    case 2: carried = entryImage
+                    case 3: carried = entryVideo
+                    case 7: carried = entryGif
+                    case 4: carried = entryFile
+                    case 5: carried = entryAudio
+                    default: carried = ""
+                    }
+                    if !carried.isEmpty {
+                        holdToLimit(url: appURL.appendingPathComponent(carried), kind: type) { withinLimit in
+                            process(withinLimit ? index : index + 1)
+                        }
+                        return
+                    }
+                }
 
                 switch type {
 
@@ -4306,8 +4847,20 @@ public class APIS: NSObject {
         }
     }
     
+    /// The host's application mode: 1 HSA, 2 Middle, 3 Regular (the default).
+    ///
+    /// This is one number with one meaning. It has always chosen the login and 2FA flow -
+    /// SignUpSignIn, SignInOption, MFAViewController, TFAPasswordVC - and it now also chooses the
+    /// Sentinel posture: whether App Attest and a server-issued ZTA token are preconditions,
+    /// whether the master key sits behind a Keychain biometric ACL, and whether a runtime
+    /// finding revokes the session or is only reported. See REMEDIATION_DOCS/SECURITY-LEVELS.md.
+    ///
+    /// Call it before `configureSentinel`/`connect`: the verification chain reads the mode before
+    /// `Nexilis.connect` gets as far as persisting it, so the value is pushed here rather than
+    /// read back out of preferences later.
     public static func setAppMode(mode: Int) {
         Utils.selectedAppMode = mode
+        NXSecurityPolicy.mode = NXAppMode(rawValue: mode) ?? .regular
     }
     
     public static func checkSignMethod() -> (Int, Int) {

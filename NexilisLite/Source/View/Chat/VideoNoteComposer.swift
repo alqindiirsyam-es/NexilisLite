@@ -21,7 +21,12 @@ public final class VideoNoteComposer: UIView {
     /// Recording finished and the reader asked to send it: the file, and how many seconds it runs.
     public var onFinish: ((URL, Int) -> Void)?
     /// Nothing is being sent - thrown away, slid to cancel, or refused for want of permission.
-    public var onCancel: (() -> Void)?
+    ///
+    /// The flag says whether the camera ever got as far as recording anything. Cancelling
+    /// something that was being recorded is the reader's own doing and needs no explanation;
+    /// cancelling something that never started is a failure, and the last safety net for one that
+    /// nothing else caught - the buzz alone is what the reader was left with.
+    public var onCancel: ((_ everStarted: Bool) -> Void)?
 
     /// The reference stops at a minute, and so does this.
     public static let maximumDuration: TimeInterval = 60
@@ -192,6 +197,9 @@ public final class VideoNoteComposer: UIView {
             player?.removeTimeObserver(observer)
         }
         NotificationCenter.default.removeObserver(self)
+        // The block-based observations are held by their tokens, not by self, so removing self
+        // does not remove them.
+        watching.forEach { NotificationCenter.default.removeObserver($0) }
         // The session holds the camera open; leaving it running is a light on the reader's phone
         // for a screen that is no longer there.
         sessionQueue.async { [session] in
@@ -484,20 +492,43 @@ public final class VideoNoteComposer: UIView {
 
     /// Asks for the camera and the microphone, wires the session up and starts recording.
     /// `ready(false)` means it never got going and the caller should take the screen away.
-    public func begin(ready: @escaping (Bool) -> Void) {
+    /// Why a recording could not be started.
+    ///
+    /// Fix: this answered with a plain true or false, and the screen above reported every false as
+    /// "Camera and microphone access is needed to record". Three quite different things produce a
+    /// false - permission refused, the screen closed before the camera was ready, and the capture
+    /// session refusing to be built at all - and the last of those has nothing to do with
+    /// permission. With no console on a device, one message for all three is one message that
+    /// cannot be acted on.
+    public enum StartFailure {
+        /// The camera or the microphone was refused. The only one Settings can fix.
+        case denied
+        /// Closed again before the camera was ready. Nothing to report.
+        case cancelled
+        /// Permission was given and the camera still could not be set up.
+        case cameraUnavailable
+        /// Another app is holding the microphone - a call in WhatsApp, or the phone itself. A
+        /// video note carries sound, so it cannot be recorded until that call ends, and there is
+        /// nothing in Settings to change.
+        case heldByAnotherApp
+    }
+
+    public func begin(ready: @escaping (StartFailure?) -> Void) {
         authorise { [weak self] granted in
             guard let self = self else { return }
             guard granted else {
-                ready(false)
+                ready(.denied)
                 return
             }
             guard !self.isFinished else {
-                ready(false)
+                ready(.cancelled)
                 return
             }
             self.sessionQueue.async {
                 guard self.configureSession() else {
-                    DispatchQueue.main.async { ready(false) }
+                    DispatchQueue.main.async {
+                        ready(self.microphoneHeldElsewhere ? .heldByAnotherApp : .cameraUnavailable)
+                    }
                     return
                 }
                 self.session.startRunning()
@@ -506,12 +537,36 @@ public final class VideoNoteComposer: UIView {
                         self.stopSession()
                         return
                     }
+                    // Fix: the session can be interrupted between startRunning() and this line -
+                    // which is exactly what happens when another app holds the microphone - and
+                    // this reported a clean start anyway. The reader then lifted their finger, the
+                    // note was cancelled for being too short, and all they got was the cancel
+                    // buzz with nothing said. Asked again here, at the last moment before saying
+                    // it worked.
+                    guard !self.microphoneHeldElsewhere else {
+                        self.stopSession()
+                        ready(.heldByAnotherApp)
+                        return
+                    }
                     self.attachPreview()
-                    ready(true)
+                    // Nothing to report: it started.
+                    ready(nil)
                     // Recording begins on the first frame out of the lens, not on a timer. The
                     // backstop below only covers a camera that never answers at all.
                     DispatchQueue.main.asyncAfter(deadline: .now() + VideoNoteComposer.warmUpLimit) { [weak self] in
-                        self?.beginCapturing()
+                        guard let self = self, !self.isFinished else {
+                            return
+                        }
+                        // Fix: the backstop began recording whatever the camera was doing, so a
+                        // camera that never produced a frame was recorded as a black circle and
+                        // nothing was ever said about it. If it is not working by now, it is not
+                        // going to, and the reader is told which of the ways it failed.
+                        if let trouble = self.cameraTrouble() {
+                            self.onTrouble?(trouble)
+                            self.cancelEverything()
+                            return
+                        }
+                        self.beginCapturing()
                     }
                 }
             }
@@ -538,14 +593,103 @@ public final class VideoNoteComposer: UIView {
         }
     }
 
+    /// What to record at, best first.
+    ///
+    /// A video note is shown in a circle 190pt across, 250pt when it is opened - about 750 pixels
+    /// at its very largest, and everything outside that circle is thrown away when it is drawn.
+    /// Recording at `.high` meant capturing 1920x1080 and sending it, for something that is never
+    /// seen at more than a fraction of it. VGA is still more than the circle can show and roughly
+    /// a seventh of the pixels, so nothing large is ever written in the first place.
+    private static let presets: [AVCaptureSession.Preset] = [.vga640x480, .cif352x288, .medium, .high]
+
+    /// Whether iOS has told us another app is holding the microphone.
+    ///
+    /// A capture session that cannot have the microphone is interrupted rather than refused, and
+    /// the notification carries the reason. Without reading it, a video note attempted during a
+    /// call in another app came up as a camera that would not start - or worse, as a permission
+    /// problem, which it is not.
+    private var interruptedByAnotherApp = false
+    /// Set when the microphone could not be attached at all, which on a device that has one means
+    /// something else is holding it.
+    private var microphoneUnavailable = false
+
+    /// Whether either of those has happened.
+    private var microphoneHeldElsewhere: Bool {
+        return interruptedByAnotherApp || microphoneUnavailable
+    }
+
+    /// What the session last complained about, in words, for the line the reader can read back.
+    private var lastComplaint: String?
+    /// Whether the output that watches for the first frame could be attached at all. Without it
+    /// no frame is ever seen, and "no frames" would be said of a camera that is working.
+    private var probeAttached = false
+    /// Kept so the observations can be taken down with the composer rather than outliving it.
+    private var watching: [NSObjectProtocol] = []
+
+    private func watchForInterruption() {
+        // Fix: only interruptions were listened for. A capture session can also fail at runtime -
+        // AVCaptureSessionRuntimeError - and that is silent: the circle appears, the camera stays
+        // black, nothing is reported, and the reader is left with a cancel buzz. Both are heard
+        // now, and both say what happened.
+        watching.append(NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.runtimeErrorNotification,
+            object: session,
+            queue: .main) { [weak self] note in
+            guard let self = self else { return }
+            let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
+            self.lastComplaint = "camera error \(error?.code ?? 0)"
+            // An audio device taken by somebody else is reported through here too on some
+            // systems, under its own code.
+            if error?.code == AVError.Code.deviceAlreadyUsedByAnotherSession.rawValue {
+                self.interruptedByAnotherApp = true
+            }
+            self.onInterrupted?()
+        })
+        watching.append(NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session,
+            queue: .main) { [weak self] note in
+            guard let self = self,
+                  let raw = note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int,
+                  let reason = AVCaptureSession.InterruptionReason(rawValue: raw) else {
+                return
+            }
+            self.lastComplaint = "interrupted \(raw)"
+            guard reason == .audioDeviceInUseByAnotherClient
+                    || reason == .videoDeviceInUseByAnotherClient else {
+                return
+            }
+            self.interruptedByAnotherApp = true
+            self.onInterrupted?()
+        })
+    }
+
+    /// What the camera is actually doing, in a few words, once it has had its chance to start.
+    ///
+    /// There is no console on a device, so a camera that comes up black has to be able to say why
+    /// on the screen itself. Read back from a recording, this one line settles which of the four
+    /// possible failures it was.
+    private func cameraTrouble() -> String? {
+        if let complaint = lastComplaint {
+            return complaint
+        }
+        if !session.isRunning {
+            return "camera not running"
+        }
+        if probeAttached, !sawFirstFrame {
+            return "camera gave no frames"
+        }
+        return nil
+    }
+
+    /// Called when another app takes the microphone or the camera away mid-recording.
+    var onInterrupted: (() -> Void)?
+    /// Called when the camera never came up, carrying what it was doing instead.
+    var onTrouble: ((String) -> Void)?
+
     private func configureSession() -> Bool {
+        watchForInterruption()
         session.beginConfiguration()
-        // A video note is shown in a circle 190pt across, 250pt when it is opened - about 750
-        // pixels at its very largest, and everything outside that circle is thrown away when it is
-        // drawn. Recording at `.high` meant capturing 1920x1080 and sending it, for something that
-        // is never seen at more than a fraction of it. VGA is still more than the circle can show
-        // and roughly a seventh of the pixels, so nothing large is ever written in the first place.
-        session.sessionPreset = .vga640x480
 
         guard let camera = camera(front: usingFrontCamera),
               let input = try? AVCaptureDeviceInput(device: camera),
@@ -556,9 +700,28 @@ public final class VideoNoteComposer: UIView {
         session.addInput(input)
         videoInput = input
 
-        if let mic = AVCaptureDevice.default(for: .audio),
-           let micInput = try? AVCaptureDeviceInput(device: mic),
-           session.canAddInput(micInput) {
+        // Fix: the preset was set to VGA outright, before any input was added and without ever
+        // asking whether the camera could do it. Every iPhone this had been tried on could, so it
+        // worked - but a camera that cannot offer a preset makes the whole session refuse to run,
+        // and that is a failure with nothing to do with permission even though it was reported as
+        // one. Asked of the camera now, once it is attached, and the first preset it accepts is
+        // the one used; the list ends at `.high`, which every camera has.
+        if let usable = VideoNoteComposer.presets.first(where: { session.canSetSessionPreset($0) }) {
+            session.sessionPreset = usable
+        }
+
+        // Fix: a microphone that could not be attached was skipped in silence and the session
+        // carried on being built, so a video note recorded during a call in another app came out
+        // as a silent film - or, more often, as a session that was then interrupted and torn down
+        // with nothing said. A video note carries sound; a microphone that cannot be had is a
+        // reason not to start, and it is the same reason as the interruption below.
+        if let mic = AVCaptureDevice.default(for: .audio) {
+            guard let micInput = try? AVCaptureDeviceInput(device: mic),
+                  session.canAddInput(micInput) else {
+                microphoneUnavailable = true
+                session.commitConfiguration()
+                return false
+            }
             session.addInput(micInput)
         }
 
@@ -572,6 +735,7 @@ public final class VideoNoteComposer: UIView {
             probe.alwaysDiscardsLateVideoFrames = true
             probe.setSampleBufferDelegate(self, queue: probeQueue)
             session.addOutput(probe)
+            probeAttached = true
         }
 
         session.commitConfiguration()
@@ -835,7 +999,7 @@ public final class VideoNoteComposer: UIView {
         stopSession()
 
         guard !segments.isEmpty else {
-            onCancel?()
+            onCancel?(true)
             return
         }
         if segments.count == 1 {
@@ -933,6 +1097,10 @@ public final class VideoNoteComposer: UIView {
     private func cancelEverything() {
         guard !isFinished else { return }
         isFinished = true
+        // The preview being on screen is what proves the camera actually started: recording
+        // itself begins on the first frame, so a release inside that window would otherwise be
+        // reported as a camera that never worked when it was only a quick tap.
+        let everStarted = isCapturing || previewLayer != nil || !segments.isEmpty || fileURL != nil
         // Before the session is torn down, not after: an audio session in a recording category
         // deprioritises haptics, so the buzz is asked for while the engine can still answer.
         VideoNoteComposer.playCancelHaptic()
@@ -948,7 +1116,9 @@ public final class VideoNoteComposer: UIView {
         }
         segments = []
         fileURL = nil
-        onCancel?()
+        // A microphone another app is holding is reported by whichever path found it, so the net
+        // below is told to stay out of the way - two messages for one failure is worse than one.
+        onCancel?(everStarted || microphoneHeldElsewhere)
     }
 
     private func releasePlayback() {
@@ -1255,18 +1425,51 @@ public final class VideoNoteEntryPoint: NSObject, UIGestureRecognizerDelegate {
         screen.alignLockTrack(with: button)
         composer = screen
 
-        screen.onCancel = { [weak self] in
-            self?.dismiss()
+        screen.onCancel = { [weak self] everStarted in
+            guard let self = self else { return }
+            self.dismiss()
+            // The last safety net: the camera never recorded a frame, so whatever went wrong went
+            // wrong before the reader could do anything about it - and without this all they get
+            // is the cancel buzz and no idea why. Anything with a reason of its own has already
+            // been reported by the time this runs.
+            guard !everStarted else { return }
+            self.onHint?("The camera could not be started. Try again.".localized())
         }
         screen.onFinish = { [weak self] url, seconds in
             self?.dismiss()
             self?.onFinish?(url, seconds)
         }
-        screen.begin { [weak self] started in
+        // Fix: this was set inside begin's answer, which arrives after the session has already
+        // been told to run - and an interruption can land in between. The handler was still nil
+        // at that moment, so the one notification that says another app has the microphone was
+        // dropped on the floor. Wired before anything is asked for, so none can be missed.
+        screen.onInterrupted = { [weak self] in
+            self?.dismiss()
+            APIS.showMicrophoneBusyElsewhere()
+        }
+        // Fix: a camera that came up black said nothing at all - the circle appeared, no frame
+        // ever arrived, the reader let go, and the only answer was the cancel buzz. What the
+        // session was actually doing is put on screen, so a recording of it is enough to tell
+        // which of the four failures it was without a console.
+        screen.onTrouble = { [weak self] trouble in
+            self?.dismiss()
+            self?.onHint?("The camera could not be started".localized() + " (\(trouble))")
+        }
+        screen.begin { [weak self] failure in
             guard let self = self else { return }
-            guard started else {
+            if let failure = failure {
                 self.dismiss()
-                self.onHint?("Camera and microphone access is needed to record".localized())
+                switch failure {
+                case .cancelled:
+                    // Closed again before the camera was ready; the reader knows, they did it.
+                    break
+                case .denied:
+                    APIS.showCameraOrMicrophoneRefused()
+                case .cameraUnavailable:
+                    self.onHint?("The camera could not be started. Try again.".localized())
+                case .heldByAnotherApp:
+                    APIS.showMicrophoneBusyElsewhere()
+                }
                 return
             }
             UIView.animate(withDuration: 0.2) { screen.alpha = 1 }
@@ -1664,12 +1867,33 @@ public enum VideoNote {
         return nil
     }
 
+    /// Stills already asked for, so one is not asked for twice over while it is on its way.
     private static var stillsRequested: Set<String> = []
 
+    /// Asks the server for a quote's picture.
+    ///
+    /// Fix: a name went into the "already asked for" list and never came out. A fetch that failed
+    /// - the server refusing it, the network dropping mid-transfer - therefore made that picture
+    /// unaskable for the rest of the session, and the quote showed an empty corner however many
+    /// times it was scrolled past. That is the quote that "sometimes has no picture". A request
+    /// that ends without the file is forgotten, so the next pass can try again.
     private static func fetchQuotedStill(named name: String) {
-        guard !stillsRequested.contains(name), !Download.isDownloading(forKey: name) else { return }
+        guard !stillsRequested.contains(name), !Download.isDownloading(forKey: name) else {
+            return
+        }
         stillsRequested.insert(name)
-        Download().startHTTP(forKey: name) { _, _ in }
+        Download().startHTTP(forKey: name) { _, progress in
+            guard progress >= 100 || progress < 0 else {
+                return
+            }
+            // Touched from the download's own queue and read while a row is being drawn, so the
+            // one place it changes is the main thread.
+            DispatchQueue.main.async {
+                if progress < 0 {
+                    stillsRequested.remove(name)
+                }
+            }
+        }
     }
 
     /// Fills a quote's thumbnail in, now or when it arrives.

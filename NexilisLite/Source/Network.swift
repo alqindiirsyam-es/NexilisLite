@@ -257,7 +257,10 @@ public class Network {
     // because Alamofire is linked into this framework rather than installed
     // beside it. The public uploadHTTP(name:) / uploadHTTP(fileUrl:) overloads
     // return Void and stay public.
-    func uploadHTTP(_ endUrl: String, files: [URL] = [], filename: [String] = [], parameters: [String : Any] = [:], completion: @escaping (Bool, Double)->()) -> UploadRequest {
+    // Sentinel remediation (NX-03/NX-04): a protected upload that has no current ZTA
+    // authorization is never started, so there is no request to hand back. The two
+    // public overloads below are the only callers and both cope with nil.
+    func uploadHTTP(_ endUrl: String, files: [URL] = [], filename: [String] = [], parameters: [String : Any] = [:], completion: @escaping (Bool, Double)->()) -> UploadRequest? {
         
         var filesIn = [URL]()
         filesIn.append(contentsOf: files)
@@ -293,7 +296,7 @@ public class Network {
         }
         let BOUNDARY = "esuploader-" + "\(Date().currentTimeMillis())"
         let MIME_TYPE = "multipart/form-data; boundary=" + BOUNDARY
-        let headers: HTTPHeaders = [
+        var headers: HTTPHeaders = [
             "Content-Type": MIME_TYPE,
             "Host": Utils.getURLBase().component(2, separatedBy: "/"),
             "Accept-Encoding": "gzip, deflate, br",
@@ -302,6 +305,11 @@ public class Network {
             "User-Agent": Utils.getUserAgent(),
             "Cookie": Utils.getCookiesMobile()
         ]
+        guard SentinelSecurityGate.isAuthorized else {
+            completion(false, 0)
+            return nil
+        }
+        for (name, value) in SentinelSecurityGate.authorizationHeaders { headers.add(name: name, value: value) }
         //print("HEADER: \(headers)")
         
         let uploadRequest = SessionManager.shared.session.upload(multipartFormData: { (multipartFormData: MultipartFormData) in

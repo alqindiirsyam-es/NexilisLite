@@ -8,6 +8,7 @@
 
 import Foundation
 @_implementationOnly import Alamofire
+import NexilisZTA
 /// How many bytes of a transfer have gone through, and how many there are in total, for
 /// whatever transfers are in flight.
 ///
@@ -382,8 +383,13 @@ public class Download {
         request.setValue(Utils.getUserAgent(), forHTTPHeaderField: "User-Agent")
         request.setValue(Utils.getCookiesMobile(), forHTTPHeaderField: "Cookie")
         request.timeoutInterval = 12
+        guard SentinelSecurityGate.attachAuthorization(to: &request) else {
+            askingSize.remove(key)
+            sizeWaiters.removeValue(forKey: key)
+            return
+        }
 
-        URLSession.shared.dataTask(with: request) { _, response, _ in
+        Utils.sharedSession.dataTask(with: request) { _, response, _ in
             let length = (response as? HTTPURLResponse)
                 .flatMap { $0.value(forHTTPHeaderField: "Content-Length") }
                 .flatMap { Int64($0) } ?? 0
@@ -423,7 +429,7 @@ public class Download {
             }
             let BOUNDARY = "esuploader-" + "\(Date().currentTimeMillis())"
             let MIME_TYPE = "multipart/form-data; boundary=" + BOUNDARY
-            let headers: HTTPHeaders = [
+            var headers: HTTPHeaders = [
                 "Content-Type": MIME_TYPE,
                 "Host": Utils.getURLBase().component(2, separatedBy: "/"),
                 "Accept-Encoding": "gzip, deflate, br",
@@ -432,6 +438,11 @@ public class Download {
                 "User-Agent": Utils.getUserAgent(),
                 "Cookie": Utils.getCookiesMobile()
             ]
+            guard SentinelSecurityGate.isAuthorized else {
+                Download.publish(filename: filename, progress: -1)
+                return
+            }
+            for (name, value) in SentinelSecurityGate.authorizationHeaders { headers.add(name: name, value: value) }
 //            print("FULL URL: \(fullURL)")
             do {
                 // Kept, rather than started and forgotten. Nothing could cancel a transfer before
@@ -508,6 +519,16 @@ public class Download {
     }
 }
 
+private final class NexilisServerTrustEvaluator: ServerTrustEvaluating {
+    func evaluate(_ trust: SecTrust, forHost host: String) throws {
+        try DefaultTrustEvaluator(validateHost: true).evaluate(trust, forHost: host)
+        if RASPGuard.shared().isPinnedHost(host),
+           !PinnedURLSessionNexilisDelegate.isTrustedPinnedHost(trust: trust, host: host) {
+            throw NSError(domain: "NexilisTLS", code: -7301, userInfo: [NSLocalizedDescriptionKey: "SPKI pin mismatch for \(host)"])
+        }
+    }
+}
+
 public class SessionManager {
     static let shared = SessionManager()
     let session: Session
@@ -515,8 +536,8 @@ public class SessionManager {
     private init() {
         let sessionConfiguration = URLSessionConfiguration.default
         sessionConfiguration.timeoutIntervalForRequest = 60
-        let serverTrustManager = ServerTrustManager(allHostsMustBeEvaluated: false,
-                                                    evaluators: [Utils.getURLBase().component(2, separatedBy: "/"): DisabledTrustEvaluator()])
+        let serverTrustManager = ServerTrustManager(allHostsMustBeEvaluated: true,
+                                                    evaluators: [Utils.getURLBase().component(2, separatedBy: "/"): NexilisServerTrustEvaluator()])
         self.session = Session(configuration: sessionConfiguration, serverTrustManager: serverTrustManager)
     }
 }

@@ -2828,6 +2828,17 @@ public class CoreMessage_TMessageBank {
         return tMessage
     }
     
+    /// Asks the server what a message is allowed to carry: the length of the text, and the size
+    /// of a picture, a video and a document. Answered as a JSON array in DATA - see
+    /// Nexilis.pullInstantMessaging.
+    public static func pullInstantMessaging() -> TMessage {
+        let tmessage = TMessage()
+        tmessage.mCode = CoreMessage_TMessageCode.PULL_INSTANT_MESSAGING_ATTACHMENT
+        tmessage.mStatus = CoreMessage_TMessageUtil.getTID()
+        tmessage.mPIN = User.getMyPin() ?? ""
+        return tmessage
+    }
+
     public static func checkVersion() -> TMessage {
         let tMessage = NexilisLite.TMessage()
         let me = User.getMyPin() ?? ""

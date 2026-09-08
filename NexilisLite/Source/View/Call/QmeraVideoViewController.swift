@@ -879,7 +879,14 @@ class QmeraVideoViewController: UIViewController {
                                     }
                                 }
                             }
-                            SecureUserDefaults.shared.set(members, forKey: "inEditorPersonal")
+                            // Fix: the people on a call used to be written into
+                            // "inEditorPersonal", the same key a chat screen uses to say which
+                            // conversation is open, and the banner test read any value with a
+                            // comma in it as "silence every personal card". Nothing cleared it
+                            // when the call ended, so one conference call could leave in-app
+                            // notifications silent for the rest of the session. They have a key
+                            // of their own now, and it is only consulted while a call is up.
+                            SecureUserDefaults.shared.set(members, forKey: "inCallMembers")
                             SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                         }
                     }
@@ -1001,20 +1008,14 @@ class QmeraVideoViewController: UIViewController {
     @objc func didTapAcceptCallButton() {
         self.taskTimeout?.cancel()
         if !isInisiator{
+            // Fix: only the camera was tested here, so answering a video call with the camera
+            // allowed and the microphone refused went ahead - a call nobody could be heard on.
+            // Either one refused stops it, and the alert names whichever it was and offers
+            // Settings. The two buttons come back either way, so the call can still be declined.
             let goAudioCall = Nexilis.checkMicPermission()
             let goVideoCall = Nexilis.checkCameraPermission()
-            if goVideoCall == 0 {
-                let alert = LibAlertController(title: "Attention!".localized(), message: !goAudioCall && goVideoCall == 0 ? "Please allow microphone & camera permission in your settings".localized() : !goAudioCall ? "Please allow microphone permission in your settings".localized() : "Please allow camera permission in your settings", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: {_ in
-                    if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                    }
-                }))
-                self.navigationController?.present(alert, animated: true, completion: nil)
-                self.buttonAccept.isHidden = false
-                self.buttonDecline.isHidden = false
-                return
-            } else if goVideoCall == -1 {
+            if !goAudioCall || goVideoCall == 0 {
+                APIS.showCaptureRefused(microphone: !goAudioCall, camera: goVideoCall == 0)
                 self.buttonAccept.isHidden = false
                 self.buttonDecline.isHidden = false
                 return

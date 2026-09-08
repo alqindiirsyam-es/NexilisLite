@@ -32,7 +32,7 @@ public protocol ChatTagSearchDelegate: AnyObject {
 
 public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDelegate,
                                   UICollectionViewDataSource, UICollectionViewDelegateFlowLayout,
-                                  QLPreviewControllerDataSource {
+                                  QLPreviewControllerDataSource, AVAudioPlayerDelegate {
 
     /// The badges a tile draws over its thumbnail - the download arrow, the play triangle.
     /// They are found by this tag so the progress ring can take their place while a transfer
@@ -117,6 +117,9 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
     /// Conversation names are looked up per row and never change while the results are on
     /// screen, so each one is only ever read from the database once.
     private var conversationNames: [String: String] = [:]
+    /// What is already known about each link on screen. Same reason as the names above: a row
+    /// is built again every time it comes back into view, and this is a database read.
+    private var linkAnswers: [String: LinkPreviewStore.Answer] = [:]
     private static let monthFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM yyyy"
@@ -132,7 +135,20 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
     private var previewItem: NSURL?
     /// The file a tap is waiting on, and the filter it was tapped under.
     private var pendingOpen: (fileName: String, tag: Int)?
-    private var audioPlayer: AVAudioPlayer?
+    /// The recording this screen is playing, if any.
+    ///
+    /// The player itself belongs to AudioMiniPlayer, not here - one player per recording, kept in
+    /// one place, so a note started in this list and then opened in its conversation carries on
+    /// rather than starting again beside itself. All this screen keeps is which recording it is
+    /// showing as playing, and what to keep up to date while it runs.
+    private var playingAudioId = ""
+    private var audioTicker: Timer?
+    /// The rows showing each recording, so the one playing can be kept up to date without being
+    /// rebuilt under the reader.
+    private var audioRows: [String: AudioBubbleContent] = [:]
+    /// What each play button stands for. A button carries nothing of its own, and the row it sits
+    /// in is rebuilt as the list scrolls.
+    private var audioButtonResults: [UIButton: Chat] = [:]
 
     public override init() {
         super.init()
@@ -292,8 +308,8 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         selectedTag = 0
         searchText = ""
         results = []
-        audioPlayer?.stop()
-        audioPlayer = nil
+        // Rule one: the filter going takes its sound with it.
+        stopOwnAudio()
         pendingOpen = nil
         updateChipSelection()
         updateResultsVisibility()
@@ -315,51 +331,88 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
 
     // MARK: - Chips
 
+    /// The height of a chip, and of the row it sits in. The hosts give the scroll view 40pt,
+    /// which leaves this a margin either side.
+    private static let chipHeight: CGFloat = 30
+
     private func buildChips() {
         chipsView.showsHorizontalScrollIndicator = false
+        // Obvious at a glance that there is more of the row than fits, which on a 4.7" screen
+        // there always is.
+        chipsView.alwaysBounceHorizontal = true
         let row = UIStackView()
         row.axis = .horizontal
-        row.spacing = 10
+        row.spacing = 8
         row.alignment = .center
         chipsView.addSubview(row)
         row.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: chipsView.leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: chipsView.trailingAnchor),
+            // A little air at each end, so the first and last chip are not shaved flat against
+            // the edge of the screen when the row is scrolled to either end.
+            row.leadingAnchor.constraint(equalTo: chipsView.leadingAnchor, constant: 2),
+            row.trailingAnchor.constraint(equalTo: chipsView.trailingAnchor, constant: -2),
             row.centerYAnchor.constraint(equalTo: chipsView.centerYAnchor),
-            row.heightAnchor.constraint(equalToConstant: 30)
+            row.heightAnchor.constraint(equalToConstant: ChatTagSearch.chipHeight)
         ])
 
-        let definitions: [(CGFloat, String, String, Int)] = [
-            (105, "bubble.right", "Unread", ChatTagSearch.unreadTag),
-            (100, "photo", "Photos", ChatTagSearch.photosTag),
-            (130, "doc", "Documents", ChatTagSearch.documentsTag),
-            (80, "link", "Links", ChatTagSearch.linksTag),
-            (100, "video", "Videos", ChatTagSearch.videosTag),
-            (80, "photo.on.rectangle", "GIFs", ChatTagSearch.gifsTag),
-            (80, "music.note", "Audio", ChatTagSearch.audiosTag)
+        let definitions: [(String, String, Int)] = [
+            ("bubble.right", "Unread", ChatTagSearch.unreadTag),
+            ("photo", "Photos", ChatTagSearch.photosTag),
+            ("doc", "Documents", ChatTagSearch.documentsTag),
+            ("link", "Links", ChatTagSearch.linksTag),
+            ("video", "Videos", ChatTagSearch.videosTag),
+            ("photo.on.rectangle", "GIFs", ChatTagSearch.gifsTag),
+            ("music.note", "Audio", ChatTagSearch.audiosTag)
         ]
-        for (width, icon, title, tag) in definitions {
-            let chip = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 30))
+        for (icon, title, tag) in definitions {
+            let chip = UIView()
             row.addArrangedSubview(chip)
-            chip.anchor(width: width, height: 30)
-            chip.layer.cornerRadius = 15
+            chip.translatesAutoresizingMaskIntoConstraints = false
+            chip.heightAnchor.constraint(equalToConstant: ChatTagSearch.chipHeight).isActive = true
+            chip.layer.cornerRadius = ChatTagSearch.chipHeight / 2
             chip.layer.borderColor = UIColor.gray.cgColor
             chip.layer.borderWidth = 0.5
+            // The pill is the chip's edge: nothing inside it may be drawn past it.
+            chip.layer.masksToBounds = true
             chip.isUserInteractionEnabled = true
             chip.tag = tag
             chip.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(chipTapped(_:))))
 
             let image = UIImageView()
-            image.image = UIImage(systemName: icon)
+            // Asked for at the size of the text beside it, and given a box of its own, so every
+            // pill in the row is padded the same however wide its own symbol happens to draw.
+            image.image = UIImage(systemName: icon, withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .regular))
+            image.contentMode = .scaleAspectFit
             chip.addSubview(image)
-            image.anchor(left: chip.leftAnchor, paddingLeft: 10, centerY: chip.centerYAnchor)
+            image.translatesAutoresizingMaskIntoConstraints = false
 
             let label = UILabel()
             label.text = title.localized()
             label.font = .systemFont(ofSize: 15)
+            // Never expected to be needed - the pill is measured from this - but a tail is
+            // better than a letter sliced down the middle if anything ever squeezes it.
+            label.lineBreakMode = .byTruncatingTail
+            // The pill is measured from the text; the text is never measured from the pill.
+            label.setContentCompressionResistancePriority(.required, for: .horizontal)
             chip.addSubview(label)
-            label.anchor(left: image.rightAnchor, paddingLeft: 5, centerY: chip.centerYAnchor)
+            label.translatesAutoresizingMaskIntoConstraints = false
+
+            // Fix: every pill used to be given a width in points, chosen by eye for the English
+            // word inside it - 80 for "Links", 80 for "Audio", 100 for "Videos". Nothing held the
+            // text to that width, and nothing else was ever measured, so a longer word simply ran
+            // out through the side of its own pill and into the border of the next one: "Tautan"
+            // for Links, "Belum dibaca" for Unread, and a couple that were already tight in
+            // English. The pill is measured from what is in it now, in whatever language that is.
+            NSLayoutConstraint.activate([
+                image.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 11),
+                image.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
+                image.widthAnchor.constraint(equalToConstant: 17),
+                image.heightAnchor.constraint(equalToConstant: 17),
+
+                label.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
+                label.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -13),
+                label.centerYAnchor.constraint(equalTo: chip.centerYAnchor)
+            ])
 
             chips.append(chip)
         }
@@ -370,11 +423,23 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         guard let tag = sender.view?.tag else {
             return
         }
-        // Tapping the filter that is already on turns it off, which is the only way back to
-        // the plain text search without closing the search altogether.
-        selectedTag = (selectedTag == tag) ? 0 : tag
-        audioPlayer?.stop()
-        audioPlayer = nil
+        // Tapping the filter that is already on turns it off.
+        apply(tag: selectedTag == tag ? 0 : tag)
+    }
+
+    /// Turns a filter on, or off with nought, leaving whatever is typed alone.
+    ///
+    /// Apart from a tap on the chips, this is how the host turns one off - a backspace in an
+    /// empty search field, which is how a chip in any field gives way. Unlike reset(), the words
+    /// the reader typed survive it: turning the filter off is meant to widen the search, not end
+    /// it.
+    public func apply(tag: Int) {
+        guard tag != selectedTag else {
+            return
+        }
+        selectedTag = tag
+        // Changing filter is leaving the one that was on, so the same rule applies.
+        stopOwnAudio()
         updateChipSelection()
         reloadResults()
         onTagChanged?(selectedTag)
@@ -492,6 +557,10 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
     }
 
     private func reloadResults() {
+        // The rows are about to be built again, and what these hold are the ones that were.
+        audioRows.removeAll()
+        audioButtonResults.removeAll()
+        linkAnswers.removeAll()
         switch selectedTag {
         case ChatTagSearch.unreadTag:
             results = Chat.getData(isUnread: true, withText: searchText)
@@ -674,10 +743,11 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
 
     /// The month strip itself, shared by the list and the grid so both read the same.
     private func buildMonthStrip(in header: UIView, title: String, style: UIUserInterfaceStyle) {
+        // Fix: the month line was laid over an ultra-thin material, which on a plain light ground
+        // reads as a flat grey strip rather than as glass - a band of colour across a screen that
+        // is otherwise nothing but the results. The line carries no ground of its own now; it is
+        // the month written over what is behind it.
         header.backgroundColor = .clear
-        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
-        header.addSubview(blur)
-        blur.anchor(top: header.topAnchor, left: header.leftAnchor, bottom: header.bottomAnchor, right: header.rightAnchor)
 
         let label = UILabel()
         label.text = title
@@ -724,8 +794,8 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         }
                 let title = UILabel()
                 let subtitle = UILabel()
-                title.textColor = .black
-                subtitle.textColor = .gray
+                title.textColor = .label
+                subtitle.textColor = .secondaryLabel
                 title.font = .systemFont(ofSize: 16 + String.offset(), weight: .medium)
                 subtitle.font = .systemFont(ofSize: 14 + String.offset())
                 content.addSubview(title)
@@ -733,7 +803,13 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
                 title.anchor(top: content.topAnchor, left: content.leftAnchor, paddingTop: 10, paddingLeft: 20)
                 subtitle.anchor(top: title.bottomAnchor, left: content.leftAnchor, right: content.rightAnchor, paddingLeft: 20, paddingRight: 20)
                 subtitle.numberOfLines = 2
-                title.text = data.name
+                // Fix: this was data.name, which the query behind these results fills from the
+                // *sender* - it joins BUDDY on m.f_pin. So the title of a group result was one
+                // member's name and the conversation it belonged to was never said at all. The
+                // title is the conversation, the same name the conversation itself carries; who
+                // sent it belongs to the line under it.
+                title.text = conversationName(for: data)
+                subtitle.attributedText = resultSubtitle(for: data)
                 
                 let imageArrowRight = UIImageView(image: UIImage(systemName: "chevron.right"))
                 content.addSubview(imageArrowRight)
@@ -778,244 +854,281 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
                 
                 let container = UIView()
                 content.addSubview(container)
-                container.anchor(top: subtitle.bottomAnchor, left: content.leftAnchor, right: content.rightAnchor, paddingTop: 5, paddingLeft: 20, paddingRight: 20, height: selectedTag == ChatTagSearch.linksTag ? 75 : 60)
-                container.backgroundColor = .lightGray.withAlphaComponent(0.3)
+                // An audio row is taller than the rest: the picture stands 44 points and the
+                // length is written under the line, which needs room below it.
+                let panelHeight: CGFloat
+                switch selectedTag {
+                case ChatTagSearch.linksTag: panelHeight = 75
+                case ChatTagSearch.audiosTag: panelHeight = 68
+                default: panelHeight = 60
+                }
+                container.anchor(top: subtitle.bottomAnchor, left: content.leftAnchor, right: content.rightAnchor, paddingTop: 5, paddingLeft: 20, paddingRight: 20, height: panelHeight)
+                // Fix: light grey at thirty per cent comes out around #E6E6E6 on a white ground -
+                // a panel that reads as a slab. Sampled off the reference, the panel there is
+                // #F2F1F2 against a #FDFCFC page, which is four and a half per cent darker than
+                // what it sits on rather than eleven. Dark mode lifts by the same little amount
+                // instead of darkening, there being nothing darker to go to.
+                container.backgroundColor = tableView.traitCollection.userInterfaceStyle == .dark
+                    ? UIColor.white.withAlphaComponent(0.08)
+                    : UIColor.black.withAlphaComponent(0.045)
                 container.layer.cornerRadius = 15
                 container.clipsToBounds = true
                 container.isUserInteractionEnabled = true
                 
                 if selectedTag == ChatTagSearch.documentsTag {
-                    subtitle.text = "📄 " + "Document".localized()
-                    
-                    let imageFile = UIImageView(image: UIImage(systemName: "doc.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 45)))
+                    // Fix: a grey page glyph the same for every document, and a size line worked
+                    // out by reading the whole file into memory to count its bytes - on the main
+                    // thread, once per row that came into view. The bubble already draws a
+                    // document properly: a page in the colour of its own kind with the extension
+                    // written on it, and a size taken from what the sender said or from the file's
+                    // own length without opening it. Both come from there now, so a document looks
+                    // the same wherever it is shown.
+                    let documentName = Utils.documentName(messageText: data.messageText, file: data.file)
+                    // What kind it is: what the name says, and where the name says nothing,
+                    // what the file itself says. See Utils.documentKind.
+                    let documentKind = Utils.documentKind(named: documentName, file: data.file)
+                    let imageFile = UIImageView(image: DocumentBadge.image(
+                        of: documentKind,
+                        size: CGSize(width: 34, height: 40)))
+                    imageFile.contentMode = .scaleAspectFit
                     container.addSubview(imageFile)
-                    imageFile.tintColor = .black
-                    imageFile.anchor(top: container.topAnchor, left: container.leftAnchor, bottom: container.bottomAnchor, paddingTop: 5, paddingLeft: 5, paddingBottom: 5, width: 45)
-                    
+                    imageFile.anchor(left: container.leftAnchor, paddingLeft: 10,
+                                     centerY: container.centerYAnchor, width: 34, height: 40)
+
                     let nameFile = UILabel()
                     container.addSubview(nameFile)
                     nameFile.font = .systemFont(ofSize: 12 + String.offset(), weight: .medium)
-                    nameFile.textColor = .black
+                    nameFile.textColor = .label
                     nameFile.numberOfLines = 2
                     nameFile.anchor(top: container.topAnchor, left: imageFile.rightAnchor, right: container.rightAnchor, paddingTop: 5, paddingLeft: 10, paddingRight: 5)
-                    nameFile.text = data.messageText.components(separatedBy: "|")[0]
-                    
+                    nameFile.text = documentName
+
                     let fileSub = UILabel()
-                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                    let arrExtFile = (data.messageText.components(separatedBy: "|")[0]).split(separator: ".")
-                    let finalExtFile = arrExtFile[arrExtFile.count - 1]
-                    if let dirPath = paths.first {
-                        let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(data.file)
-                        if FileManager.default.fileExists(atPath: fileURL.path) {
-                            if let dataFile = try? Data(contentsOf: fileURL) {
-                                var sizeOfFile = Int(dataFile.count / 1000000)
-                                if (sizeOfFile < 1) {
-                                    sizeOfFile = Int(dataFile.count / 1000)
-                                    if (finalExtFile.count > 4) {
-                                        fileSub.text = "\(sizeOfFile) kB \u{2022} TXT"
-                                    }else {
-                                        fileSub.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
-                                    }
-                                } else {
-                                    if (finalExtFile.count > 4) {
-                                        fileSub.text = "\(sizeOfFile) MB \u{2022} TXT"
-                                    }else {
-                                        fileSub.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
-                                    }
-                                }
-                            } else {
-                                fileSub.text = ""
-                            }
+                    container.addSubview(fileSub)
+                    fileSub.anchor(top: nameFile.bottomAnchor, left: imageFile.rightAnchor, bottom: container.bottomAnchor, paddingLeft: 10, paddingBottom: 5)
+                    fileSub.font = .systemFont(ofSize: 10 + String.offset())
+                    fileSub.textColor = .secondaryLabel
+                    let fileType = Utils.documentType(of: documentKind)
+                    var fileBytes = VideoNote.Facts.of(attachmentNamed: data.file).bytes
+                    if fileBytes == 0 {
+                        fileBytes = VideoNote.Facts.measuredSize(ofAttachmentNamed: data.file)
+                    }
+                    fileSub.text = fileBytes > 0
+                        ? "\(VideoNote.Facts.humanSize(fileBytes)) \u{2022} \(fileType)"
+                        : fileType
+                    if fileBytes == 0 {
+                        // Neither the sender nor a plain copy on disk could say. The one place left
+                        // to look is the secure store, and looking there means opening the whole
+                        // file - so it is done away from the main thread and the line fills itself
+                        // in.
+                        VideoNote.Facts.measureSize(ofAttachmentNamed: data.file) { [weak fileSub] bytes in
+                            fileSub?.text = "\(VideoNote.Facts.humanSize(bytes)) \u{2022} \(fileType)"
                         }
-                        else if FileEncryption.shared.isSecureExists(filename: data.file) {
-                            if var dataFile = try? FileEncryption.shared.readSecure(filename: data.file) {
-                                let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: dataFile)
-                                if dataDecrypt != nil {
-                                    dataFile = dataDecrypt!
-                                }
-                                var sizeOfFile = Int(dataFile.count / 1000000)
-                                if (sizeOfFile < 1) {
-                                    sizeOfFile = Int(dataFile.count / 1000)
-                                    if (finalExtFile.count > 4) {
-                                        fileSub.text = "\(sizeOfFile) kB \u{2022} TXT"
-                                    }else {
-                                        fileSub.text = "\(sizeOfFile) kB \u{2022} \(finalExtFile.uppercased())"
-                                    }
-                                } else {
-                                    if (finalExtFile.count > 4) {
-                                        fileSub.text = "\(sizeOfFile) MB \u{2022} TXT"
-                                    }else {
-                                        fileSub.text = "\(sizeOfFile) MB \u{2022} \(finalExtFile.uppercased())"
-                                    }
-                                }
-                            } else {
-                                fileSub.text = ""
-                            }
-                        }
-                        container.addSubview(fileSub)
-                        fileSub.anchor(top: nameFile.bottomAnchor, left: imageFile.rightAnchor, bottom: container.bottomAnchor, paddingLeft: 10, paddingBottom: 5)
-                        fileSub.font = .systemFont(ofSize: 10 + String.offset())
-                        fileSub.textColor = .gray
-                        let objectTap = ObjectGesture(target: self, action: #selector(onContSearch(_:)))
-                        objectTap.file_id = data.file
-                        objectTap.containerFile = container
-                        container.addGestureRecognizer(objectTap)
-                        // A transfer that is already running when this row is drawn shows its
-                        // ring straight away, at the progress it has actually reached.
-                        if Download.isDownloading(forKey: data.file) {
-                            ChatTransferRing.add(to: container, fileName: data.file, progress: Download.progress(forKey: data.file) ?? 0)
-                        }
+                    }
+
+                    let objectTap = ObjectGesture(target: self, action: #selector(onContSearch(_:)))
+                    objectTap.file_id = data.file
+                    objectTap.containerFile = container
+                    container.addGestureRecognizer(objectTap)
+                    // A transfer that is already running when this row is drawn shows its ring
+                    // straight away, at the progress it has actually reached.
+                    if Download.isDownloading(forKey: data.file) {
+                        ChatTransferRing.add(to: container, fileName: data.file, progress: Download.progress(forKey: data.file) ?? 0)
                     }
                 } else if selectedTag == ChatTagSearch.linksTag {
-                    var text = ""
-                    var txtData = data.messageText
-                    if txtData.contains("■"){
-                        txtData = txtData.components(separatedBy: "■")[0]
-                        txtData = txtData.trimmingCharacters(in: .whitespacesAndNewlines)
-                    }
-                    let listTextSplitBreak = txtData.components(separatedBy: "\n")
-                    let indexFirstLinkSplitBreak = listTextSplitBreak.firstIndex(where: { $0.contains("www.") || $0.contains("http://") || $0.contains("https://") })
-                    if indexFirstLinkSplitBreak != nil {
-                        let listTextSplitSpace = listTextSplitBreak[indexFirstLinkSplitBreak!].components(separatedBy: " ")
-                        let indexFirstLinkSplitSpace = listTextSplitSpace.firstIndex(where: { ($0.starts(with: "www.") && $0.components(separatedBy: ".").count > 2) || ($0.starts(with: "http://") && $0.components(separatedBy: ".").count > 1) || ($0.starts(with: "https://") && $0.components(separatedBy: ".").count > 1) })
-                        if indexFirstLinkSplitSpace != nil {
-                            text = listTextSplitSpace[indexFirstLinkSplitSpace!]
-                        }
-                    }
-                    var dataURL = ""
-                    subtitle.text = txtData.mentionsAsNames()
-                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                        do {
-                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select data_link from LINK_PREVIEW where link='\(text)'"), cursor.next() {
-                                if let data = cursor.string(forColumnIndex: 0) {
-                                    dataURL = data
-                                }
-                                cursor.close()
-                            }
-                        } catch {
-                            rollback.pointee = true
-                            print("Access database error: \(error.localizedDescription)")
-                        }
-                    })
-                    
-                    var title = ""
-                    var description = ""
-                    var imageUrl: String?
-                    var link = text
-                    
+                    // Fix: the panel under a link result was a grey chain glyph and the address
+                    // written out in small print - no picture, no title, nothing to say what was
+                    // on the other end. The reference gives a link result the page's own picture
+                    // at the left, its title over two lines, and the site under that; which is
+                    // what the bubble in the conversation now draws too, so both read the page
+                    // the same way. See LinkPreviewFacts.
+                    let link = LinkPreviewFetcher.firstLink(in: data.messageText)
+
                     let objectTap = ObjectGesture(target: self, action: #selector(onContSearch(_:)))
                     objectTap.message_id = link
                     container.addGestureRecognizer(objectTap)
-                    
+
                     let imagePreview = UIImageView()
                     container.addSubview(imagePreview)
                     imagePreview.translatesAutoresizingMaskIntoConstraints = false
-                    imagePreview.leadingAnchor.constraint(equalTo: container.leadingAnchor).isActive = true
-                    imagePreview.bottomAnchor.constraint(equalTo: container.bottomAnchor).isActive = true
-                    imagePreview.topAnchor.constraint(equalTo: container.topAnchor).isActive = true
-                    imagePreview.widthAnchor.constraint(equalToConstant: 80.0).isActive = true
-                    
-                    imagePreview.image = UIImage(systemName: "link", withConfiguration: UIImage.SymbolConfiguration(pointSize: 45))
-                    imagePreview.contentMode = .center
+                    NSLayoutConstraint.activate([
+                        imagePreview.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                        imagePreview.topAnchor.constraint(equalTo: container.topAnchor),
+                        imagePreview.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                        imagePreview.widthAnchor.constraint(equalToConstant: panelHeight)
+                    ])
                     imagePreview.clipsToBounds = true
-                    imagePreview.tintColor = .black
-                    imagePreview.backgroundColor = .gray.withAlphaComponent(0.3)
-                    
+                    imagePreview.backgroundColor = tableView.traitCollection.userInterfaceStyle == .dark
+                        ? UIColor.white.withAlphaComponent(0.08)
+                        : UIColor.black.withAlphaComponent(0.05)
+
                     let titlePreview = UILabel()
-                    container.addSubview(titlePreview)
-                    titlePreview.translatesAutoresizingMaskIntoConstraints = false
-                    titlePreview.leadingAnchor.constraint(equalTo: imagePreview.trailingAnchor, constant: 5.0).isActive = true
-                    titlePreview.topAnchor.constraint(equalTo: container.topAnchor, constant: 10.0).isActive = true
-                    titlePreview.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -5.0).isActive = true
-                    titlePreview.text = title
-                    titlePreview.font = UIFont.systemFont(ofSize: 14.0 + String.offset(), weight: .bold)
-                    titlePreview.textColor = resultsView.traitCollection.userInterfaceStyle == .dark ? .white : .black
-                    
-                    let descPreview = UILabel()
-                    container.addSubview(descPreview)
-                    descPreview.translatesAutoresizingMaskIntoConstraints = false
-                    descPreview.leadingAnchor.constraint(equalTo: imagePreview.trailingAnchor, constant: 5.0).isActive = true
-                    descPreview.topAnchor.constraint(equalTo: titlePreview.bottomAnchor).isActive = true
-                    descPreview.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -5.0).isActive = true
-                    descPreview.text = description
-                    descPreview.font = UIFont.systemFont(ofSize: 12.0 + String.offset())
-                    descPreview.textColor = .gray
-                    descPreview.numberOfLines = 1
-                    
-                    let linkPreview = UILabel()
-                    container.addSubview(linkPreview)
-                    linkPreview.translatesAutoresizingMaskIntoConstraints = false
-                    linkPreview.leadingAnchor.constraint(equalTo: imagePreview.trailingAnchor, constant: 5.0).isActive = true
-                    linkPreview.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -5.0).isActive = true
-                    linkPreview.font = UIFont.systemFont(ofSize: 10.0 + String.offset())
-                    linkPreview.textColor = .gray
-                    linkPreview.numberOfLines = 1
-                    
-                    if !dataURL.isEmpty {
-                        // Anything missing or malformed leaves the preview blank rather than
-                        // bringing the screen down: this is stored data, and it is not always
-                        // what it should be.
-                        if let encoded = dataURL.data(using: String.Encoding.utf8),
-                           let data = (try? JSONSerialization.jsonObject(with: encoded, options: [])) as? [String: Any] {
-                            title = data["title"] as? String ?? ""
-                            description = data["description"] as? String ?? ""
-                            imageUrl = data["imageUrl"] as? String
-                            link = data["link"] as? String ?? ""
-                            
-                            if imageUrl != nil {
-                                imagePreview.loadImageAsync(with: imageUrl)
-                                imagePreview.contentMode = .scaleToFill
-                                imagePreview.clipsToBounds = true
-                            }
-                            
-                            titlePreview.text = title
-                            descPreview.text = description
-                            linkPreview.text = link
-                            linkPreview.topAnchor.constraint(equalTo: descPreview.bottomAnchor, constant: 8.0).isActive = true
+                    titlePreview.font = .systemFont(ofSize: 14 + String.offset(), weight: .semibold)
+                    titlePreview.textColor = .label
+                    titlePreview.numberOfLines = 2
+
+                    let hostPreview = UILabel()
+                    hostPreview.font = .systemFont(ofSize: 12 + String.offset())
+                    hostPreview.textColor = .secondaryLabel
+                    hostPreview.numberOfLines = 1
+
+                    let written = UIStackView(arrangedSubviews: [titlePreview, hostPreview])
+                    written.axis = .vertical
+                    written.spacing = 2
+                    container.addSubview(written)
+                    written.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        written.leadingAnchor.constraint(equalTo: imagePreview.trailingAnchor, constant: 12),
+                        written.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+                        written.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                        written.topAnchor.constraint(greaterThanOrEqualTo: container.topAnchor, constant: 6)
+                    ])
+
+                    /// A link nothing is known about yet, or nothing could be learned about: the
+                    /// address itself, which is all there is to say.
+                    func drawPlain() {
+                        imagePreview.image = UIImage(systemName: "link",
+                                                     withConfiguration: UIImage.SymbolConfiguration(pointSize: 26))
+                        imagePreview.contentMode = .center
+                        imagePreview.tintColor = .secondaryLabel
+                        titlePreview.text = link
+                        titlePreview.numberOfLines = 2
+                        hostPreview.isHidden = true
+                    }
+
+                    func draw(_ facts: LinkPreviewFacts) {
+                        titlePreview.text = facts.title.isEmpty ? link : facts.title
+                        var site = facts.domain
+                        if facts.isVideo {
+                            let spoken = facts.spokenDuration
+                            site += " \u{2022} " + (spoken.isEmpty ? facts.videoLabel : "\(facts.videoLabel) \(spoken)")
                         }
+                        hostPreview.text = site
+                        hostPreview.isHidden = site.isEmpty
+                        // The picture as it already stands on this device - the conversation put
+                        // it there when it drew the message. Nothing is downloaded for a row in a
+                        // list that scrolls, and the disk is read away from the main thread: the
+                        // shared image cache decrypts what it reads, which is not something a row
+                        // can do between two frames.
+                        imagePreview.image = UIImage(systemName: "link",
+                                                     withConfiguration: UIImage.SymbolConfiguration(pointSize: 26))
+                        imagePreview.contentMode = .center
+                        imagePreview.tintColor = .secondaryLabel
+                        LinkPreviewImage.onDisk(facts.imageUrl) { [weak imagePreview] picture in
+                            guard let picture = picture, let imagePreview = imagePreview else {
+                                return
+                            }
+                            imagePreview.contentMode = .scaleAspectFill
+                            imagePreview.tintColor = nil
+                            imagePreview.image = picture
+                        }
+                    }
+
+                    // Fix: this list read every link it drew off the internet, a page per row as
+                    // the rows came into view, and rebuilt each row when its page arrived - so
+                    // scrolling the link filter dragged a queue of downloads and a queue of row
+                    // reloads behind it, and the scrolling showed it. Nothing is fetched here any
+                    // more: the list draws what is already known about a link, which is what the
+                    // conversation itself wrote down when it drew the message. A link whose page
+                    // has not been read yet reads as its own address, and reading the message in
+                    // its conversation is what fills it in.
+                    let known: LinkPreviewStore.Answer
+                    if let held = linkAnswers[link] {
+                        known = held
                     } else {
-                        linkPreview.text = link
-                        linkPreview.centerYAnchor.constraint(equalTo: container.centerYAnchor).isActive = true
+                        known = LinkPreviewStore.answer(link: link)
+                        linkAnswers[link] = known
+                    }
+                    switch known {
+                    case .read(let facts):
+                        draw(facts)
+                    case .nothingOnIt, .notAsked:
+                        drawPlain()
                     }
                 } else if selectedTag == ChatTagSearch.audiosTag {
-                    subtitle.text = "♫ " + "Audio".localized()
-                    
-                    let imageAudio = UIImageView()
-                    imageAudio.image = UIImage(systemName: "music.note", withConfiguration: UIImage.SymbolConfiguration(pointSize: 35))
-                    container.addSubview(imageAudio)
-                    imageAudio.anchor(left: container.leftAnchor, paddingLeft: 10, centerY: container.centerYAnchor)
-                    imageAudio.tintColor = .black
-                    
-                    let nameAudio = UILabel()
-                    container.addSubview(nameAudio)
-                    nameAudio.anchor(left: imageAudio.rightAnchor, right: container.rightAnchor, paddingLeft: 10, paddingRight: 10, centerY: container.centerYAnchor)
-                    nameAudio.numberOfLines = 2
-                    nameAudio.text = data.messageText.components(separatedBy: "|")[0]
-                    nameAudio.font = .systemFont(ofSize: 16 + String.offset(), weight: .medium)
-                    
-                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                    if let dirPath = paths.first {
-                        let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(data.audio)
-                        if !FileManager.default.fileExists(atPath: audioURL.path) && !FileEncryption.shared.isSecureExists(filename: data.audio) {
-                            Download().startHTTP(forKey: data.audio) { (name, progress) in
-                                guard progress == 100 else {
-                                    return
+                    // Fix: a music-note glyph and a file name, and a tap anywhere on the panel to
+                    // start it - no play button, no waveform, no length, and nothing to say whose
+                    // voice it is. The conversation already draws an audio row properly, in
+                    // AudioBubbleContent, and the message info screen draws the same one; this
+                    // makes three places rather than a fourth drawing of its own.
+                    let isVoiceNote = data.attachmentFlag == "60"
+
+                    // Fix: incoming: true was wrong for a list. That lays a bubble out mirrored -
+                    // the sender's picture on the far side - which is right in a conversation where
+                    // the two sides face each other, and wrong here where every row is somebody
+                    // else's and they all read the same way. The reference has the picture leading.
+                    let row = AudioBubbleContent(incoming: false,
+                                                 isVoiceNote: isVoiceNote,
+                                                 bubbleColour: container.backgroundColor ?? .white,
+                                                 traits: tableView.traitCollection,
+                                                 fontOffset: String.offset(),
+                                                 stretchesTrack: true)
+                    container.addSubview(row)
+                    // Fix: the row was pinned to the panel's right edge as well, and it must not
+                    // be. AudioBubbleContent ends where its own line ends - it says so with a
+                    // required constraint, so that two screens showing the same note come out the
+                    // same width - and pinning it to a wide panel as well asks for two widths at
+                    // once. Auto Layout settles that by breaking something, and what it broke was
+                    // the picture's own width: a 44-point circle stretched into a black stadium
+                    // most of the row long. It hugs its content now and only the left edge and the
+                    // height are given to it.
+                    // The line runs to the row's own trailing edge now, so the row is given the
+                    // panel's width and there is no second answer for Auto Layout to break.
+                    row.anchor(top: container.topAnchor, left: container.leftAnchor,
+                               bottom: container.bottomAnchor, right: container.rightAnchor,
+                               paddingTop: 6, paddingLeft: 10, paddingBottom: 6, paddingRight: 14)
+                    // Fix: data.thumb is the *message's* thumbnail, which a voice note does not
+                    // have - so the picture was never given anything to load and every row drew the
+                    // grey stand-in. The sender's own picture is data.profile: the query behind
+                    // these results joins BUDDY on m.f_pin, so it is already whose voice it is.
+                    row.setPicture(named: data.profile)
+                    // The speed button belongs to a conversation, where a note is listened to at
+                    // length; a result in a list is a thing to identify, not to sit through.
+                    row.speedPill.isHidden = true
+                    audioRows[data.messageId] = row
+
+                    audioButtonResults[row.playButton] = data
+                    row.playButton.addTarget(self, action: #selector(audioPlayTapped(_:)), for: .touchUpInside)
+
+                    if let url = audioFileURL(named: data.audio) {
+                        // What the row says is taken from the one player this recording has,
+                        // whether this screen started it or a conversation did - see
+                        // AudioMiniPlayer. Opening a second player for a recording already playing
+                        // somewhere else is what leaves a row silent with a play button on it.
+                        _ = AudioMiniPlayer.shared.player(for: data.messageId, openingFrom: url)
+                        showAudioState(on: row, messageId: data.messageId, name: data.audio)
+                        if isVoiceNote {
+                            let key = data.audio
+                            if let levels = AudioWaveformStore.levels(for: key) {
+                                row.wave.levels = levels
+                            } else {
+                                AudioWaveformStore.read(url: url, key: key) { [weak row] levels in
+                                    row?.wave.levels = levels
                                 }
-                                tableView.reloadRows(at: [indexPath], with: .none)
-                            }
-                        } else {
-                            let objectTap = ObjectGesture(target: self, action: #selector(onContSearch(_:)))
-                            objectTap.audio_id = data.audio
-                            objectTap.containerFile = container
-                            container.addGestureRecognizer(objectTap)
-                            if Download.isDownloading(forKey: data.audio) {
-                                ChatTransferRing.add(to: container, fileName: data.audio, progress: Download.progress(forKey: data.audio) ?? 0)
                             }
                         }
+                        // Fix: this used to take the recording back off the strip the moment the
+                        // row was built, copied from the conversation - which is right there,
+                        // because a bubble showing a recording is the thing that should be showing
+                        // it. It is wrong here: coming back from a conversation lands on this list,
+                        // and the reader asked for the strip to be the one that carries on. So the
+                        // row is drawn at rest and the recording stays with the strip until the
+                        // play button asks for it - rule three.
+                        if playingAudioId == data.messageId {
+                            startAudioTicker()
+                        }
+                    } else if !Download.isDownloading(forKey: data.audio) {
+                        Download().startHTTP(forKey: data.audio) { [weak self] (name, progress) in
+                            guard progress == 100 else {
+                                return
+                            }
+                            DispatchQueue.main.async {
+                                self?.reloadBothViews()
+                            }
+                        }
+                    }
+                    if Download.isDownloading(forKey: data.audio) {
+                        ChatTransferRing.add(to: container, fileName: data.audio, progress: Download.progress(forKey: data.audio) ?? 0)
                     }
                 }
         return cell
@@ -1070,7 +1183,7 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         subtitle.textColor = .gray
         subtitle.numberOfLines = 2
         subtitle.lineBreakMode = .byTruncatingTail
-        subtitle.attributedText = mediaSubtitle(for: data)
+        subtitle.attributedText = resultSubtitle(for: data)
         content.addSubview(subtitle)
         subtitle.anchor(top: title.bottomAnchor, left: content.leftAnchor, right: thumbButton.leftAnchor,
                         paddingTop: 4, paddingLeft: ChatTagSearch.captionMargin, paddingRight: 12)
@@ -1081,7 +1194,15 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
     /// "You: 📷 caption" the way WhatsApp writes it: who sent it (left out when the
     /// conversation is with that person and it is already in the title), then the kind of
     /// attachment as an icon, then whatever was said with it.
-    private func mediaSubtitle(for data: Chat) -> NSAttributedString {
+    /// Who sent it and what it is - the line under the conversation's name.
+    ///
+    /// Fix: this was only asked for by the photo and video rows. Documents, links and audio each
+    /// wrote their own subtitle a few lines further down, and none of them said who sent it - so a
+    /// group result gave no clue which of twenty people it came from. The rule about the sender is
+    /// the same for all of them, and it is a rule worth stating once: in a group the sender is
+    /// always named, because there are many; in a one-to-one conversation only "You" is worth
+    /// saying, because the other name is already the title.
+    private func resultSubtitle(for data: Chat) -> NSAttributedString {
         let font = UIFont.systemFont(ofSize: 15 + String.offset())
         let line = NSMutableAttributedString()
         let sender: String
@@ -1098,6 +1219,10 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
 
         let symbol: String
         let fallback: String
+        // Whether the line ends with what was written alongside the attachment, or simply with
+        // what the attachment is. A caption belongs to a picture; a document's message text is its
+        // own file name, and a recording has none at all.
+        var showsCaption = true
         switch selectedTag {
         case ChatTagSearch.videosTag:
             symbol = "video.fill"
@@ -1105,6 +1230,23 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         case ChatTagSearch.gifsTag:
             symbol = "photo.fill"
             fallback = "GIF"
+        case ChatTagSearch.documentsTag:
+            symbol = "doc.fill"
+            fallback = "Document".localized()
+            showsCaption = false
+        case ChatTagSearch.audiosTag:
+            let isVoiceNote = data.attachmentFlag == "60"
+            symbol = isVoiceNote ? "mic.fill" : "music.note"
+            var said = isVoiceNote ? "Voice message".localized() : "Audio".localized()
+            // The length, where it is known, exactly as the conversation list says it.
+            if isVoiceNote, let seconds = AudioDurationStore.seconds(forFileNamed: data.audio) {
+                said += String(format: " (%d:%02d)", seconds / 60, seconds % 60)
+            }
+            fallback = said
+            showsCaption = false
+        case ChatTagSearch.linksTag:
+            symbol = "link"
+            fallback = "Link".localized()
         default:
             symbol = "camera.fill"
             fallback = "Photo".localized()
@@ -1118,8 +1260,15 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
             line.append(NSAttributedString(attachment: attachment))
             line.append(NSAttributedString(string: " ", attributes: [.font: font]))
         }
-        let caption = data.messageText.mentionsAsNames().trimmingCharacters(in: .whitespacesAndNewlines)
-        line.append(NSAttributedString(string: caption.isEmpty ? fallback : caption,
+        // What was written, less the part after the black square - that is carried along with some
+        // messages for the app's own purposes and is not something anybody wrote.
+        var written = data.messageText
+        if written.contains("■") {
+            written = written.components(separatedBy: "■")[0]
+        }
+        let caption = written.mentionsAsNames().trimmingCharacters(in: .whitespacesAndNewlines)
+        let said = showsCaption && !caption.isEmpty ? caption : fallback
+        line.append(NSAttributedString(string: said,
                                        attributes: [.font: font, .foregroundColor: UIColor.gray]))
         return line
     }
@@ -1148,15 +1297,28 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
         }
         var name = ""
         if isGroupResult(data) {
+            // Fix: this answered with the topic's title alone, or with the group's name alone when
+            // there was no topic - so two topics of the same group read as two unrelated
+            // conversations, and a reader could not tell which group a result belonged to. The
+            // conversation itself is named "group (topic)", and a result should carry the same name
+            // the conversation carries.
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT title FROM DISCUSSION_FORUM WHERE chat_id = '\(key)'"), cursor.next() {
-                    name = cursor.string(forColumnIndex: 0) ?? ""
+                var group = ""
+                var topic = ""
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT c.f_name, b.title FROM DISCUSSION_FORUM b JOIN GROUPZ c ON b.group_id = c.group_id WHERE b.chat_id = '\(key)'"), cursor.next() {
+                    group = cursor.string(forColumnIndex: 0) ?? ""
+                    topic = cursor.string(forColumnIndex: 1) ?? ""
                     cursor.close()
                 }
-                if name.isEmpty, let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name FROM GROUPZ WHERE group_id = '\(key)'"), cursor.next() {
-                    name = cursor.string(forColumnIndex: 0) ?? ""
+                if group.isEmpty, let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT f_name FROM GROUPZ WHERE group_id = '\(key)'"), cursor.next() {
+                    group = cursor.string(forColumnIndex: 0) ?? ""
                     cursor.close()
+                    // A group's own room, which the conversation calls Lounge.
+                    topic = "Lounge".localized()
                 }
+                name = topic.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? group
+                    : "\(group) (\(topic))"
             })
         } else if let user = User.getDataCanNil(pin: key) {
             name = user.fullName.trimmingCharacters(in: .whitespaces)
@@ -1289,65 +1451,216 @@ public final class ChatTagSearch: NSObject, UITableViewDataSource, UITableViewDe
                 UIApplication.shared.open(url)
             }
         } else if selectedTag == ChatTagSearch.audiosTag {
-            if downloadIfMissing(sender.audio_id, showingProgressOn: sender.containerFile) {
-                return
-            }
-            let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-            let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-            let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-            if let dirPath = paths.first {
-                let audioURL = URL(fileURLWithPath: dirPath).appendingPathComponent(sender.audio_id)
-                if FileManager.default.fileExists(atPath: audioURL.path) {
-                    do {
-                        if audioPlayer == nil || audioPlayer?.url != audioURL {
-                            do {
-                                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-                                try AVAudioSession.sharedInstance().setActive(true)
-                            } catch {
-                                
-                            }
-                            audioPlayer = try AVAudioPlayer(contentsOf: audioURL)
-                            audioPlayer?.prepareToPlay()
-                            audioPlayer?.play()
-                        } else if audioPlayer!.isPlaying {
-                            audioPlayer?.pause()
-                        } else {
-                            audioPlayer?.play()
-                        }
-                    } catch {
-                        
-                    }
-                } else if FileEncryption.shared.isSecureExists(filename: sender.audio_id) {
-                    do {
-                        if var audioData = try FileEncryption.shared.readSecure(filename: sender.audio_id) {
-                            let dataDecrypt = FileEncryption.shared.decryptFileFromServer(data: audioData)
-                            if dataDecrypt != nil {
-                                audioData = dataDecrypt!
-                            }
-                            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                            let tempPath = cachesDirectory.appendingPathComponent(sender.audio_id)
-                            try audioData.write(to: tempPath)
-                            if audioPlayer == nil || audioPlayer?.url != tempPath {
-                                do {
-                                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-                                    try AVAudioSession.sharedInstance().setActive(true)
-                                } catch {
-                                    
-                                }
-                                audioPlayer = try AVAudioPlayer(contentsOf: tempPath)
-                                audioPlayer?.prepareToPlay()
-                                audioPlayer?.play()
-                            } else if audioPlayer!.isPlaying {
-                                audioPlayer?.pause()
-                            } else {
-                                audioPlayer?.play()
-                            }
-                        }
-                    } catch {
-                        
-                    }
+            // Nothing here. A recording is started by its own play button, which is where the
+            // reference puts it and the only thing that can say which recording is meant. This
+            // used to open a player of its own - one per screen rather than one per recording - so
+            // a note started in this list and then opened in its conversation played twice over.
+            // See audioPlayTapped.
+        }
+    }
+
+    // MARK: - Playing a result
+
+    /// Where a recording can be played from, or nil while it is not on this device.
+    ///
+    /// A recording in the secure store has to be written out before anything can play it, and it
+    /// is written to the caches directory under its own name so the same recording is only ever
+    /// written out once.
+    private func audioFileURL(named name: String) -> URL? {
+        guard !name.isEmpty else {
+            return nil
+        }
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let onDisk = documents.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: onDisk.path) {
+            return onDisk
+        }
+        guard FileEncryption.shared.isSecureExists(filename: name) else {
+            return nil
+        }
+        // .aac written out as .m4a: AVAudioPlayer reads the container by its extension, and a
+        // recording from Android arrives as a raw stream with the wrong one.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let written = caches.appendingPathComponent(
+            name.contains(".aac") ? "\(name.components(separatedBy: ".")[0]).m4a" : name)
+        if FileManager.default.fileExists(atPath: written.path) {
+            return written
+        }
+        do {
+            if var data = try FileEncryption.shared.readSecure(filename: name) {
+                if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) {
+                    data = decrypted
                 }
+                try data.write(to: written)
+                return written
             }
+        } catch {
+            return nil
+        }
+        return nil
+    }
+
+    /// Puts a row in step with the one player its recording has: the button, the line and the
+    /// length.
+    private func showAudioState(on row: AudioBubbleContent, messageId: String, name: String) {
+        let player = AudioMiniPlayer.shared.player(for: messageId)
+        // Rule three: a recording the strip is holding is running, but it is not running *here*.
+        // The strip is what says so, and two things saying it at once is one too many - so this row
+        // shows it at rest until the reader takes it back with the play button.
+        let heldByStrip = AudioMiniPlayer.shared.currentMessageId == messageId
+        let playing = player?.isPlaying == true && !heldByStrip
+        row.playButton.setImage(UIImage(systemName: playing ? "pause.fill" : "play.fill"), for: .normal)
+        guard let player = player else {
+            row.timeLabel.text = AudioDurationStore.seconds(forFileNamed: name)
+                .map { ChatTagSearch.clock(TimeInterval($0)) } ?? ""
+            return
+        }
+        // Fix: the pointer on a note is the slider's own thumb laid over the waveform - the two
+        // views share the same place in AudioBubbleContent - and only the waveform was being
+        // moved. So the played part of the wave crept along while the dot that marks it sat at the
+        // beginning. Both, always: the wave says how much, the thumb says where.
+        row.slider.maximumValue = Float(max(player.duration, 0.01))
+        row.slider.value = Float(player.currentTime)
+        if row.isVoiceNote {
+            row.wave.progress = player.duration > 0 ? CGFloat(player.currentTime / player.duration) : 0
+        }
+        // What is left of it while it runs, and how long it is when it is not - which is what the
+        // reference shows on a note nobody has started.
+        row.timeLabel.text = ChatTagSearch.clock(player.isPlaying || player.currentTime > 0
+                                                 ? player.currentTime
+                                                 : player.duration)
+    }
+
+    private static func clock(_ seconds: TimeInterval) -> String {
+        let whole = Int(seconds.rounded(.down))
+        return String(format: "%d:%02d", whole / 60, whole % 60)
+    }
+
+    /// Starts a recording, or stops the one that is running.
+    @objc private func audioPlayTapped(_ sender: UIButton) {
+        guard let data = audioButtonResults[sender], let row = audioRows[data.messageId] else {
+            return
+        }
+        if downloadIfMissing(data.audio, showingProgressOn: row.superview ?? row) {
+            return
+        }
+        guard let url = audioFileURL(named: data.audio),
+              let player = AudioMiniPlayer.shared.player(for: data.messageId, openingFrom: url) else {
+            return
+        }
+        // Rule three, the other half: the strip is holding this one, so pressing play here means
+        // taking it back. Nothing stops and nothing starts again - the sound carries on from where
+        // it is, and the strip goes because this row is showing it now.
+        if AudioMiniPlayer.shared.currentMessageId == data.messageId {
+            _ = AudioMiniPlayer.shared.reclaim(messageId: data.messageId)
+            player.delegate = self
+            playingAudioId = data.messageId
+            startAudioTicker()
+            showAudioState(on: row, messageId: data.messageId, name: data.audio)
+            return
+        }
+        if player.isPlaying {
+            player.pause()
+            AudioPositionStore.remember(player.currentTime, for: data.messageId)
+            playingAudioId = ""
+            stopAudioTicker()
+            showAudioState(on: row, messageId: data.messageId, name: data.audio)
+            return
+        }
+        // One recording at a time, and that rule belongs to the app rather than to this screen:
+        // what it stops may be another row here, or one still running on the strip from a
+        // conversation that has been left. Both are settled in one call.
+        for stopped in AudioMiniPlayer.shared.pauseAllExcept(data.messageId) {
+            if let other = audioRows[stopped] {
+                showAudioState(on: other, messageId: stopped, name: "")
+            }
+        }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+        }
+        player.delegate = self
+        player.play()
+        playingAudioId = data.messageId
+        startAudioTicker()
+        showAudioState(on: row, messageId: data.messageId, name: data.audio)
+    }
+
+    private func startAudioTicker() {
+        guard audioTicker == nil else {
+            return
+        }
+        audioTicker = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.tickAudio()
+        }
+    }
+
+    private func stopAudioTicker() {
+        audioTicker?.invalidate()
+        audioTicker = nil
+    }
+
+    private func tickAudio() {
+        guard !playingAudioId.isEmpty,
+              let player = AudioMiniPlayer.shared.player(for: playingAudioId) else {
+            stopAudioTicker()
+            return
+        }
+        // Fix: this went on ticking after the recording had been handed to the strip. Nothing ever
+        // told it - the handover happens in the conversation that was left, and this screen was
+        // not there to hear it - so the button showed the recording at rest, correctly, while the
+        // thumb and the played part of the waveform carried on moving underneath it. The one thing
+        // that can always be checked is who is holding the recording now, so it is checked here:
+        // the strip holding it means this screen is no longer the one showing it, and it steps
+        // aside where it stands.
+        if AudioMiniPlayer.shared.currentMessageId == playingAudioId {
+            let handedOver = playingAudioId
+            playingAudioId = ""
+            stopAudioTicker()
+            if let row = audioRows[handedOver] {
+                showAudioState(on: row, messageId: handedOver, name: "")
+            }
+            return
+        }
+        AudioPositionStore.remember(player.currentTime, for: playingAudioId)
+        guard let row = audioRows[playingAudioId], row.window != nil else {
+            // The row has scrolled away. The sound carries on - it is the strip's job to say so
+            // once this screen is left - but there is nothing here to keep in step.
+            return
+        }
+        showAudioState(on: row, messageId: playingAudioId, name: "")
+    }
+
+    /// Stops whatever this screen started, and forgets the recording so the next listen begins at
+    /// the beginning.
+    ///
+    /// Rule one of the three: a filter cleared takes its sound with it. Anything a *conversation*
+    /// started is left alone - it is not this screen's to stop.
+    private func stopOwnAudio() {
+        stopAudioTicker()
+        guard !playingAudioId.isEmpty else {
+            return
+        }
+        let wasPlaying = playingAudioId
+        playingAudioId = ""
+        AudioMiniPlayer.shared.release(wasPlaying)
+        if let row = audioRows[wasPlaying] {
+            showAudioState(on: row, messageId: wasPlaying, name: "")
+        }
+    }
+
+    public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        guard !playingAudioId.isEmpty else {
+            return
+        }
+        let finished = playingAudioId
+        playingAudioId = ""
+        stopAudioTicker()
+        AudioPositionStore.remember(0, for: finished)
+        player.currentTime = 0
+        if let row = audioRows[finished] {
+            showAudioState(on: row, messageId: finished, name: "")
         }
     }
 

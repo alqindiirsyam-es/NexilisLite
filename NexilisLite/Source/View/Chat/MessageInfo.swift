@@ -1174,11 +1174,18 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 containerViewFile.bottomAnchor.constraint(equalTo:messageText.topAnchor, constant: -5).isActive = true
                 containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
                 containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
-                containerViewFile.backgroundColor = .black.withAlphaComponent(0.2)
+                // The same panel a quote sits on, and the same two weights of writing on it.
+                let onDarkBubble = self.traitCollection.userInterfaceStyle == .dark
+                containerViewFile.backgroundColor = BubblePanel.ground(dark: onDarkBubble)
                 containerViewFile.layer.cornerRadius = 5.0
                 containerViewFile.clipsToBounds = true
                 
-                let imageFile = UIImageView(image: UIImage(systemName: "doc.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .bold, scale: .default)))
+                // Each kind of document in its own colour, with its extension on the page.
+                let documentName = Utils.documentName(messageText: textChat, file: fileChat)
+                let imageFile = UIImageView(image: DocumentBadge.image(
+                    of: Utils.documentKind(named: documentName, file: fileChat),
+                    size: CGSize(width: 26, height: 30)))
+                imageFile.contentMode = .scaleAspectFit
                 containerViewFile.addSubview(imageFile)
                 let nameFile = UILabel()
                 containerViewFile.addSubview(nameFile)
@@ -1189,14 +1196,13 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 imageFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
                 imageFile.widthAnchor.constraint(equalToConstant: 30).isActive = true
                 imageFile.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                imageFile.tintColor = .docColor
                 
                 nameFile.translatesAutoresizingMaskIntoConstraints = false
                 nameFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
                 nameFile.widthAnchor.constraint(lessThanOrEqualToConstant: 200).isActive = true
                 nameFile.font = UIFont.systemFont(ofSize: 12 + offset(), weight: .medium)
-                nameFile.textColor = .white
-                nameFile.text = textChat.components(separatedBy: "|").first ?? ""
+                nameFile.textColor = BubblePanel.text(dark: onDarkBubble)
+                nameFile.text = documentName
                 
                 // Fix: force cast. A row that carries no progress at all - which is any message
                 // that did not come from a transfer - brought the screen down.
@@ -1255,12 +1261,10 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     // instead moves the quote away from the bubble the same way, and the text goes to
                     // 87% for the same reason WhatsApp can afford 60% and we cannot.
                     let isDarkQuote = self.traitCollection.userInterfaceStyle == .dark
-                    let quoteOverlay: UIColor = isDarkQuote
-                        ? .black.withAlphaComponent(0.22)
-                        : UIColor(white: 0.784, alpha: 0.22)
-                    let quotedTextColour: UIColor = isDarkQuote
-                        ? .white.withAlphaComponent(0.87)
-                        : .black.withAlphaComponent(0.77)
+                    // The one place these two live, so the quote and the document card - which are the
+                    // same panel by design - cannot drift apart. See BubblePanel.
+                    let quoteOverlay = BubblePanel.ground(dark: isDarkQuote)
+                    let quotedTextColour = BubblePanel.text(dark: isDarkQuote)
 
                     let containerReply = UIView()
                     containerMessage.addSubview(containerReply)
@@ -1351,6 +1355,16 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     // message text below it - which is the one meant to give way - does.
                     let topConstraintContent = contentReply.topAnchor.constraint(greaterThanOrEqualTo: titleReply.bottomAnchor)
                     topConstraintContent.isActive = true
+                    // Fix: with the name held to the top of the box and the text to the bottom, and only a
+                    // minimum between them, nothing said how tall the box should actually be - it had a
+                    // floor and no ceiling. So the thumbnail's own picture size, even given the lowest say
+                    // there is, was still the only thing with an opinion, and it inflated the box until the
+                    // width cap stopped it: a hundred-point quote holding two lines of text, with the label
+                    // stranded at the bottom. This says the box hugs its two lines, and says it firmly
+                    // enough to beat a picture while still giving way to the minimum above it.
+                    let hugContent = contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor)
+                    hugContent.priority = UILayoutPriority(500)
+                    hugContent.isActive = true
                     contentReply.font = UIFont.systemFont(ofSize: 11 + offset())
                     // Fix: force casts on values that come straight out of the database, where a
                     // NULL column arrives as nil. Any of the six could bring the screen down.
@@ -1361,82 +1375,122 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     let video_chat = (dataReply["video_id"] as? String) ?? ""
                     let file_chat = (dataReply["file_id"] as? String) ?? ""
                     let audio_chat = (dataReply["audio_id"] as? String) ?? ""
-                    if (attachment_flag == "0" && thumb_chat == "") {
-                        contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
+                    let gif_chat = (dataReply["gif_id"] as? String) ?? ""
+                    // Fix: this chain began with "no flag and no thumbnail, so it is plain text", and that test
+                    // is looser than it reads - an attachment whose flag is 0 or blank was answered with its own
+                    // message text, which for a document is a filename and a caption joined by a bar, or nothing
+                    // at all. A reply to a document therefore drew a quote with nothing in it. What a message
+                    // carries is decided from its slots now, in one place shared by all six quotes - see
+                    // Utils.quotedAttachmentLine - and nil comes back only for a message that really is text,
+                    // which is rendered here because each of the six draws mentions its own way.
+                    // Held rather than activated and forgotten: a thumbnail claims the right-hand end of the
+                    // quote further down, and this has to come off before it does or the two fight over the
+                    // same edge.
+                    let contentTrailingToContainer = contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20)
+                    contentTrailingToContainer.isActive = true
+                    if let carried = Utils.quotedAttachmentLine(attachmentFlag: attachment_flag,
+                                                                thumb: thumb_chat,
+                                                                image: image_chat,
+                                                                video: video_chat,
+                                                                file: file_chat,
+                                                                audio: audio_chat,
+                                                                gif: gif_chat,
+                                                                messageText: message_text,
+                                                                font: contentReply.font,
+                                                                colour: quotedTextColour) {
+                        contentReply.attributedText = carried
+                    } else {
                         contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: mentionGroupId)
-                    } else if (attachment_flag == "1" || image_chat != "") {
-                        if (message_text == "") {
-                            contentReply.text = "📷 Photo".localized()
-                        } else {
-                            contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: mentionGroupId)
-                        }
-                    } else if (attachment_flag == "2" || video_chat != "") {
-                        if (message_text == "") {
-                            // A round video note is quoted as one, with its length; an ordinary video
-                            // is quoted the way it always was.
-                            if let noteLine = VideoNote.quotedLine(videoId: video_chat,
-                                                                   font: contentReply.font,
-                                                                   colour: contentReply.textColor ?? .gray) {
-                                contentReply.attributedText = noteLine
-                            } else {
-                                contentReply.text = "📹 Video".localized()
-                            }
-                        } else {
-                            contentReply.attributedText = message_text.richText(fontSize: 11 + offset(), group_id: mentionGroupId)
-                        }
-                    } else if (attachment_flag == "6" || file_chat != ""){
-                        contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                        contentReply.text = "📄 \(message_text.components(separatedBy: "|")[0])"
-                    } else if (attachment_flag == "11") {
-                        contentReply.text = "❤️ Sticker"
-                    } else if !audio_chat.isEmpty {
-                        contentReply.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -20).isActive = true
-                        contentReply.attributedText = Utils.audioPreviewLine(attachmentFlag: attachment_flag,
-                                                                            audioName: audio_chat,
-                                                                            font: contentReply.font,
-                                                                            colour: quotedTextColour)
                     }
 // WhatsApp writes the quote in the foreground colour held back a little, not in a
                     // colour of its own: #303237 on that #D3E1F2 quote is black at 77%. Its dark
                     // theme does the same the other way round, white at 60%.
                     contentReply.textColor = quotedTextColour
                     
-                    if (attachment_flag == "1" || attachment_flag == "2" || image_chat != "" || video_chat != "") {
-                        let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                        let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                        let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                        if let dirPath = paths.first {
-                            // Only the plain file was read, which a receiver often does not have -
-                            // nobody downloads the thumbnail of a message they have only been shown
-                            // a quote of. See VideoNote.quotedStill.
-                            let imageThumb = UIImageView()
-                            VideoNote.loadQuotedStill(named: thumb_chat, into: imageThumb)
-                            containerReply.addSubview(imageThumb)
-                            // A video note is round wherever it is shown, a quote included; the square corner
-                            // is what every other kind of attachment keeps.
-                            imageThumb.layer.cornerRadius = VideoNote.isNote(video_chat) ? 15.0 : 2.0
-                            imageThumb.clipsToBounds = true
-                            imageThumb.contentMode = .scaleAspectFill
-                            imageThumb.translatesAutoresizingMaskIntoConstraints = false
-                            imageThumb.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -10).isActive = true
-                            imageThumb.centerYAnchor.constraint(equalTo: containerReply.centerYAnchor).isActive = true
-                            imageThumb.widthAnchor.constraint(equalToConstant: 30).isActive = true
-                            imageThumb.heightAnchor.constraint(equalToConstant: 30).isActive = true
-                            
-                            if (attachment_flag == "2") {
-                                let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
-                                imageThumb.addSubview(imagePlay)
-                                imagePlay.clipsToBounds = true
-                                imagePlay.translatesAutoresizingMaskIntoConstraints = false
-                                imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor).isActive = true
-                                imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor).isActive = true
-                                imagePlay.widthAnchor.constraint(equalToConstant: 10).isActive = true
-                                imagePlay.heightAnchor.constraint(equalToConstant: 10).isActive = true
-                                imagePlay.tintColor = .white
-                            }
-                            titleReply.trailingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: -20).isActive = true
-                            contentReply.trailingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: -20).isActive = true
+                    // The still fills the right-hand end of the quote, full height and flush to the edge, the
+                    // way the reference draws one. It is scaled to that box and cropped to it, so a picture
+                    // is never drawn at whatever size it happens to be.
+                    //
+                    // Fix: it was a 30-point square floating ten points in from the edge, vertically centred -
+                    // a stamp beside the text rather than part of the quote. The picture it was given was
+                    // only ever the thumbnail, so a message whose thumbnail never arrived showed nothing at
+                    // all - which is the quote that "sometimes has no picture"; the full image is the
+                    // fallback now. And only a quote of a picture or a video has a still to show at all: the
+                    // test that said so was lost when this block was first rewritten, so every quote grew
+                    // one, and a quote of a document or of plain text grew an empty one - the grey rectangle
+                    // on the right.
+                    let carriesStill = attachment_flag == "1" || attachment_flag == "2"
+                        || !image_chat.isEmpty || !video_chat.isEmpty
+                    if carriesStill, !VideoNote.isNote(video_chat) {
+                        let imageThumb = UIImageView()
+                        VideoNote.loadQuotedStill(named: thumb_chat.isEmpty ? image_chat : thumb_chat, into: imageThumb)
+                        containerReply.addSubview(imageThumb)
+                        imageThumb.clipsToBounds = true
+                        imageThumb.contentMode = .scaleAspectFill
+                        imageThumb.translatesAutoresizingMaskIntoConstraints = false
+                        // Fix: a picture in an image view carries its own size, and with the view pinned to the
+                        // top and the bottom of the quote that size became the quote's height - a five-hundred
+                        // point still made a four-hundred point quote, which is the tall grey box with the name
+                        // at the top and the label stranded at the bottom. Its own size is given the lowest say
+                        // there is, so the height comes from the two labels and the picture fills whatever that
+                        // turns out to be.
+                        imageThumb.setContentHuggingPriority(UILayoutPriority(1), for: .vertical)
+                        imageThumb.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+                        imageThumb.setContentCompressionResistancePriority(UILayoutPriority(1), for: .vertical)
+                        imageThumb.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+                        // Flush to three edges, so the quote's own rounded corner is what shapes it - no radius
+                        // of its own, and nothing to keep in step with the container's.
+                        NSLayoutConstraint.activate([
+                            imageThumb.topAnchor.constraint(equalTo: containerReply.topAnchor),
+                            imageThumb.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor),
+                            imageThumb.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor),
+                            // Square, so it fills the height it was given rather than stretching into a
+                            // letterbox - the quote is only as tall as its two lines of text, and a picture
+                            // three times wider than tall is not what the reference shows. Capped as a share
+                            // of the width so it can never crowd the text out on a narrow bubble.
+                            imageThumb.widthAnchor.constraint(equalTo: imageThumb.heightAnchor),
+                            imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerReply.widthAnchor, multiplier: 0.45)
+                        ])
+
+                        // A gif travels in the video slot too, and a play badge on an animated
+                    // picture is a promise it does not keep.
+                    if (attachment_flag == "2" || !video_chat.isEmpty), gif_chat.isEmpty {
+                            let imagePlay = UIImageView(image: UIImage(systemName: "play.circle.fill"))
+                            imageThumb.addSubview(imagePlay)
+                            imagePlay.translatesAutoresizingMaskIntoConstraints = false
+                            NSLayoutConstraint.activate([
+                                imagePlay.centerYAnchor.constraint(equalTo: imageThumb.centerYAnchor),
+                                imagePlay.centerXAnchor.constraint(equalTo: imageThumb.centerXAnchor),
+                                imagePlay.widthAnchor.constraint(equalToConstant: 22),
+                                imagePlay.heightAnchor.constraint(equalToConstant: 22)
+                            ])
+                            imagePlay.tintColor = .white
                         }
+                        // The text gives the picture its room. The constraint that held it to the container's own
+                        // edge is taken off first: two required constraints on one edge is a conflict, and the
+                        // layout resolves those by breaking whichever it likes.
+                        contentTrailingToContainer.isActive = false
+                        titleReply.trailingAnchor.constraint(lessThanOrEqualTo: imageThumb.leadingAnchor, constant: -10).isActive = true
+                        contentReply.trailingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: -10).isActive = true
+                    } else if carriesStill {
+                        // A video note is round wherever it is shown, a quote included, so it stays a small
+                        // still beside the text rather than filling the corner.
+                        let imageThumb = UIImageView()
+                        VideoNote.loadQuotedStill(named: thumb_chat, into: imageThumb)
+                        containerReply.addSubview(imageThumb)
+                        imageThumb.layer.cornerRadius = 15.0
+                        imageThumb.clipsToBounds = true
+                        imageThumb.contentMode = .scaleAspectFill
+                        imageThumb.translatesAutoresizingMaskIntoConstraints = false
+                        NSLayoutConstraint.activate([
+                            imageThumb.trailingAnchor.constraint(equalTo: containerReply.trailingAnchor, constant: -10),
+                            imageThumb.centerYAnchor.constraint(equalTo: containerReply.centerYAnchor),
+                            imageThumb.widthAnchor.constraint(equalToConstant: 30),
+                            imageThumb.heightAnchor.constraint(equalToConstant: 30)
+                        ])
+                        contentTrailingToContainer.isActive = false
+                        titleReply.trailingAnchor.constraint(lessThanOrEqualTo: imageThumb.leadingAnchor, constant: -10).isActive = true
+                        contentReply.trailingAnchor.constraint(equalTo: imageThumb.leadingAnchor, constant: -10).isActive = true
                     }
                     if (attachment_flag == "11" && message_text.components(separatedBy: "/").count > 1) {
                         let imageSticker = UIImageView(image: UIImage(named: (message_text.component(1, separatedBy: "/")), in: Bundle.resourceBundle(for: Nexilis.self), with: nil))
@@ -1571,7 +1625,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
     private func queryMessageReply(message_id: String) -> [String: Any?] {
         var dataQuery: [String: Any] = [:]
         Database.shared.database?.inTransaction({ fmdb, rollback in
-            if let c = Database().getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, message_text, attachment_flag, thumb_id, image_id, video_id, file_id, audio_id FROM MESSAGE where message_id='\(message_id)'"), c.next() {
+            if let c = Database().getRecords(fmdb: fmdb, query: "SELECT message_id, f_pin, message_text, attachment_flag, thumb_id, image_id, video_id, file_id, audio_id, gif_id FROM MESSAGE where message_id='\(message_id)'"), c.next() {
                 dataQuery["message_id"] = c.string(forColumnIndex: 0)
                 dataQuery["f_pin"] = c.string(forColumnIndex: 1)
                 dataQuery["message_text"] = c.string(forColumnIndex: 2)
@@ -1581,6 +1635,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 dataQuery["video_id"] = c.string(forColumnIndex: 6)
                 dataQuery["file_id"] = c.string(forColumnIndex: 7)
                 dataQuery["audio_id"] = c.string(forColumnIndex: 8)
+                dataQuery["gif_id"] = c.string(forColumnIndex: 9)
                 c.close()
             }
         })

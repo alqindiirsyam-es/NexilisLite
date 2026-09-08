@@ -1,5 +1,5 @@
 # Uncomment the next line to define a global platform for your project
-platform :ios, '14.0'
+platform :ios, '15.0'
 
 target 'NexilisLite' do
   # Comment the next line if you don't want to use dynamic frameworks
@@ -8,6 +8,7 @@ target 'NexilisLite' do
   # Pods for NexilisLite
 
   pod 'nuSDKService', '5.0.2'
+  pod 'NexilisZTA', :path => '../NexilisZTA'
   pod 'FMDB/SQLCipher', '~> 2.7.12'
   pod 'NotificationBannerSwift', :git => 'https://github.com/Daltron/NotificationBanner.git', :tag => '4.0.0'
   pod 'Alamofire', '~> 5.10.2'
@@ -44,6 +45,10 @@ end
 # Consequence: consumers must use dynamic frameworks (`use_frameworks!`), since a
 # dynamic framework cannot bind to a pod that was linked statically into the app.
 DYNAMIC_PODS = %w[
+  # NexilisZTA is named in NexilisLite's own public API - APIS.configureSentinel takes a
+  # NexilisZTAConfiguration - so the generated .swiftinterface names the module and a
+  # consumer must actually have it. Same reasoning as FMDB below: declared, not absorbed.
+  NexilisZTA
   Firebase
   FirebaseAuth
   FirebaseAuthInterop

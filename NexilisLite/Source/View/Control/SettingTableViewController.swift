@@ -647,37 +647,16 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
             }))
             self.present(alert, animated: true, completion: nil)
         } else if item.title == "Sign-In to Web".localized() {
-            var permissionCheck = -1
-            if AVCaptureDevice.authorizationStatus(for: .video) ==  .authorized {
-                permissionCheck = 1
-            } else if AVCaptureDevice.authorizationStatus(for: .video) ==  .denied {
-                permissionCheck = 0
-            } else {
-                AVCaptureDevice.requestAccess(for: .video, completionHandler: { (granted: Bool) -> Void in
-                    if granted == true {
-                        permissionCheck = 1
-                    } else {
-                        permissionCheck = 0
-                    }
-                })
-            }
-            
-            while permissionCheck == -1 {
-                sleep(1)
-            }
+            // Fix: this asked for the camera, then span on a variable the answer would be written
+            // into - `while permissionCheck == -1 { sleep(1) }`. On the main thread that is the app
+            // frozen a second at a time, and the prompt it is waiting for may not be able to draw
+            // itself while it is; the variable was also written from iOS's queue and read from this
+            // one with nothing between them. The one checker waits on a semaphore and never returns
+            // the "not asked yet" answer this was spinning on.
+            let permissionCheck = Nexilis.checkCameraPermission()
             
             if permissionCheck == 0 {
-                let alert = LibAlertController(title: "Attention!".localized(), message: "Please allow camera permission in your settings".localized(), preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK".localized(), style: UIAlertAction.Style.default, handler: { _ in
-                    if let url = URL(string: UIApplication.openSettingsURLString), UIApplication.shared.canOpenURL(url) {
-                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                    }
-                }))
-                if UIApplication.shared.visibleViewController?.navigationController != nil {
-                    UIApplication.shared.visibleViewController?.navigationController?.present(alert, animated: true, completion: nil)
-                } else {
-                    UIApplication.shared.visibleViewController?.present(alert, animated: true, completion: nil)
-                }
+                APIS.showCameraRefused()
                 return
             }
             if APIS.blockedByCallInProgress() {

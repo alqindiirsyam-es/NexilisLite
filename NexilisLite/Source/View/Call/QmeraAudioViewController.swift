@@ -1261,7 +1261,14 @@ class QmeraAudioViewController: UIViewController {
                                     }
                                 }
                             }
-                            SecureUserDefaults.shared.set(members, forKey: "inEditorPersonal")
+                            // Fix: the people on a call used to be written into
+                            // "inEditorPersonal", the same key a chat screen uses to say which
+                            // conversation is open, and the banner test read any value with a
+                            // comma in it as "silence every personal card". Nothing cleared it
+                            // when the call ended, so one conference call could leave in-app
+                            // notifications silent for the rest of the session. They have a key
+                            // of their own now, and it is only consulted while a call is up.
+                            SecureUserDefaults.shared.set(members, forKey: "inCallMembers")
                             SecureUserDefaults.shared.set("\(members)", forKey: "membersCC")
                         }
                     }
