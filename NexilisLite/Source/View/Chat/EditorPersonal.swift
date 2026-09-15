@@ -146,6 +146,32 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     /// which keeps the window in one piece. Further away, reading the gap would mean
     /// thousands of messages, so the window is moved instead.
     private static let maxBridgedMessages: Int64 = 200
+    /// The bubble that still owes an arrival animation: which message, which side it grows from,
+    /// and when the growing started.
+    ///
+    /// Fix: the animation used to be played from the completion of the insert. That completion
+    /// runs only once the table has finished animating the insertion in - by which point the
+    /// bubble has been on screen at full size for about a tenth of a second, so what the reader
+    /// saw was a finished bubble that then collapsed and grew again. The debt is written down
+    /// before the row is inserted now and paid by willDisplay, which fires while the row is
+    /// being created: the first frame the bubble is drawn at all, it is already small.
+    ///
+    /// It is kept until the growing has actually finished, not merely started, because a row
+    /// rebuilt in the middle - a tick arriving a moment after the message does exactly that -
+    /// throws its bubble away, and the new one has to pick the animation up where the old one
+    /// left off rather than snapping to full size.
+    private var pendingBubbleArrival: (messageId: String, outgoing: Bool, startedAt: Date?, pushesList: Bool)?
+
+    /// The bubble growing right now, so a redraw does not wipe the transform out from under it.
+    private weak var arrivingBubble: UIView?
+
+    /// The row that bubble is in - held back while the conversation slides up behind it, so a
+    /// redraw must leave everything in it alone, not only the bubble.
+    private weak var arrivingCell: UITableViewCell?
+
+    /// How long a bubble takes to grow, measured off the reference.
+    static let bubbleArrivalDuration: TimeInterval = 0.18
+
     /// True while the first page is being put on screen; what the old `alpha != 1` checks
     /// were really asking.
     private var isInitialLoading = true
@@ -248,6 +274,23 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var summarizeSession = false
     var isSearching = false
     let containerMultpileSelectSession = UIView()
+    /// The two views that trade places when a selection session opens: the sender's picture goes
+    /// and the circle takes the same spot. Found by tag because the fade runs over `visibleCells`
+    /// after the table has already built them.
+    static let selectionMarkTag = 77_311
+    static let selectionAvatarTag = 77_312
+    /// Where the circle starts and ends up when it is not shown - small enough to read as growing
+    /// out of the picture it replaces, not so small that it looks like it fell out of the row.
+    static let selectionMarkHidden = CGAffineTransform(scaleX: 0.4, y: 0.4)
+    /// Whether the circles are on screen. Every cell is built in whichever of the two states this
+    /// names, so a row scrolled into view mid-session arrives already showing its circle.
+    private var selectionChromeShown = false
+    /// What held the table's bottom before the selection bar took the input bar's place.
+    private var bottomTableConstantBeforeSelection: CGFloat?
+    /// Counts the bars this screen has put up. `cancelAction` does its work a run loop later, and
+    /// a session opened in between - searching, then forwarding - would otherwise be taken down
+    /// by the cancel that belonged to the one before it.
+    private var selectionSessionToken = 0
     let containerAction = UIView()
     var removed = false
     var isConfidential = false
@@ -785,22 +828,17 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     /// collage: the bubble lightens for half a second the way the reference does, and the one
     /// picture the quote named brightens and fades.
     private func flashBubble(at indexPath: IndexPath, row: [String: Any?], quoted: String) {
-        guard let cell = tableChatView.cellForRow(at: indexPath),
-              cell.contentView.subviews.count > 0 else {
+        guard let cell = tableChatView.cellForRow(at: indexPath) else {
             return
         }
-        let containerMessage = cell.contentView.subviews[0]
-        let isMine = (row["f_pin"] as? String) == User.getMyPin()
-        let bubbleColour: UIColor = isMine ? .blueBubbleColor : .whiteBubbleColor
-        // Fix: what the bubble goes back to used to be worked out again from whose message it is,
-        // with one exception written in for stickers - and a sticker is not the only bubble here
-        // that is transparent. A round video note is another, and a collage was a third the moment
-        // this path could reach one. What it goes back to is simply what it was.
-        let resting = containerMessage.backgroundColor ?? .clear
-        containerMessage.backgroundColor = bubbleColour.withAlphaComponent(0.3)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            containerMessage.backgroundColor = resting
+        // By the tag every editor puts on the bubble - its position among the row's subviews
+        // differs between a plain chat and one with an avatar, and by position this could land on
+        // the avatar. The collage tiles below live inside the same view.
+        guard let containerMessage = cell.contentView.viewWithTag(EditorPersonal.bubbleTag) else {
+            return
         }
+        // One highlight, the same everywhere - see BubbleHighlight for what it is and why.
+        BubbleHighlight.flash(containerMessage)
         guard (row["message_id"] as? String) != quoted,
               let members = groupImages[row["message_id"] as? String ?? ""],
               let member = members.firstIndex(where: { $0.messageId == quoted }) else {
@@ -1063,16 +1101,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         } else {
             deleteSession = true
         }
-        let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
-        cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
+        let cancelButton = selectionCancelBarButton()
         navigationItem.rightBarButtonItems = nil
         navigationItem.rightBarButtonItem = cancelButton
         changeAppBar()
         if let idx = dataMessages.firstIndex(where: { ($0["message_id"] as? String) == messageId }) {
             dataMessages[idx]["isSelected"] = true
         }
-        addMultipleSelectSession()
-        tableChatView.reloadData()
+        startMultipleSelectSession()
     }
 
     /// Opens the picker for where messages are being forwarded to.
@@ -1884,6 +1920,16 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         applyPendingUnreadMarkerScroll()
     }
 
+    /// Fix: the room the table is given while a selection bar is up is measured off the safe
+    /// area, and that is not known until the screen is in a window - a session opened before
+    /// then, or a device turned on its side under one, would leave the table's bottom sitting
+    /// behind the bar. The measurement is taken again whenever the inset settles.
+    public override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        guard bottomTableConstantBeforeSelection != nil else { return }
+        constraintBottomTableViewWithTextfield.constant = view.safeAreaInsets.bottom - 60
+    }
+
     /// Makes the opening placement converge now instead of over the next few layout passes.
     ///
     /// Fix: a row the table has never drawn is guessed at, so the first placement is worked out
@@ -2388,12 +2434,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 self.deleteReplyView()
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
-                cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
-                if self.dataPerson["f_pin"] != "-999" && !self.isContactCenter {
-                    self.navigationItem.rightBarButtonItems = nil
-                }
-                self.navigationItem.rightBarButtonItem = cancelButton
+                // Fix: a cancel button was put in the navigation bar here, beside a search field
+                // laid out by the search bar - two layouts, and they disagreed by 5pt. The search
+                // bar carries its own now, so the row is left empty for it to fill.
+                self.navigationItem.rightBarButtonItems = nil
+                self.navigationItem.rightBarButtonItem = nil
                 if self.isContactCenter || self.fromNotification {
                     self.navigationItem.leftBarButtonItem = nil
                 }
@@ -2599,6 +2644,16 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // against and shift the whole conversation by it.
         tableChatView.contentInsetAdjustmentBehavior = .always
         tableChatView.delegate = self
+        // Fix: a scroll view holds a touch back from whatever is under it for about 150ms while
+        // it decides whether the finger is going to drag - and a tap is over before that. So the
+        // quote a message replies to, a mention, a link: none of them showed a pressed look on
+        // a plain tap, only on a held one. Measured off a recording, our own reply container
+        // showed zero pressed frames at 60fps before the jump it led to; the reference shows it
+        // pressed from the first frame. Touches go straight through now. Dragging still works
+        // the same way it does in the reference: canCancelContentTouches, on by default, takes
+        // the touch back the moment the finger moves, and the pressed look is lifted with it.
+        tableChatView.delaysContentTouches = false
+        tableChatView.panGestureRecognizer.delaysTouchesBegan = false
         // Pull a row right to reply to it, left for its info - see ChatBubbleSwipe.
         bubbleSwipe = ChatBubbleSwipe(tableView: tableChatView, canPerform: { [weak self] indexPath, direction in
             return self?.canSwipeBubble(at: indexPath, direction: direction) ?? false
@@ -2638,10 +2693,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         if row != nil && section != nil {
                             let indexPath = IndexPath(row: row!, section: section!)
                             self.tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: false)
-                            self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .yellow
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                                self.tableChatView.cellForRow(at: indexPath)?.contentView.backgroundColor = .clear
-                            })
+                            // Fix: this painted the whole row yellow for a second - the second of two
+                            // highlights this screen had. The same one as a quote tap now, on the
+                            // bubble: see BubbleHighlight.
+                            if let cell = self.tableChatView.cellForRow(at: indexPath) {
+                                BubbleHighlight.flash(in: cell, tag: EditorPersonal.bubbleTag)
+                            }
                         }
                     }
                 }
@@ -2750,6 +2807,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                         if !last_m.isEmpty {
                             textFieldSend.attributedText = last_m.richText(isEditing: true, listMentionInTextField: listMentionInTextField)
                             textFieldSend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : UIColor.black
+                            // Fix: the draft went back into the field, but the bar was never told.
+                            // Its one refresh had run in viewDidLoad, over the placeholder, and
+                            // decided on the microphone and the camera; typing refreshes it, a
+                            // draft put back by hand does not. So a conversation reopened with a
+                            // draft in it showed the recording buttons over a field full of text.
+                            refreshSendOrRecordButton()
                         }
                         
                         if !last_r.isEmpty {
@@ -2908,7 +2971,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         viewAppBar.frame.size = CGSize(width: self.view.frame.size.width, height: 44)
         
         if !isSearching {
-            let imageProfile = UIImageView(frame: CGRect(x: 0, y: 7, width: 30, height: 30))
+            let imageProfile = UIImageView(frame: ChatHeaderMetrics.pictureFrame())
             imageProfile.circle()
             imageProfile.clipsToBounds = true
             let pictureImage = dataPerson["picture"]!
@@ -2933,7 +2996,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                 continue
                             }
                             if count == 0 {
-                                let pictures = UIImageView(frame: CGRect(x: 0, y: 7, width: 30, height: 30))
+                                let pictures = UIImageView(frame: ChatHeaderMetrics.pictureFrame())
                                 pictures.circle()
                                 pictures.clipsToBounds = true
                                 viewAppBar.addSubview(pictures)
@@ -2942,7 +3005,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                                     pictures.contentMode = .scaleAspectFit
                                 }
                             } else {
-                                let pictures = UIImageView(frame: CGRect(x: count * 20 , y: 7, width: 30, height: 30))
+                                let pictures = UIImageView(frame: ChatHeaderMetrics.pictureFrame(at: count))
                                 pictures.circle()
                                 pictures.clipsToBounds = true
                                 viewAppBar.addSubview(pictures)
@@ -2992,30 +3055,34 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 imageProfile.backgroundColor = .lightGray
             }
             
-            var titleNavigation = UILabel(frame: CGRect(x: 35, y: 0, width: viewAppBar.frame.size.width - 250, height: 44))
-            if blocking == "-1" || blocking == "1" {
-                titleNavigation = UILabel(frame: CGRect(x: 35, y: 0, width: viewAppBar.frame.size.width - 150, height: 44))
-            } else if isContactCenter {
-                titleNavigation = UILabel(frame: CGRect(x: 35, y: 0, width: viewAppBar.frame.size.width - 150, height: 44))
-                if users.count > 0 {
-                    titleNavigation = UILabel(frame: CGRect(x: 35 * (CGFloat(users.count)) - (CGFloat((users.count - 1) * 15)), y: 0, width: viewAppBar.frame.size.width - 150 - (35 * (CGFloat(users.count - 1)) - (CGFloat((users.count - 1) * 15))), height: 44))
-                }
-            }
+            // The bar sizes itself to whatever is free between the buttons, and the name
+            // starts clear of however many pictures were put in above - a contact-centre chat can
+            // be with several people at once. See `ChatHeaderMetrics.layoutTitleView`, called
+            // once everything is in it.
+            let titleNavigation = MarqueeLabel()
             viewAppBar.addSubview(titleNavigation)
+            // Fix: the font was set after the text, and an official, verified or internal name is
+            // not text but an attributed string built below with a badge in front of it -
+            // assigning `font` afterwards does not reach inside one of those. So those names were
+            // drawn in the label's default 17pt regular while every other name used this, which
+            // is what made an official chat's header look like a different screen. Settled first,
+            // the attributed string is built with it.
+            titleNavigation.textColor = .white
+            titleNavigation.font = UIFont.systemFont(ofSize: ChatHeaderMetrics.titleFontSize + offset()).bold
             if ((User.isOfficial(official_account: (dataPerson["isOfficial"] ?? "")!) || User.isOfficialRegular(official_account: (dataPerson["isOfficial"] ?? "")!)) && !isContactCenter) || ((User.isOfficial(official_account: (dataPerson["isOfficial"] ?? "")!) || User.isOfficialRegular(official_account: (dataPerson["isOfficial"] ?? "")!)) && fPinContacCenter.isEmpty) {
                 var name = dataPerson["name"]!!
                 if (isContactCenter) {
                     name = name + " " + "Contact Center".localized()
                     titleNavigation.text = name
                 } else {
-                    titleNavigation.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(name)", size: 15, y: -4)
+                    titleNavigation.set(image: UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(name)", size: ChatHeaderMetrics.flagSize, y: ChatHeaderMetrics.flagBaseline)
                 }
             } else if User.isVerified(official_account: (dataPerson["isOfficial"] ?? "")!) && !isContactCenter {
                 let name = dataPerson["name"]!!
-                titleNavigation.set(image: UIImage(named: "ic_verified", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(name)", size: 15, y: -4)
+                titleNavigation.set(image: UIImage(named: "ic_verified", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(name)", size: ChatHeaderMetrics.flagSize, y: ChatHeaderMetrics.flagBaseline)
             } else if User.isInternal(userType: (dataPerson["user_type"] ?? "")!) && !isContactCenter {
                 let name = dataPerson["name"]!!
-                titleNavigation.set(image: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(name)", size: 15, y: -4)
+                titleNavigation.set(image: UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "  \(name)", size: ChatHeaderMetrics.flagSize, y: ChatHeaderMetrics.flagBaseline)
             } else {
                 if !isContactCenter {
                     titleNavigation.text = dataPerson["name"] as? String
@@ -3035,13 +3102,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     }
                 }
             }
-            titleNavigation.textColor = .white
-            titleNavigation.font = UIFont.systemFont(ofSize: 12 + offset()).bold
+            ChatHeaderMetrics.layoutTitleView(viewAppBar, title: titleNavigation)
             navigationItem.titleView = viewAppBar
             titleText = titleNavigation.text
             previewHeaderLabel?.text = titleText
         } else {
-            searchBar = UISearchBar()
+            searchBar = ChatSearchBar()
             searchBar.autocapitalizationType = .none
             searchBar.delegate = self
             searchBar.searchTextField.tintColor = .mainColor
@@ -3049,17 +3115,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             searchBar.showsCancelButton = false
 //            searchBar.setMagnifyingGlassColorTo(color: .white)
 //            searchBar.updateHeight(height: 36, radius: 18)
-            searchBar.setImage(UIImage(), for: .search, state: .normal)
-            searchBar.setPositionAdjustment(UIOffset(horizontal: 10, vertical: 0), for: .search)
-            // 36pt is the height iOS gives a search field, and it lines the bottom of the
-            // field up with the Cancel button next to it - the old 30pt bitmap left it sitting
-            // noticeably short. The colour is the one that bitmap was painted with, so nothing
-            // about the look changes; only its size and the shape of its corners.
+            // The same height as the button beside it, the magnifying glass and the word the
+            // reference has in it - see ChatHeaderMetrics.dressSearchBar.
             //
-            // Both themes get the light fill on purpose: the text in this field is black, and
-            // the dark asset this used to draw is very nearly transparent, which left black
-            // text on a near-black bar.
-            searchBar.setSearchFieldStyle(height: 36, backgroundColor: UIColor(red: 248.0 / 255.0, green: 252.0 / 255.0, blue: 254.0 / 255.0, alpha: 1.0))
+            // Both themes get the light fill on purpose: the text in this field is black, and the
+            // dark asset this used to draw is very nearly transparent, which left black text on a
+            // near-black bar.
+            ChatHeaderMetrics.dressSearchBar(searchBar, fill: UIColor(red: 248.0 / 255.0, green: 252.0 / 255.0, blue: 254.0 / 255.0, alpha: 1.0))
             navigationItem.titleView = searchBar
             self.definesPresentationContext = true
         }
@@ -4823,11 +4885,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     } else {
                         self.dataMessages.append(row)
                         let arrived = IndexPath(row: self.messages(onDate: self.dataDates[self.dataDates.count - 1]).count - 1, section: self.dataDates.count - 1)
+                        // A message that arrives grows out of the side it came from, the way one
+                        // that is sent grows out of ours. Written down before the insert so the
+                        // bubble is small the first time it is drawn.
+                        self.expectBubbleArrival(messageId: row[TypeDataMessage.message_id] as? String ?? "",
+                                                 outgoing: false)
                         self.tableChatView.insertRows(at: [arrived], with: .none)
                         self.tableChatView.layoutIfNeeded()
-                        // A message that arrives grows out of the side it came from, the way one
-                        // that is sent grows out of ours.
-                        self.playBubbleArrival(at: arrived, outgoing: false)
+                        self.retryPendingBubbleArrival(at: arrived)
                     }
                     self.tableChatView.layoutIfNeeded()
                     if row["credential"] != nil && row["credential"]  as? String ?? "" == "1" {
@@ -5916,6 +5981,23 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         self.navigationController?.show(controller, sender: nil)
     }
     
+    /// A tap on a call bubble: the same sheet a link gets, with the contact's name over one row
+    /// that places the same kind of call again. The row goes through audioVideoCall, so every
+    /// check that guards a call from the bar - a call already in progress, feature access, the
+    /// microphone or camera permission, the network - guards this one too.
+    @objc private func callBubbleTapped(_ sender: UITapGestureRecognizer) {
+        guard !listMotion.isMoving(tableChatView) else { return }
+        let video = sender.name == "video"
+        let again = UIBarButtonItem()
+        again.tag = video ? 1 : 0
+        let row = LinkActionSheetViewController.Action(
+            title: (video ? "Video call" : "Call").localized(),
+            systemImageName: video ? "video" : "phone",
+            handler: { [weak self] in self?.audioVideoCall(sender: again) })
+        let sheet = LinkActionSheetViewController(title: titleText ?? "", actions: [row])
+        sheet.presentAsBottomSheet(from: self)
+    }
+
     @objc func audioVideoCall(sender: UIBarButtonItem) {
         if sender.tag == 0 {
             if APIS.blockedByCallInProgress() {
@@ -6390,6 +6472,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
         row["chat_date"] = "Today".localized()
         let newRow = row
+        // Written down before the insert, so willDisplay can play it while the row is still being
+        // created - see pendingBubbleArrival.
+        expectBubbleArrival(messageId: newRow[TypeDataMessage.message_id] as? String ?? "", outgoing: true)
         tableChatView.performBatchUpdates({
             if opensNewDay {
                 self.tableChatView.insertSections(IndexSet(integer: self.dataDates.count - 1), with: .none)
@@ -6399,6 +6484,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 // collage is redrawn to take it. Plainly, not through the place-keeping
                 // reload: this is inside a batch update, where the table is mid-way through
                 // rearranging itself and must not be asked to lay out or to move.
+                // No row of its own goes in, so no bubble arrives.
+                self.cancelExpectedBubbleArrival()
                 self.tableChatView.reloadRows(at: [collageRow], with: .none)
             } else {
                 self.dataMessages.append(newRow)
@@ -6412,7 +6499,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             if lastSection >= 0 {
                 let lastRow = self.tableChatView.numberOfRows(inSection: lastSection) - 1
                 if lastRow >= 0 {
-                    self.playBubbleArrival(at: IndexPath(row: lastRow, section: lastSection), outgoing: true)
+                    // willDisplay has almost certainly played it by now; this is only for the
+                    // case where the cell had not been measured when it fired.
+                    self.retryPendingBubbleArrival(at: IndexPath(row: lastRow, section: lastSection))
                 }
             }
             self.slideToNewestMessage()
@@ -8412,49 +8501,56 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                                     official: "1")
                     listMentionWithText.insert(gptUser, at: 0)
                 }
-                listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
-                var nowTableMention = tableMention!
-                var nowHeightTableMention = heightTableMention!
-                if isEditingMessage {
-                    nowTableMention = tableMentionEdit
-                    if heightTableEditMention != nil {
-                        nowHeightTableMention = heightTableEditMention
-                    } else {
-                        return
-                    }
-                }
-                if listMentionWithText.count > 0 {
-                    // Four and a half rows when there are more than four, so the half row showing
-                    // at the bottom says there is more to scroll to - the old four exactly looked
-                    // like the whole list however many names were behind it.
-                    let rows = min(CGFloat(listMentionWithText.count), 4.5)
-                    let wasShowing = nowHeightTableMention.constant > 0
-                    // And never taller than the room actually left above the input area. On a
-                    // 4.7" screen with the keyboard up, a reply preview and a link preview open,
-                    // four and a half rows do not fit between the input area and the header -
-                    // the list would run up under the navigation bar.
-                    nowHeightTableMention.constant = min(rows * ChatMentionList.rowHeight, roomForMentionList)
-                    nowTableMention.reloadData()
-                    // Opening is worth animating; growing by a row as the reader types is not -
-                    // that would have the list breathing under every keystroke.
-                    if !wasShowing, !isEditingMessage {
-                        nowTableMention.setContentOffset(.zero, animated: false)
-                        UIView.animate(withDuration: 0.2) {
-                            self.view.layoutIfNeeded()
-                        }
-                    } else {
-                        self.view.layoutIfNeeded()
-                    }
-                } else {
-                    self.hideMention()
-                }
             } catch {
                 rollback.pointee = true
                 print("Access database error: \(error.localizedDescription)")
             }
         })
+        // Fix: everything below used to run inside the transaction above - and a transaction runs
+        // synchronously on the database's own serial queue. Laying the view out from there reaches
+        // the chat table, which builds its rows, and a row reads the sender's profile through a
+        // transaction of its own: a dispatch_sync onto the very queue this was already on, which
+        // libdispatch stops with a trap (__DISPATCH_WAIT_FOR_QUEUE__, EXC_BREAKPOINT). The app
+        // went down the moment the mention list opened over a row that had a profile to read. It
+        // also put every bit of this UI work on a background thread. The transaction only reads
+        // now; what is drawn is drawn after it has returned, on the thread this was called on.
+        listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
+        var nowTableMention = tableMention!
+        var nowHeightTableMention = heightTableMention!
+        if isEditingMessage {
+            nowTableMention = tableMentionEdit
+            if heightTableEditMention != nil {
+                nowHeightTableMention = heightTableEditMention
+            } else {
+                return
+            }
+        }
+        if listMentionWithText.count > 0 {
+            // Four and a half rows when there are more than four, so the half row showing
+            // at the bottom says there is more to scroll to - the old four exactly looked
+            // like the whole list however many names were behind it.
+            let rows = min(CGFloat(listMentionWithText.count), 4.5)
+            let wasShowing = nowHeightTableMention.constant > 0
+            // And never taller than the room actually left above the input area. On a
+            // 4.7" screen with the keyboard up, a reply preview and a link preview open,
+            // four and a half rows do not fit between the input area and the header -
+            // the list would run up under the navigation bar.
+            nowHeightTableMention.constant = min(rows * ChatMentionList.rowHeight, roomForMentionList)
+            nowTableMention.reloadData()
+            // Opening is worth animating; growing by a row as the reader types is not -
+            // that would have the list breathing under every keystroke.
+            if !wasShowing, !isEditingMessage {
+                nowTableMention.setContentOffset(.zero, animated: false)
+                UIView.animate(withDuration: 0.2) {
+                    self.view.layoutIfNeeded()
+                }
+            } else {
+                self.view.layoutIfNeeded()
+            }
+        } else {
+            self.hideMention()
+        }
     }
-    
     private func hideMention() {
         // Fix: this took away whichever of the two lists it found first. The one for editing a
         // message is built over the top of the conversation's own, so both can be up at once -
@@ -8926,6 +9022,13 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         // Fix: these closures capture self strongly (they always have - they're the very
         // same closures that used to go straight into UIAction), so the ones registered
         // by the previous long-press are dropped here rather than piling up on self.
+        // The menu is about to lift the bubble into a preview, snapshotting it with the finger
+        // still on it. Everything pressed under that finger lets go first - the quote, the link
+        // preview, and the chip over a mention - or the preview would show them pressed for as
+        // long as the menu stayed open. See PressableView.liftAll.
+        PressableView.liftAll(in: interaction.view)
+        hideLinkHighlight()
+        linkPressGeneration += 1
         contextMenuActionHandlers.removeAll()
         let indexPath = self.tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: self.tableChatView))
         let dataMessages = self.messages(onDate: dataDates[indexPath!.section])
@@ -9094,8 +9197,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 self.forwardSession = true
-                let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
-                cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
+                let cancelButton = self.selectionCancelBarButton()
                 if self.dataPerson["f_pin"] != "-999" && !self.isContactCenter {
                     self.navigationItem.rightBarButtonItems = nil
                 }
@@ -9104,12 +9206,15 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     self.navigationItem.leftBarButtonItem = nil
                 }
                 self.changeAppBar()
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String})
-                if idx != nil{
-                    self.dataMessages[idx!]["isSelected"] = true
+                // The message the menu was opened on is only marked if it can be picked at all -
+                // see `canPickMessage`. It used to be marked whatever it was, so a file still
+                // waiting to be downloaded opened a session reading "1 Selected" over a row that
+                // showed no circle and answered no tap.
+                if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String}),
+                   self.canPickMessage(self.dataMessages[idx], for: .forward) {
+                    self.dataMessages[idx]["isSelected"] = true
                 }
-                self.addMultipleSelectSession()
-                self.tableChatView.reloadData()
+                self.startMultipleSelectSession()
             }
         })
         let copy = chatMenuAction(title: "Copy".localized(), image: UIImage(systemName: "doc.on.doc"), handler: {(_) in
@@ -9124,8 +9229,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 self.copySession = true
-                let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
-                cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
+                let cancelButton = self.selectionCancelBarButton()
                 if self.dataPerson["f_pin"] != "-999" && !self.isContactCenter {
                     self.navigationItem.rightBarButtonItems = nil
                 }
@@ -9134,12 +9238,15 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     self.navigationItem.leftBarButtonItem = nil
                 }
                 self.changeAppBar()
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String})
-                if idx != nil{
-                    self.dataMessages[idx!]["isSelected"] = true
+                // The message the menu was opened on is only marked if it can be picked at all -
+                // see `canPickMessage`. It used to be marked whatever it was, so a file still
+                // waiting to be downloaded opened a session reading "1 Selected" over a row that
+                // showed no circle and answered no tap.
+                if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String}),
+                   self.canPickMessage(self.dataMessages[idx], for: .copy) {
+                    self.dataMessages[idx]["isSelected"] = true
                 }
-                self.addMultipleSelectSession()
-                self.tableChatView.reloadData()
+                self.startMultipleSelectSession()
             }
         })
         let edit = chatMenuAction(title: "Edit".localized(), image: UIImage(systemName: "pencil.tip.crop.circle"), handler: {(_) in
@@ -9155,7 +9262,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
             let payload: [String : Any] = [
                 "role": "user",
-                "content": dataMessages[indexPath!.row][TypeDataMessage.message_text]!!
+                "content": ChatMessageText.spoken(of: dataMessages[indexPath!.row])
             ]
             let parameter: [String : Any] = [
                 "use_video": "0",
@@ -9190,7 +9297,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             self.view.makeToast("Getting chat suggestion...".localized(), duration: 3)
             let payload: [String : Any] = [
                 "role": "user",
-                "content": dataMessages[indexPath!.row][TypeDataMessage.message_text]!!
+                "content": ChatMessageText.spoken(of: dataMessages[indexPath!.row])
             ]
             let parameter: [String : Any] = [
                 "use_video": "0",
@@ -9234,8 +9341,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 self.summarizeSession = true
-                let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
-                cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
+                let cancelButton = self.selectionCancelBarButton()
                 if self.dataPerson["f_pin"] != "-999" && !self.isContactCenter {
                     self.navigationItem.rightBarButtonItems = nil
                 }
@@ -9244,12 +9350,15 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     self.navigationItem.leftBarButtonItem = nil
                 }
                 self.changeAppBar()
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String})
-                if idx != nil{
-                    self.dataMessages[idx!]["isSelected"] = true
+                // The message the menu was opened on is only marked if it can be picked at all -
+                // see `canPickMessage`. It used to be marked whatever it was, so a file still
+                // waiting to be downloaded opened a session reading "1 Selected" over a row that
+                // showed no circle and answered no tap.
+                if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String}),
+                   self.canPickMessage(self.dataMessages[idx], for: .summarize) {
+                    self.dataMessages[idx]["isSelected"] = true
                 }
-                self.addMultipleSelectSession()
-                self.tableChatView.reloadData()
+                self.startMultipleSelectSession()
             }
         })
         let more = UIMenu(title: "More...".localized(), children: [translate, gcs, summarize])
@@ -9274,8 +9383,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 self.deleteSession = true
-                let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(self.cancelAction))
-                cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white, NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
+                let cancelButton = self.selectionCancelBarButton()
                 if self.dataPerson["f_pin"] != "-999" && !self.isContactCenter {
                     self.navigationItem.rightBarButtonItems = nil
                 }
@@ -9284,12 +9392,15 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     self.navigationItem.leftBarButtonItem = nil
                 }
                 self.changeAppBar()
-                let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String})
-                if idx != nil{
-                    self.dataMessages[idx!]["isSelected"] = true
+                // The message the menu was opened on is only marked if it can be picked at all -
+                // see `canPickMessage`. It used to be marked whatever it was, so a file still
+                // waiting to be downloaded opened a session reading "1 Selected" over a row that
+                // showed no circle and answered no tap.
+                if let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath!.row]["message_id"] as? String}),
+                   self.canPickMessage(self.dataMessages[idx], for: .delete) {
+                    self.dataMessages[idx]["isSelected"] = true
                 }
-                self.addMultipleSelectSession()
-                self.tableChatView.reloadData()
+                self.startMultipleSelectSession()
             }
         })
         
@@ -9321,25 +9432,31 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             delete.title = "Delete All".localized()
             children = [delete]
             if (Nexilis.checkingAccess(key: "secure_folder_forward") || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" {
-                children.insert(forward, at: 0)
+                // Fix: whether the file is on this device was never asked here, so Forward was
+                // offered on a document that is still only a name and a size - and a message the
+                // session cannot pick was marked all the same. See `canPickMessage`.
+                if canPickMessage(dataMessages[indexPath!.row], for: .forward) {
+                    children.insert(forward, at: 0)
+                }
             }
         } else {
             if (!(dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty || !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty) {
-                var isEmpty = true
-                let messageText = dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? ""
-                if !(dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && !messageText.component(1, separatedBy: "|").isEmpty {
-                    isEmpty = false
-                } else if (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && !messageText.isEmpty {
-                    isEmpty = false
-                }
-                if isEmpty {
+                // Whether anything was written alongside what this message carries - the same
+                // reading `canPickMessage` goes by, so the Copy offered here and the Copy a
+                // session will accept cannot disagree. See `ChatMessageText`.
+                if ChatMessageText.spoken(of: dataMessages[indexPath!.row]).isEmpty {
                     children = [star, reply , pin, delete]
                 }
             } else if dataMessages[indexPath!.row]["attachment_flag"]  as? String ?? "" == "11" {
                children = [reply, delete]
             }
             if ((Nexilis.checkingAccess(key: "secure_folder_forward") && dataMessages[indexPath!.row]["attachment_flag"] as? String ?? "" != "11") || (!(dataMessages[indexPath!.row][TypeDataMessage.message_text]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty) || (dataMessages[indexPath!.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward")) && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" && dataMessages[indexPath!.row]["read_receipts"] as? String != "8" && dataMessages[indexPath!.row]["attachment_flag"] as? String ?? "" != "11" {
-                children.insert(forward, at: 2)
+                // Fix: whether the file is on this device was never asked here, so Forward was
+                // offered on a document that is still only a name and a size - and a message the
+                // session cannot pick was marked all the same. See `canPickMessage`.
+                if canPickMessage(dataMessages[indexPath!.row], for: .forward) {
+                    children.insert(forward, at: 2)
+                }
             }
             if (dataMessages[indexPath!.row]["f_pin"]  as? String ?? "") == idMe {
                 children.insert(info, at: children.count - 1)
@@ -9359,7 +9476,13 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                         }
                     }
                 }
-                if (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11" && (dataMessages[indexPath!.row]["image_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["video_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["file_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath!.row]["audio_id"]  as? String ?? "").isEmpty{
+                // Fix: More - and with it Translate and Summarize - was held back from every
+                // message carrying a file, picture, video or recording, so a document sent with
+                // something written under it could be neither translated nor summarised, though
+                // that writing is text like any other. What decides it is whether the message
+                // says anything, not what it is carrying alongside.
+                if (dataMessages[indexPath!.row][TypeDataMessage.attachment_flag] as? String ?? "") != "11",
+                   !ChatMessageText.spoken(of: dataMessages[indexPath!.row]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     isMore = true
                 }
             }
@@ -9733,7 +9856,9 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
     }
     
     @objc func cancelAction() {
+        let token = selectionSessionToken
         DispatchQueue.main.async {
+            guard token == self.selectionSessionToken else { return }
             if self.copySession {
                 self.copySession = false
             } else if self.forwardSession {
@@ -9760,15 +9885,12 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             if self.viewButton.isHidden {
                 self.viewButton.isHidden = false
             }
-            if self.constraintBottomTableViewWithTextfield.constant == -60.0 {
-                self.constraintBottomTableViewWithTextfield.constant = self.constraintBottomTableViewWithTextfield.constant + 70
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: {
-                    if (self.currentIndexpath != nil) {
-                        self.tableChatView.safeScrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: true)
-                    } else {
-                        self.tableChatView.scrollToBottom()
-                    }
-                })
+            if let restored = self.bottomTableConstantBeforeSelection {
+                let readingPlace = self.distanceFromNewestMessage()
+                self.constraintBottomTableViewWithTextfield.constant = restored
+                self.bottomTableConstantBeforeSelection = nil
+                self.view.layoutIfNeeded()
+                self.restoreDistanceFromNewestMessage(readingPlace)
             }
             let data = self.dataMessages.filter({ $0["isSelected"] as? Bool == true })
             for i in 0..<data.count {
@@ -9777,54 +9899,337 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                     self.dataMessages[idx!]["isSelected"] = false
                 }
             }
-            self.tableChatView.reloadData()
             self.setRightButtonItem()
             self.changeAppBar()
             if self.isContactCenter || self.fromNotification {
                 let backButton = UIBarButtonItem(image: UIImage(systemName: "chevron.backward"), style: .plain, target: self, action: #selector(self.didTapExit))
                 self.navigationItem.leftBarButtonItem = backButton
             }
-            self.containerMultpileSelectSession.removeFromSuperview()
-            self.refreshScrollToBottomButtonPlacement()
-            self.checkNewMessage(tableView: self.tableChatView)
+            // The circles leave the way they arrived, each fading back into the picture it stood
+            // on, and the table is only built again once that has finished - a rebuild in the
+            // middle of the fade would cut it short.
+            self.setSelectionChrome(shown: false, animated: true) {
+                self.tableChatView.reloadDataKeepingPlace()
+                self.checkNewMessage(tableView: self.tableChatView)
+            }
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn, .allowUserInteraction], animations: {
+                self.containerMultpileSelectSession.alpha = 0
+            }, completion: { _ in
+                // A session opened again while this was running owns the bar now; taking it out
+                // from under that would leave the screen with no bar at all.
+                guard !self.copySession, !self.forwardSession, !self.deleteSession,
+                      !self.summarizeSession, !self.isSearching else { return }
+                self.containerMultpileSelectSession.removeFromSuperview()
+                self.containerMultpileSelectSession.alpha = 1
+                self.refreshScrollToBottomButtonPlacement()
+            })
         }
     }
     
     private func addMultipleSelectSession() {
+        selectionSessionToken += 1
         viewTextfield.isHidden = true
         viewAttachment.isHidden = true
         containerAction.isHidden = true
         viewButton.isHidden = true
-        constraintBottomTableViewWithTextfield.constant = constraintBottomTableViewWithTextfield.constant - 70
+        // Fix: the bar hung off the bottom of the window, so on a device with a home indicator
+        // the forward button sat underneath it - the 50pt the bar is given ran out below the
+        // point a finger can reach. It stands on the safe area now, in the place the input bar
+        // had, and the table is given back exactly the room that leaves: the gap over the bar
+        // comes out the same 10pt on a device with an indicator and on one without.
+        let readingPlace = distanceFromNewestMessage()
+        bottomTableConstantBeforeSelection = constraintBottomTableViewWithTextfield.constant
+        constraintBottomTableViewWithTextfield.constant = view.safeAreaInsets.bottom - 60
         view.addSubview(containerMultpileSelectSession)
         containerMultpileSelectSession.translatesAutoresizingMaskIntoConstraints = false
-        constraintBottomContainerMultpileSelectSession = containerMultpileSelectSession.bottomAnchor.constraint(equalTo: self.view.bottomAnchor, constant: 0)
+        constraintBottomContainerMultpileSelectSession = containerMultpileSelectSession.bottomAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.bottomAnchor, constant: 0)
         NSLayoutConstraint.activate([
             containerMultpileSelectSession.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
             containerMultpileSelectSession.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
             constraintBottomContainerMultpileSelectSession,
             containerMultpileSelectSession.heightAnchor.constraint(equalToConstant: 50)
         ])
-        containerMultpileSelectSession.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        // Nothing is painted behind the capsule on iOS 26 - it floats over the chat, the way
+        // the bar it replaces does on that release.
+        if #available(iOS 26.0, *) {
+            containerMultpileSelectSession.backgroundColor = .clear
+        } else {
+            containerMultpileSelectSession.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
+        }
         addSubviewMultipleSession()
         refreshScrollToBottomButtonPlacement()
+        // The bar arrives over the input bar rather than in place of it: the table is resized in
+        // this pass, un-animated as it always was, and only the bar itself fades in.
+        containerMultpileSelectSession.alpha = 0
+        view.layoutIfNeeded()
+        restoreDistanceFromNewestMessage(readingPlace)
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut, .allowUserInteraction], animations: {
+            self.containerMultpileSelectSession.alpha = 1
+        })
+    }
+
+    /// Opens a selection session on screen: the bar at the bottom, every row built again with its
+    /// circle still hidden, and then the fade that trades each sender's picture for its circle.
+    ///
+    /// The rebuild has to happen with the circles hidden and the pictures showing - the state the
+    /// screen is already in - or the fade has nothing to travel from and the circles simply appear.
+    private func startMultipleSelectSession() {
+        selectionChromeShown = false
+        addMultipleSelectSession()
+        // Every row changes at once here, so the rebuild lays them all out again - and it lays
+        // them out now rather than at the next pass, because `visibleCells` is empty until it
+        // has and there would be nothing to animate.
+        tableChatView.reloadDataKeepingPlace()
+        setSelectionChrome(shown: true, animated: true)
+    }
+
+    /// Fades the selection circles in or out over the rows that are on screen.
+    ///
+    /// Each circle stands where the picture is drawn, so the two cross-fade in place and no row
+    /// moves. `selectionChromeShown` is left behind for `cellForRowAt` to read, so a row built
+    /// after this has run comes back in the state the rest of the screen is in.
+    private func setSelectionChrome(shown: Bool, animated: Bool, completion: (() -> Void)? = nil) {
+        selectionChromeShown = shown
+        let apply = { self.tableChatView.visibleCells.forEach { self.applySelectionChrome(to: $0) } }
+        guard animated else {
+            apply()
+            completion?()
+            return
+        }
+        UIView.animate(withDuration: shown ? 0.3 : 0.2,
+                       delay: 0,
+                       usingSpringWithDamping: shown ? 0.75 : 1.0,
+                       initialSpringVelocity: 0.3,
+                       options: [.allowUserInteraction, .beginFromCurrentState],
+                       animations: apply,
+                       completion: { _ in completion?() })
+    }
+
+    /// How far the reader is from the newest message, in points - 0 when sitting at the bottom.
+    private func distanceFromNewestMessage() -> CGFloat {
+        return max(0, tableChatView.contentSize.height + tableChatView.adjustedContentInset.bottom
+                      - tableChatView.bounds.height - tableChatView.contentOffset.y)
+    }
+
+    /// Puts the reader back that far from the newest message once the table has been resized.
+    ///
+    /// Fix: opening and closing a session changes the table's height by whatever the bar takes,
+    /// and a `contentOffset` carried unchanged through that slides the conversation by the same
+    /// amount. Closing used to cover for it by scrolling to the last row it had seen, which threw
+    /// away wherever the reader had actually scrolled to - the jump on Cancel.
+    private func restoreDistanceFromNewestMessage(_ distance: CGFloat) {
+        let maximum = tableChatView.contentSize.height + tableChatView.adjustedContentInset.bottom
+            - tableChatView.bounds.height
+        let minimum = -tableChatView.adjustedContentInset.top
+        tableChatView.contentOffset.y = min(max(maximum - distance, minimum), max(maximum, minimum))
+    }
+
+    /// Which kind of picking a selection session is for.
+    ///
+    /// The rule about which messages can be picked differs between them, and the menu has to ask
+    /// before the session it is about to open exists - so the kind is passed rather than read off
+    /// the flags.
+    enum SelectionKind {
+        case copy, forward, delete, summarize
+    }
+
+    /// The session that is open right now, if one is.
+    private var openSelectionKind: SelectionKind? {
+        if copySession { return .copy }
+        if forwardSession { return .forward }
+        if deleteSession { return .delete }
+        if summarizeSession { return .summarize }
+        return nil
+    }
+
+    /// Whether one message can be picked out, for a session of this kind. `nil` asks the same of
+    /// a screen with no session open, which is what decides whether a row is built with a circle
+    /// at all.
+    ///
+    /// Fix: this rule was written out twice - once to decide whether to draw a circle beside a
+    /// row, once to decide whether a tap on that row counts - and nowhere at all where the menu
+    /// opens the session. A file still waiting to be downloaded fails the rule, so its row was
+    /// given no circle and answered no tap, and yet Forward had already marked it: the bar read
+    /// "1 Selected" for a message that could be neither seen to be selected nor unselected, and
+    /// forwarding it sent a file that is not on this device. One answer now, asked everywhere.
+    private func canPickMessage(_ message: [String: Any?], for kind: SelectionKind?) -> Bool {
+        let imageChat = message["image_id"] as? String ?? ""
+        let videoChat = message["video_id"] as? String ?? ""
+        let fileChat = message["file_id"] as? String ?? ""
+        let audioChat = message["audio_id"] as? String ?? ""
+        // What the message actually says, with a document's file name and a link's preview
+        // details taken off - see `ChatMessageText`.
+        let spoken = ChatMessageText.spoken(of: message).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty || !audioChat.isEmpty {
+            let specFile = message[TypeDataMessage.spec_file] as? String ?? ""
+            // Summarising reads what is written under the attachment and nothing else, so it
+            // asks only whether anything is written there - not whether the file has been
+            // downloaded, which is what the branches below go on to check.
+            if kind == .summarize {
+                if spoken.isEmpty {
+                    return false
+                }
+            } else if kind == .copy && spoken.isEmpty {
+                // Fix: this asked the raw field, which for a document is its file name and a bar
+                // even when nothing was written with it - so a document with no caption could be
+                // ticked in a copy session and copied out as an empty line.
+                return false
+            } else if kind == .forward && (!Nexilis.checkingAccess(key: "secure_folder_forward") || (!specFile.isEmpty && !specFile.contains("forward"))) {
+                return false
+            } else {
+                var file = imageChat
+                if file.isEmpty {
+                    file = videoChat
+                    if file.isEmpty {
+                        file = fileChat
+                        if file.isEmpty {
+                            file = audioChat
+                        }
+                    }
+                }
+                let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
+                let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
+                let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
+                if let dirPath = paths.first {
+                    let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
+                    // Nothing has been downloaded yet, so there is nothing here to forward, copy
+                    // or hand on - only a name and a size. This is the line the whole rule is for.
+                    if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
+                        return false
+                    } else if !fileChat.isEmpty && spoken.isEmpty {
+                        return false
+                    }
+                }
+            }
+        }
+        if let kind = kind, kind != .delete,
+           message["lock"] as? String == "1"
+            || (message["credential"] as? String) == "1"
+            || (message["lock"] as? String) == "2"
+            || message["f_pin"] as? String ?? "" == "-999"
+            || message["attachment_flag"] as? String ?? "" == "11"
+            || (message["message_id"] as? String ?? "").contains("NTFPIN_")
+            || message["message_scope_id"] as? String == MessageScope.CALL {
+            return false
+        }
+        return true
+    }
+
+    /// Where an incoming bubble sits when there is no picture to its left, with a session open
+    /// and without one.
+    ///
+    /// A bubble that already starts at the left edge has no free column beside it, so unlike a
+    /// group's - where the circle simply takes the sender's picture's place - it has to make room.
+    /// The shift is animated together with the circle rather than arriving with a redraw, which
+    /// is what made it read as the whole conversation jumping sideways.
+    static let bubbleLeadingNormal: CGFloat = 15
+    static let bubbleLeadingInSession: CGFloat = 50
+
+    private static var selectionShiftKey: UInt8 = 0
+
+    private func setSelectionShift(_ constraint: NSLayoutConstraint, on cell: UITableViewCell) {
+        objc_setAssociatedObject(cell, &EditorPersonal.selectionShiftKey, constraint, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
+
+    private func selectionShift(of cell: UITableViewCell) -> NSLayoutConstraint? {
+        return objc_getAssociatedObject(cell, &EditorPersonal.selectionShiftKey) as? NSLayoutConstraint
+    }
+
+    /// Whether messages are being picked out right now, whatever the picking is for.
+    private var isSelectionSessionActive: Bool {
+        copySession || forwardSession || deleteSession || summarizeSession
+    }
+
+    /// Puts one cell into whichever of the two states the screen is in.
+    ///
+    /// Called on a cell handed back from the bubble cache as well, which is built once and then
+    /// returned unchanged - without this it would come back carrying the state it was built in.
+    private func applySelectionChrome(to cell: UITableViewCell) {
+        if let mark = cell.contentView.viewWithTag(EditorPersonal.selectionMarkTag) {
+            mark.alpha = selectionChromeShown ? 1 : 0
+            mark.transform = selectionChromeShown ? .identity : EditorPersonal.selectionMarkHidden
+        }
+        if let picture = cell.contentView.viewWithTag(EditorPersonal.selectionAvatarTag) {
+            picture.alpha = selectionChromeShown ? 0 : 1
+        }
+        if let shift = selectionShift(of: cell) {
+            let wanted = selectionChromeShown ? EditorPersonal.bubbleLeadingInSession : EditorPersonal.bubbleLeadingNormal
+            if shift.constant != wanted {
+                shift.constant = wanted
+                // Inside the fade this travels with the circle; outside it - a cell handed back
+                // from the cache - it simply lands in the right place.
+                cell.contentView.layoutIfNeeded()
+            }
+        }
+        // Fix: a link, a mention, a picture, the sender's own picture - each answered a tap of
+        // its own while a session was open, so a tap meant to tick a message opened a browser or
+        // a profile instead. Nothing inside a bubble answers while messages are being picked;
+        // the tap falls through to the row, which is the one thing the session is for.
+        cell.contentView.isUserInteractionEnabled = !isSelectionSessionActive
     }
     
+
+    /// The button that closes a selection session.
+    ///
+    /// Fix: iOS 26 closes a mode with a round button of glass carrying an x, and the word sitting
+    /// where that button belongs is the one thing on this bar that still reads as the release
+    /// before. Older releases keep the word, which is what they draw everywhere else.
+    private func selectionCancelBarButton() -> UIBarButtonItem {
+        if #available(iOS 26.0, *) {
+            // Fix: this used to be a button carrying a glass background of its own, which the bar
+            // then drew its own glass circle around - the pill outlined inside the circle. The
+            // bar dresses whatever item it is given on this release, so the item is left plain
+            // and the circle is the bar's.
+            let item = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain,
+                                       target: self, action: #selector(cancelAction))
+            item.tintColor = .label
+            return item
+        }
+        let cancelButton = UIBarButtonItem(title: "Cancel".localized(), style: .plain, target: self, action: #selector(cancelAction))
+        cancelButton.setTitleTextAttributes([NSAttributedString.Key.foregroundColor: UIColor.white,
+                                             NSAttributedString.Key.font: UIFont.systemFont(ofSize: 16)], for: .normal)
+        return cancelButton
+    }
+
     private func addSubviewMultipleSession() {
         let container = UIView()
         containerMultpileSelectSession.addSubview(container)
         container.translatesAutoresizingMaskIntoConstraints = false
+        // iOS 26 floats a bar like this clear of the edges as a capsule of glass, which is what
+        // that release does with every other bar; before it, the bar stays the full-width block
+        // with the shadow, which is what those releases do.
+        var sideInset: CGFloat = 0
+        if #available(iOS 26.0, *) {
+            sideInset = 16
+        }
         NSLayoutConstraint.activate([
-            container.leadingAnchor.constraint(equalTo: containerMultpileSelectSession.leadingAnchor),
-            container.trailingAnchor.constraint(equalTo:containerMultpileSelectSession.trailingAnchor),
+            container.leadingAnchor.constraint(equalTo: containerMultpileSelectSession.leadingAnchor, constant: sideInset),
+            container.trailingAnchor.constraint(equalTo:containerMultpileSelectSession.trailingAnchor, constant: -sideInset),
             container.bottomAnchor.constraint(equalTo: containerMultpileSelectSession.bottomAnchor),
             container.heightAnchor.constraint(equalToConstant: 50)
         ])
-        container.layer.shadowOpacity = 0.7
-        container.layer.shadowOffset = CGSize(width: 3, height: 3)
-        container.layer.shadowRadius = 3.0
-        container.layer.shadowColor = UIColor.black.cgColor
-        container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .secondaryColor
+        if #available(iOS 26.0, *) {
+            container.backgroundColor = .clear
+            container.cornerConfiguration = .capsule()
+            // The glass goes behind everything else the bar carries, so the count and the buttons
+            // added below sit on it rather than under it.
+            let glass = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+            container.insertSubview(glass, at: 0)
+            glass.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                glass.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                glass.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                glass.topAnchor.constraint(equalTo: container.topAnchor),
+                glass.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+            ])
+            glass.cornerConfiguration = .capsule()
+        } else {
+            container.layer.shadowOpacity = 0.7
+            container.layer.shadowOffset = CGSize(width: 3, height: 3)
+            container.layer.shadowRadius = 3.0
+            container.layer.shadowColor = UIColor.black.cgColor
+            container.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .secondaryColor
+        }
         
         if !isSearching {
             let title = UILabel()
@@ -9960,7 +10365,10 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 formatterTime.dateFormat = "HH:mm"
                 formatterTime.locale = NSLocale(localeIdentifier: "id") as Locale?
                 let dataProfile = getDataProfile(message_id: dataMessages[i]["message_id"]  as? String ?? "")
-                let textCopied = (dataMessages[i]["message_text"]  as? String ?? "").richText(isEditing: true)
+                // Fix: the raw field was copied, so a document handed over its file name with a
+                // bar in front of the caption, and a link handed over the preview's own details
+                // after the "■". What is copied is what the bubble shows - see `ChatMessageText`.
+                let textCopied = ChatMessageText.spoken(of: dataMessages[i]).richText(isEditing: true)
                 if text.isEmpty {
                     text = "*[\(formatterDate.string(from: date as Date)) \(formatterTime.string(from: date as Date))] \(dataProfile["name"]!):*\n\(textCopied.string)"
                 } else {
@@ -9990,11 +10398,12 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             }
             var contentText = ""
             for message in dataMessages {
-                if !(message[TypeDataMessage.message_text] as? String ?? "").isEmpty {
+                let spoken = ChatMessageText.spoken(of: message)
+                if !spoken.isEmpty {
                     let dataUser = User.getData(pin: message[TypeDataMessage.f_pin] as? String ?? "", lPin: self.dataPerson["f_pin"] as? String ?? "")
                     contentText.append(dataUser?.fullName ?? "")
                     contentText.append(": ")
-                    contentText.append(message[TypeDataMessage.message_text] as? String ?? "")
+                    contentText.append(spoken)
                     contentText.append("\n\n")
                 } else {
                     self.view.makeToast("Cannot get messages to summarize".localized(), duration: 3)
@@ -10261,7 +10670,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                         }
                         if (index == 0) {
                             DispatchQueue.main.async {
-                                UIPasteboard.general.string = dataMessages[indexPath.row]["message_text"] as? String
+                                UIPasteboard.general.string = ChatMessageText.spoken(of: dataMessages[indexPath.row])
                                 self.view.makeToast("Text coppied to clipboard".localized(), duration: 3)
                             }
                         } else {
@@ -10524,6 +10933,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         guard tableView == tableChatView else {
             return
         }
+        // A bubble that has just been sent or has just arrived grows into place as its row comes
+        // on screen - see pendingBubbleArrival.
+        playPendingBubbleArrivalIfNeeded(for: cell, at: indexPath)
         // Remember what each row actually measured, so the table estimates rows it has not
         // built yet from real numbers. That is what keeps the content from shifting under the
         // reader when a page of older messages is inserted above.
@@ -11074,41 +11486,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             guard indexPath.row < dataMessages.count else {
                 return
             }
-            let imageChat = dataMessages[indexPath.row]["image_id"]  as? String ?? ""
-            let videoChat = dataMessages[indexPath.row]["video_id"]  as? String ?? ""
-            let fileChat = dataMessages[indexPath.row]["file_id"]  as? String ?? ""
-            let audioChat = dataMessages[indexPath.row]["audio_id"]  as? String ?? ""
-            let messageText = dataMessages[indexPath.row][TypeDataMessage.message_text]  as? String ?? ""
-            if !imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty || !audioChat.isEmpty {
-                if summarizeSession || (copySession && messageText.isEmpty) {
-                    return
-                } else if forwardSession && (!Nexilis.checkingAccess(key: "secure_folder_forward") || (!(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward"))) {
-                    return
-                } else {
-                    var file = imageChat
-                    if file.isEmpty {
-                        file = videoChat
-                        if file.isEmpty {
-                            file = fileChat
-                            if file.isEmpty {
-                                file = audioChat
-                            }
-                        }
-                    }
-                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                    if let dirPath = paths.first {
-                        let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
-                        if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
-                            return
-                        }  else if !fileChat.isEmpty && messageText.component(1, separatedBy: "|").isEmpty {
-                            return
-                        }
-                    }
-                }
-            }
-            if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "11" || (dataMessages[indexPath.row]["message_id"] as? String ?? "").contains("NTFPIN_") || dataMessages[indexPath.row]["message_scope_id"] as? String == MessageScope.CALL) {
+            // One rule for whether a message can be picked - see `canPickMessage`. A row that
+            // fails it draws no circle, so a tap on it must not quietly change the count either.
+            guard canPickMessage(dataMessages[indexPath.row], for: openSelectionKind) else {
                 return
             }
             let idx = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == dataMessages[indexPath.row]["message_id"] as? String})
@@ -11380,11 +11760,21 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             // A pull that was interrupted can leave a bubble sitting off to one side. Building
             // the cell again used to clear that as a side effect of throwing the views away, so
             // handing one back has to say it plainly.
-            cell.contentView.subviews.forEach { $0.transform = .identity }
+            // Fix: this clears a bubble left off to one side by an interrupted pull - but it
+            // used to clear the one that is growing into place as well, which killed the arrival
+            // animation two frames after it started. A row in the middle of arriving is left
+            // entirely alone: everything in it is being held back on purpose.
+            if cell !== arrivingCell {
+                cell.contentView.subviews.forEach { $0.transform = .identity }
+            }
+            applySelectionChrome(to: cell)
             return cell
         }
         emptyBubbleCell(cell)
         setBuiltSignature(signature, on: cell)
+        // See `applySelectionChrome`: while messages are being picked, a tap belongs to the row
+        // and to nothing the row is carrying.
+        cell.contentView.isUserInteractionEnabled = !isSelectionSessionActive
         
         if isContactCenter && isRequestContactCenter && dataMessages[indexPath.row]["category_cc"] != nil {
             cell.backgroundColor = .clear
@@ -11621,11 +12011,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
                 profileMessage.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -15).isActive = true
             } else {
-                if copySession || forwardSession || deleteSession || summarizeSession {
-                    profileMessage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 50).isActive = true
-                } else {
-                    profileMessage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 15).isActive = true
-                }
+                // The picture no longer moves aside for the circle - the circle is drawn on top
+                // of it and the two cross-fade, so this is the one leading it has ever needed.
+                profileMessage.tag = EditorPersonal.selectionAvatarTag
+                profileMessage.alpha = selectionChromeShown ? 0 : 1
+                profileMessage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 15).isActive = true
             }
             profileMessage.heightAnchor.constraint(equalToConstant: 37).isActive = true
             profileMessage.widthAnchor.constraint(equalToConstant: 35).isActive = true
@@ -11725,54 +12115,31 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         let statusMessage = UIImageView()
         
         if copySession || forwardSession || deleteSession || summarizeSession {
-            var showSelectedImage = true
-            if !imageChat.isEmpty || !videoChat.isEmpty || !fileChat.isEmpty || !audioChat.isEmpty {
-                if summarizeSession || (copySession && textChat.isEmpty) {
-                    showSelectedImage = false
-                } else if forwardSession && (!Nexilis.checkingAccess(key: "secure_folder_forward") || (!(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").isEmpty && !(dataMessages[indexPath.row][TypeDataMessage.spec_file] as? String ?? "").contains("forward"))) {
-                    showSelectedImage = false
-                } else {
-                    var file = imageChat
-                    if file.isEmpty {
-                        file = videoChat
-                        if file.isEmpty {
-                            file = fileChat
-                            if file.isEmpty {
-                                file = audioChat
-                            }
-                        }
-                    }
-                    let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
-                    let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
-                    let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
-                    if let dirPath = paths.first {
-                        let fileURL = URL(fileURLWithPath: dirPath).appendingPathComponent(file)
-                        if !FileManager.default.fileExists(atPath: fileURL.path) && !FileEncryption.shared.isSecureExists(filename: fileURL.lastPathComponent) {
-                            showSelectedImage = false
-                        } else if !fileChat.isEmpty && textChat.component(1, separatedBy: "|").isEmpty {
-                            showSelectedImage = false
-                        }
-                    }
-                }
-            }
-            if (copySession || forwardSession || summarizeSession) && (dataMessages[indexPath.row]["lock"] as? String == "1" || (dataMessages[indexPath.row]["credential"] as? String) == "1" || (dataMessages[indexPath.row]["lock"] as? String) == "2" || dataMessages[indexPath.row]["f_pin"]  as? String ?? "" == "-999" || dataMessages[indexPath.row]["attachment_flag"]  as? String ?? "" == "11" || messageIdChat.contains("NTFPIN_") || dataMessages[indexPath.row]["message_scope_id"] as? String == MessageScope.CALL) {
-                showSelectedImage = false
-            }
-            
+            let showSelectedImage = canPickMessage(dataMessages[indexPath.row], for: openSelectionKind)
             if showSelectedImage {
                 let selectedImage = UIImageView()
                 cell.contentView.addSubview(selectedImage)
+                selectedImage.tag = EditorPersonal.selectionMarkTag
                 selectedImage.translatesAutoresizingMaskIntoConstraints = false
                 selectedImage.frame.size = CGSize(width: 20, height: 20)
-                var leading = selectedImage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: -20)
-                selectedImage.isHidden = true
-                if copySession || forwardSession || deleteSession || summarizeSession {
-                    leading = selectedImage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 15)
-                    selectedImage.isHidden = false
-                }
+                // Fix: the circle used to be given a column of its own at the left edge, and where
+                // a picture is drawn at all - a contact centre or bot conversation - the picture
+                // and the bubble beside it were pushed 35pt over to clear it, so the whole row
+                // jumped sideways the moment a session opened. It takes the picture's column now,
+                // and the two cross-fade in place. A conversation that draws no picture on the
+                // left keeps the middle of the column a picture would have taken.
+                //
+                // Its height is read off the bubble rather than off the row: the row carries the
+                // time and the acknowledgement under the bubble, so the middle of the row sits
+                // below the middle of what is being chosen.
+                let picturedOnTheLeft = (isContactCenter || is_bot == 1)
+                    && dataMessages[indexPath.row]["f_pin"] as? String != idMe
+                let column: NSLayoutConstraint = picturedOnTheLeft
+                    ? selectedImage.centerXAnchor.constraint(equalTo: profileMessage.centerXAnchor)
+                    : selectedImage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 22.5)
                 NSLayoutConstraint.activate([
-                    leading,
-                    selectedImage.centerYAnchor.constraint(equalTo: cell.contentView.centerYAnchor),
+                    column,
+                    selectedImage.centerYAnchor.constraint(equalTo: containerMessage.centerYAnchor),
                     selectedImage.widthAnchor.constraint(equalToConstant: 20),
                     selectedImage.heightAnchor.constraint(equalToConstant: 20)
                 ])
@@ -11783,6 +12150,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     selectedImage.image = UIImage(systemName: "checkmark.circle.fill")
                 }
                 selectedImage.tintColor = .mainColor
+                // Built in whichever state the screen is in, so a row that scrolls in during a
+                // session is not caught halfway through a fade it never took part in.
+                selectedImage.alpha = selectionChromeShown ? 1 : 0
+                selectedImage.transform = selectionChromeShown ? .identity : EditorPersonal.selectionMarkHidden
             }
         }
         
@@ -11855,11 +12226,15 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             if isContactCenter || is_bot == 1 {
                 containerMessage.leadingAnchor.constraint(equalTo: profileMessage.trailingAnchor, constant: 5).isActive = true
             } else {
-                if copySession || forwardSession || deleteSession || summarizeSession {
-                    containerMessage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 50).isActive = true
-                } else {
-                    containerMessage.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 15).isActive = true
-                }
+                // Fix: no picture is drawn on the left of a plain personal chat, so unlike a
+                // group - where the circle takes the picture's place - the bubble has to make
+                // room for it. It used to do that in a redraw, which is the sideways jump; the
+                // shift travels with the circle now. See bubbleLeadingNormal.
+                let bubbleLeading = containerMessage.leadingAnchor.constraint(
+                    equalTo: cell.contentView.leadingAnchor,
+                    constant: selectionChromeShown ? EditorPersonal.bubbleLeadingInSession : EditorPersonal.bubbleLeadingNormal)
+                bubbleLeading.isActive = true
+                setSelectionShift(bubbleLeading, on: cell)
             }
             containerMessage.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor, constant: -60).isActive = true
             containerMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
@@ -12009,7 +12384,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
         }
         
-        let messageText = UITextView()
+        let messageText = PressableTextView()
         messageText.isEditable = false
         // Fix: isSelectable = false (was true) - like WhatsApp, no drag-to-select or
         // system text-selection UI on message text. Important side effect: a
@@ -12041,13 +12416,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         // cancelsTouchesInView = false and the UIGestureRecognizerDelegate
         // conformance below (shouldRecognizeSimultaneouslyWith) keep it purely
         // observational alongside containerMessage's UIContextMenuInteraction.
-        let touchHighlightGesture = LinkTouchHighlightGesture(target: self, action: #selector(handleLinkTouchHighlight(_:)))
-        touchHighlightGesture.minimumPressDuration = 0
-        touchHighlightGesture.textView = messageText
-        touchHighlightGesture.delegate = self
-        touchHighlightGesture.cancelsTouchesInView = false
-        touchHighlightGesture.delaysTouchesBegan = false
-        messageText.addGestureRecognizer(touchHighlightGesture)
+        // The view's own touches, not a recognizer - see PressableTextView for why.
+        messageText.onTouch = { [weak self, weak messageText] phase, point in
+            guard let self = self, let messageText = messageText else { return }
+            self.handleLinkTouch(phase, at: point, in: messageText)
+        }
 
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
@@ -12319,7 +12692,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String == MessageScope.CALL || dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String == MessageScope.MISSED_CALL{
             messageText.removeFromSuperview()
             
-            let containerCall = UIButton(type: .custom)
+            // Looks pressed under the finger, the way a quote does, and a tap offers to call
+            // again - see PressableView and callBubbleTapped.
+            let containerCall = PressableView()
             containerCall.backgroundColor = .white.withAlphaComponent(0.3)
             containerMessage.addSubview(containerCall)
             containerCall.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: 5, paddingLeft: 5, paddingBottom: 5, paddingRight: 5, height: 60)
@@ -12331,6 +12706,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             let isVideo = textChat.lowercased().contains("video")
             let isMissedCall = textChat.lowercased().contains("missed")
             let isImageLeft = textChat.lowercased().contains("incoming") || isMissedCall
+            if !copySession && !forwardSession && !deleteSession && !summarizeSession && !isSearching {
+                let callTap = UITapGestureRecognizer(target: self, action: #selector(callBubbleTapped(_:)))
+                // Which kind of call this bubble records, so the sheet offers the same kind back.
+                callTap.name = isVideo ? "video" : "audio"
+                containerCall.addGestureRecognizer(callTap)
+            }
             let longCall = textChat.component(1, separatedBy: " at ")
             var subTextCall = longCall
             
@@ -12401,7 +12782,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
         
         if isSearching && textSearch.count > 1 && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.CALL && dataMessages[indexPath.row][TypeDataMessage.message_scope_id] as? String != MessageScope.MISSED_CALL && dataMessages[indexPath.row][TypeDataMessage.attachment_flag] as? String != "11" && !(dataMessages[indexPath.row][TypeDataMessage.message_id] as? String ?? "").contains("NTFPIN_") {
-            messageText.attributedText = messageRequestFriend != nil ? messageRequestFriend.richText(isSearching: true, textSearch: textSearch) : stringLS.isEmpty ? textChat.richText(isSearching: true, textSearch: textSearch) : stringLS.richText(isSearching: true, textSearch: textSearch)
+            // Fix: a search re-renders the bubble from the raw message text to add the
+            // highlight, and the raw text of a message with a link still carries the link
+            // preview after the "■" - which the ordinary render strips before drawing. So
+            // the moment a search was typed, every bubble with a link grew its "■" tail back.
+            // The same rule the bubble, reply and copy use: see ChatMessageText.
+            let shownText = ChatMessageText.withoutLinkPreview(textChat)
+            messageText.attributedText = messageRequestFriend != nil ? messageRequestFriend.richText(isSearching: true, textSearch: textSearch) : stringLS.isEmpty ? shownText.richText(isSearching: true, textSearch: textSearch) : stringLS.richText(isSearching: true, textSearch: textSearch)
         }
         
         let stringDate = (dataMessages[indexPath.row]["server_date"] as? String) ?? ""
@@ -13861,7 +14248,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let quoteOverlay = BubblePanel.ground(dark: isDarkQuote)
                 let quotedTextColour = BubblePanel.text(dark: isDarkQuote)
 
-                let containerReply = UIView()
+                // Looks pressed under the finger, the way a link does - see PressableView.
+                let containerReply = PressableView()
                 containerMessage.addSubview(containerReply)
                 containerReply.translatesAutoresizingMaskIntoConstraints = false
                 containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
@@ -13980,7 +14368,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 hugContent.priority = UILayoutPriority(500)
                 hugContent.isActive = true
                 contentReply.font = UIFont.systemFont(ofSize: 11 + offset())
-                let message_text = chatGroup[0].messageText
+                let message_text = ChatMessageText.withoutLinkPreview(chatGroup[0].messageText)
                 let attachment_flag = chatGroup[0].attachmentFlag
                 let thumb_chat = chatGroup[0].thumb
                 let image_chat = chatGroup[0].image
@@ -14463,7 +14851,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     /// is aiming for is a guess that UIKit keeps correcting while the animation is already
     /// running - which is the bouncing. The bottom is measured from the content that has actually
     /// been laid out, and the offset is set once.
-    func slideToNewestMessage(animated: Bool = true) {
+    func slideToNewestMessage(animated: Bool = true, over duration: TimeInterval = 0.25) {
         guard let table = tableChatView, table.numberOfSections > 0 else {
             return
         }
@@ -14478,9 +14866,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             settle()
             return
         }
-        // The same unhurried ease the reference uses: the new bubble is already in place and the
-        // conversation moves up under it, rather than the row being chased into view.
-        UIView.animate(withDuration: 0.25, delay: 0,
+        // The same ease the bubble grows to, and by default the same length of time - so when the
+        // two are started together the conversation moves up exactly as the bubble fills out.
+        UIView.animate(withDuration: duration, delay: 0,
                        options: [.curveEaseOut, .beginFromCurrentState],
                        animations: settle,
                        completion: { _ in
@@ -14503,36 +14891,188 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     /// The tag the bubble carries so an arrival animation can find it again in a built cell.
     static let bubbleTag = 77_301
 
-    /// The pop a new bubble arrives with: it grows out of the side it belongs to, and fades in.
+    /// Written down before the row goes in, so the bubble is small the first time it is drawn.
     ///
-    /// WhatsApp's own animation, which they describe as the bubble fading in while scaling up
-    /// slightly as it settles rather than appearing abruptly. Growing it about its trailing
-    /// corner for a message of ours, and its leading corner for one that arrives, is what makes
-    /// it look like it comes out of that side instead of out of the middle.
+    /// Whether the conversation moves up to meet it is decided here too, while it still can be:
+    /// a message of ours always takes the reader to it, and one that arrives only does so if the
+    /// reader was already at the end. Once the row is in, the list is no longer at its bottom and
+    /// the question can no longer be asked.
+    func expectBubbleArrival(messageId: String, outgoing: Bool) {
+        guard !messageId.isEmpty else {
+            return
+        }
+        pendingBubbleArrival = (messageId, outgoing, nil, outgoing || isAtNewestMessage())
+    }
+
+    /// How far the list is about to travel to bring its newest message into view.
+    func distanceToNewestMessage() -> CGFloat {
+        guard let table = tableChatView, table.numberOfSections > 0 else {
+            return 0
+        }
+        let lowest = -table.adjustedContentInset.top
+        let bottom = table.contentSize.height + table.adjustedContentInset.bottom - table.bounds.height
+        return max(0, max(lowest, bottom) - table.contentOffset.y)
+    }
+
+    /// Whether the reader is sitting at the end of the conversation.
+    private func isAtNewestMessage() -> Bool {
+        guard let table = tableChatView else {
+            return false
+        }
+        let bottom = table.contentSize.height + table.adjustedContentInset.bottom - table.bounds.height
+        return bottom - table.contentOffset.y <= 40
+    }
+
+    /// Nothing is arriving after all - a picture folded into a collage adds no row of its own.
+    func cancelExpectedBubbleArrival() {
+        pendingBubbleArrival = nil
+    }
+
+    /// Last chance, from the completion of the insert: the row is in place and nothing has played
+    /// it. A short conversation does not scroll to make room for a new message, so willDisplay may
+    /// have fired before the cell had been measured and found a bubble with no size to grow from.
+    func retryPendingBubbleArrival(at indexPath: IndexPath) {
+        guard pendingBubbleArrival?.startedAt == nil else {
+            return
+        }
+        tableChatView.layoutIfNeeded()
+        if let cell = tableChatView.cellForRow(at: indexPath) {
+            playPendingBubbleArrivalIfNeeded(for: cell, at: indexPath)
+        }
+    }
+
+    /// Plays whatever arrival this row owes - from the beginning, or from wherever a rebuild
+    /// interrupted it.
+    func playPendingBubbleArrivalIfNeeded(for cell: UITableViewCell, at indexPath: IndexPath) {
+        guard let pending = pendingBubbleArrival,
+              (message(at: indexPath)?["message_id"] as? String) == pending.messageId else {
+            return
+        }
+        let started = pending.startedAt ?? Date()
+        let elapsed = Date().timeIntervalSince(started)
+        let remaining = Self.bubbleArrivalDuration - elapsed
+        guard remaining > 0.02 else {
+            pendingBubbleArrival = nil
+            return
+        }
+        let progress = CGFloat(max(0, elapsed) / Self.bubbleArrivalDuration)
+        guard playBubbleArrival(on: cell, outgoing: pending.outgoing,
+                                from: progress, over: remaining,
+                                of: pending.messageId,
+                                pushingList: pending.pushesList && pending.startedAt == nil) else {
+            return
+        }
+        pendingBubbleArrival = (pending.messageId, pending.outgoing, started, pending.pushesList)
+    }
+
+    /// The pop a new bubble arrives with: it grows out of the corner it belongs to.
+    ///
+    /// Over 0.18s the bubble goes from nothing to its full size, decelerating, with its top edge
+    /// and the edge it belongs to held still the whole way - so it unfolds downwards out of the
+    /// corner it came from rather than swelling in place. It does not fade: the first frame it can
+    /// be seen at all, less than a point tall, is already solid. A message of ours grows out of
+    /// its top-right corner, one that arrives out of its top-left.
+    ///
+    /// Fix: the corner used to be the bottom one, and the first message of a conversation grew
+    /// from the top while every message after it grew from the bottom. Both come from the same
+    /// arithmetic below - `dy` moved the bubble down by half of what the scaling took off its
+    /// height, which holds the bottom edge still. It only actually held it when the height being
+    /// measured was the real one, and for the first message in a conversation it is not: that row
+    /// is still being laid out when this runs, so the height read here was short and the bubble
+    /// ended up anchored nearer its top. The measurement is settled first now, and the corner is
+    /// the top one on purpose, which is where the two happened to agree.
     ///
     /// Done with a transform rather than by moving the layer's anchor point: a transform sits on
     /// top of Auto Layout and undoes itself cleanly, where a moved anchor point is put back by
     /// the next layout pass and leaves the bubble somewhere it should not be.
-    func playBubbleArrival(at indexPath: IndexPath, outgoing: Bool) {
-        guard let cell = tableChatView.cellForRow(at: indexPath),
-              let bubble = cell.contentView.viewWithTag(Self.bubbleTag),
-              bubble.bounds.width > 0 else {
-            return
+    @discardableResult
+    func playBubbleArrival(on cell: UITableViewCell, outgoing: Bool,
+                           from progress: CGFloat, over duration: TimeInterval,
+                           of messageId: String, pushingList: Bool) -> Bool {
+        guard let bubble = cell.contentView.viewWithTag(Self.bubbleTag) else {
+            return false
         }
-        let scale: CGFloat = 0.78
+        // The size this is all worked out from has to be the settled one. willDisplay can run
+        // while the row is still being measured, and a height read too early is what made the
+        // first message of a conversation grow from a different corner than the rest. Asked for
+        // before the size is read, and before the guard below decides there is nothing to grow.
+        UIView.performWithoutAnimation {
+            bubble.transform = .identity
+            cell.contentView.layoutIfNeeded()
+        }
+        guard bubble.bounds.width > 0, bubble.bounds.height > 0 else {
+            return false
+        }
+        // Measured off the reference frame by frame: it starts from nothing, not from a bubble
+        // that is merely small. `progress` is only ever above zero when a rebuild has interrupted
+        // the growing and this is picking it back up.
+        let smallest: CGFloat = 0.05
+        let scale = smallest + (1 - smallest) * max(0, min(1, progress))
         let shrink = (1 - scale) / 2
         // Keeps the corner it grows from where it already is: scaling about the centre pulls that
-        // corner inwards, so it is pushed back out by the same amount.
+        // corner inwards, so it is pushed back out by the same amount. Up rather than down, so it
+        // is the top edge that stays put and the bubble unfolds downwards.
         let dx = bubble.bounds.width * shrink * (outgoing ? 1 : -1)
-        let dy = bubble.bounds.height * shrink
-        bubble.transform = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
-        bubble.alpha = 0
-        UIView.animate(withDuration: 0.26, delay: 0,
-                       usingSpringWithDamping: 0.82, initialSpringVelocity: 0.5,
-                       options: [.beginFromCurrentState, .allowUserInteraction]) {
-            bubble.transform = .identity
+        let dy = -bubble.bounds.height * shrink
+        let start = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
+        // The starting state is set outside any animation that happens to be running - this is
+        // called from willDisplay, which the table is in the middle of animating an insertion in.
+        UIView.performWithoutAnimation {
+            bubble.transform = start
             bubble.alpha = 1
         }
+        arrivingBubble = bubble
+        arrivingCell = cell
+        // Fix: with the conversation already at its end, the new row is added below what can be
+        // seen and only the list moving up brings it in - so the bubble did all its growing off
+        // the bottom of the screen and the reader saw nothing but a finished bubble sliding into
+        // place. The reference does not let that happen: the new row sits where it will end up
+        // from the very first frame, and it is everything above that travels.
+        //
+        // That is what the counter-travel below is. The row is held back by exactly as far as the
+        // list is about to move, and released on the same curve, so the two cancel: on screen the
+        // row does not move at all while the conversation slides up behind it, and the bubble
+        // grows in full view for the whole of it.
+        //
+        // Both are asked for on the next turn of the run loop, together. This is called from
+        // willDisplay, in the middle of the table laying itself out, and the scroll position is
+        // not something to change from inside that; doing the two in the same turn also means the
+        // row is never held back in a frame where the list has not yet moved.
+        DispatchQueue.main.async { [weak self, weak cell, weak bubble] in
+            guard let self = self, let cell = cell, let bubble = bubble else {
+                return
+            }
+            let lift = pushingList ? self.distanceToNewestMessage() : 0
+            let held = CGAffineTransform(translationX: 0, y: -lift)
+            let travellers = cell.contentView.subviews.filter { $0 !== bubble }
+            if lift > 0 {
+                UIView.performWithoutAnimation {
+                    bubble.transform = start.concatenating(held)
+                    travellers.forEach { $0.transform = held }
+                }
+                self.slideToNewestMessage(over: duration)
+            }
+            UIView.animate(withDuration: duration, delay: 0,
+                           options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction],
+                           animations: {
+                bubble.transform = .identity
+                travellers.forEach { $0.transform = .identity }
+            }, completion: { [weak self] finished in
+                guard let self = self, finished else {
+                    return
+                }
+                if self.arrivingBubble === bubble {
+                    self.arrivingBubble = nil
+                }
+                if self.arrivingCell === cell {
+                    self.arrivingCell = nil
+                }
+                if self.pendingBubbleArrival?.messageId == messageId {
+                    self.pendingBubbleArrival = nil
+                }
+            })
+        }
+        return true
     }
 
     // MARK: - Long messages
@@ -14676,7 +15216,28 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         guard let stack = navigationController else {
             return
         }
-        if rising {
+        // Fix: this raised a new list every time it was asked, and it is asked far more often than
+        // the reader asks for one. Moving between pictures inside the viewer reports each new
+        // picture back here, and answering that goes through the same jump a quote does - which,
+        // for a picture that lives in a collage, is "raise the collage". So every swipe stacked
+        // another copy of the same screen behind the viewer, and closing it left the reader
+        // pressing Back through a pile of identical pages. There is only ever one list per
+        // collage: if it is already in the stack it is pointed at the picture and returned to,
+        // and a stack with something over it is rearranged in silence, since an animation nobody
+        // can see only turns up later as a slide out of nowhere.
+        let quietly = stack.presentedViewController != nil
+        if let already = stack.viewControllers.reversed().first(where: {
+            ($0 as? ListGroupImages)?.holdsSameAs(list) == true
+        }) as? ListGroupImages {
+            if let opened = list.imageTapped, opened >= 0, opened < list.listGroupingImages.count {
+                already.show(messageId: list.listGroupingImages[opened].messageId)
+            }
+            if stack.topViewController !== already {
+                stack.popToViewController(already, animated: !quietly)
+            }
+            return
+        }
+        if rising, !quietly {
             let transition = RisingPushTransition(rising: list, previous: stack.delegate)
             transition.onFinished = { [weak self] in
                 self?.risingCollageTransition = nil
@@ -14684,7 +15245,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             risingCollageTransition = transition
             stack.delegate = transition
         }
-        stack.pushViewController(list, animated: true)
+        stack.pushViewController(list, animated: !quietly)
     }
 
     @objc func imageGroupingTapped(_ sender: ObjectGesture) {
@@ -15093,7 +15654,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 // viewer came out of and should go back into. Once the reader has moved past what
                 // the collage holds, `presenter` has been let go and the conversation answers.
                 if let collage = sender.presenter as? ListGroupImages, collage.holds(messageId: viewer.currentMessageId) {
-                    return sender.imageView
+                    // Fix: this handed back the row that was tapped to open the viewer, whichever
+                    // picture the reader had since moved to - so closing on the second picture
+                    // shrank it into the first one's row. The row is asked for by the picture on
+                    // screen, and the list is brought to it first if it is not already there,
+                    // because a row nobody can see is nothing to shrink into.
+                    collage.show(messageId: viewer.currentMessageId)
+                    return collage.tileView(for: viewer.currentMessageId) ?? sender.imageView
                 }
                 let shown = viewer.currentMessageId
                 guard !shown.isEmpty,
@@ -15427,17 +15994,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     }
 
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        if gestureRecognizer is LinkTouchHighlightGesture || otherGestureRecognizer is LinkTouchHighlightGesture {
-            return true
-        }
+        // Nothing here needs to run alongside another recognizer any more: the link and
+        // mention highlight is drawn from the text view's own touches - see PressableTextView.
         return false
     }
 
-    @objc private func handleLinkTouchHighlight(_ sender: LinkTouchHighlightGesture) {
-        guard let textView = sender.textView else { return }
-        let point = sender.location(in: textView)
-
-        switch sender.state {
+    private func handleLinkTouch(_ phase: PressableTextView.Phase, at point: CGPoint, in textView: UITextView) {
+        switch phase {
         case .began:
             // The same rule as the bubble menu: nothing is offered on a press that landed on a
             // list still in motion.
@@ -15464,7 +16027,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 self.presentLinkActionSheet(urlString: urlString)
             }
 
-        case .changed:
+        case .moved:
             if let info = LinkHighlighting.linkInfo(at: point, in: textView) {
                 showLinkHighlight(range: info.range, in: textView)
             } else {
@@ -15472,12 +16035,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 linkPressGeneration += 1
             }
 
-        case .ended, .cancelled, .failed:
+        case .ended, .cancelled:
             linkPressGeneration += 1
             hideLinkHighlight()
-
-        default:
-            break
         }
     }
 
@@ -15834,7 +16394,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         contentReply.trailingAnchor.constraint(equalTo: containerPreviewReply.trailingAnchor, constant: -20).isActive = true
         contentReply.topAnchor.constraint(equalTo: titleReply.bottomAnchor).isActive = true
         contentReply.font = UIFont.systemFont(ofSize: 10 + offset())
-        let message_text = chatGroup.count == 0 ? (dataMessages[indexPath.row]["message_text"] as? String ?? "") : chatGroup[0].messageText
+        let message_text = ChatMessageText.withoutLinkPreview(chatGroup.count == 0 ? (dataMessages[indexPath.row]["message_text"] as? String ?? "") : chatGroup[0].messageText)
         let attachment_flag = chatGroup.count == 0 ? (dataMessages[indexPath.row]["attachment_flag"] as? String ?? "") : chatGroup[0].attachmentFlag
         let thumb_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["thumb_id"] as? String ?? "") : chatGroup[0].thumb
         let image_chat = chatGroup.count == 0 ? (dataMessages[indexPath.row]["image_id"] as? String ?? "") : chatGroup[0].image
@@ -15956,35 +16516,15 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         if !wasLoaded {
             ensureMessageLoaded(messageId: messageId)
         }
-        guard let indexPath = indexPath(forMessageId: messageId),
-              let message = dataMessages.first(where: { $0["message_id"] as? String == messageId }) else {
+        guard let indexPath = indexPath(forMessageId: messageId) else {
             return
         }
         lastScrollIdxSearch = indexScroll
         tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: wasLoaded)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            if let cell = self.tableChatView.cellForRow(at: indexPath), cell.contentView.subviews.count > 1 {
-                let containerMessage = cell.contentView.subviews[1]
-                let idMe = User.getMyPin() as String?
-                if (message["f_pin"] as? String == idMe) {
-                    containerMessage.backgroundColor = .blueBubbleColor.withAlphaComponent(0.3)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        if (message["attachment_flag"] as? String == "11") {
-                            containerMessage.backgroundColor = .clear
-                        } else {
-                            containerMessage.backgroundColor = .blueBubbleColor
-                        }
-                    }
-                } else {
-                    containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        if (message["attachment_flag"] as? String == "11") {
-                            containerMessage.backgroundColor = .clear
-                        } else {
-                            containerMessage.backgroundColor = .whiteBubbleColor
-                        }
-                    }
-                }
+            // One highlight, the same everywhere - see BubbleHighlight for what it is and why.
+            if let cell = self.tableChatView.cellForRow(at: indexPath) {
+                BubbleHighlight.flash(in: cell, tag: EditorPersonal.bubbleTag)
             }
         }
         if countMatchesSearch != 0 {
@@ -16105,23 +16645,56 @@ extension UIImage {
 
 extension EditorPersonal: UISearchBarDelegate {
     
+    public func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
+        cancelAction()
+    }
+
     public func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         timerSearch?.invalidate()
-        if searchText.count > 1 {
-            timerSearch = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {[self] _ in
-                textSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-                titleSearchMatches.isHidden = true
-                // The hits come from the database, so nothing has to be loaded to search and
-                // the reader stays exactly where they were reading. The count is the length of
-                // that list, which means the "x of N" can never disagree with what the arrows
-                // can actually reach.
-                searchMatchIds = searchMatches(for: textSearch)
-                countMatchesSearch = searchMatchIds.count
-                lastScrollIdxSearch = 0
-                tableChatView.reloadData()
-                scrollToFirstSearchMessage()
-            })
+        // Fix: nothing at all happened below two characters, so emptying the field - the clear
+        // button, or backspacing down to one letter - left everything the last search had put on
+        // screen exactly where it was: the old word still lit up in every bubble, the "x of N"
+        // still counting its hits, the arrows still stepping through them. What is on screen has
+        // to follow what is in the field, and a search too short to run is a search that is over.
+        guard searchText.count > 1 else {
+            guard !textSearch.isEmpty || countMatchesSearch > 0 else {
+                // Already nothing to clear - typing the first letter of a search must not cost a
+                // reload of the whole conversation.
+                return
+            }
+            textSearch = ""
+            searchMatchIds = []
+            countMatchesSearch = 0
+            lastScrollIdxSearch = 0
+            titleSearchMatches?.isHidden = true
+            // Nothing to step through, which is the same state the arrows are put in for a search
+            // that found nothing.
+            buttonUp?.isEnabled = false
+            buttonUp?.tintColor = .gray
+            buttonDown?.isEnabled = false
+            buttonDown?.tintColor = .gray
+            // Only the highlight and the count go; the list stays exactly where it is. Clearing
+            // used to put the reader back where they were before the search, or at the newest
+            // message - both of which moved a list they had just been reading. Where they are is
+            // where they want to be. A new word, on the other hand, starts from the newest bubble
+            // again: the matches are read newest-first and lastScrollIdxSearch is reset to 0
+            // below, so the first hit shown is always the one nearest the bottom.
+            tableChatView.reloadDataKeepingPlace()
+            return
         }
+        timerSearch = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: {[self] _ in
+            textSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            titleSearchMatches.isHidden = true
+            // The hits come from the database, so nothing has to be loaded to search and
+            // the reader stays exactly where they were reading. The count is the length of
+            // that list, which means the "x of N" can never disagree with what the arrows
+            // can actually reach.
+            searchMatchIds = searchMatches(for: textSearch)
+            countMatchesSearch = searchMatchIds.count
+            lastScrollIdxSearch = 0
+            tableChatView.reloadData()
+            scrollToFirstSearchMessage()
+        })
     }
 }
 
@@ -16429,10 +17002,6 @@ enum LinkHighlighting {
 // gets cancelled partway through by a competing recognizer winning, the highlight it
 // already drew simply gets cleared (see EditorGroup's handling), no action is lost or
 // duplicated either way.
-final class LinkTouchHighlightGesture: UILongPressGestureRecognizer {
-    weak var textView: UITextView?
-}
-
 // Fix: custom bottom sheet for the "Open Link"/"Copy" popup, replacing the plain
 // UIAlertController(style: .actionSheet) the three editors used to show. It puts
 // itself on screen through presentAsBottomSheet below, which uses
@@ -16445,10 +17014,17 @@ final class LinkTouchHighlightGesture: UILongPressGestureRecognizer {
 // requested, with an added "Open in Chrome" row that only appears when Chrome is
 // actually installed on the device.
 final class LinkActionSheetViewController: UIViewController {
-    private let urlString: String
-    private let onOpen: () -> Void
-    private let onCopy: () -> Void
-    private let onOpenInChrome: (() -> Void)?
+    /// One tappable row of the sheet.
+    struct Action {
+        let title: String
+        let systemImageName: String
+        let handler: () -> Void
+    }
+
+    private let titleText: String
+    private let subtitleText: String?
+    private let iconSystemName: String?
+    private let actions: [Action]
     /// Called whenever this sheet leaves the screen, however that happened (an action
     /// was tapped, the close "X" was tapped, or the user swiped/tapped-outside to
     /// dismiss without choosing anything) - lets the presenter (EditorGroup) reliably
@@ -16479,12 +17055,30 @@ final class LinkActionSheetViewController: UIViewController {
     private static let bottomContentInset: CGFloat = 12
     private static let horizontalContentInset: CGFloat = 16
 
-    init(urlString: String, onOpen: @escaping () -> Void, onCopy: @escaping () -> Void, onOpenInChrome: (() -> Void)? = nil) {
-        self.urlString = urlString
-        self.onOpen = onOpen
-        self.onCopy = onCopy
-        self.onOpenInChrome = onOpenInChrome
+    /// A sheet of the same shape for anything: a title, an optional line under it, an optional
+    /// icon before them, and the rows. Each row dismisses the sheet and then runs its handler.
+    ///
+    /// Fix: this was built for links and only links - the icon, the title, the URL line and the
+    /// three rows were all written in. A call bubble wants the very same sheet with a name for a
+    /// title and one row in it, and rather than a second sheet that would drift from this one,
+    /// this one says what it shows.
+    init(title: String, subtitle: String? = nil, iconSystemName: String? = nil, actions: [Action]) {
+        self.titleText = title
+        self.subtitleText = subtitle
+        self.iconSystemName = iconSystemName
+        self.actions = actions
         super.init(nibName: nil, bundle: nil)
+    }
+
+    /// The link sheet: "Select an action" over the URL, with Open, Open in Chrome (when Chrome is
+    /// installed - see presentLinkActionSheet) and Copy.
+    convenience init(urlString: String, onOpen: @escaping () -> Void, onCopy: @escaping () -> Void, onOpenInChrome: (() -> Void)? = nil) {
+        var actions = [Action(title: "Open link".localized(), systemImageName: "safari", handler: onOpen)]
+        if let onOpenInChrome = onOpenInChrome {
+            actions.append(Action(title: "Open in Chrome".localized(), systemImageName: "globe", handler: onOpenInChrome))
+        }
+        actions.append(Action(title: "Copy".localized(), systemImageName: "doc.on.doc", handler: onCopy))
+        self.init(title: "Select an action".localized(), subtitle: urlString, iconSystemName: "link", actions: actions)
     }
 
     required init?(coder: NSCoder) {
@@ -16497,25 +17091,13 @@ final class LinkActionSheetViewController: UIViewController {
 
         let header = makeHeader()
 
-        var rows: [LinkActionRow] = []
-        let openRow = LinkActionRow(title: "Open link".localized(), systemImageName: "safari")
-        openRow.onTap = { [weak self] in self?.handleOpen() }
-        rows.append(openRow)
-
-        if onOpenInChrome != nil {
-            // Fix: only shown when Chrome is actually installed - see
-            // presentLinkActionSheet in EditorGroup, which checks
-            // UIApplication.shared.canOpenURL against the "googlechrome" scheme
-            // (declared in Info.plist's LSApplicationQueriesSchemes) before ever
-            // passing a non-nil onOpenInChrome closure here.
-            let chromeRow = LinkActionRow(title: "Open in Chrome".localized(), systemImageName: "globe")
-            chromeRow.onTap = { [weak self] in self?.handleOpenInChrome() }
-            rows.append(chromeRow)
+        let rows: [LinkActionRow] = actions.map { action in
+            let row = LinkActionRow(title: action.title, systemImageName: action.systemImageName)
+            row.onTap = { [weak self] in
+                self?.dismiss(animated: true) { action.handler() }
+            }
+            return row
         }
-
-        let copyRow = LinkActionRow(title: "Copy".localized(), systemImageName: "doc.on.doc")
-        copyRow.onTap = { [weak self] in self?.handleCopy() }
-        rows.append(copyRow)
 
         let rowsCard = makeCard(rows: rows)
 
@@ -16570,13 +17152,14 @@ final class LinkActionSheetViewController: UIViewController {
 
     private func makeHeader() -> UIView {
         let iconBackground = UIView()
+        iconBackground.isHidden = iconSystemName == nil
         iconBackground.backgroundColor = .tertiarySystemFill
         iconBackground.layer.cornerRadius = 20
         iconBackground.translatesAutoresizingMaskIntoConstraints = false
         iconBackground.widthAnchor.constraint(equalToConstant: 40).isActive = true
         iconBackground.heightAnchor.constraint(equalToConstant: 40).isActive = true
 
-        let icon = UIImageView(image: UIImage(systemName: "link"))
+        let icon = UIImageView(image: UIImage(systemName: iconSystemName ?? "link"))
         icon.tintColor = .label
         icon.contentMode = .scaleAspectFit
         icon.translatesAutoresizingMaskIntoConstraints = false
@@ -16589,12 +17172,18 @@ final class LinkActionSheetViewController: UIViewController {
         ])
 
         let titleLabel = UILabel()
-        titleLabel.text = "Select an action".localized()
+        titleLabel.text = titleText
         titleLabel.font = .boldSystemFont(ofSize: 17)
         titleLabel.textColor = .label
         titleLabel.numberOfLines = 1
+        // With nothing before it and nothing under it - a name on its own - the title sits in
+        // the middle, the way the reference's call sheet has it.
+        if iconSystemName == nil && subtitleText == nil {
+            titleLabel.textAlignment = .center
+        }
 
-        urlLabel.text = urlString
+        urlLabel.text = subtitleText
+        urlLabel.isHidden = subtitleText == nil
         urlLabel.font = .systemFont(ofSize: 14)
         urlLabel.textColor = .secondaryLabel
         urlLabel.numberOfLines = 4
@@ -16660,17 +17249,6 @@ final class LinkActionSheetViewController: UIViewController {
         dismiss(animated: true)
     }
 
-    private func handleOpen() {
-        dismiss(animated: true) { [weak self] in self?.onOpen() }
-    }
-
-    private func handleOpenInChrome() {
-        dismiss(animated: true) { [weak self] in self?.onOpenInChrome?() }
-    }
-
-    private func handleCopy() {
-        dismiss(animated: true) { [weak self] in self?.onCopy() }
-    }
 
     // MARK: - Presentation
 

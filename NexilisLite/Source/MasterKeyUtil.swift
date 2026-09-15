@@ -48,8 +48,19 @@ public class MasterKeyUtil {
         let exists = attrStatus == errSecSuccess
 
         // Does the item's protection already match the mode this launch is running in?
+        //
+        // Fix: this asked whether the returned attributes carried kSecAttrAccessControl at all,
+        // and on iOS they always do - every data-protection item comes back with an `accc`
+        // describing its protection class, ACL or not. So every existing item read as
+        // "biometric-protected": the preference key, which never is, hit the main-thread refusal
+        // below on each launch. At modes 2 and 3 the throw was swallowed as best-effort; at mode
+        // 1 it stopped connect() before a single thread was started, and a fresh sign-in sat on
+        // top of a session that was never opened. The protection class is what tells the two
+        // apart: the hardened item is created WhenUnlockedThisDeviceOnly inside its ACL, every
+        // other item AfterFirstUnlockThisDeviceOnly.
+        let existingAccessible = (attrsItem as? [String: Any])?[kSecAttrAccessible as String] as? String
         let existingHasAccessControl = exists
-            && (attrsItem as? [String: Any])?[kSecAttrAccessControl as String] != nil
+            && existingAccessible == (kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
 
         if exists, existingHasAccessControl == hardened {
             // Nothing to change. The marker still has to be caught up, though: a key provisioned

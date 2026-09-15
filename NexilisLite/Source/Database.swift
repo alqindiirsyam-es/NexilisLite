@@ -337,6 +337,23 @@ public class Database {
                 //MESSAGE_SUMMARY
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE_SUMMARY", columnName: "pinned", columnType: "INTEGER", defaultValue: "0")
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE_SUMMARY", columnName: "archived", columnType: "INTEGER", defaultValue: "0")
+                // Repairs pins this app wrote wrong. `pinned` holds the moment a conversation was
+                // pinned, in milliseconds, and for a long while every arriving message read it
+                // back as a 32-bit number and wrote the wrapped result straight back. Roughly half
+                // of those wrapped values are negative, and the list is sorted on this column
+                // highest-first - so a pinned conversation could end up below every unpinned one,
+                // at the very bottom. The moment it was pinned cannot be recovered from a wrapped
+                // value, and nothing is silently unpinned: the rows are given a time instead,
+                // keeping them pinned and in some order. The reader can reorder them by pinning
+                // again; what they cannot do is find a chat that has sunk.
+                //
+                // Here and not in createDatabase: it has to run after the column is known to
+                // exist, and on a database old enough to predate the column it did not - so the
+                // statement threw, and took the whole of the table setup down with it. On a
+                // mode-1 device that is a session that never opens.
+                if !fmdb.executeUpdate("UPDATE MESSAGE_SUMMARY SET pinned = 1 WHERE pinned < 0", withArgumentsIn: []) {
+                    print("pinned repair skipped: \(fmdb.lastErrorMessage())")
+                }
                 
                 //MESSAGE
                 addColumnIfNeeded(database: fmdb, tableName: "MESSAGE", columnName: "notif_broadcast", columnType: "INTEGER", defaultValue: "0")

@@ -71,6 +71,13 @@ class IncomingThread {
     
     private func process(message: TMessage) {
 //        print("incoming process", message.toLogString())
+        // Fix: `enterBackground` closes the database and throws the encryption key away the
+        // moment the app is minimised, but this thread keeps receiving - so every handler below
+        // was writing through a nil connection, every write silently did nothing, and the
+        // acknowledgements went out all the same. Opened here, once, before anything is
+        // dispatched: it costs nothing when the connection is already up, and it is the same call
+        // the push path has always made before writing.
+        Database.shared.ensureOpenForBackgroundWrite()
         let code = message.getCode()
         if code == CoreMessage_TMessageCode.LOGIN_FILE {
             loginFile(message: message)
@@ -1316,8 +1323,12 @@ class IncomingThread {
             }
         }
         guard let _: String = SecureUserDefaults.shared.value(forKey: "status") else {
-            //print("App not ready!!! skip receive message \(message_id)")
-            ack(message: message)
+            // Fix: this used to acknowledge the message before dropping it. An acknowledgement is
+            // the server's proof of delivery - it is what stops the server resending - so a
+            // message that arrived before this app had finished starting up was thrown away and
+            // never sent again. Left unacknowledged it comes back on the next connection, which
+            // is the whole point of acknowledging. `receiveMessageStatus` below has always done
+            // it this way.
             return
         }
 //        var messageExist = false
@@ -1356,10 +1367,23 @@ class IncomingThread {
 //                }
 //            }
 //        } else {
-            Nexilis.saveMessage(message: message, withStatus: false)
+        // Fix: the message used to be acknowledged whatever became of it. saveMessage cannot
+        // report a failure and, while the app is in the background, could not write at all -
+        // so the server was told the message had been delivered, stopped sending it, and it was
+        // gone. Nothing is acknowledged now until the row has been read back off disk; a message
+        // that could not be written stays unacknowledged and the server sends it again.
+        guard Nexilis.persistIncomingMessage(message) else {
+            print("WARNING: not acknowledging \(message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID, default_value: "")) - it is not in the database, so the server should send it again")
+            return
+        }
 //        }
         DispatchQueue.main.async {
-            if APIS.checkAppStateisBackground() && !APIS.listMessageFromAPN.contains(message.getStatus()) {
+            // Fix: this compared the list of message ids being fetched for a push against the
+            // message's *status* - a "3" against ids - so it was never true and the guard did
+            // nothing. The banner is gated inside addNotificationNexilis now, once per message
+            // whichever route brought it; here it is only a matter of not asking while the app is
+            // on screen.
+            if APIS.checkAppStateisBackground() {
                 APIS.addNotificationNexilis(message)
             }
         }

@@ -39,6 +39,53 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
         return listGroupingImages.contains { $0.messageId == messageId }
     }
 
+    /// The same pictures, in the same order - one collage being asked about another.
+    func holdsSameAs(_ other: ListGroupImages) -> Bool {
+        guard let mine = listGroupingImages, let theirs = other.listGroupingImages,
+              mine.count == theirs.count else {
+            return false
+        }
+        return zip(mine, theirs).allSatisfy { $0.messageId == $1.messageId }
+    }
+
+    /// Puts this list on one of its own pictures, for a reader who is already looking at it.
+    ///
+    /// Nothing moves if that picture is already there to be seen: the reader put the list where it
+    /// is, and a picture closing out of the viewer has to land on the row it is actually over.
+    func show(messageId: String) {
+        guard let index = listGroupingImages.firstIndex(where: { $0.messageId == messageId }) else {
+            return
+        }
+        imageTapped = index
+        guard isViewLoaded, tableViewImages.numberOfRows(inSection: 0) > index else {
+            return
+        }
+        tableViewImages.layoutIfNeeded()
+        let row = tableViewImages.rectForRow(at: IndexPath(row: index, section: 0))
+        let inset = tableViewImages.adjustedContentInset
+        let onScreen = CGRect(x: 0,
+                              y: tableViewImages.contentOffset.y + inset.top,
+                              width: tableViewImages.bounds.width,
+                              height: tableViewImages.bounds.height - inset.top - inset.bottom)
+        // Enough of it to aim at, and enough for the reader to recognise: half the row, or half
+        // the screen when the row is the larger of the two.
+        let enough = min(row.height, onScreen.height) / 2
+        guard row.intersection(onScreen).height < enough else {
+            return
+        }
+        tableViewImages.scrollToRow(at: IndexPath(row: index, section: 0), at: .top, animated: false)
+    }
+
+    /// The picture of one of the collage's rows, once it is on screen - what a transition grows
+    /// out of and shrinks back into.
+    func tileView(for messageId: String) -> UIImageView? {
+        guard let index = listGroupingImages.firstIndex(where: { $0.messageId == messageId }),
+              let cell = tableViewImages.cellForRow(at: IndexPath(row: index, section: 0)) else {
+            return nil
+        }
+        return cell.contentView.subviews.compactMap { $0 as? UIImageView }.first
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -127,6 +174,17 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
         makeHeaderTransparent()
     }
 
+    /// Whether the screen has been placed at the picture it was opened for - see
+    /// `viewDidLayoutSubviews`.
+    private var hasPlaced = false
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // The last of the settling passes, and the end of them.
+        jumpToTappedImage()
+        hasPlaced = true
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         // Handed back, or the conversation underneath would be left with a see-through bar it
@@ -184,7 +242,17 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         applyTableInsets()
-        jumpToTappedImage()
+        // Fix: this went on jumping for the life of the screen. `imageTapped` is the picture the
+        // screen was opened at, but it is rewritten while the screen is alive - the viewer over it
+        // reports every picture the reader moves to - so any layout afterwards re-applied whatever
+        // it had last been set to. The layout that follows closing the viewer did exactly that:
+        // the picture finished shrinking into its row and then, one frame later, the list snapped
+        // to a different one. Measured off a recording, that single frame changed more of the
+        // screen than the entire animation before it. Placing the screen at its opening picture is
+        // a one-time job; after that only `show(messageId:)` moves the list, and only when it must.
+        if !hasPlaced {
+            jumpToTappedImage()
+        }
         let height = (navigationController?.navigationBar.frame.maxY ?? 88) + 40
         headerScrim.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: height)
         headerScrimMask.frame = headerScrim.bounds
@@ -1140,6 +1208,42 @@ public final class MediaBrowserViewController: UIViewController {
         scrolledTo[.media] = grid.contentOffset
     }
 
+    /// Brings the square holding this message into view, if it is not there already.
+    ///
+    /// The reader moves through the pictures inside the viewer, and the one they close on is
+    /// usually not the one they opened - its square can be anywhere in the list, including well
+    /// off the top of it. Closing then shrank the picture towards a place that could not be seen:
+    /// it slid off the screen and vanished. So the list is taken to that square first, and what
+    /// is behind the picture as it closes is the picture itself.
+    ///
+    /// Fix: this centred the square, and it did so every time. Centring a square taller than the
+    /// screen leaves the reader looking at the join between two pictures, and doing it every time
+    /// moved the list even when the square was already in full view - so closing on the very
+    /// picture you had opened left the list halfway between it and the next one, rather than
+    /// where you had put it. Nothing moves unless it has to, and when it has to it moves the
+    /// least it can.
+    public func focus(on messageId: String) {
+        guard currentTab == .media,
+              let item = media.firstIndex(where: { $0.messageId == messageId }),
+              grid.bounds.height > 0,
+              let square = grid.layoutAttributesForItem(at: IndexPath(item: item, section: 0)) else {
+            return
+        }
+        let onScreen = CGRect(x: grid.contentOffset.x,
+                              y: grid.contentOffset.y + grid.adjustedContentInset.top,
+                              width: grid.bounds.width,
+                              height: grid.bounds.height - grid.adjustedContentInset.top - grid.adjustedContentInset.bottom)
+        // Enough of it to aim at, and enough for the reader to recognise: half the square, or
+        // half the screen when the square is the larger of the two.
+        let enough = min(square.frame.height, onScreen.height) / 2
+        guard square.frame.intersection(onScreen).height < enough else {
+            return
+        }
+        grid.scrollRectToVisible(square.frame, animated: false)
+        grid.layoutIfNeeded()
+        scrolledTo[.media] = grid.contentOffset
+    }
+
     /// The square holding one message, once it is on screen - what a transition grows out of.
     public func tileView(for messageId: String) -> UIImageView? {
         guard let item = media.firstIndex(where: { $0.messageId == messageId }),
@@ -1151,6 +1255,16 @@ public final class MediaBrowserViewController: UIViewController {
 
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Fix: a picture opening full screen counts as this screen disappearing, so the bar came
+        // back - underneath something covering the whole screen, where nobody could see it - and
+        // was hidden again on the way back. Both of those change the room the grid has, and the
+        // grid answers by moving its rows. That happened in the middle of the picture flying
+        // home, so it flew to where its square had been rather than where it now was. A screen
+        // with something presented over it has not been left; only a real departure hands the
+        // bar back.
+        guard presentedViewController == nil else {
+            return
+        }
         navigationController?.setNavigationBarHidden(false, animated: animated)
         // Handed back, so nothing else in the stack inherits this screen's arrangement.
         navigationController?.interactivePopGestureRecognizer?.delegate = popGestureOwner
@@ -1679,6 +1793,10 @@ extension MediaBrowserViewController: UICollectionViewDataSource, UICollectionVi
             guard let self = self, let viewer = viewer else {
                 return nil
             }
+            // The grid is moved to whichever picture the reader ended on before its square is
+            // asked for - see focus(on:). Without that the square is often off screen, and a
+            // square off screen is either nothing to aim at or somewhere the reader cannot see.
+            self.focus(on: viewer.currentMessageId)
             return self.tileView(for: viewer.currentMessageId)
         }
         stack.transitioningDelegate = zoom
@@ -2307,5 +2425,16 @@ final class RisingPushTransition: NSObject, UINavigationControllerDelegate {
         navigationController.delegate = previous
         onFinished?()
         onFinished = nil
+    }
+}
+
+extension MediaBrowserViewController: ZoomTransitionChromeProviding {
+
+    /// This screen has no bar above it - the back button, the title and the strip along the bottom
+    /// are floated over the pictures themselves. A picture closing out of the viewer is added over
+    /// the whole screen, so without this they would be hidden for the length of the move and
+    /// reappear in one frame at the end. Back to front, the way they are stacked.
+    public var zoomTransitionChrome: [UIView] {
+        return [headerScrim, header, footer, actionBar]
     }
 }

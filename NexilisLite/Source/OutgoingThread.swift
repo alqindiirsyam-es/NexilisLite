@@ -735,7 +735,7 @@ class OutgoingThread {
                         if !chat.isEmpty {
                             pin = chat
                         }
-                        var pinned = 0
+                        var pinned: Int64 = 0
                         var archived = 0
                         var queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND (message_scope_id = '\(MessageScope.FORM)' OR message_scope_id = '\(MessageScope.MISSED_CALL)' OR message_scope_id = '\(MessageScope.CALL)' OR message_scope_id = '\(MessageScope.WHISPER)') AND is_call_center = 0 order by server_date desc LIMIT 1"
                         if scope == "4" {
@@ -747,7 +747,7 @@ class OutgoingThread {
                             cursorData.close()
                         }
                         if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
-                            pinned = Int(cursor.int(forColumnIndex: 0))
+                            pinned = cursor.longLongInt(forColumnIndex: 0)
                             archived = Int(cursor.int(forColumnIndex: 1))
                             // Left open, this one. A result set still open on the connection is
                             // enough to make the write below fail, and the whole transaction with

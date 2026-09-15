@@ -1368,7 +1368,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     contentReply.font = UIFont.systemFont(ofSize: 11 + offset())
                     // Fix: force casts on values that come straight out of the database, where a
                     // NULL column arrives as nil. Any of the six could bring the screen down.
-                    let message_text = (dataReply["message_text"] as? String) ?? ""
+                    let message_text = ChatMessageText.withoutLinkPreview((dataReply["message_text"] as? String) ?? "")
                     let attachment_flag = (dataReply["attachment_flag"] as? String) ?? ""
                     let thumb_chat = (dataReply["thumb_id"] as? String) ?? ""
                     let image_chat = (dataReply["image_id"] as? String) ?? ""

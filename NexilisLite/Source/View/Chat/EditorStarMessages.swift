@@ -578,7 +578,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         timeMessage.translatesAutoresizingMaskIntoConstraints = false
         // The date is placed with the name, at the top of the row.
         
-        let messageText = UITextView()
+        let messageText = PressableTextView()
         messageText.isEditable = false
         // Fix: mirrors EditorGroup.swift's isSelectable = false change - see its
         // CHANGELOG entries for the full history.
@@ -592,13 +592,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleMessageTextTap(_:)))
         messageText.addGestureRecognizer(tapGesture)
 
-        let touchHighlightGesture = LinkTouchHighlightGesture(target: self, action: #selector(handleLinkTouchHighlight(_:)))
-        touchHighlightGesture.minimumPressDuration = 0
-        touchHighlightGesture.textView = messageText
-        touchHighlightGesture.delegate = self
-        touchHighlightGesture.cancelsTouchesInView = false
-        touchHighlightGesture.delaysTouchesBegan = false
-        messageText.addGestureRecognizer(touchHighlightGesture)
+        // The view's own touches, not a recognizer - see PressableTextView for why.
+        messageText.onTouch = { [weak self, weak messageText] phase, point in
+            guard let self = self, let messageText = messageText else { return }
+            self.handleLinkTouch(phase, at: point, in: messageText)
+        }
 
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
@@ -1684,7 +1682,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             objectTap.indexPath = indexPath
         }
         
-        let containerLinkMessage = UIView()
+        // Looks pressed under the finger, the way a link does - see PressableView.
+        let containerLinkMessage = PressableView()
         var isLoadingShowLink = false
         if thumbChat.isEmpty && fileChat.isEmpty && !textChat.isEmpty {
             var text = ""
@@ -2001,7 +2000,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 hugContent.priority = UILayoutPriority(500)
                 hugContent.isActive = true
                 contentReply.font = UIFont.systemFont(ofSize: 11 + offset())
-                let message_text = data["message_text"] as? String ?? ""
+                let message_text = ChatMessageText.withoutLinkPreview(data["message_text"] as? String ?? "")
                 let attachment_flag = data["attachment_flag"] as? String  ?? ""
                 let thumb_chat = data["thumb_id"] as? String ?? ""
                 let image_chat = data["image_id"] as? String ?? ""
@@ -3127,28 +3126,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 let indexPath = IndexPath(row: row!, section: section!)
                 self.tableChatView.safeScrollToRow(at: indexPath, at: .middle, animated: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    // One highlight, the same everywhere - see BubbleHighlight for what it is and why.
                     if let cell = self.tableChatView.cellForRow(at: indexPath) {
-                        let containerMessage = cell.contentView.subviews[0]
-                        let idMe = User.getMyPin() as String?
-                        if (self.dataMessages[idx!]["f_pin"] as? String == idMe) {
-                            containerMessage.backgroundColor = .mainColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .blueBubbleColor
-                                }
-                            }
-                        } else {
-                            containerMessage.backgroundColor = .whiteBubbleColor.withAlphaComponent(0.3)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                if (self.dataMessages[idx!]["attachment_flag"] as? String == "11") {
-                                    containerMessage.backgroundColor = .clear
-                                } else {
-                                    containerMessage.backgroundColor = .whiteBubbleColor
-                                }
-                            }
-                        }
+                        if let bubble = cell.contentView.subviews.first { BubbleHighlight.flash(bubble) }
                     }
                 }
             }
@@ -3280,6 +3260,13 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         // Fix: these closures capture self strongly (they always have - they're the very
         // same closures that used to go straight into UIAction), so the ones registered
         // by the previous long-press are dropped here rather than piling up on self.
+        // The menu is about to lift the bubble into a preview, snapshotting it with the finger
+        // still on it. Everything pressed under that finger lets go first - the quote, the link
+        // preview, and the chip over a mention - or the preview would show them pressed for as
+        // long as the menu stayed open. See PressableView.liftAll.
+        PressableView.liftAll(in: interaction.view)
+        hideLinkHighlight()
+        linkPressGeneration += 1
         contextMenuActionHandlers.removeAll()
         let indexPath = self.tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: self.tableChatView))
         let dataMessages = self.dataMessages.filter({ $0["chat_date"] as! String == dataDates[indexPath!.section]})
@@ -3722,17 +3709,13 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     }
 
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        if gestureRecognizer is LinkTouchHighlightGesture || otherGestureRecognizer is LinkTouchHighlightGesture {
-            return true
-        }
+        // Nothing here needs to run alongside another recognizer any more: the link and
+        // mention highlight is drawn from the text view's own touches - see PressableTextView.
         return false
     }
 
-    @objc private func handleLinkTouchHighlight(_ sender: LinkTouchHighlightGesture) {
-        guard let textView = sender.textView else { return }
-        let point = sender.location(in: textView)
-
-        switch sender.state {
+    private func handleLinkTouch(_ phase: PressableTextView.Phase, at point: CGPoint, in textView: UITextView) {
+        switch phase {
         case .began:
             // The same rule as the bubble menu: nothing is offered on a press that landed on a
             // list still in motion.
@@ -3767,7 +3750,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 self.presentLinkActionSheet(urlString: urlString)
             }
 
-        case .changed:
+        case .moved:
             if let info = LinkHighlighting.linkInfo(at: point, in: textView) {
                 showLinkHighlight(range: info.range, in: textView)
             } else if let mention = LinkHighlighting.mentionInfo(at: point, in: textView) {
@@ -3780,12 +3763,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 linkPressGeneration += 1
             }
 
-        case .ended, .cancelled, .failed:
+        case .ended, .cancelled:
             linkPressGeneration += 1
             hideLinkHighlight()
-
-        default:
-            break
         }
     }
 

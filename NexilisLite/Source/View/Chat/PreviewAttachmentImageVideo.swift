@@ -637,25 +637,30 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                     }
                     cursor.close()
                 }
-                listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
-                let nowTableMention = tableMention
-                let nowHeightTableMention = heightTableMention!
-                if listMentionWithText.count > 0 {
-                    if listMentionWithText.count < 5 {
-                        nowHeightTableMention.constant = CGFloat(44 * listMentionWithText.count)
-                    } else {
-                        nowHeightTableMention.constant = 44 * 4
-                    }
-                    nowTableMention.reloadData()
-                } else {
-                    nowHeightTableMention.constant = 44
-                    self.hideMention()
-                }
             } catch {
                 rollback.pointee = true
                 print("Access database error: \(error.localizedDescription)")
             }
         })
+        // The same split as showMention in the two conversation editors: the transaction runs on
+        // the database's own serial queue, and drawing from there can reach a row that reads the
+        // database through a transaction of its own - a dispatch_sync onto the queue this is
+        // already on, which libdispatch stops with a trap. The transaction only reads; what is
+        // drawn is drawn after it has returned.
+        listMentionWithText.removeAll(where: { listMentionInTextField.contains($0) })
+        let nowTableMention = tableMention
+        let nowHeightTableMention = heightTableMention!
+        if listMentionWithText.count > 0 {
+            if listMentionWithText.count < 5 {
+                nowHeightTableMention.constant = CGFloat(44 * listMentionWithText.count)
+            } else {
+                nowHeightTableMention.constant = 44 * 4
+            }
+            nowTableMention.reloadData()
+        } else {
+            nowHeightTableMention.constant = 44
+            self.hideMention()
+        }
     }
     
     private func hideMention() {

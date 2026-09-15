@@ -1034,7 +1034,19 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
         
         let timeView = UILabel()
         let viewCounter = UIView()
-        
+        // Fix: this list drew no pin at all. A conversation pinned here moved to the top and
+        // stayed there with nothing to say why, and the same rows in the other list did show one -
+        // the two had drifted apart. One description of it now, shared: see ChatListPin.
+        let viewPinned = ChatListPin.imageView()
+        if data.pinned != 0 && !data.isFolPinned {
+            content.addSubview(viewPinned)
+            viewPinned.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                viewPinned.widthAnchor.constraint(equalToConstant: ChatListPin.side),
+                viewPinned.heightAnchor.constraint(equalToConstant: ChatListPin.side)
+            ])
+        }
+
         if data.counter != "0" {
             timeView.textColor = .systemRed
             content.addSubview(viewCounter)
@@ -1184,6 +1196,20 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
                 viewCounter.topAnchor.constraint(equalTo: timeView.bottomAnchor, constant: 5.0).isActive = true
                 viewCounter.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20).isActive = true
             }
+            if data.pinned != 0 && !data.isFolPinned {
+                if data.counter == "0" {
+                    NSLayoutConstraint.activate([
+                        viewPinned.topAnchor.constraint(equalTo: timeView.bottomAnchor, constant: 5.0),
+                        viewPinned.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20)
+                    ])
+                } else {
+                    NSLayoutConstraint.activate([
+                        viewPinned.centerYAnchor.constraint(equalTo: viewCounter.centerYAnchor),
+                        viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor,
+                                                             constant: -ChatListPin.gapToBadge)
+                    ])
+                }
+            }
         } else {
             titleView.centerYAnchor.constraint(equalTo: content.centerYAnchor).isActive = true
             titleView.text = data.groupName
@@ -1203,6 +1229,21 @@ public class ChatWALikeVC: UIViewController, UITableViewDataSource, UITableViewD
             if data.counter != "0" {
                 viewCounter.trailingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: -5).isActive = true
                 viewCounter.centerYAnchor.constraint(equalTo: content.centerYAnchor).isActive = true
+            }
+            if data.pinned != 0 && !data.isFolPinned {
+                NSLayoutConstraint.activate([
+                    viewPinned.centerYAnchor.constraint(equalTo: content.centerYAnchor)
+                ])
+                if data.counter == "0" {
+                    NSLayoutConstraint.activate([
+                        viewPinned.trailingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: -5)
+                    ])
+                } else {
+                    NSLayoutConstraint.activate([
+                        viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor,
+                                                             constant: -ChatListPin.gapToBadge)
+                    ])
+                }
             }
         }
         cell.separatorInset = UIEdgeInsets(top: 0, left: 85, bottom: 0, right: 0)

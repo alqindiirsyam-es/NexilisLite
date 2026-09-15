@@ -2203,7 +2203,7 @@ extension ContactChatViewController {
                 
                 let timeView = UILabel()
                 let viewCounter = UIView()
-                let viewPinned = UIImageView()
+                let viewPinned = ChatListPin.imageView()
                 
                 if data.counter != "0" {
                     timeView.textColor = .systemRed
@@ -2238,13 +2238,11 @@ extension ContactChatViewController {
                 }
                 
                 if data.pinned != 0 && !data.isFolPinned {
-                    viewPinned.image = UIImage(systemName: "pin.fill")!.rotateImage(byDegrees: 45).withRenderingMode(.alwaysTemplate)
-                    viewPinned.tintColor = .darkGray
                     content.addSubview(viewPinned)
                     viewPinned.translatesAutoresizingMaskIntoConstraints = false
                     NSLayoutConstraint.activate([
-                        viewPinned.widthAnchor.constraint(equalToConstant: 18),
-                        viewPinned.heightAnchor.constraint(equalToConstant: 18)
+                        viewPinned.widthAnchor.constraint(equalToConstant: ChatListPin.side),
+                        viewPinned.heightAnchor.constraint(equalToConstant: ChatListPin.side)
                     ])
                 }
                 
@@ -2370,16 +2368,21 @@ extension ContactChatViewController {
                         viewCounter.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20).isActive = true
                     }
                     if data.pinned != 0 && !data.isFolPinned {
-                        NSLayoutConstraint.activate([
-                            viewPinned.topAnchor.constraint(equalTo: timeView.bottomAnchor, constant: 5.0)
-                        ])
                         if data.counter == "0" {
                             NSLayoutConstraint.activate([
+                                viewPinned.topAnchor.constraint(equalTo: timeView.bottomAnchor, constant: 5.0),
                                 viewPinned.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20)
                             ])
                         } else {
+                            // Fix: both were hung off the time above them, and they are not the
+                            // same height - the pin's box is 20 and the badge's is 20 but the
+                            // glyph inside the pin is 14, so aligning their tops left the pin
+                            // riding high of the number beside it. On the badge's line, which is
+                            // where the reference has it.
                             NSLayoutConstraint.activate([
-                                viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor, constant: -5)
+                                viewPinned.centerYAnchor.constraint(equalTo: viewCounter.centerYAnchor),
+                                viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor,
+                                                                     constant: -ChatListPin.gapToBadge)
                             ])
                         }
                     }
@@ -2413,7 +2416,8 @@ extension ContactChatViewController {
                             ])
                         } else {
                             NSLayoutConstraint.activate([
-                                viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor, constant: -5)
+                                viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor,
+                                                                     constant: -ChatListPin.gapToBadge)
                             ])
                         }
                     }

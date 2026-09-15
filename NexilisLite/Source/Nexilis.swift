@@ -22,7 +22,7 @@ import NexilisZTA
 import AudioToolbox
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "6.0.4"
+    public static var cpaasVersion = "6.0.5"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -149,9 +149,20 @@ public class Nexilis: NSObject {
     
     public static func connect(apiKey: String, userId:String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
         guard SentinelSecurityGate.isAuthorized else {
+            NXLogger.general.publicError("[Nexilis] connect ditolak: Sentinel belum mengotorisasi.")
             delegate.onFailed(error: "Sentinel authorization is required before Nexilis.connect().")
             return
         }
+        // Fix: the mode was persisted only further down, after the master key had been created.
+        // At mode 1 that creation can refuse - a biometric-bound key on a device that cannot
+        // hold one - and connect() returned before the mode was ever written. Everything that
+        // reads Utils.getAppMode() afterwards, the host's own first screen included, then saw
+        // the stored default: mode 3, no sign-in, no biometry - a fresh mode-1 install that
+        // looked like a regular one, with the only explanation inside an onFailed most hosts
+        // do not print. The declared mode is the mode from the first line, whatever happens
+        // next; the failure itself is now logged below as well as delegated.
+        Utils.setAppMode(value: Utils.selectedAppMode)
+        NXSecurityPolicy.mode = NXAppMode(rawValue: Utils.getAppMode()) ?? .regular
         showFB = showButton
         Nexilis.fromMAB = fromMAB
         floatingButton = FloatingButton()
@@ -180,6 +191,7 @@ public class Nexilis: NSObject {
             // no user presence, so a failure here is not the mode being impossible on this device.
             if NXSecurityPolicy.bindsKeysToUserAuth() {
                 let reason = error.localizedDescription
+                NXLogger.general.publicError("[Nexilis] connect berhenti: penyimpanan aman tidak bisa disiapkan di mode 1 - \(reason)")
                 DispatchQueue.main.async {
                     delegate.onFailed(error: "Secure storage could not be prepared on this device. \(reason)")
                 }
@@ -198,12 +210,9 @@ public class Nexilis: NSObject {
         // is one silent Keychain attribute lookup.
         MasterKeyUtil.shared.primeSecureStorage()
 
-        Utils.setAppMode(value: Utils.selectedAppMode)
-        // Keep the Sentinel policy on the same number as the persisted app mode. A host that set
-        // it through APIS.setAppMode already pushed it; this covers the path where the mode was
-        // restored from preferences rather than set this launch.
-        NXSecurityPolicy.mode = NXAppMode(rawValue: Utils.getAppMode()) ?? .regular
-        
+        // The app mode and the Sentinel policy were written at the top of this method, before
+        // anything that can return early.
+
         IncomingThread.default.run()
         
         imageCache.countLimit = 100
@@ -401,8 +410,31 @@ public class Nexilis: NSObject {
                                 sendStateToServer(s: message)
                             }
 
-                            print("checkSignInSignUp sleep 30s before retrying send to server..")
-                            Thread.sleep(forTimeInterval: 30)
+                            // No response at all, which is not the same thing as a refusal.
+                            //
+                            // `writeSync` returns nil the instant `nGetCLXConnState()` is 0 - the
+                            // socket is not up yet. On a first install that is the normal state for
+                            // the first second or two: the address lookup, the TLS handshake and
+                            // the login all have to finish before anything can be sent, and none of
+                            // that has happened by the time this loop first runs.
+                            //
+                            // A flat 30s treated that identically to a server that answered and
+                            // said no. The retry then landed half a minute after the socket was
+                            // ready - and long after the launch-screen gate in AppDelegate had
+                            // given up at 20s, which is why a first install always showed the app
+                            // before its preferences had arrived. Nothing was broken; the two
+                            // numbers were simply chosen without reference to each other.
+                            //
+                            // Graduated instead: 1s, 2s, 4s, 8s, 16s, then 30s from there on. A
+                            // socket that was merely slow is caught in about a second; a backend
+                            // that is genuinely down is still polled once every 30s, so the
+                            // give-up path below is reached at roughly the same point it was.
+                            // The two branches above keep their flat 30s on purpose - the server
+                            // answered there, and answering faster will not change its answer.
+                            let backoffStep = Double(min(max(iRetryCheckSignInSignUp - 1, 0), 5))
+                            let backoff = min(30.0, pow(2.0, backoffStep))
+                            print("checkSignInSignUp no response (attempt \(iRetryCheckSignInSignUp)), retrying in \(Int(backoff))s..")
+                            Thread.sleep(forTimeInterval: backoff)
                         }
                     }
                 } catch {
@@ -1045,13 +1077,23 @@ public class Nexilis: NSObject {
     }
     
     public static func showForceSignIn(completion: (() -> Void)? = nil) {
-        guard let controller = APIS.getControllerSign() else { return }
+        guard let controller = APIS.getControllerSign() else {
+            // Every sign-in method switched off in feature access. Said out loud: the host called
+            // for a sign-in screen and nothing appeared, and nothing else explains why.
+            NXLogger.general.publicError("[Nexilis] showForceSignIn: tidak ada metode sign-in yang aktif (feature access) - layar tidak ditampilkan.")
+            return
+        }
         if let controller = controller as? SignUpSignIn {
             controller.forceLogin = true
             controller.forceSignIn = true
         } else if let controller = controller as? SignInOption {
             controller.forceLogin = true
             controller.forceSignIn = true
+        } else if let controller = controller as? ChangeDeviceViewController {
+            // Mode 1 with one sign-in method lands here directly (getControllerSign). Without
+            // forceLogin the screen ends a failed attempt with popViewController on a stack of
+            // one - nothing happens - instead of dismissing the modal it is the root of.
+            controller.forceLogin = true
         }
         let navigationController = CustomNavigationController(rootViewController: controller)
         navigationController.modalPresentationStyle = .fullScreen
@@ -1066,10 +1108,27 @@ public class Nexilis: NSObject {
         navigationController.navigationBar.titleTextAttributes = textAttributes
         navigationController.modalPresentationStyle = .fullScreen
         navigationController.modalTransitionStyle = .crossDissolve
-        UIApplication.shared.windows.first?.rootViewController?.present(navigationController, animated: false, completion: completion)
+        // Hosts call this from the first screen's viewDidLoad, which runs while that screen is
+        // still being installed as the window's root - its view is not in the hierarchy yet, and
+        // a present() at that moment is refused with only a console warning to show for it.
+        // Deferred one turn of the run loop when that is the case.
+        let root = UIApplication.shared.windows.first?.rootViewController
+        if let root, root.view.window == nil {
+            DispatchQueue.main.async {
+                root.present(navigationController, animated: false, completion: completion)
+            }
+        } else {
+            root?.present(navigationController, animated: false, completion: completion)
+        }
     }
     
-    static func showPassSignIn(isFromSU: Bool = false) {
+    /// The 2FA password screen, for a host at mode 1 or 2 to put up itself.
+    ///
+    /// Fix: this lost `public` in a pass over the file, and nothing noticed because the one host
+    /// in this repository runs at mode 3 and never calls it. A mode-2 host does - it is the way in
+    /// once the profile exists - and its build stopped at "inaccessible due to internal
+    /// protection level". Host-facing, and public again.
+    public static func showPassSignIn(isFromSU: Bool = false) {
         let controller = TFAPasswordVC()
         controller.isFromSU = isFromSU
         let navigationController = CustomNavigationController(rootViewController: controller)
@@ -1906,6 +1965,61 @@ public class Nexilis: NSObject {
         }
     }
     
+    /// Writes an incoming message down and says whether it really is on disk.
+    ///
+    /// Fix: `saveMessage` reports nothing. It has three guards that return without writing, four
+    /// places that roll the transaction back, and - the one that mattered - it writes through
+    /// `Database.shared.database?`, which is nil for as long as the app is in the background:
+    /// `enterBackground` closes the connection and throws the key away. Every one of those is
+    /// silent, and the socket thread went straight on to acknowledge the message. The server
+    /// takes an acknowledgement as delivery and never sends it again, so a message that arrived
+    /// while the app was minimised was gone for good - which is exactly what "message hilang"
+    /// was. Nothing here trusts the write: the connection is reopened first, the row is read back
+    /// afterwards, and only a row that is actually there counts as saved.
+    ///
+    /// Synchronous on purpose. Its caller is the socket's own worker thread, which has nothing
+    /// else to do until this message is dealt with, and holding it here keeps messages being
+    /// acknowledged in the order they arrived.
+    @discardableResult
+    static func persistIncomingMessage(_ message: TMessage, fromAPNS: Bool = false,
+                                       attempts: Int = 3) -> Bool {
+        let messageId = message.getBody(key: CoreMessage_TMessageKey.MESSAGE_ID, default_value: "")
+        guard !messageId.isEmpty else {
+            // Nothing with an id to write - a friend request carried as attachment_flag 61, say.
+            // saveMessage deals with those itself, and there is no row to look for afterwards.
+            saveMessage(message: message, withStatus: false, fromAPNS: fromAPNS)
+            return true
+        }
+        for attempt in 1...max(1, attempts) {
+            // The connection the app closed on its way into the background, opened again.
+            Database.shared.ensureOpenForBackgroundWrite()
+            saveMessage(message: message, withStatus: false, fromAPNS: fromAPNS)
+            if isMessageOnDisk(messageId) {
+                return true
+            }
+            print("WARNING: attempt \(attempt) could not write message \(messageId) to the database")
+            if attempt < attempts {
+                Thread.sleep(forTimeInterval: Double(attempt) * 0.2)
+            }
+        }
+        return false
+    }
+
+    /// Whether this message is in the database at all.
+    static func isMessageOnDisk(_ messageId: String) -> Bool {
+        guard !messageId.isEmpty else {
+            return false
+        }
+        var found = false
+        Database.shared.database?.inTransaction({ (fmdb, _) in
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(messageId)'"), cursor.next() {
+                found = true
+                cursor.close()
+            }
+        })
+        return found
+    }
+
     static func saveMessage(message: TMessage, withStatus: Bool = true, fromAPNS: Bool = false) {
 //        print("save message \(message.toLogString())")
         guard let me = User.getMyPin() else {
@@ -2103,14 +2217,23 @@ public class Nexilis: NSObject {
                             queryGetLastMessageId = "SELECT message_id FROM MESSAGE where (f_pin = '\(pin)' OR l_pin = '\(pin)') AND message_scope_id = '\(MessageScope.GPT_CHATBOT)' order by server_date desc LIMIT 1"
                         }
                         var messageId = ""
-                        var pinned = 0
+                        var pinned: Int64 = 0
                         var archived = 0
                         if let cursorData = Database.shared.getRecords(fmdb: fmdb, query: queryGetLastMessageId), cursorData.next() {
                             messageId = cursorData.string(forColumnIndex: 0) ?? ""
                             cursorData.close()
                         }
+                        // Fix: `pinned` is a millisecond timestamp - thirteen digits - and this
+                        // read it back as an Int32, whose ceiling is ten. The value came back
+                        // wrapped around, and was written straight back with `replace: true`, so a
+                        // pinned conversation had its pin quietly corrupted in the database every
+                        // time a message arrived for it. The list is sorted on this number, and
+                        // roughly half of the wrapped values are negative - which puts the
+                        // conversation below every unpinned one, at the very bottom of the list,
+                        // which is exactly where it was reported to end up. Every other read of
+                        // this column was the same; Chat.getData already read it as an Int64.
                         if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
-                            pinned = Int(cursor.int(forColumnIndex: 0))
+                            pinned = cursor.longLongInt(forColumnIndex: 0)
                             archived = Int(cursor.int(forColumnIndex: 1))
                         }
                         if !messageId.isEmpty {
@@ -2263,13 +2386,13 @@ public class Nexilis: NSObject {
         })
         let pin = "-999"
         var counter : Int? = nil
-        var pinned = 0
+        var pinned: Int64 = 0
         var archived = 0
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select counter, pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
                     counter = Int(cursor.int(forColumnIndex: 0))
-                    pinned = Int(cursor.int(forColumnIndex: 1))
+                    pinned = cursor.longLongInt(forColumnIndex: 1)
                     archived = Int(cursor.int(forColumnIndex: 2))
                     counter! += 1
                     cursor.close()
@@ -2380,13 +2503,13 @@ public class Nexilis: NSObject {
         if !chatId.isEmpty {
             pin = chatId
         }
-        var pinned = 0
+        var pinned: Int64 = 0
         var archived = 0
         if fmdb == nil {
             Database.shared.database?.inTransaction({ (fmdb, rollback) in
                 do {
                     if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
-                        pinned = Int(cursor.int(forColumnIndex: 0))
+                        pinned = cursor.longLongInt(forColumnIndex: 0)
                         archived = Int(cursor.int(forColumnIndex: 1))
                     }
                     _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [
@@ -2404,7 +2527,7 @@ public class Nexilis: NSObject {
         } else {
             do {
                 if let cursor = Database.shared.getRecords(fmdb: fmdb!, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
-                    pinned = Int(cursor.int(forColumnIndex: 0))
+                    pinned = cursor.longLongInt(forColumnIndex: 0)
                     archived = Int(cursor.int(forColumnIndex: 1))
                 }
                 _ = try Database.shared.insertRecord(fmdb: fmdb!, table: "MESSAGE_SUMMARY", cvalues: [
@@ -2473,12 +2596,12 @@ public class Nexilis: NSObject {
             }
         })
         let pin = lPin == me ? fPin : lPin
-        var pinned = 0
+        var pinned: Int64 = 0
         var archived = 0
         Database.shared.database?.inTransaction({ (fmdb, rollback) in
             do {
                 if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select pinned, archived from MESSAGE_SUMMARY where l_pin = '\(pin)'"), cursor.next() {
-                    pinned = Int(cursor.int(forColumnIndex: 0))
+                    pinned = cursor.longLongInt(forColumnIndex: 0)
                     archived = Int(cursor.int(forColumnIndex: 1))
                 }
                 _ = try Database.shared.insertRecord(fmdb: fmdb, table: "MESSAGE_SUMMARY", cvalues: [

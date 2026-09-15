@@ -2032,6 +2032,9 @@ public class APIS: NSObject {
             return
         }
         DispatchQueue.main.async {
+            // Whichever push this is, the alert for some message may just have landed - and a
+            // banner of ours for that message may already be in the tray.
+            withdrawLocalBannersAnnouncedBySystem()
             if checkAppStateisBackground() {
                 if let data = userInfo["data"] as? [String: Any] {
                     ccActionFromAPN(data: data)
@@ -2695,7 +2698,7 @@ public class APIS: NSObject {
         // some later block - which is what made the badge "sometimes" not move at all.
         let badge = badgeTargetForNewMessage()
         content.badge = NSNumber(value: badge)
-        let request = UNNotificationRequest(identifier: messageId, content: content, trigger: nil)
+        let request = UNNotificationRequest(identifier: localBannerIdentifier(for: messageId), content: content, trigger: nil)
         // Fix: the server sends two pushes for every message - an alert one, which iOS shows by
         // itself, and a silent one carrying the message to be saved. This banner was put up for
         // the second of those, so the reader saw the same message announced twice. It is only put
@@ -2703,7 +2706,20 @@ public class APIS: NSObject {
         //
         // The badge is set either way, below: it is this app that works the number out, since the
         // server does not send one, and suppressing the banner must not suppress the count.
-        systemAlreadyAnnounced(messageId: messageId) { announced in
+        //
+        // Fix: it was still being seen twice. This waited one second for the alert and then went
+        // ahead, and the two pushes are sent together but land in either order - measured off a
+        // screenshot, the local banner was above the alert in the tray, so it had gone up first and
+        // the alert had arrived after it. Two things have changed. This waits longer, and the same
+        // message is never gated twice - the socket and the silent push can both bring the same
+        // message in, and each used to ask separately. And the alert arriving late is no longer
+        // final: it is caught when it lands, and the banner this put up is taken down again - see
+        // withdrawLocalBannersAnnouncedBySystem.
+        guard claimLocalBanner(for: messageId) else {
+            setApplicationBadge(badge)
+            return
+        }
+        systemAlreadyAnnounced(messageId: messageId, from: nameUser) { announced in
             guard !announced else {
                 return
             }
@@ -2718,36 +2734,136 @@ public class APIS: NSObject {
         setApplicationBadge(badge)
     }
 
+    /// The identifier a banner this app puts up is filed under - distinct from the message id, so
+    /// that a banner of ours can be told apart from the system's alert for the same message. The
+    /// alert is looked for by the message id it carries; our own must not answer that search.
+    private static func localBannerIdentifier(for messageId: String) -> String {
+        return "local-banner:" + messageId
+    }
+
+    private static let localBannerLock = NSLock()
+    private static var localBannersClaimed: [String] = []
+
+    /// Whether a banner for this message has already been asked for. The socket and the silent
+    /// push can both deliver the same message, one after the other; only the first may announce it.
+    private static func claimLocalBanner(for messageId: String) -> Bool {
+        guard !messageId.isEmpty else {
+            return true
+        }
+        localBannerLock.lock()
+        defer { localBannerLock.unlock() }
+        if localBannersClaimed.contains(messageId) {
+            return false
+        }
+        localBannersClaimed.append(messageId)
+        // Enough to cover everything the tray could still be holding.
+        if localBannersClaimed.count > 300 {
+            localBannersClaimed.removeFirst(localBannersClaimed.count - 300)
+        }
+        return true
+    }
+
+    /// Takes down banners this app put up for messages the system has since announced itself.
+    ///
+    /// The alert push and the silent push land in either order. When the alert is last, the banner
+    /// put up for the silent push is already in the tray - and the alert, arriving, is the moment
+    /// it becomes redundant. Called wherever the alert's arrival can be noticed.
+    static func withdrawLocalBannersAnnouncedBySystem() {
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let prefix = localBannerIdentifier(for: "")
+            let ours = delivered.filter { $0.request.identifier.hasPrefix(prefix) }
+            guard !ours.isEmpty else {
+                return
+            }
+            let theirs = delivered.filter { !$0.request.identifier.hasPrefix(prefix) }
+            var redundant: [String] = []
+            for banner in ours {
+                let messageId = String(banner.request.identifier.dropFirst(prefix.count))
+                let ids = [messageId] + APNMessageAliasStore.shared.apnIds(forStoredId: messageId)
+                let name = banner.request.content.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let byId = theirs.contains { note in ids.contains { mentions(messageId: $0, in: note.request) } }
+                // The alert for the same sender that landed around the same time as our banner.
+                let bySender = !name.isEmpty && theirs.contains { note in
+                    note.request.content.title.trimmingCharacters(in: .whitespacesAndNewlines) == name
+                        && abs(note.date.timeIntervalSince(banner.date)) < 60
+                }
+                if byId || bySender {
+                    redundant.append(banner.request.identifier)
+                }
+            }
+            if !redundant.isEmpty {
+                center.removeDeliveredNotifications(withIdentifiers: redundant)
+            }
+        }
+    }
+
     /// Whether iOS has already put a notification up for this message - the server's own alert.
     ///
     /// The two pushes are sent together and may land in either order, so a message not found on
     /// the first look is given a moment and looked for again. Not finding it is the safe answer:
     /// the banner is put up, and at worst the reader sees what they would have seen before.
-    private static func systemAlreadyAnnounced(messageId: String, completion: @escaping (Bool) -> Void) {
+    /// Fix: this matched the tray against the message's own id, and the alert in the tray does not
+    /// carry that id - it carries the APN id, which the alias store already documents as "not
+    /// always the id the message ends up stored under". An exact-match search therefore found
+    /// nothing, the banner went up beside an alert that was already there, and waiting longer
+    /// only delayed the duplicate. Measured off a screenshot: the alert below, "now"; ours above
+    /// it, also "now". Three things are matched now, any one of which is enough: the id, the id
+    /// the alias store maps it to, or - what the alert visibly is - a system alert whose title
+    /// is this sender's name, delivered within the last minute. Our own banners are never
+    /// candidates: they are filed under a prefix of their own, see localBannerIdentifier.
+    private static func systemAlreadyAnnounced(messageId: String, from sender: String,
+                                               completion: @escaping (Bool) -> Void) {
         guard !messageId.isEmpty else {
             completion(false)
             return
         }
-        lookForDeliveredNotification(messageId: messageId) { found in
-            if found {
+        // Fix: one look and one more a second later, which is not long enough - the alert push is
+        // routed through APNs and the socket is a direct line, so the message regularly beats its
+        // own alert by more than that. Looked for a few times over several seconds, and then put
+        // up: a reader must not be left with no banner at all when the alert never comes.
+        func look(_ attemptsLeft: Int) {
+            lookForDeliveredNotification(messageId: messageId, from: sender) { found in
+                if found {
+                    completion(true)
+                    return
+                }
+                guard attemptsLeft > 0 else {
+                    completion(false)
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    look(attemptsLeft - 1)
+                }
+            }
+        }
+        look(3)
+    }
+
+    private static func lookForDeliveredNotification(messageId: String, from sender: String = "",
+                                                     completion: @escaping (Bool) -> Void) {
+        let center = UNUserNotificationCenter.current()
+        let ours = localBannerIdentifier(for: "")
+        let aliases = APNMessageAliasStore.shared.apnIds(forStoredId: messageId)
+        let ids = [messageId] + aliases
+        let name = sender.trimmingCharacters(in: .whitespacesAndNewlines)
+        center.getDeliveredNotifications { delivered in
+            let system = delivered.filter { !$0.request.identifier.hasPrefix(ours) }
+            if system.contains(where: { note in ids.contains { mentions(messageId: $0, in: note.request) } }) {
                 completion(true)
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                lookForDeliveredNotification(messageId: messageId, completion: completion)
-            }
-        }
-    }
-
-    private static func lookForDeliveredNotification(messageId: String, completion: @escaping (Bool) -> Void) {
-        let center = UNUserNotificationCenter.current()
-        center.getDeliveredNotifications { delivered in
-            if delivered.contains(where: { mentions(messageId: messageId, in: $0.request) }) {
+            if !name.isEmpty,
+               system.contains(where: { note in
+                   note.request.content.title.trimmingCharacters(in: .whitespacesAndNewlines) == name
+                       && Date().timeIntervalSince(note.date) < 60
+               }) {
                 completion(true)
                 return
             }
             center.getPendingNotificationRequests { pending in
-                completion(pending.contains { mentions(messageId: messageId, in: $0) })
+                let theirs = pending.filter { !$0.identifier.hasPrefix(ours) }
+                completion(theirs.contains { req in ids.contains { mentions(messageId: $0, in: req) } })
             }
         }
     }
@@ -3477,6 +3593,86 @@ public class APIS: NSObject {
         }
     }
 
+    /// Every message one notification is about.
+    ///
+    /// A push arrives in one of two shapes - the alert that names a message to fetch, and the
+    /// CL01 payload that carries the message itself - so both are read, and anything that is
+    /// neither (a missed call, say) yields nothing and is passed over.
+    private static func messageIds(announcedBy userInfo: [AnyHashable: Any]) -> [String] {
+        var found: [String] = []
+        if let id = userInfo["message_id"] as? String, !id.isEmpty {
+            found.append(id)
+        }
+        if let payload = userInfo["payload"] as? [String: Any],
+           let message = payload["message"] as? [String: Any],
+           let data = message["data"] as? [String: Any] {
+            if let id = data["message_id"] as? String, !id.isEmpty {
+                found.append(id)
+            }
+            if let bodies = data["bodies"] as? [String: String],
+               let id = bodies[CoreMessage_TMessageKey.MESSAGE_ID], !id.isEmpty {
+                found.append(id)
+            }
+        }
+        return found
+    }
+
+    /// Reads what is still sitting in Notification Centre and fetches anything it announced that
+    /// never reached the database.
+    ///
+    /// Fix: a message only ever got pulled because something told this app to pull it - the silent
+    /// push waking `showNotificationNexilis`, or the reader tapping the notification. Neither is
+    /// guaranteed. iOS hands out background wake-ups on a budget and stops when it runs out, and a
+    /// reader who opens the app from the launcher never taps anything - so on that path nothing had
+    /// ever recorded the id, `PendingMessageStore` was empty, and the foreground pull had nothing
+    /// to ask for. The message then depended entirely on the socket replaying it, which is why it
+    /// sometimes simply was not there. The notification itself is the record that was being
+    /// thrown away: it was still in Notification Centre, naming the message, and this function is
+    /// called where the tray used to be cleared unread. Anything already on disk is passed over,
+    /// so a reader who opens the app with everything already delivered costs nothing.
+    static func pullMessagesFromDeliveredNotifications(then done: @escaping () -> Void = {}) {
+        UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+            let announced = Array(Set(delivered.flatMap {
+                messageIds(announcedBy: $0.request.content.userInfo)
+            }))
+            guard !announced.isEmpty else {
+                DispatchQueue.main.async { done() }
+                return
+            }
+            DispatchQueue.global(qos: .utility).async {
+                Database.shared.ensureOpenForBackgroundWrite()
+                var missing: [String] = []
+                for id in announced {
+                    // The push's id first, then whatever a previous pull for it resolved to - a
+                    // message pulled earlier is on disk under that one.
+                    let localId = APNMessageAliasStore.shared.storedId(forAPNId: id) ?? id
+                    var exists = false
+                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                        if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select message_id from MESSAGE where message_id = '\(localId)'"), cursor.next() {
+                            exists = true
+                            cursor.close()
+                        }
+                    })
+                    if !exists {
+                        missing.append(id)
+                    }
+                }
+                guard !missing.isEmpty else {
+                    DispatchQueue.main.async { done() }
+                    return
+                }
+                print("Notification tray names \(missing.count) message(s) not on disk - pulling them")
+                // Written down before anything is asked for, the same as the push path does: if
+                // this launch is cut short the ids are still there to be chased on the next one.
+                missing.forEach { PendingMessageStore.shared.save($0) }
+                pullPendingMessages()
+                // And kept being chased, for a pull that fails while the reader stays in the app.
+                startPendingMessageReconciliationLoop()
+                DispatchQueue.main.async { done() }
+            }
+        }
+    }
+
     public static func enterForeground() {
         // Called first, and given a fresh budget of attempts: every time the app comes to the
         // front is a new chance for something shared to be waiting, whether or not the last window
@@ -3543,7 +3739,14 @@ public class APIS: NSObject {
             }
         }
 //        UIApplication.shared.applicationIconBadgeNumber = 0
-        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        // Fix: the tray was emptied here without ever being read. Opened from the launcher rather
+        // than from a notification, that was the app throwing away the only record it had of
+        // messages it had been told about and never fetched - see
+        // pullMessagesFromDeliveredNotifications. It is read first now, and cleared after.
+        withdrawLocalBannersAnnouncedBySystem()
+        pullMessagesFromDeliveredNotifications {
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        }
         if Utils.getSecureFolderOffline() == "0" && afterEnterBackground && Database.shared.database == nil && Utils.getSetProfile() && !Utils.isHSAMode() {
             Database.recreateInstance()
             NotificationCenter.default.post(name: NSNotification.Name(rawValue: "disconnected_nexilis"), object: nil, userInfo: nil)
@@ -4888,7 +5091,13 @@ public class APIS: NSObject {
         if count > 0 {
             var controller: UIViewController!
             if count == 1 {
-                if forceSignIn {
+                // Fix: mode 1 has no sign-up - an account is provisioned, and the device is bound
+                // to it with a biometric-backed key on sign-in (ChangeDeviceViewController,
+                // useBiometric: true). SignInOption already routes mode 1 there whatever the
+                // caller asked for, but with a single sign-in method this path skipped it and
+                // handed a mode-1 install the sign-up screen, whose key is built without
+                // biometry and whose mode branches are all `isMiddleMode()`. Same rule here.
+                if forceSignIn || Utils.isHSAMode() {
                     let vc = AppStoryBoard.Palio.instance.instantiateViewController(withIdentifier: "changeDevice") as! ChangeDeviceViewController
                     if type == 0 {
                         vc.isMSISDN = true

@@ -4141,20 +4141,44 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         makeNavigationBarTransparent()
         setupBottomChrome()
         highlightedStripIndex = currentStripIndex
-        // The pager has no pages until it has been laid out, so where it opens is settled on the
-        // next turn - before anything is shown, and without an animation to see.
+        // Last resort. Everything this settles is settled from viewWillAppear and from the first
+        // layout pass - see settleOpeningPage - and both of those happen before the screen is
+        // shown. This is only here for the case where neither has, so the viewer is never left
+        // on the wrong page.
         DispatchQueue.main.async { [weak self] in
-            guard let self = self, !self.stripItems.isEmpty else {
-                return
-            }
-            guard self.currentStripIndex < self.stripItems.count else {
-                return
-            }
-            self.pager.layoutIfNeeded()
-            self.movePager(to: self.currentStripIndex, animated: false)
-            self.adoptCurrentPage()
-            self.stripCollection.scrollToItem(at: IndexPath(item: self.currentStripIndex, section: 0), at: .centeredHorizontally, animated: false)
+            self?.settleOpeningPage()
         }
+    }
+
+    /// Whether the viewer has been put on the page it was opened at.
+    private var hasSettledOpeningPage = false
+
+    /// Puts the viewer on the page it was opened at, with the chrome that page carries.
+    ///
+    /// Fix: this was left to the next turn of the run loop, on the grounds that the pager has no
+    /// pages until it has been laid out. That was the whole opening animation's problem. The name
+    /// in the bar, the buttons under the picture and where the strip of thumbnails sits are all
+    /// settled here, by way of adoptCurrentPage - so none of them existed while the picture grew,
+    /// and they arrived together, in one frame, whenever the turn came round. With a picture to
+    /// decode and a pager to lay out that turn lands at the end of the growing, which is why the
+    /// chrome looked like it snapped into place after the animation rather than being part of it.
+    ///
+    /// The pager does have pages once it is asked to lay out, and something has to ask: whoever
+    /// shows this screen lays it out before it is seen, and a transition animator lays it out
+    /// before it moves anything. Either way this runs first, and once.
+    private func settleOpeningPage() {
+        guard !hasSettledOpeningPage,
+              !stripItems.isEmpty,
+              currentStripIndex < stripItems.count,
+              pager != nil, pager.bounds.width > 0,
+              stripCollection != nil else {
+            return
+        }
+        hasSettledOpeningPage = true
+        pager.layoutIfNeeded()
+        movePager(to: currentStripIndex, animated: false)
+        adoptCurrentPage()
+        stripCollection.scrollToItem(at: IndexPath(item: currentStripIndex, section: 0), at: .centeredHorizontally, animated: false)
     }
 
     /// Lets the picture run behind the bar rather than beginning underneath it.
@@ -4987,6 +5011,9 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         // Fix: this put the player back across the whole screen on every layout pass, undoing the
         // placement that keeps it on its own page - and, now, on the poster it is zoomed with.
         positionVideoHost()
+        // The first pass to give the pager a width is the earliest the opening page can be
+        // settled, and a transition animator forces that pass before it moves anything.
+        settleOpeningPage()
     }
 
     /// Lets the first and the last thumbnail reach the middle of the strip.
@@ -5058,6 +5085,9 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(false, animated: false)
         isNavigationBarHidden = false
+        // Before the screen is shown rather than on a later turn - see settleOpeningPage.
+        view.layoutIfNeeded()
+        settleOpeningPage()
     }
 
     func animateBackgroundIn() {
@@ -5642,12 +5672,32 @@ class MediaViewerViewController: UIViewController, UIGestureRecognizerDelegate, 
     }
 }
 
+/// A screen that draws its own bar over its content, rather than having one above it.
+///
+/// A picture flying in or out is added on top of everything, so anything the screen underneath
+/// draws over its own content is hidden for as long as the picture is in flight - and comes back
+/// in the one frame where the picture is taken away. Naming those pieces here lets the animation
+/// carry copies of them above the picture, so they are on screen the whole way.
+public protocol ZoomTransitionChromeProviding: AnyObject {
+    /// Bars, scrims and buttons this screen floats over its own content, back to front.
+    var zoomTransitionChrome: [UIView] { get }
+}
+
 class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     var isPresenting = true
     var originImageView: UIImageView?
 
+    /// Asked again, once the screen being returned to has been laid out, which square this
+    /// picture belongs to - see the note in `animateTransition`.
+    var originProvider: (() -> UIImageView?)?
+
+    /// Fix: this was 0.45s, and on a spring - which does not stop when its time is up, it settles
+    /// afterwards. Measured off a recording, the picture took 0.30s to finish growing and the
+    /// screen was not done until 0.70s. The reference does the whole thing, growing and darkening
+    /// together, in 0.25s. So: 0.25s, and a plain ease rather than a spring, because a spring's
+    /// tail is exactly the part that reads as "too long".
     func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
-        return 0.45
+        return 0.25
     }
 
     func animateTransition(using transitionContext: UIViewControllerContextTransitioning) {
@@ -5657,6 +5707,37 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             transitionContext.completeTransition(false)
             return
         }
+        let container = transitionContext.containerView
+
+        // On the way back, the screen being returned to is put in place and laid out before
+        // anything is measured or moved - otherwise its own bar and rows drop into place in one
+        // frame at the end.
+        //
+        // Fix: it was laid out, but where the picture had to land had already been read, before
+        // any of that, from a square in a grid still holding its old arrangement. Laying the grid
+        // out moves its rows, and a grid hands its squares round between rows as they move - so
+        // the view being aimed at was frequently no longer this picture's square at all. The
+        // picture shrank towards the wrong row and was taken away in mid-air, which is why the
+        // same picture could be seen twice, one of them in the wrong place. The screen settles
+        // first, and only then is it asked which square this picture belongs to.
+        if !isPresenting {
+            var host = toVC
+            while let parent = host.parent {
+                host = parent
+            }
+            let arriving = transitionContext.view(forKey: .to) ?? host.view
+            if let arriving = arriving {
+                if arriving.superview == nil {
+                    container.insertSubview(arriving, at: 0)
+                }
+                arriving.frame = container.bounds
+                arriving.layoutIfNeeded()
+            }
+            if let settled = originProvider?(), settled.window != nil {
+                originImageView = settled
+            }
+        }
+
         guard let originImageView = originImageView, originImageView.window != nil else {
             // No bubble on screen to aim at - a picture whose message is not in the loaded window,
             // say. Flying to a stale reference is worse than not flying at all, so it fades.
@@ -5664,8 +5745,6 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             fadeTransition(using: transitionContext, from: fromVC, to: toVC)
             return
         }
-
-        let container = transitionContext.containerView
         // The bubble keeps its own thumbnail on screen while the snapshot flies over it, so for a
         // moment the same picture is drawn twice - once sitting still in the conversation and once
         // moving. It is put away for the length of the move and handed back at the end.
@@ -5678,6 +5757,16 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         if isPresenting {
             toVC.view.alpha = 0
             container.addSubview(toVC.view)
+            // Fix: the arriving screen was added and then left to be laid out whenever UIKit got
+            // round to it - which is when the transition completes. So while the picture grew,
+            // the bar above it and the strip of thumbnails below were not yet in place, and both
+            // appeared together in a single frame the moment the growing stopped. Measured off a
+            // recording, that one frame changed more than the last third of the animation put
+            // together. Given its size and laid out before anything moves, everything on it is
+            // where it belongs from the first frame - and `finalFrame` below is read from that
+            // same frame, so the picture flies to the right size rather than to a guess.
+            toVC.view.frame = container.bounds
+            toVC.view.layoutIfNeeded()
             // Starts cropped, the way the bubble is actually drawing it, and opens out to the
             // whole picture. Beginning aspect-fit instead put the entire picture inside the
             // bubble's frame for one frame - a visible squeeze before the animation had moved.
@@ -5685,16 +5774,23 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             container.addSubview(imageViewSnapshot)
 
             let finalFrame = toVC.view.frame
+            // Fix: the black behind the picture was faded in by whoever presented this, from the
+            // completion of the presentation - so it only began once the growing had finished,
+            // and took another quarter of a second on top. Two motions, one after the other,
+            // where the reference has one. It is part of this animation now, and of the fade-only
+            // path below. The call in the completion is left where it is - against a background
+            // already at 1 it does nothing, and it is the safety net for any path that does not
+            // come through this animator at all.
+            let arriving = (toVC as? UINavigationController)?.viewControllers.first as? MediaViewerViewController
 
             UIView.animate(withDuration: transitionDuration(using: transitionContext),
                            delay: 0,
-                           usingSpringWithDamping: 0.85,
-                           initialSpringVelocity: 0.6,
-                           options: .curveEaseOut, animations: {
+                           options: [.curveEaseOut], animations: {
 
                 imageViewSnapshot.frame = finalFrame
                 imageViewSnapshot.contentMode = .scaleAspectFit
                 toVC.view.alpha = 1
+                arriving?.backgroundView.alpha = 1
 
             }) { _ in
                 imageViewSnapshot.removeFromSuperview()
@@ -5705,7 +5801,21 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         } else {
             let navVC = fromVC as? UINavigationController
             let fromImageVC = navVC?.viewControllers.first as? MediaViewerViewController
-            let finalFrame = container.convert(originImageView.bounds, from: originImageView)
+
+            // Where the picture is drawn while it travels home.
+            //
+            // Fix: it used to be laid over the whole transition, above the screen it was going
+            // back to - and that screen floats its own bar over its pictures, so the bar was
+            // buried for the length of the move and appeared in the single frame where the
+            // flying copy was taken away. The attempt before this one carried stand-in copies of
+            // that bar above the picture; the copies were a second header written over the
+            // first, and any that outlived their animation stayed on the screen, which is how
+            // the page came to look like several of itself piled up. There are no copies now.
+            // The picture is placed inside that screen, underneath the bar, so the one real bar
+            // is above it from the first frame to the last and taking the picture away at the
+            // end changes nothing on screen.
+            let stage = ZoomAnimator.landingStage(of: toVC, fallback: container)
+            let finalFrame = stage.view.convert(originImageView.bounds, from: originImageView)
 
             // Fix: the snapshot was put at the bubble's frame and then animated to the bubble's
             // frame - the same place - so closing the viewer never moved anything; the picture
@@ -5714,28 +5824,44 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             let shown = fromImageVC?.currentPictureView()
             if let shown = shown, let picture = shown.image {
                 imageViewSnapshot.image = picture
-                imageViewSnapshot.frame = container.convert(ZoomAnimator.drawnFrame(of: shown), from: shown.superview)
+                imageViewSnapshot.frame = stage.view.convert(ZoomAnimator.drawnFrame(of: shown), from: shown.superview)
             } else {
-                imageViewSnapshot.frame = container.bounds
+                imageViewSnapshot.frame = stage.view.bounds
             }
             imageViewSnapshot.contentMode = .scaleAspectFit
 
-            container.addSubview(imageViewSnapshot)
-            fromImageVC?.view.alpha = 0
-            fromImageVC?.backgroundView.alpha = 0 // fade background
+            if let below = stage.below {
+                stage.view.insertSubview(imageViewSnapshot, belowSubview: below)
+            } else {
+                stage.view.addSubview(imageViewSnapshot)
+            }
+            // Fix: the screen being left was taken away in two wrong pieces. Its own view was set
+            // to alpha 0 outright, so the black and the toolbar vanished in one frame at the
+            // start; and the bar above it belongs to the navigation controller wrapped around it,
+            // not to the viewer, so that was never touched at all - it stayed drawn over the grid
+            // for the whole shrink and then disappeared in a single frame when the transition
+            // completed. Measured off a recording, that last frame changed more than any frame of
+            // the animation itself: the shrink tapered to nothing and then jolted. Everything
+            // leaving now fades together, over the same time the picture is travelling, and only
+            // the picture is taken out early - the snapshot is already carrying it, and without
+            // that it would be drawn twice.
+            shown?.isHidden = true
 
             UIView.animate(withDuration: transitionDuration(using: transitionContext),
                            delay: 0,
-                           usingSpringWithDamping: 0.85,
-                           initialSpringVelocity: 0.6,
-                           options: .curveEaseOut, animations: {
+                           options: [.curveEaseOut], animations: {
 
                 imageViewSnapshot.frame = finalFrame
                 imageViewSnapshot.contentMode = .scaleAspectFill
+                fromVC.view.alpha = 0
 
             }) { _ in
                 imageViewSnapshot.removeFromSuperview()
                 originImageView.isHidden = false
+                shown?.isHidden = false
+                // The screen being left is only being dismissed, not thrown away - anything that
+                // shows it again must not find it invisible.
+                fromVC.view.alpha = 1
                 transitionContext.completeTransition(true)
             }
         }
@@ -5749,9 +5875,13 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             toVC.view.alpha = 0
             container.addSubview(toVC.view)
         }
+        // The black behind the picture belongs to this animation too, the same as in the flying
+        // one above - otherwise it waits for the presentation to finish and arrives on its own.
+        let arriving = (toVC as? UINavigationController)?.viewControllers.first as? MediaViewerViewController
         UIView.animate(withDuration: transitionDuration(using: transitionContext), animations: {
             if self.isPresenting {
                 toVC.view.alpha = 1
+                arriving?.backgroundView.alpha = 1
             } else {
                 fromVC.view.alpha = 0
             }
@@ -5759,6 +5889,40 @@ class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             fromVC.view.alpha = 1
             transitionContext.completeTransition(!transitionContext.transitionWasCancelled)
         })
+    }
+
+    /// Where to put a picture on its way home, and what it must stay underneath.
+    ///
+    /// A screen that floats its own bar over its content says so; the picture then belongs inside
+    /// that screen, below the backmost of those pieces, so all of them are drawn over it for the
+    /// whole move. Anything else gets the transition's own view and the picture on top, which is
+    /// right for a screen whose bar is above its content rather than over it.
+    static func landingStage(of toVC: UIViewController, fallback: UIView) -> (view: UIView, below: UIView?) {
+        let destination = (toVC as? UINavigationController)?.topViewController ?? toVC
+        guard let provider = destination as? ZoomTransitionChromeProviding else {
+            return (fallback, nil)
+        }
+        var stage: UIView? = nil
+        var backmost: UIView? = nil
+        var lowest = Int.max
+        for piece in provider.zoomTransitionChrome {
+            guard let parent = piece.superview,
+                  let index = parent.subviews.firstIndex(of: piece) else {
+                continue
+            }
+            if stage == nil {
+                stage = parent
+            }
+            guard parent === stage, index < lowest else {
+                continue
+            }
+            lowest = index
+            backmost = piece
+        }
+        guard let stageView = stage, let below = backmost else {
+            return (fallback, nil)
+        }
+        return (stageView, below)
     }
 
     /// Where the picture actually is inside its view, which for an aspect-fit image view is not
@@ -5808,6 +5972,7 @@ class ZoomTransitioningDelegate: NSObject, UIViewControllerTransitioningDelegate
             let animator = ZoomAnimator()
             animator.isPresenting = false
             animator.originImageView = currentOrigin()
+            animator.originProvider = originProvider
             return animator
     }
 }
@@ -7551,6 +7716,16 @@ final class APNMessageAliasStore {
             }
         }
         UserDefaults.standard.set(map, forKey: key)
+    }
+
+    /// Every push id that has been found to be about this stored message - the other direction
+    /// of `storedId(forAPNId:)`, for looking a message up in the notification tray, where what
+    /// is filed is the push id.
+    func apnIds(forStoredId storedId: String) -> [String] {
+        guard !storedId.isEmpty else {
+            return []
+        }
+        return load().filter { $0.value == storedId }.map { $0.key }
     }
 
     func storedId(forAPNId apnId: String) -> String? {
@@ -9308,6 +9483,16 @@ public final class MarqueeLabel: UIView {
     /// replaced has to be able to recognise that it no longer is.
     private var runToken = 0
 
+    /// How long the line rests at each end of its walk.
+    ///
+    /// At the start, so the beginning can be read without waiting out a whole pass; at the end,
+    /// so the last words can be. Fix: there was no rest at the end at all - the line arrived at
+    /// its end and was back at the beginning in the same frame, so whatever was written there
+    /// went past too quickly to read, which is the one thing the walking is for.
+    private static let pauseBeforeSettingOff: TimeInterval = 2
+    private static let pauseAtTheEnd: TimeInterval = 1
+    private static let pauseBackAtTheStart: TimeInterval = 1.5
+
     public var text: String? {
         get { return label.text }
         set { label.text = newValue; invalidateIntrinsicContentSize(); restart() }
@@ -9321,6 +9506,23 @@ public final class MarqueeLabel: UIView {
     public var textColor: UIColor! {
         get { return label.textColor }
         set { label.textColor = newValue }
+    }
+
+    /// The line with something drawn into it - the flag in front of an official name.
+    public var attributedText: NSAttributedString? {
+        get { return label.attributedText }
+        set { label.attributedText = newValue; invalidateIntrinsicContentSize(); restart() }
+    }
+
+    /// Puts an image in front of the text, the way the UILabel of the same name does.
+    ///
+    /// The header carries an official, verified or internal badge before the name, and it is
+    /// built with the font the line already has - so the font must be set before this is called,
+    /// which is what every caller does.
+    public func set(image: UIImage, with text: String, size: CGFloat, y: CGFloat) {
+        label.set(image: image, with: text, size: size, y: y)
+        invalidateIntrinsicContentSize()
+        restart()
     }
 
     public override init(frame: CGRect) {
@@ -9367,6 +9569,17 @@ public final class MarqueeLabel: UIView {
         }
     }
 
+    public override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        // Fix: the same stranding, from being moved rather than removed. A navigation bar puts
+        // its title view somewhere else of its own while a screen is being pushed in, and a view
+        // that changes parent inside the same window has its animations taken off it without
+        // didMoveToWindow ever being called - so nothing knew to start the walk again.
+        if superview != nil {
+            restart()
+        }
+    }
+
     private func restart() {
         runToken += 1
         label.layer.removeAllAnimations()
@@ -9378,16 +9591,33 @@ public final class MarqueeLabel: UIView {
         walk(token: runToken, overflow: overflow)
     }
 
-    /// One pass: waits, walks the text left until its end shows, puts it straight back where it
-    /// started, waits again.
+    /// One pass: waits, walks the text left until its end shows, rests there, goes back where it
+    /// started, rests again.
     ///
     /// Not an autoreversing animation - that walks back at reading speed, which reads as the text
     /// sliding about. It goes one way and returns at once, the way a marquee does.
     private func walk(token: Int, overflow: CGFloat) {
         // Roughly 30pt a second, so it can be read as it goes, and never quicker than a second.
         let duration = TimeInterval(max(overflow / 30, 1))
+        // Fix: the wait used to be the animation's own `delay`, and UIView commits the end of an
+        // animation the moment it is asked for - the delay only holds back what is drawn. So for
+        // those two seconds the line was already, as far as the model was concerned, at its far
+        // end; anything that took the animation off the layer in the meantime - and pushing a
+        // screen in does exactly that to a navigation bar's title view - left it drawn there.
+        // Which is why the name was at its end before the screen had finished opening. The wait
+        // is just a wait now, and nothing is committed until the walking actually starts.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pauseBeforeSettingOff) { [weak self] in
+            guard let self = self, self.runToken == token, self.window != nil else {
+                return
+            }
+            self.walkNow(token: token, overflow: overflow, duration: duration)
+        }
+    }
+
+    /// The walk itself, once the waiting is done.
+    private func walkNow(token: Int, overflow: CGFloat, duration: TimeInterval) {
         UIView.animate(withDuration: duration,
-                       delay: 2,
+                       delay: 0,
                        options: [.curveLinear, .allowUserInteraction],
                        animations: { [weak self] in
             self?.label.transform = CGAffineTransform(translationX: -overflow, y: 0)
@@ -9395,14 +9625,18 @@ public final class MarqueeLabel: UIView {
             guard let self = self, finished, self.runToken == token else {
                 return
             }
-            self.label.transform = .identity
-            // A pause at the beginning before setting off again, so the start of the name can be
-            // read without waiting out a whole pass.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            // Held at the end, with the last of the line showing, before it goes back.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.pauseAtTheEnd) { [weak self] in
                 guard let self = self, self.runToken == token, self.window != nil else {
                     return
                 }
-                self.walk(token: token, overflow: overflow)
+                self.label.transform = .identity
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.pauseBackAtTheStart) { [weak self] in
+                    guard let self = self, self.runToken == token, self.window != nil else {
+                        return
+                    }
+                    self.walk(token: token, overflow: overflow)
+                }
             }
         })
     }
@@ -11035,6 +11269,613 @@ public enum ChatRowDiff {
     }
 }
 
+/// How the bar at the top of a conversation is laid out.
+///
+/// Fix: the picture was 30pt and the name 12pt - noticeably smaller than the 40pt and 17pt every
+/// other messenger gives that bar, and smaller than the 14pt a bubble's own text is drawn at, so
+/// the name of whoever is being talked to was the smallest writing on the screen. Written here
+/// because three chat screens draw the same bar and each carried its own copy of the numbers.
+/// A search bar whose cancel button is a circle, the way the reference has it.
+///
+/// Fix: the cancel button the bar makes for itself is a squat capsule - measured off a screenshot,
+/// 46.7 by 34.3pt beside a 44pt field, where the reference has a circle as tall as its field. That
+/// 34.3 is simply the height UIKit gives a cancel button; it does not follow the field, and there
+/// is no public way to tell it to. Letting the system size the field instead, so that both would
+/// be whatever the system made them, did not help either: the field came out 44 and the button
+/// came out 34.3 just the same.
+///
+/// So the button is ours. The bar is still asked for one - that is what makes it leave room in the
+/// row and keep the field the right width, and it is what keeps the two lined up, which took six
+/// builds to get right and is not being given away - but the one it makes is hidden and a circle
+/// of our own is drawn in its place, square by construction and centred on the field. Pressing it
+/// says the same thing to the delegate the real one would, so nothing downstream can tell.
+final class ChatSearchBar: UISearchBar {
+
+    /// What the field is filled with, painted to fit once the field has a size.
+    var fieldFill: UIColor? {
+        didSet {
+            paintedAt = 0
+            setNeedsLayout()
+        }
+    }
+
+    /// The height the fill was last drawn for, so it is redrawn when that changes and not on
+    /// every pass - setting a background image asks for another layout, and re-setting the same
+    /// one every time would never settle.
+    private var paintedAt: CGFloat = 0
+
+    private let roundCancel = UIButton(type: .system)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        buildCancel()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        buildCancel()
+    }
+
+    private func buildCancel() {
+        let cross = UIImage(systemName: "xmark",
+                            withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
+        if #available(iOS 26.0, *) {
+            var glass = UIButton.Configuration.glass()
+            glass.image = cross
+            glass.baseForegroundColor = .label
+            glass.cornerStyle = .capsule
+            roundCancel.configuration = glass
+        } else {
+            roundCancel.setImage(cross, for: .normal)
+            roundCancel.tintColor = .white
+            roundCancel.backgroundColor = UIColor.white.withAlphaComponent(0.3)
+            roundCancel.clipsToBounds = true
+        }
+        roundCancel.addTarget(self, action: #selector(roundCancelPressed), for: .touchUpInside)
+        addSubview(roundCancel)
+    }
+
+    @objc private func roundCancelPressed() {
+        delegate?.searchBarCancelButtonClicked?(self)
+    }
+
+    /// Puts away the cancel button the bar made, so only ours is drawn.
+    ///
+    /// Fix, and the last of several: this was looking inside the search bar, and the button is not
+    /// in there. Fitted against a screenshot, what stood out past our circle was a capsule of
+    /// height 103px and radius 51.5 centred at y=279 - the bar's own cancel button exactly, to
+    /// within a pixel at every point along its curve - while our circle is centred at 281.5. Two
+    /// different things, three pixels apart, not one thing with a rim.
+    ///
+    /// Our own circle sits at 1024..1156 of a 1206px screen, which puts this bar's width at the
+    /// full 402pt: it spans the row end to end. So nothing can ever be "to the right of the bar",
+    /// which is what an earlier attempt looked for and why it found nothing, and the button UIKit
+    /// makes is not inside the bar at all - on this release it is lifted out into the navigation
+    /// bar, a sibling of the title view rather than a child of it. So the search starts from the
+    /// row, and what it measures against is the right-hand edge of the field rather than of the
+    /// bar.
+    ///
+    /// `isHidden` rather than alpha: alpha is UIKit's own to set, and it was handing it straight
+    /// back.
+    private func hideTheOneTheBarMade() {
+        guard let row = enclosingNavigationBar() else {
+            return
+        }
+        let field = row.convert(searchTextField.bounds, from: searchTextField)
+        hunt(row, rightOf: field.maxX, measuredIn: row)
+    }
+
+    private func enclosingNavigationBar() -> UINavigationBar? {
+        var next = superview
+        while let view = next {
+            if let bar = view as? UINavigationBar {
+                return bar
+            }
+            next = view.superview
+        }
+        return nil
+    }
+
+    /// Fix: the walk stopped at the first step and never reached anything. It skipped any view the
+    /// field was inside of, meaning to skip the field's own controls - but every view on the way
+    /// down is one the field is inside of, the navigation bar's content view first among them, and
+    /// that is also what the button is inside of. It turned back at the door. Being inside the
+    /// field and holding the field are opposite things, and they are told apart now: a branch that
+    /// holds something of ours is descended into and never hidden, and only the field's own
+    /// subtree is left alone.
+    private func hunt(_ view: UIView, rightOf edge: CGFloat, measuredIn row: UINavigationBar) {
+        for child in view.subviews where child !== roundCancel && child !== searchTextField {
+            // Inside the field - its own controls, the cross for emptying it among them.
+            if child.isDescendant(of: searchTextField) {
+                continue
+            }
+            // Holding something of ours: go deeper, but never put it away.
+            if searchTextField.isDescendant(of: child) || roundCancel.isDescendant(of: child) {
+                hunt(child, rightOf: edge, measuredIn: row)
+                continue
+            }
+            let box = row.convert(child.bounds, from: child)
+            // Small enough to be a button rather than something holding one.
+            if box.width > 0, box.height > 0, box.width <= 150, box.height <= 80,
+               box.minX >= edge - 1 {
+                child.isHidden = true
+                child.isUserInteractionEnabled = false
+                continue
+            }
+            hunt(child, rightOf: edge, measuredIn: row)
+        }
+    }
+
+    /// Fix: the bar does not build its cancel button until it is asked to show one, which is after
+    /// the pass that would have put it away - so the one pass that mattered ran while there was
+    /// nothing there to find, and nothing asked for another. Being put on screen, and the moment
+    /// after, are when the rest of the bar exists.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else {
+            return
+        }
+        setNeedsLayout()
+        DispatchQueue.main.async { [weak self] in
+            self?.setNeedsLayout()
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        let field = searchTextField
+        let side = field.bounds.height
+        guard side > 0, let fieldHost = field.superview else {
+            return
+        }
+
+        if let fill = fieldFill, abs(side - paintedAt) > 0.5 {
+            paintedAt = side
+            setSearchFieldStyle(height: side, backgroundColor: fill)
+        }
+
+        let box = convert(field.frame, from: fieldHost)
+
+        // The one the bar made. It is not asked for by name - UISearchBar does not hand it over,
+        // and the private key that would is not worth the risk - nor by type, since what UIKit
+        // builds it out of is its own business and has changed before. It is found by where it is:
+        // the thing in this bar that stands clear to the right of the field.
+        //
+        // Fix: this only looked at the bar's own subviews, and the button is not one - it is
+        // nested. Measured off a screenshot, six pixels of it stood out past the left of our
+        // circle, a pale arc against the glass. The whole tree is walked now, and a branch is
+        // left alone once its root has been put away: there is no point hiding what is already
+        // inside something hidden, and descending into the field would find its own controls.
+        hideTheOneTheBarMade()
+
+        // Anchored to the far edge by the same margin the field keeps on the near one, so the row
+        // reads as even; centred on the field, which is what puts it on the same line.
+        let margin = box.minX
+        roundCancel.frame = CGRect(x: bounds.width - margin - side,
+                                   y: box.midY - side / 2,
+                                   width: side, height: side)
+        if #unavailable(iOS 26.0) {
+            roundCancel.layer.cornerRadius = side / 2
+        }
+        bringSubviewToFront(roundCancel)
+    }
+}
+
+/// The pin drawn on a conversation row that has been pinned.
+///
+/// One description of it, because there are two lists showing the same rows and they had drifted:
+/// the conversation list drew no pin at all.
+///
+/// Measured off the reference: a 13.7pt glyph in a flat grey of 0.42, sitting 7pt to the left of
+/// the unread badge and centred on it.
+public enum ChatListPin {
+
+    /// The box it is drawn in. Larger than the glyph: the image is a square canvas with the pin
+    /// turned 45 degrees inside it, so the glyph only ever fills part of what it is given.
+    public static let side: CGFloat = 20
+    /// Between the pin and the unread badge.
+    public static let gapToBadge: CGFloat = 7
+
+    /// Fix: this was `.darkGray`, which is 0.33 - noticeably darker than the 0.42 the reference
+    /// uses. Light and dark are given separately, because a grey that reads as quiet on white is
+    /// nearly invisible on black.
+    public static var colour: UIColor {
+        return UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(white: 0.72, alpha: 1)
+                                               : UIColor(white: 0.42, alpha: 1)
+        }
+    }
+
+    public static func imageView() -> UIImageView {
+        let view = UIImageView()
+        let pin = UIImage(systemName: "pin.fill",
+                          withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        view.image = pin?.rotateImage(byDegrees: 45).withRenderingMode(.alwaysTemplate)
+        view.tintColor = colour
+        // Fix: a UIImageView fills by default, and the image here is a square canvas holding a
+        // turned pin - filled into a box of a different shape it came out stretched.
+        view.contentMode = .scaleAspectFit
+        return view
+    }
+}
+
+/// A view that looks pressed while a finger is on it - the quote a message replies to, for one.
+///
+/// A link already darkens under the finger; a mention does the same in a group. The quote did
+/// nothing, and a tappable thing that does not answer the touch reads as not tappable. Measured
+/// off recordings of the reference: the quote dims by about seven percent on a light bubble and
+/// brightens by about a third on a dark one, from the moment the finger lands to the moment it
+/// lifts - a pressed state, not a flash. The jump it leads to, or the menu, comes after.
+///
+/// Fix: this was first done with a long-press recognizer of zero duration, and it only ever
+/// showed while the list was still moving from a scroll - never on a still list. On a still
+/// list the bubble's context-menu interaction has its own long press armed, and UIKit makes any
+/// other recognizer on the same touch wait for that one to fail before it may begin; while a
+/// scroll is in play that interaction fails at once and the zero-duration press ran. Nothing a
+/// recognizer's delegate says can lift a failure requirement the system's recognizer imposes.
+/// So this is not a recognizer. It is the view, taking its own touches: those arrive the moment
+/// the finger lands (the list no longer delays them - see delaysContentTouches) and answer to no
+/// arbitration. When a tap, the menu's long press or a scroll does recognise, UIKit cancels the
+/// view's touches, and the pressed look goes with them - which is exactly when it should.
+public class PressableView: UIView {
+
+    private weak var veil: UIView?
+
+    public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        press()
+    }
+
+    public override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesMoved(touches, with: event)
+        // Dragged off: the touch is no longer a tap on this, and the reference lets go of the
+        // pressed look at that point too.
+        if let touch = touches.first, !bounds.insetBy(dx: -8, dy: -8).contains(touch.location(in: self)) {
+            lift()
+        }
+    }
+
+    public override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        lift()
+    }
+
+    public override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        lift()
+    }
+
+    private func press() {
+        guard veil == nil else { return }
+        let veil = UIView()
+        veil.backgroundColor = UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.10)
+                                               : UIColor(white: 0, alpha: 0.07)
+        }
+        veil.isUserInteractionEnabled = false
+        veil.layer.cornerRadius = layer.cornerRadius
+        veil.layer.maskedCorners = layer.maskedCorners
+        veil.clipsToBounds = true
+        veil.frame = bounds
+        veil.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(veil)
+        self.veil = veil
+    }
+
+    /// Lets go of the pressed look. Public for the one caller outside the view's own touches:
+    /// the moment a context menu is about to lift the bubble into a preview.
+    public func liftPress() {
+        veil?.removeFromSuperview()
+        veil = nil
+    }
+
+    private func lift() {
+        liftPress()
+    }
+
+    /// Lets go of every pressed look inside `root`.
+    ///
+    /// Fix: a context menu lifts the bubble into a preview by snapshotting it - and it does so
+    /// while the finger is still down, before UIKit cancels the bubble's touches. So whatever was
+    /// pressed under that finger was snapshotted pressed, and the preview showed the quote or the
+    /// mention still lit up, for as long as the menu stayed open. Called from the menu's
+    /// configuration hook, which runs before the snapshot is taken.
+    public static func liftAll(in root: UIView?) {
+        guard let root = root else { return }
+        if let pressable = root as? PressableView {
+            pressable.liftPress()
+        }
+        for child in root.subviews {
+            liftAll(in: child)
+        }
+    }
+}
+
+/// A text view that reports its own touches, so what is under the finger - a link, a mention -
+/// can be lit up the moment the finger lands.
+///
+/// Fix: this was a long-press recognizer of zero duration on the text view, and it had the same
+/// flaw the quote's pressed look had: on a still list the bubble's context-menu long press is
+/// armed and UIKit holds every other recognizer on that touch until it fails, so nothing lit up
+/// on a plain tap - only while a scroll had already knocked the menu's press out. The view's own
+/// touches answer to no arbitration and arrive the moment the finger lands. When a tap, the
+/// menu's press or a scroll does recognise, UIKit cancels these, and the highlight goes with them.
+public final class PressableTextView: UITextView {
+
+    public enum Phase {
+        case began, moved, ended, cancelled
+    }
+
+    /// Where the finger is, and what it is doing, in this view's coordinates.
+    public var onTouch: ((Phase, CGPoint) -> Void)?
+
+    public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        report(.began, touches)
+    }
+
+    public override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesMoved(touches, with: event)
+        report(.moved, touches)
+    }
+
+    public override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        report(.ended, touches)
+    }
+
+    public override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        report(.cancelled, touches)
+    }
+
+    private func report(_ phase: Phase, _ touches: Set<UITouch>) {
+        guard let touch = touches.first else { return }
+        onTouch?(phase, touch.location(in: self))
+    }
+}
+
+/// The one way a bubble is pointed out - reached by a tap on a quote, a starred message, a
+/// search result, or a notification.
+///
+/// Fix: there were two. Opening a conversation on a message painted the whole row yellow for a
+/// second - a band from edge to edge, still on long after the reader had found the bubble - and
+/// a quote tap inside a conversation tinted the bubble with its own colour at a third of its
+/// strength, which on a white bubble is nothing at all. Neither is what the reference does.
+///
+/// Measured off a recording of the reference: the bubble itself, not its row, is dimmed by a
+/// dark tint of a few percent - ramped in over about 0.13s, held about 0.3s, faded out over
+/// about 0.15s - and is at rest again well under a second later. That is what this draws, with a
+/// view of its own laid over the bubble rather than by changing the bubble's colour, so what the
+/// bubble was is never touched and never has to be remembered.
+public enum BubbleHighlight {
+
+    static let rampIn: TimeInterval = 0.13
+    static let hold: TimeInterval = 0.3
+    static let fadeOut: TimeInterval = 0.15
+    /// Dark on a light bubble, light on a dark one - the tint has to be visible against both.
+    static var tint: UIColor {
+        return UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.12)
+                                               : UIColor(white: 0, alpha: 0.10)
+        }
+    }
+
+    /// The bubble in a row, found by the tag every editor puts on it - the position it holds among
+    /// the row's subviews is not the same in every chat, and reading it by position was how a
+    /// contact-centre conversation ended up flashing the avatar.
+    public static func flash(in cell: UITableViewCell, tag: Int) {
+        guard let bubble = cell.contentView.viewWithTag(tag) else {
+            return
+        }
+        flash(bubble)
+    }
+
+    /// Lays the tint over `bubble` and takes it away again.
+    public static func flash(_ bubble: UIView) {
+        let veil = UIView()
+        veil.backgroundColor = tint
+        veil.isUserInteractionEnabled = false
+        veil.layer.cornerRadius = bubble.layer.cornerRadius
+        veil.layer.maskedCorners = bubble.layer.maskedCorners
+        veil.clipsToBounds = true
+        veil.alpha = 0
+        bubble.addSubview(veil)
+        veil.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            veil.topAnchor.constraint(equalTo: bubble.topAnchor),
+            veil.bottomAnchor.constraint(equalTo: bubble.bottomAnchor),
+            veil.leadingAnchor.constraint(equalTo: bubble.leadingAnchor),
+            veil.trailingAnchor.constraint(equalTo: bubble.trailingAnchor)
+        ])
+        bubble.bringSubviewToFront(veil)
+        UIView.animate(withDuration: rampIn, delay: 0, options: [.curveEaseOut], animations: {
+            veil.alpha = 1
+        }, completion: { _ in
+            UIView.animate(withDuration: fadeOut, delay: hold, options: [.curveEaseIn], animations: {
+                veil.alpha = 0
+            }, completion: { _ in
+                veil.removeFromSuperview()
+            })
+        })
+    }
+}
+
+enum ChatHeaderMetrics {
+    static let barHeight: CGFloat = 44
+    static let pictureSize: CGFloat = 40
+    static let titleFontSize: CGFloat = 14
+    /// The line under the name - in a group, who is in it. Three quarters of the name's size,
+    /// which is the proportion the reference keeps between the two.
+    static let subtitleFontSize: CGFloat = 11
+    /// Between the two lines.
+    static let titleSubtitleSpacing: CGFloat = 1
+    /// Between the picture and the name.
+    static let gap: CGFloat = 9
+    /// How far along the next picture starts when a contact-centre chat has several people in
+    /// it - they overlap by a third, which is the overlap the 30pt pictures had.
+    static let pictureStep: CGFloat = 27
+    /// The flag drawn before an official or verified name, sized to the name beside it.
+    static let flagSize: CGFloat = 21
+    static let flagBaseline: CGFloat = -5
+
+
+    /// Dresses the search field so it reads as one row with the round button beside it.
+    ///
+    /// Fix: three things were wrong with it and all three came from the same place - the field
+    /// was being drawn by hand rather than being allowed to be a search field.
+    ///
+    /// It sat low. A UISearchBar asks for 56pt of height; put in a 44pt bar it keeps asking, is
+    /// given the 56 it wants, and hangs 6pt below the row. The field inside is bottom-aligned, so
+    /// it went down with it - measured off a screenshot, 5pt lower than the middle of the button
+    /// next to it, which is exactly what "tidak lurus" looks like. Held to the same 44 the button
+    /// is, the bar has nowhere to hang and the two line up.
+    ///
+    /// It had no magnifying glass, because a blank image was being set over the one iOS provides,
+    /// and the 10pt nudge that went with it was there to put the text back where the missing icon
+    /// would have left it. Both are gone: the icon is the indent.
+    ///
+    /// And it had nothing written in it, so an empty field looked like an empty white pill with
+    /// no way of telling what it was for.
+    static func dressSearchBar(_ searchBar: UISearchBar, fill: UIColor) {
+        // The bar's own, not a separate item in the navigation bar - see ChatSearchBar. On this
+        // release it is drawn as the same circle of glass the navigation bar was drawing, so
+        // nothing about the look changes; what changes is that one layout now owns both of them.
+        searchBar.showsCancelButton = true
+        searchBar.placeholder = "Search".localized()
+        searchBar.setImage(tinted("magnifyingglass", .gray), for: .search, state: .normal)
+        searchBar.setPositionAdjustment(.zero, for: .search)
+        // Fix: the cross for emptying the field came out white as often as it came out dark. It
+        // is drawn from a template, so it takes whichever tint it happens to inherit - the bar's,
+        // the window's, the one the navigation bar is carrying at that moment - and over a
+        // near-white field a white cross is an empty space where a button should be. Given a
+        // picture of its own, in a colour of its own, there is nothing left to inherit.
+        searchBar.setImage(tinted("xmark.circle.fill", .gray), for: .clear, state: .normal)
+        searchBar.setImage(tinted("xmark.circle.fill", .darkGray), for: .clear, state: .highlighted)
+        // Painted to fit once the field has been given a size - see ChatSearchBar. A bar that is
+        // not one of ours gets it at the height the system uses for a search field.
+        if let ours = searchBar as? ChatSearchBar {
+            ours.fieldFill = fill
+        } else {
+            searchBar.setSearchFieldStyle(backgroundColor: fill)
+        }
+    }
+
+    /// A symbol in one fixed colour, which is what `.alwaysOriginal` guarantees: nothing
+    /// downstream can re-tint it.
+    private static func tinted(_ symbol: String, _ colour: UIColor) -> UIImage? {
+        return UIImage(systemName: symbol)?
+            .withTintColor(colour, renderingMode: .alwaysOriginal)
+    }
+
+    static func pictureFrame(at index: Int = 0) -> CGRect {
+        return CGRect(x: CGFloat(index) * pictureStep, y: (barHeight - pictureSize) / 2,
+                      width: pictureSize, height: pictureSize)
+    }
+
+    /// Where the name starts, clear of however many pictures are drawn before it.
+    static func titleLeading(pictures: Int = 1) -> CGFloat {
+        return pictureSize + CGFloat(max(pictures, 1) - 1) * pictureStep + gap
+    }
+
+    /// Lays the bar's contents out and lets the bar size itself to the room it is given.
+    ///
+    /// Fix: the title view was handed the full width of the screen and the name a width worked
+    /// out from that - but a title view does not start at the edge of the screen, it starts after
+    /// the back button, so the name ran 72pt further right than the arithmetic said and simply
+    /// carried on over the buttons on the other side. Nothing in that arithmetic could know where
+    /// those buttons are; the bar does. Sized this way it asks for the room it wants, is given
+    /// whatever is free between the buttons, and the name truncates exactly there.
+    ///
+    /// The pictures are whatever image views the caller has already added - one for most chats,
+    /// a stack of up to three for a contact centre - and they keep the frames they were built
+    /// with, because a round mask is cut from those before Auto Layout has measured anything.
+    static func layoutTitleView(_ container: UIView, title: MarqueeLabel, subtitle: UILabel? = nil) {
+        let pictures = container.subviews.compactMap { $0 as? UIImageView }
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        // One line or two, they are stacked and the stack is centred - so a bar with a subtitle
+        // and one without put their name in the same place relative to the picture beside it.
+        //
+        // Fix: the name was a plain label and a long one was simply cut off, which for a group
+        // named after what it is about means losing the part that says so. It walks itself across
+        // instead - see MarqueeLabel - which is what the starred list already does with the same
+        // problem. The line under it, where there is one, still truncates: two lines walking at
+        // once in a header this small is more movement than it is worth.
+        subtitle?.lineBreakMode = .byTruncatingTail
+        let lines: [UIView] = [title, subtitle].compactMap { $0 }
+        for line in lines {
+            // A name gives way first: the bar is only ever as wide as what is free between the
+            // buttons, and being squeezed is what sets the walking off.
+            line.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        let column = UIStackView(arrangedSubviews: lines)
+        column.axis = .vertical
+        column.alignment = .fill
+        column.spacing = titleSubtitleSpacing
+        container.addSubview(column)
+        column.translatesAutoresizingMaskIntoConstraints = false
+
+        // Fix: a bar sized to its own contents is centred by the navigation bar, so a short name
+        // floated in the middle of the header while a long one sat against the back button - the
+        // same screen laid out two different ways depending on the name. It asks for all the room
+        // there is instead; the navigation bar's own limit is what it actually gets, which is
+        // whatever is free between the buttons, and the name is left-aligned in that.
+        let fillsTheBar = container.widthAnchor.constraint(equalToConstant: 10_000)
+        fillsTheBar.priority = .defaultHigh
+
+        var constraints: [NSLayoutConstraint] = [
+            container.heightAnchor.constraint(equalToConstant: barHeight),
+            fillsTheBar,
+            column.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            column.leadingAnchor.constraint(equalTo: container.leadingAnchor,
+                                            constant: pictures.isEmpty ? 0 : titleLeading(pictures: pictures.count)),
+            column.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+        ]
+        for (index, picture) in pictures.enumerated() {
+            picture.translatesAutoresizingMaskIntoConstraints = false
+            constraints += [
+                picture.leadingAnchor.constraint(equalTo: container.leadingAnchor,
+                                                 constant: CGFloat(index) * pictureStep),
+                picture.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                picture.widthAnchor.constraint(equalToConstant: pictureSize),
+                picture.heightAnchor.constraint(equalToConstant: pictureSize)
+            ]
+        }
+        NSLayoutConstraint.activate(constraints)
+    }
+}
+
+/// The words a message actually says, whatever else it is carrying.
+///
+/// A message that carries a file keeps two things in one field - the file's name and whatever was
+/// written under it - joined by a "|", and the bubble draws only the second half. Anything that
+/// wants the words of a message has to ask for them the same way, or a document hands over its
+/// file name in place of what was said about it.
+enum ChatMessageText {
+    /// Whatever a link's preview appended to a message, cut back off.
+    ///
+    /// A message carrying a link keeps the preview's own details after a "■" in the very same
+    /// field. The bubble has always cut them away before drawing, so everything else that shows,
+    /// quotes, copies or asks about the text has to cut them away too - otherwise the reader is
+    /// handed the machinery along with the message.
+    static func withoutLinkPreview(_ text: String) -> String {
+        guard let separator = text.range(of: "■") else {
+            return text
+        }
+        return String(text[..<separator.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func spoken(of message: [String: Any?]) -> String {
+        let text = withoutLinkPreview(message[TypeDataMessage.message_text] as? String ?? "")
+        if (message[TypeDataMessage.file_id] as? String ?? "").isEmpty {
+            return text
+        }
+        return text.component(1, separatedBy: "|")
+    }
+}
+
 public extension UITableView {
 
     /// Redraws rows without moving what the reader is looking at.
@@ -11065,6 +11906,42 @@ public extension UITableView {
 
         UIView.performWithoutAnimation {
             reloadRows(at: indexPaths, with: .none)
+            layoutIfNeeded()
+        }
+
+        var target: CGFloat?
+        if wasAtBottom {
+            target = max(lowest, contentSize.height + adjustedContentInset.bottom - bounds.height)
+        } else if let anchor = anchor, let distance = anchorDistanceFromTop,
+                  anchor.section < numberOfSections,
+                  anchor.row < numberOfRows(inSection: anchor.section) {
+            target = max(lowest, rectForRow(at: anchor).minY - distance)
+        }
+        if let target = target, abs(target - contentOffset.y) > 0.5 {
+            setContentOffset(CGPoint(x: contentOffset.x, y: target), animated: false)
+        }
+    }
+
+    /// Builds every row again without moving what the reader is looking at.
+    ///
+    /// The same idea as `reloadRowsKeepingPlace`, for when the whole table has to be built again
+    /// rather than a row or two of it - opening and closing a selection session changes every row
+    /// at once. Heights are worked out from scratch by that, so an offset carried through
+    /// unchanged puts the reader somewhere they never scrolled to.
+    func reloadDataKeepingPlace() {
+        guard !isDragging, !isDecelerating, window != nil else {
+            reloadData()
+            layoutIfNeeded()
+            return
+        }
+        let lowest = -adjustedContentInset.top
+        let bottomOffset = max(lowest, contentSize.height + adjustedContentInset.bottom - bounds.height)
+        let wasAtBottom = bottomOffset - contentOffset.y <= 8
+        let anchor = indexPathsForVisibleRows?.first
+        let anchorDistanceFromTop = anchor.map { rectForRow(at: $0).minY - contentOffset.y }
+
+        UIView.performWithoutAnimation {
+            reloadData()
             layoutIfNeeded()
         }
 
@@ -11792,6 +12669,9 @@ extension Utils {
                                             messageText: String,
                                             font: UIFont,
                                             colour: UIColor) -> NSAttributedString? {
+        // A link's preview details ride along after a "■" in the same field - see
+        // `ChatMessageText.withoutLinkPreview`. A quote shows what was said, not that.
+        let messageText = ChatMessageText.withoutLinkPreview(messageText)
         let caption = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if !audio.isEmpty || attachmentFlag == "60" {
@@ -13071,7 +13951,10 @@ public enum LinkPreviewImage {
 /// The card measures itself - `height(for:width:)` answers before anything is built - because the
 /// bubble around it has to know how tall it will be to place the message text under it, and a row
 /// that guesses is a row that jumps when the guess turns out wrong.
-public final class LinkPreviewCard: UIView {
+/// Looks pressed under the finger, the way the quote a message replies to does - it is the
+/// tappable thing, and it owns the rounded shape the pressed look has to follow. See
+/// PressableView.
+public final class LinkPreviewCard: PressableView {
 
     private let picture = UIImageView()
     private let badge = UIView()
