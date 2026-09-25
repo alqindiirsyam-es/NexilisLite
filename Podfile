@@ -9,6 +9,7 @@ target 'NexilisLite' do
 
   pod 'nuSDKService', '5.0.2'
   pod 'NexilisZTA', :path => '../NexilisZTA'
+  pod 'NexilisSecurityShield', :path => '../NexilisSecurityShield'
   pod 'FMDB/SQLCipher', '~> 2.7.12'
   pod 'NotificationBannerSwift', :git => 'https://github.com/Daltron/NotificationBanner.git', :tag => '4.0.0'
   pod 'Alamofire', '~> 5.10.2'
@@ -49,6 +50,9 @@ DYNAMIC_PODS = %w[
   # NexilisZTAConfiguration - so the generated .swiftinterface names the module and a
   # consumer must actually have it. Same reasoning as FMDB below: declared, not absorbed.
   NexilisZTA
+  # NexilisSecurityShield: its own pod on trunk and a declared dependency of the binary pod, so the
+  # consumer resolves one copy - absorbing it would put a second SecurityShield in the app.
+  NexilisSecurityShield
   Firebase
   FirebaseAuth
   FirebaseAuthInterop
@@ -108,6 +112,11 @@ post_install do |installer|
   installer.pods_project.targets.each do |t|
     t.build_configurations.each do |c|
       c.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'NO'
+      # Current Xcode refuses deployment targets below iOS 15; several pods (and their resource bundles)
+      # still declare 9.0 or 12.0. NexilisLite itself targets 15.0, so nothing is lost.
+      if c.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 15.0
+        c.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      end
     end
   end
   installer.aggregate_targets.each do |agg|

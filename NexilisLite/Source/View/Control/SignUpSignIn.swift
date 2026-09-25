@@ -644,7 +644,7 @@ public class SignUpSignIn: UIViewController {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
                     Nexilis.hideLoader(completion: {
                         if Nexilis.showFB {
-                            Nexilis.floatingButton.removeFromSuperview()
+                            Nexilis.floatingButton?.removeFromSuperview()
                             FloatingButton.datePull = nil
                             Nexilis.floatingButton = FloatingButton()
                             Nexilis.addFB()

@@ -136,6 +136,10 @@ public class CoreMessage_TMessageCode {
     public static let DELETE_CTEXT              = "S0D";
     public static let DELETE_CONVERSATION      = "A0021A";
     public static let UPDATE_MESSAGE              = "A0022";
+    /// Pin or unpin, the code the Android client sends and listens for. Fix: this went out as
+    /// UPDATE_MESSAGE with an item code, which Android acknowledges and drops, and Android's
+    /// own pin arrived here as a code nobody read - so a pin never crossed between the two.
+    public static let PIN_OR_UNPIN_MSG            = "POUM";
     public static let CHANGE_PERSON_INFO       = "A003";
     public static let ADD_BUDDY                = "A005";
     public static let REQUEST_BUDDY               = "A0051";

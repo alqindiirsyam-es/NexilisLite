@@ -213,6 +213,8 @@ class IncomingThread {
             logoutDevice(message: message)
         } else if code == CoreMessage_TMessageCode.UPDATE_MESSAGE {
             updateMessage(message: message)
+        } else if code == CoreMessage_TMessageCode.PIN_OR_UNPIN_MSG {
+            pinOrUnpinMessage(message: message)
         } else {
             //print("unprocessed code", code)
             ack(message: message)
@@ -227,59 +229,66 @@ class IncomingThread {
      */
     
     private func updateMessage(message: TMessage) -> Void {
-        let data = message.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
         let item_code = message.getBody(key: CoreMessage_TMessageKey.ITEM_CODE, default_value: "")
+        // How an older build of this client sends a pin; kept so it is still read.
+        if item_code == "pinorunpin" {
+            pinOrUnpinMessage(message: message)
+        }
+    }
+
+    /// A pin or unpin from another participant or another device: the same body whichever
+    /// client sent it - an array of message ids with the moment each was pinned, 0 for unpinned.
+    private func pinOrUnpinMessage(message: TMessage) -> Void {
+        let data = message.getBody(key: CoreMessage_TMessageKey.DATA, default_value: "[]")
         let f_pin = message.getBody(key: CoreMessage_TMessageKey.F_PIN, default_value: "")
         let l_pin = message.getBody(key: CoreMessage_TMessageKey.OPPOSITE_PIN, default_value: "")
         let chat_id = message.getBody(key: CoreMessage_TMessageKey.CHAT_ID, default_value: "")
         let scope_id = message.getBody(key: CoreMessage_TMessageKey.SCOPE_ID, default_value: "")
-        if item_code == "pinorunpin" {
-            if !data.isEmpty {
-                if let data = data.data(using: .utf8),
-                   let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
-                    Database.shared.database?.inTransaction({ (fmdb, rollback) in
-                        do {
-                            for json in jsonArray {
-                                let pinned = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_PINNED_MESSAGE)
-                                let messageId = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MESSAGE_ID)
-                                var messageIdNotif = ""
-                                if pinned != "0" {
-                                    if let dataUser = User.getData(pin: f_pin, lPin: l_pin, fmdb: fmdb) {
-                                        messageIdNotif = Nexilis.saveMessageNotif(textMessage: dataUser.fullName + " " + "pinned a message".localized(), fPin: f_pin, lPin: l_pin, chatId: chat_id, scopeId: scope_id, fmdb: fmdb)
-                                    }
-                                }
-                                _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
-                                    "is_pinned" : pinned
-                                ], _where: "message_id = '\(messageId)'")
-                                var dataMessage: [AnyHashable : Any] = [:]
-                                dataMessage["message_id"] = messageId
-                                dataMessage["message_id_notif"] = messageIdNotif
-                                dataMessage["is_pinned"] = pinned
-                                NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil, userInfo: dataMessage)
-                                // Fix: a pin arriving from another participant or another device
-                                // was written in with nothing counting what the conversation
-                                // already had, so it could end up holding four or more. The
-                                // server keeps neither the list nor the count, so this database
-                                // is where the limit of three has to hold: the oldest pins over
-                                // it are let go here, and every screen showing them is told.
-                                if pinned != "0",
-                                   let conversation = PinnedMessages.conversationClause(forMessageId: messageId, fmdb: fmdb) {
-                                    for droppedId in PinnedMessages.trim(conversation: conversation, fmdb: fmdb) {
-                                        var dropped: [AnyHashable : Any] = [:]
-                                        dropped["message_id"] = droppedId
-                                        dropped["message_id_notif"] = ""
-                                        dropped["is_pinned"] = "0"
-                                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil, userInfo: dropped)
-                                    }
+        if !data.isEmpty {
+            if let data = data.data(using: .utf8),
+               let jsonArray = try? JSONSerialization.jsonObject(with: data, options: JSONSerialization.ReadingOptions()) as? [AnyObject] {
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    do {
+                        for json in jsonArray {
+                            let pinned = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.IS_PINNED_MESSAGE)
+                            let messageId = CoreMessage_TMessageUtil.getString(json: json, key: CoreMessage_TMessageKey.MESSAGE_ID)
+                            var messageIdNotif = ""
+                            if pinned != "0" {
+                                if let dataUser = User.getData(pin: f_pin, lPin: l_pin, fmdb: fmdb) {
+                                    messageIdNotif = Nexilis.saveMessageNotif(textMessage: dataUser.fullName + " " + "pinned a message".localized(), fPin: f_pin, lPin: l_pin, chatId: chat_id, scopeId: scope_id, fmdb: fmdb)
                                 }
                             }
-                            ack(message: message)
-                        } catch {
-                            rollback.pointee = true
-                            print("Access database error: \(error.localizedDescription)")
+                            _ = Database.shared.updateRecord(fmdb: fmdb, table: "MESSAGE", cvalues: [
+                                "is_pinned" : pinned
+                            ], _where: "message_id = '\(messageId)'")
+                            var dataMessage: [AnyHashable : Any] = [:]
+                            dataMessage["message_id"] = messageId
+                            dataMessage["message_id_notif"] = messageIdNotif
+                            dataMessage["is_pinned"] = pinned
+                            NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil, userInfo: dataMessage)
+                            // Fix: a pin arriving from another participant or another device
+                            // was written in with nothing counting what the conversation
+                            // already had, so it could end up holding four or more. The
+                            // server keeps neither the list nor the count, so this database
+                            // is where the limit of three has to hold: the oldest pins over
+                            // it are let go here, and every screen showing them is told.
+                            if pinned != "0",
+                               let conversation = PinnedMessages.conversationClause(forMessageId: messageId, fmdb: fmdb) {
+                                for droppedId in PinnedMessages.trim(conversation: conversation, fmdb: fmdb) {
+                                    var dropped: [AnyHashable : Any] = [:]
+                                    dropped["message_id"] = droppedId
+                                    dropped["message_id_notif"] = ""
+                                    dropped["is_pinned"] = "0"
+                                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onUpdatedMessage"), object: nil, userInfo: dropped)
+                                }
+                            }
                         }
-                    })
-                }
+                        ack(message: message)
+                    } catch {
+                        rollback.pointee = true
+                        print("Access database error: \(error.localizedDescription)")
+                    }
+                })
             }
         }
     }

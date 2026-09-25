@@ -8,7 +8,7 @@
 
 Pod::Spec.new do |spec|
   spec.name         = "NexilisLite"
-  spec.version      = "6.0.5"
+  spec.version      = "6.0.7"
   spec.summary      = "NexilisLite Framework"
   spec.description  = <<-DESC
   NexilisLite Framework, embed Contact Center, Live Streaming, Push Notifications, Instant Messaging, Video and VoIP Calling features into your mobile apps within minutes...
@@ -21,9 +21,16 @@ Pod::Spec.new do |spec|
 #  spec.source       = { :http => 'https://nexilis.io/UCPaaSiOS/releases/download/NexilisLite/v2.2.2/NexilisLite.zip' }
   spec.source       = { :path => '.' }
   spec.source_files = 'NexilisLite/Source/**/*'
-  spec.resource_bundles = { 'NexilisLite' => ['NexilisLite/Resource/**/*']}
+  # Files, named one folder at a time. Fix: '**/*' matched the Gifs, Sound, Stickers and fonts
+  # folders as well as what is in them, so the bundle carried every one of those files twice -
+  # once loose, where the code looks for them, and once again inside a copy of the folder.
+  spec.resource_bundles = { 'NexilisLite' => [
+    'NexilisLite/Resource/*.{xcassets,storyboard,xib,lproj}',
+    'NexilisLite/Resource/{Gifs,Sound,Stickers,fonts}/*.*'
+  ]}
   spec.swift_version = '5.5.1'
-  spec.dependency 'NexilisZTA', '~> 1.3'
+  spec.dependency 'NexilisZTA', '~> 6.0.7'
+  spec.dependency 'NexilisSecurityShield', '~> 6.0.7'
   spec.dependency 'FMDB/SQLCipher', '~> 2.7.12'
   spec.dependency 'nuSDKService', '5.0.2'
   spec.dependency 'NotificationBannerSwift'

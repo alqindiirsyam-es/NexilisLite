@@ -43,9 +43,18 @@ public class MasterKeyUtil {
 
         var attrQuery = baseQuery
         attrQuery[kSecReturnAttributes as String] = true
+        // Reading only the attributes must never be a Face ID prompt. On the mode-1 master key it was: the item
+        // sits behind its biometric ACL and, asked with no context, the Keychain put up its own sheet - twice on
+        // every sign-in (connect, then primeSecureStorage). With interaction not allowed it answers
+        // errSecInteractionNotAllowed instead, which says exactly what is needed here: the item is there and it
+        // is protected by user authentication.
+        let silent = LAContext()
+        silent.interactionNotAllowed = true
+        attrQuery[kSecUseAuthenticationContext as String] = silent
         var attrsItem: CFTypeRef?
         let attrStatus = SecItemCopyMatching(attrQuery as CFDictionary, &attrsItem)
-        let exists = attrStatus == errSecSuccess
+        let protectedByUserAuth = attrStatus == errSecInteractionNotAllowed
+        let exists = attrStatus == errSecSuccess || protectedByUserAuth
 
         // Does the item's protection already match the mode this launch is running in?
         //
@@ -59,8 +68,8 @@ public class MasterKeyUtil {
         // apart: the hardened item is created WhenUnlockedThisDeviceOnly inside its ACL, every
         // other item AfterFirstUnlockThisDeviceOnly.
         let existingAccessible = (attrsItem as? [String: Any])?[kSecAttrAccessible as String] as? String
-        let existingHasAccessControl = exists
-            && existingAccessible == (kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
+        let existingHasAccessControl = protectedByUserAuth || (exists
+            && existingAccessible == (kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String))
 
         if exists, existingHasAccessControl == hardened {
             // Nothing to change. The marker still has to be caught up, though: a key provisioned
@@ -208,19 +217,51 @@ public class MasterKeyUtil {
     /// allows. Only the `.hsa` path uses this; nothing else builds an LAContext here.
     private var reusableAuthContext: LAContext?
     private var reusableAuthContextAt: Date?
+    /// How long `reusableAuthContext` counts from `reusableAuthContextAt`.
+    private var reusableAuthContextValidFor: TimeInterval = 0
 
     private func authenticationReuseWindow() -> TimeInterval {
         let configured = Double(Utils.getAuthenticationDuration()) ?? 30
         return max(0, min(configured, LATouchIDAuthenticationMaximumAllowableReuseDuration))
     }
 
+    /// A context the caller has just evaluated successfully (the pre-asset sign-in's Face ID / Touch ID):
+    /// the master-key reads inside the reuse window use it instead of asking again.
+    func adoptAuthenticatedContext(_ context: LAContext) {
+        // At least long enough for the reads of the same step (connect: master key, database, prefs):
+        // one confirmation must not turn into three because the configured window is 0 or tiny.
+        // The context is not modified: it has already been evaluated.
+        let window = max(authenticationReuseWindow(), 15)
+        masterKeyQueue.sync {
+            reusableAuthContext = context
+            reusableAuthContextAt = Date()
+            reusableAuthContextValidFor = window
+        }
+    }
+
+    /// The access control the mode-1 master key is stored under - also what a sign-in's Face ID evaluates
+    /// (LAContext.evaluateAccessControl) so that the Keychain accepts that one confirmation for the key.
+    static func masterKeyAccessControl() -> SecAccessControl? {
+        SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.biometryCurrentSet], nil)
+    }
+
+    /// Closes the reuse window: the next master-key read has to be authenticated again (LiteAuthenticationGate,
+    /// after the app has been away longer than authentication_duration).
+    func invalidateAuthentication() {
+        masterKeyQueue.sync {
+            reusableAuthContext?.invalidate()
+            reusableAuthContext = nil
+            reusableAuthContextAt = nil
+            reusableAuthContextValidFor = 0
+        }
+    }
+
     /// Caller holds `masterKeyQueue`.
     private func authContextLocked() -> LAContext {
         let window = authenticationReuseWindow()
-        if window > 0,
-           let context = reusableAuthContext,
+        if let context = reusableAuthContext,
            let establishedAt = reusableAuthContextAt,
-           Date().timeIntervalSince(establishedAt) < window {
+           Date().timeIntervalSince(establishedAt) < reusableAuthContextValidFor {
             return context
         }
         let context = LAContext()
@@ -228,6 +269,7 @@ public class MasterKeyUtil {
         context.localizedReason = "Authenticate to access protected Nexilis data"
         reusableAuthContext = context
         reusableAuthContextAt = Date()
+        reusableAuthContextValidFor = window
         return context
     }
 
@@ -514,6 +556,12 @@ public class MasterKeyUtil {
             forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self, NXSecurityPolicy.bindsKeysToUserAuth() else { return }
+            // Priming must not be a Face ID prompt of its own. Past Lite's timer (authentication_duration)
+            // the person is asked by the TFA screen - whose confirmation is then shared with this key
+            // (adoptAuthenticatedContext) - and a second, separate prompt on the same return to the app
+            // is what made mode 1 ask again and again. The system's own biometric sheet also makes the
+            // app inactive and active again, so this fired after every prompt as well.
+            guard !Utils.shouldRequestAuthentication() else { return }
             DispatchQueue.global(qos: .userInitiated).async {
                 _ = try? self.getMasterKey()
             }

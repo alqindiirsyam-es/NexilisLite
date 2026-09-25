@@ -52,6 +52,7 @@
 "Forward" = "Teruskan";
 "Forward Messages" = "Teruskan Pesan";
 "Copy" = "Salin";
+"Copied" = "Disalin";
 "Selected" = "Terpilih";
 "Text coppied to clipboard" = "Teks disalin ke papan klip";
 "Image coppied to clipboard" = "Gambar disalin ke papan klip";
@@ -121,6 +122,10 @@
 "Unblock" = "Buka Blokir";
 "You blocked this user" = "Kamu memblokir pengguna ini";
 "You have been blocked by this user" = "Kamu telah diblokir oleh pengguna ini";
+"Are you sure to block" = "Apakah kamu yakin memblokir";
+"Are you sure to unblock" = "Apakah kamu yakin membuka blokir";
+"You unblocked this user" = "Kamu membuka blokir pengguna ini";
+"Server busy, please try again later" = "Server sibuk, coba lagi nanti";
 "For Me" = "untukku";
 "For Everyone" = "untuk semua orang";
 "You were deleted this message" = "Kamu telah menghapus pesan ini";
@@ -490,3 +495,9 @@
  "Your message was not sent." = "Pesan Anda tidak terkirim.";
 "Send again" = "Kirim lagi";
 
+"pages" = "halaman";
+"page" = "halaman";
+"Change Status" = "Ubah Status";
+"Add Friend" = "Tambah Teman";
+"Voice" = "Suara";
+"Info" = "Info";

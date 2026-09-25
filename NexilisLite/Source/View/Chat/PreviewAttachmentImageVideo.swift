@@ -131,7 +131,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             thumbnailWidthConstraint = thumbnailWidth
             NSLayoutConstraint.activate([
                 thumbnailCollection.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                thumbnailCollection.bottomAnchor.constraint(equalTo: textFieldSend.topAnchor, constant: -12),
+                thumbnailCollection.bottomAnchor.constraint(equalTo: textFieldSend.topAnchor, constant: -12 - fieldMarginAboveText),
                 thumbnailWidth,
                 thumbnailCollection.heightAnchor.constraint(equalToConstant: const)
             ])
@@ -149,6 +149,13 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         buttonSend.circle()
         buttonSend.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
         buttonSend.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+        // The same glass the conversation's input bar has - see GlassLook. The keyboard moves the
+        // bar by its bottom constraints, so the outlets that held the field's and the send
+        // button's are pointed at the glass that now stands in their place.
+        let sendGlass = GlassLook.wrap(buttonSend, tint: buttonSend.backgroundColor)
+        if let bottom = constraintButtonSend {
+            constraintButtonSend = sendGlass.rehomed(bottom)
+        }
         if isCC {
             buttonAckConfidential.isHidden = true
             constraintLeftTextField.constant = 20
@@ -159,11 +166,14 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             let imageAck = resizeImage(image: UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
             if attachments[currPage].isAck {
                 buttonAckConfidential.setImage(imageAck, for: .normal)
+                GlassLook.imageChanged(buttonAckConfidential)
             } else if attachments[currPage].isConfidential {
                 buttonAckConfidential.setImage(imageConfidential, for: .normal)
+                GlassLook.imageChanged(buttonAckConfidential)
             }
             buttonAckConfidential.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
             buttonAckConfidential.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+            GlassLook.adopt(buttonAckConfidential, tint: buttonAckConfidential.backgroundColor, foreground: buttonAckConfidential.tintColor)
         }
         
         textFieldSend.layer.cornerRadius = textFieldSend.maxCornerRadius()
@@ -181,6 +191,28 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         textFieldSend.font = UIFont.systemFont(ofSize: 12)
         textFieldSend.delegate = self
         textFieldSend.allowsEditingTextAttributes = true
+        // After the font: the one-line height below is measured off it.
+        let fieldGlass = GlassLook.adopt(textFieldSend, tint: nil, radius: textFieldSend.layer.cornerRadius)
+        if let bottom = constraintViewTextField {
+            constraintViewTextField = fieldGlass.rehomed(bottom)
+        }
+        if let left = constraintLeftTextField {
+            constraintLeftTextField = fieldGlass.rehomed(left)
+        }
+        if #available(iOS 26.0, *), let pins = fieldGlass.pins {
+            // As in the conversation's field: the scroll indicator stands clear of the send
+            // button, and the margins above and below the text are the glass's, not the text
+            // view's, so a scrolled line is clipped at the text's edge and the margin stays empty.
+            textFieldSend.verticalScrollIndicatorInsets = UIEdgeInsets(top: 6, left: 0, bottom: 6, right: textFieldSend.textContainerInset.right)
+            let line = ceil((textFieldSend.font ?? UIFont.systemFont(ofSize: 12 + offset())).lineHeight)
+            let pad = max(0, (18 - line) / 2)
+            textFieldSend.textContainerInset.top = pad
+            textFieldSend.textContainerInset.bottom = pad
+            pins.top.constant = 11
+            pins.bottom.constant = -11
+            textFieldSend.layer.cornerRadius = 0
+            heightTextFieldSend.constant = fieldHeight(for: textFieldSend)
+        }
         
         let center: NotificationCenter = NotificationCenter.default
         center.addObserver(self, selector: #selector(keyboardWillShow(notification:)), name: UIResponder.keyboardWillShowNotification, object: nil)
@@ -194,10 +226,15 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         buttonCancel.circle()
         buttonCancel.backgroundColor = .secondaryColor.withAlphaComponent(0.4)
         buttonCancel.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        // Clear glass over the picture. The cross is a glass button; the specification button
+        // is wrapped instead, since its picture is swapped as the specification changes and a
+        // wrapped button keeps plain `setImage`.
+        GlassLook.adopt(buttonCancel, tint: nil, foreground: .label)
         
         buttonSpecFile.circle()
         buttonSpecFile.backgroundColor = .secondaryColor.withAlphaComponent(0.4)
         buttonSpecFile.addTarget(self, action: #selector(showSpecFile), for: .touchUpInside)
+        GlassLook.wrap(buttonSpecFile, tint: nil)
         if attachments[currPage].isConfidential || self.isCC {
             buttonSpecFile.isEnabled = false
             if self.isCC {
@@ -215,7 +252,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             tableMention.contentInset = UIEdgeInsets(top: -25, left: 0, bottom: 0, right: 0)
             tableMention.backgroundColor = .white
             self.view.addSubview(tableMention)
-            tableMention.anchor(left: view.leftAnchor, bottom: textFieldSend.topAnchor, right: view.rightAnchor)
+            tableMention.anchor(left: view.leftAnchor, bottom: textFieldSend.topAnchor, right: view.rightAnchor, paddingBottom: fieldMarginAboveText)
             heightTableMention = tableMention.heightAnchor.constraint(equalToConstant: 0)
             self.heightTableMention.isActive = true
         }
@@ -249,6 +286,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                 if !attachments[currPage].isConfidential {
                     attachments[currPage].isConfidential = true
                     self.buttonAckConfidential.setImage(imageConfidential, for: .normal)
+                    GlassLook.imageChanged(self.buttonAckConfidential)
                 }
                 if attachments[currPage].isAck {
                     attachments[currPage].isAck = false
@@ -266,6 +304,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             if !attachments[currPage].isAck {
                 attachments[currPage].isAck = true
                 self.buttonAckConfidential.setImage(imageAck, for: .normal)
+                GlassLook.imageChanged(self.buttonAckConfidential)
             }
             if attachments[currPage].isConfidential {
                 attachments[currPage].isConfidential = false
@@ -281,6 +320,7 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
             attachments[currPage].isConfidential = false
             attachments[currPage].isAck = false
             self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+            GlassLook.imageChanged(self.buttonAckConfidential)
             if !self.buttonSpecFile.isEnabled {
                 self.buttonSpecFile.isEnabled = true
             }
@@ -513,6 +553,56 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
         attachments[currPage].text = textView.text
     }
     
+    /// How far the top of the field as drawn stands above the text view inside it: on glass the
+    /// text view sits 11pt inside the glass (see viewDidLoad), and what is anchored above the
+    /// field - the thumbnails, the mention list - is anchored before the glass exists, so it
+    /// allows for that here rather than landing on the glass's top margin.
+    private var fieldMarginAboveText: CGFloat {
+        if #available(iOS 26.0, *) { return 11 }
+        return 0
+    }
+
+    /// How tall the field should be for what is in it: its insets plus its lines, up to five -
+    /// past five it scrolls. Read off the layout, so the height is always whole lines; see the
+    /// conversation's `fieldHeight` for why.
+    private func fieldHeight(for textView: UITextView) -> CGFloat {
+        let insets = textView.textContainerInset
+        let layout = textView.layoutManager
+        layout.ensureLayout(for: textView.textContainer)
+        var lines: [CGRect] = []
+        var index = 0
+        while index < layout.numberOfGlyphs {
+            var range = NSRange()
+            lines.append(layout.lineFragmentRect(forGlyphAt: index, effectiveRange: &range))
+            index = NSMaxRange(range)
+        }
+        if layout.extraLineFragmentRect.height > 0 {
+            lines.append(layout.extraLineFragmentRect)
+        }
+        let shown = lines.prefix(5)
+        // One line at least: 18pt of text view on glass, where the margins are the glass's and
+        // 18 + 22 is the 40pt capsule; the 40pt the field was drawn with everywhere else.
+        let floor: CGFloat = GlassLook.glass(around: textView) != nil ? 18 : 40
+        guard let last = shown.last else { return floor }
+        return max(floor, ceil(insets.top + last.maxY + insets.bottom))
+    }
+
+    /// Puts the field's scroll on a line boundary once the layout after a change has run - a
+    /// text view scrolls just far enough to show the caret, which is shorter than its line.
+    private func snapFieldScroll(_ textView: UITextView) {
+        DispatchQueue.main.async {
+            let layout = textView.layoutManager
+            var range = NSRange()
+            let pitch = layout.numberOfGlyphs > 0 ? layout.lineFragmentRect(forGlyphAt: 0, effectiveRange: &range).height : 0
+            let farthest = max(0, textView.contentSize.height - textView.bounds.height)
+            let now = textView.contentOffset.y
+            let snapped = pitch > 0 ? min(max((now / pitch).rounded() * pitch, 0), farthest) : 0
+            if abs(snapped - now) > 0.5 {
+                textView.contentOffset.y = snapped
+            }
+        }
+    }
+
     func textViewDidChangeSelection(_ textView: UITextView) {
         if delegate is EditorGroup {
             lastPositionCursorMention = textView.selectedRange.location
@@ -561,15 +651,14 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                                 index = NSMaxRange(lineRange)
                                 numberOfLines += 1
                             }
-                            if currentLine == 1 && (numberOfLines == 1 || numberOfLines == 0) {
-                                self.heightTextFieldSend.constant = 40
-                            } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintViewTextField != nil && self.constraintViewTextField.constant < 95.0)) && currentLine >= 4 {
-                                self.heightTextFieldSend.constant = 95.0
-                            } else if currentLine < 4 && numberOfLines < 5 {
-                                if (nowTextFieldSend.text.count > 0 && self.heightTextFieldSend.constant != nowTextFieldSend.contentSize.height) {
-                                    self.heightTextFieldSend.constant = nowTextFieldSend.contentSize.height
-                                }
+                            // One rule for every size, as in the conversation's field: as tall
+                            // as its lines, five at most, and scrolled to a whole line.
+                            _ = (currentLine, numberOfLines)
+                            let height = self.fieldHeight(for: nowTextFieldSend)
+                            if self.heightTextFieldSend.constant != height {
+                                self.heightTextFieldSend.constant = height
                             }
+                            self.snapFieldScroll(nowTextFieldSend)
                         }
                     }
                 }
@@ -1572,13 +1661,16 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                     let imageAck = resizeImage(image: UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
                     if attachments[idxReload].isAck {
                         buttonAckConfidential.setImage(imageAck, for: .normal)
+                        GlassLook.imageChanged(buttonAckConfidential)
                     } else if attachments[idxReload].isConfidential {
                         buttonAckConfidential.setImage(imageConfidential, for: .normal)
+                        GlassLook.imageChanged(buttonAckConfidential)
                         if self.buttonSpecFile.isEnabled {
                             self.buttonSpecFile.isEnabled = false
                         }
                     } else {
                         self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+                        GlassLook.imageChanged(self.buttonAckConfidential)
                         if !self.buttonSpecFile.isEnabled && !self.isCC {
                             self.buttonSpecFile.isEnabled = true
                         }
@@ -1638,13 +1730,16 @@ class PreviewAttachmentImageVideo: UIViewController, UIScrollViewDelegate, UITex
                     let imageAck = resizeImage(image: UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
                     if attachments[page].isAck {
                         buttonAckConfidential.setImage(imageAck, for: .normal)
+                        GlassLook.imageChanged(buttonAckConfidential)
                     } else if attachments[page].isConfidential {
                         buttonAckConfidential.setImage(imageConfidential, for: .normal)
+                        GlassLook.imageChanged(buttonAckConfidential)
                         if self.buttonSpecFile.isEnabled {
                             self.buttonSpecFile.isEnabled = false
                         }
                     } else {
                         self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+                        GlassLook.imageChanged(self.buttonAckConfidential)
                         if !self.buttonSpecFile.isEnabled && !self.isCC {
                             self.buttonSpecFile.isEnabled = true
                         }

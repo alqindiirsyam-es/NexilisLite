@@ -696,7 +696,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             } else {
                 containerMessage.backgroundColor = .blueBubbleColor
             }
-            containerMessage.layer.cornerRadius = 10.0
+            containerMessage.layer.cornerRadius = 18
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner, .layerMinXMinYCorner]
             containerMessage.clipsToBounds = true
             (containerMessage as? BubbleView)?.lift()
@@ -766,7 +766,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
             messageText.lineBreakMode = .byWordWrapping
             containerMessage.addSubview(messageText)
             messageText.translatesAutoresizingMaskIntoConstraints = false
-            let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
+            let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleTextInset.top)
             // The editors hold this at defaultHigh so anything above the text - a quote that runs
             // to three lines, say - can push the text down instead of fighting a required
             // constraint. Same here, so the bubble matches.
@@ -793,7 +793,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     imageLS.tintColor = .mainColor
                 }
             } else {
-                messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+                messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleTextInset.side).isActive = true
             }
             if data["f_pin"] as? String == "-999" && (data["blog_id"] as? String) != nil && !(data["blog_id"] as! String).isEmpty && (data["message_text"] as! String).contains("Berikut QR Code dan detil booking Anda") {
                 messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -115).isActive = true
@@ -808,9 +808,9 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 ])
                 imageQR.image = generateQRCode(from: data["blog_id"] as! String)
             } else {
-                messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15).isActive = true
+                messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -BubbleTextInset.bottom).isActive = true
             }
-            messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+            messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleTextInset.side).isActive = true
             var textChat = (data["message_text"] as? String) ?? ""
             if (data["lock"] != nil && (data["lock"])! as? String == "1") {
                 if (data["f_pin"] as? String == idMe) {
@@ -981,26 +981,38 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 let imageSlotHeight: CGFloat = getHeightImage < 40 ? 40 : getHeightImage
                 // The +5 pays for the 5pt gap the picture leaves above the text below it; without
                 // it the bubble is five short and the picture is squeezed by that much.
-                topMarginText.constant = topMarginText.constant + imageSlotHeight + 5
+                // Less the text's inset: the picture starts at the very top of the bubble.
+                topMarginText.constant = topMarginText.constant + imageSlotHeight + 5 - BubbleTextInset.top
                 
                 containerMessage.addSubview(imageThumb)
                 imageThumb.frame = CGRect(x: 0, y: 0, width: getWidthImage, height: getHeightImage)
                 imageThumb.translatesAutoresizingMaskIntoConstraints = false
                 let dataReply = queryMessageReply(message_id: reffChat)
-                if (dataReply.count == 0) {
-                    imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+                let pictureAtTop = dataReply.count == 0
+                if pictureAtTop {
+                    imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor).isActive = true
                 }
-                imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+                // Edge to edge, as the reference draws its pictures, wearing the bubble's corners
+                // where it reaches them; at the top it runs `reach` past the edge on the tail's
+                // side, so the tail is cut into it - see fit(_:sharing:).
+                let reach = pictureAtTop ? ((containerMessage as? BubbleView)?.reach ?? .zero) : .zero
+                imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -reach.left).isActive = true
                 imageThumb.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
-                imageThumb.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+                imageThumb.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: reach.right).isActive = true
+                let pictureIsAll = textChat.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if pictureIsAll {
+                    imageThumb.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
+                    messageText.isHidden = true
+                    messageText.heightAnchor.constraint(equalToConstant: 0).isActive = true
+                }
                 // Fix: the width was required, on a view already pinned to both sides of the
                 // bubble - three required constraints for one dimension, so Auto Layout broke one
                 // of them at runtime and the picture took whatever geometry that left. A preferred
                 // width and a required ceiling say the same thing without the contradiction.
-                let imgWidthConstraint = imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage)
+                let imgWidthConstraint = imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage + reach.left + reach.right)
                 imgWidthConstraint.priority = .defaultHigh
                 imgWidthConstraint.isActive = true
-                let imgMaxWidthConstraint = imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerMessage.widthAnchor, constant: -30)
+                let imgMaxWidthConstraint = imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerMessage.widthAnchor, constant: reach.left + reach.right)
                 imgMaxWidthConstraint.priority = .required
                 imgMaxWidthConstraint.isActive = true
                 // Fix: the real defect. The picture never had a height of its own - it was held
@@ -1015,8 +1027,11 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 let imgHeightConstraint = imageThumb.heightAnchor.constraint(equalToConstant: imageSlotHeight)
                 imgHeightConstraint.priority = .defaultHigh
                 imgHeightConstraint.isActive = true
-                imageThumb.layer.cornerRadius = 5.0
-                imageThumb.clipsToBounds = true
+                var pictureCorners: CACornerMask = pictureAtTop ? BubbleView.topCorners : []
+                if pictureIsAll {
+                    pictureCorners.formUnion(BubbleView.bottomCorners)
+                }
+                (containerMessage as? BubbleView)?.fit(imageThumb, sharing: pictureCorners)
                 imageThumb.contentMode = .scaleAspectFill
                 // Fix: an image view carries the size of the picture inside it, and this one has no
                 // height of its own - it is held between the top of the bubble and the text below.
@@ -1168,16 +1183,16 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 containerViewFile.translatesAutoresizingMaskIntoConstraints = false
                 let dataReply = queryMessageReply(message_id: reffChat)
                 if (dataReply.count == 0) {
-                    containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+                    containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleBox.inset).isActive = true
                 }
-                containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+                containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleBox.inset).isActive = true
                 containerViewFile.bottomAnchor.constraint(equalTo:messageText.topAnchor, constant: -5).isActive = true
-                containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+                containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleBox.inset).isActive = true
                 containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
                 // The same panel a quote sits on, and the same two weights of writing on it.
                 let onDarkBubble = self.traitCollection.userInterfaceStyle == .dark
                 containerViewFile.backgroundColor = BubblePanel.ground(dark: onDarkBubble)
-                containerViewFile.layer.cornerRadius = 5.0
+                containerViewFile.layer.cornerRadius = BubbleBox.radius
                 containerViewFile.clipsToBounds = true
                 
                 // Each kind of document in its own colour, with its extension on the page.
@@ -1191,7 +1206,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                 containerViewFile.addSubview(nameFile)
                 
                 imageFile.translatesAutoresizingMaskIntoConstraints = false
-                imageFile.leadingAnchor.constraint(equalTo: containerViewFile.leadingAnchor, constant: 5).isActive = true
+                imageFile.leadingAnchor.constraint(equalTo: containerViewFile.leadingAnchor, constant: 10).isActive = true
                 imageFile.trailingAnchor.constraint(equalTo: nameFile.leadingAnchor, constant: -5).isActive = true
                 imageFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
                 imageFile.widthAnchor.constraint(equalToConstant: 30).isActive = true
@@ -1269,8 +1284,8 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     let containerReply = UIView()
                     containerMessage.addSubview(containerReply)
                     containerReply.translatesAutoresizingMaskIntoConstraints = false
-                    containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-                    containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+                    containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleBox.inset).isActive = true
+                    containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleBox.inset).isActive = true
                     if thumbChat != "" {
                         containerReply.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
                     } else if fileChat != "" {
@@ -1280,14 +1295,14 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     } else {
                         containerReply.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                     }
-                    containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+                    containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleBox.inset).isActive = true
                     // A fixed 50 pinned the quote to roughly two lines whatever it held. The
                     // editors give it a floor and let it grow, which is what the third line needs.
                     let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
                     minHeightConstraint.priority = .defaultHigh
                     minHeightConstraint.isActive = true
                     containerReply.backgroundColor = quoteOverlay
-                    containerReply.layer.cornerRadius = 5
+                    containerReply.layer.cornerRadius = BubbleBox.radius
                     containerReply.clipsToBounds = true
                     
                     let leftReply = UIView()
@@ -1296,7 +1311,7 @@ class MessageInfo: UIViewController, UITableViewDelegate, UITableViewDataSource,
                     leftReply.leadingAnchor.constraint(equalTo: containerReply.leadingAnchor).isActive = true
                     leftReply.topAnchor.constraint(equalTo: containerReply.topAnchor).isActive = true
                     leftReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor).isActive = true
-                    leftReply.widthAnchor.constraint(equalToConstant: 3).isActive = true
+                    leftReply.widthAnchor.constraint(equalToConstant: ChatReplyPreview.stripWidth).isActive = true
                     leftReply.layer.cornerRadius = 5
                     leftReply.clipsToBounds = true
                     leftReply.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMinXMinYCorner]

@@ -9,6 +9,18 @@ import UIKit
 
 protocol CustomTextViewPasteDelegate : AnyObject {
     func customTextViewDidPasteText(image: UIImage?, dataGIF: Data?)
+    /// Plain text is about to be put into the field in one piece.
+    ///
+    /// Fix: a paste here does not go through the text view's shouldChangeTextIn - this class
+    /// answers the paste itself and writes the text with replace(_:withText:), which reports the
+    /// change afterwards but never offers it first. Anything that has to know a whole piece of
+    /// text arrived at once - a name that is to become a mention again, see EditorGroup's
+    /// adoptPastedMentions - has to be told here.
+    func customTextViewWillPasteText()
+}
+
+extension CustomTextViewPasteDelegate {
+    func customTextViewWillPasteText() {}
 }
 
 class CustomTextView: UITextView {
@@ -103,10 +115,12 @@ class CustomTextView: UITextView {
                         withTemplate: "  $1."
                     )
                 }
+                customDelegate?.customTextViewWillPasteText()
                 self.replace(self.selectedTextRange!, withText: formattedText)
                 return
             }
         } else if let string = UIPasteboard.general.string {
+            customDelegate?.customTextViewWillPasteText()
             self.replace(self.selectedTextRange!, withText: string)
         }
         super.paste(sender)

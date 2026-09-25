@@ -19,7 +19,13 @@ import AVFoundation
 import AVKit
 import WebKit
 import Intents
+#if canImport(FirebaseCore)
+import FirebaseCore
+#endif
 import NexilisZTA
+#if canImport(NexilisSecurityShield)
+import NexilisSecurityShield
+#endif
 
 /// Authoritative bridge between the host SDK and Nexilis Sentinel/ZTA.
 /// Protected networking must not proceed unless this gate has a current,
@@ -28,6 +34,12 @@ public enum SentinelSecurityGate {
     private static let lock = NSLock()
     private static var configuration: NexilisZTAConfiguration?
     private static var hardWipeObserver: NSObjectProtocol?
+
+    /// What configure() was given, if anything.
+    static var configured: NexilisZTAConfiguration? {
+        lock.lock(); defer { lock.unlock() }
+        return configuration
+    }
 
     /// Must be called before APIS.connect/Nexilis.connect in hardened builds.
     public static func configure(_ value: NexilisZTAConfiguration) {
@@ -128,7 +140,17 @@ public enum SentinelSecurityGate {
             }
         }
 
-        APISZTA.configure(cfg,
+        // Pre-asset sign-in (modes 1/2), when the host switched it on: the chain asks for the
+        // person between attestation and key delivery - see LiteBootstrapAuth.
+        var chainConfig = cfg
+        if LiteBootstrapAuth.isEnabled, chainConfig.appMode != NXAppMode.regular, chainConfig.bootstrapAuthentication == nil {
+            chainConfig.bootstrapAuthentication = LiteBootstrapAuth.provider
+            chainConfig.userAuthenticationRequired = true
+            // The form's receipt lives in this process only: sign in on every launch, as Lite's own
+            // TFA does, rather than reuse a credential an earlier launch left behind.
+            chainConfig.userAuthenticationPerLaunch = true
+        }
+        APISZTA.configure(chainConfig,
                           showsErrorScreen: true,
                           onFailure: { error in onFailure(error.localizedDescription) },
                           onReady: onReady)
@@ -168,6 +190,47 @@ public protocol ChatListTab: UIViewController {
     func reloadChatList(completion: @escaping () -> Void)
 }
 
+/// What NexilisZTA's no-code shield (NXShieldAutostart) calls, by name through the Objective-C
+/// runtime, once the ZTA chain has passed - NexilisZTA cannot import NexilisLite, which depends on
+/// it. The rest of APIS.connect's order, without running the ZTA chain a second time:
+///
+///     SentinelSecurityGate.configure  ->  SecurityShield.run  ->  Nexilis.connect  ->  floating button
+///
+///     +[NXLiteShieldBridge startWithAppName:apiKey:showButton:securityShield:completion:]
+///
+/// `completion(true, nil)` fires once SecurityShield has passed (at once when the shield switched
+/// it off) - the moment the shield may lift its cover; the messaging session then connects behind
+/// it and reports to the log.
+@objc(NXLiteShieldBridge)
+public final class LiteShieldBridge: NSObject, ConnectDelegate {
+    private static let shared = LiteShieldBridge()
+    private var showButton = true
+
+    @objc public static func start(appName: String, apiKey: String, showButton: Bool, securityShield: Bool,
+                                   completion: @escaping (Bool, String?) -> Void) {
+        shared.showButton = showButton
+        APIS.startFromShield(appName: appName, apiKey: apiKey, showButton: showButton,
+                             securityShield: securityShield, delegate: shared, completion: completion)
+    }
+
+    /// Push notifications and VoIP (ShieldPush), from the shield at launch - before the ZTA chain,
+    /// because a VoIP push has to reach CallKit at once.
+    ///     +[NXLiteShieldBridge installPushWithNotifications:voip:]
+    @objc public static func installPush(notifications: Bool, voip: Bool) {
+        ShieldPush.shared.install(notifications: notifications, voip: voip)
+    }
+
+    public func onSuccess(userId: String) {
+        NXLogger.general.publicInfo("[NexilisLite] shield: terhubung (\(userId))")
+        guard showButton else { return }
+        DispatchQueue.main.async { Nexilis.addFB() }
+    }
+
+    public func onFailed(error: String) {
+        NXLogger.general.publicError("[NexilisLite] shield: connect gagal - \(error)")
+    }
+}
+
 public class APIS: NSObject {
     private static var isAlertPresented = false
     private static var transitioningDelegateRef: ZoomTransitioningDelegate?
@@ -176,13 +239,101 @@ public class APIS: NSObject {
         SentinelSecurityGate.configure(configuration)
     }
 
-    public static func connect(appName: String, apiKey: String, userName: String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
+    /// Sign-in before the protected asset opens, at app modes 1 and 2 (Sentinel RC5 point 8): the
+    /// Login / TFA form runs inside the ZTA chain, over HTTPS to the institution backend
+    /// (`LiteBootstrapAuth.baseURL`, CPaaS /idp/v1/authn - Android's contract), and its assertion
+    /// unlocks key delivery. Call before `connect`. Off by default until that backend is live.
+    public static func enableBootstrapSignIn(_ enabled: Bool = true) {
+        LiteBootstrapAuth.isEnabled = enabled
+    }
+
+    /// Opens the NexilisLite session, in this order and each only once the one before has passed:
+    ///
+    ///   1. NexilisZTA - SentinelSecurityGate.authorize (RASP, App Attest, key delivery, token).
+    ///   2. SecurityShield - the institution's server-configured policy checks.
+    ///   3. Nexilis.connect - the messaging session itself.
+    ///
+    /// A SecurityShield finding whose policy action is "exit" ends the app from its own alert; one
+    /// set to "continue" is acknowledged and the chain goes on. At modes 1 and 2 a runtime finding
+    /// also revokes the ZTA authorization, and Nexilis.connect then refuses.
+    ///
+    /// - Parameters:
+    ///   - zta: run the ZTA chain (step 1). `false` is refused at modes 1 and 2, which need the
+    ///     server token; at mode 3 the pins and Barrier #1 are still applied, only App Attest, key
+    ///     delivery and the token are skipped.
+    ///   - securityShield: run SecurityShield (step 2).
+    public static func connect(appName: String, apiKey: String, userName: String = "", delegate: ConnectDelegate,
+                               showButton: Bool = true, fromMAB: Bool = false,
+                               zta: Bool = true, securityShield: Bool = true) {
         APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
-        SentinelSecurityGate.authorize(onFailure: { message in
-            DispatchQueue.main.async { delegate.onFailed(error: message) }
-        }, onReady: {
-            Nexilis.connect(apiKey: apiKey, userId: userName, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
-        })
+        // The pre-asset sign-in runs inside the chain, before Nexilis.connect records the key.
+        LiteBootstrapAuth.connectAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fail: (String) -> Void = { message in DispatchQueue.main.async { delegate.onFailed(error: message) } }
+        let afterZTA = {
+            runSecurityShieldThenConnect(apiKey: apiKey, securityShield: securityShield, onFailure: fail) {
+                Nexilis.connect(apiKey: apiKey, userId: userName, delegate: delegate, showButton: showButton, fromMAB: fromMAB)
+            }
+        }
+        guard zta else {
+            if let message = prepareWithoutZTA() { fail(message); return }
+            afterZTA()
+            return
+        }
+        SentinelSecurityGate.authorize(onFailure: fail, onReady: afterZTA)
+    }
+
+    /// Without the ZTA chain: the gate still gets a configuration (the host's, or the compiled-in
+    /// one) so the mode is known, and NexilisZTA still pins and still runs Barrier #1. Mode 3 only.
+    /// Returns the refusal, or nil.
+    static func prepareWithoutZTA() -> String? {
+        let config = SentinelSecurityGate.configured ?? APISZTA.configuration
+        guard config.appMode == .regular else {
+            return "ZTA can only be skipped at app mode 3 - modes 1 and 2 need the server token."
+        }
+        SentinelSecurityGate.configure(config)
+        APISZTA.applyConfiguration(config)
+        PinSetStore.configure(rotationSignerSPKIBase64: config.rotationSignerSPKIBase64)
+        _ = try? SentinelOfflinePreflight.run(configuration: config)
+        return nil
+    }
+
+    /// Step 2 and the hand-over to step 3, shared by APIS.connect and the no-code shield.
+    static func runSecurityShieldThenConnect(apiKey: String, securityShield: Bool,
+                                             onFailure: @escaping (String) -> Void,
+                                             connect: @escaping () -> Void) {
+        guard securityShield else {
+            Nexilis.securityShieldRequired = false
+            connect()
+            return
+        }
+        Nexilis.securityShieldRequired = true
+        SecurityShield.run(appName: APIS.appNm, apiKey: apiKey) { passed in
+            guard passed else {
+                onFailure("SecurityShield: perangkat tidak memenuhi kebijakan keamanan.")
+                return
+            }
+            connect()
+        }
+    }
+
+    /// The shield's entry (LiteShieldBridge). The ZTA chain has already passed (or was switched off)
+    /// in NXShieldAutostart, so the gate is configured from what it ran on instead of running it again.
+    static func startFromShield(appName: String, apiKey: String, showButton: Bool, securityShield: Bool,
+                                delegate: ConnectDelegate, completion: @escaping (Bool, String?) -> Void) {
+        // A wrapped host has no AppDelegate line for Firebase; phone sign-in needs it, and the
+        // CLI ships GoogleService-Info.plist when one is given.
+        #if canImport(FirebaseCore)
+        if FirebaseApp.app() == nil, Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
+            FirebaseApp.configure()
+        }
+        #endif
+        SentinelSecurityGate.configure(APISZTA.configuration)
+        APIS.appNm = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        runSecurityShieldThenConnect(apiKey: apiKey, securityShield: securityShield,
+                                     onFailure: { completion(false, $0) }) {
+            completion(true, nil)
+            Nexilis.connect(apiKey: apiKey, delegate: delegate, showButton: showButton, fromMAB: false)
+        }
     }
     
     // MARK: - App icon badge
@@ -1116,7 +1267,7 @@ public class APIS: NSObject {
                                 let errMessage = "Multiple Login Detected...".localized()
                                 UIApplication.shared.visibleViewController?.view.makeToast(errMessage, duration: 3)
                                 if Nexilis.showFB {
-                                    Nexilis.floatingButton.removeFromSuperview()
+                                    Nexilis.floatingButton?.removeFromSuperview()
                                     FloatingButton.datePull = nil
                                     Nexilis.floatingButton = FloatingButton()
                                     Nexilis.addFB()
@@ -1141,7 +1292,7 @@ public class APIS: NSObject {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
                                 Nexilis.hideLoader(completion: {
                                     if Nexilis.showFB {
-                                        Nexilis.floatingButton.removeFromSuperview()
+                                        Nexilis.floatingButton?.removeFromSuperview()
                                         FloatingButton.datePull = nil
                                         Nexilis.floatingButton = FloatingButton()
                                         Nexilis.addFB()
@@ -1377,7 +1528,7 @@ public class APIS: NSObject {
     
     public static func setFloatingButton(isShow: Bool) {
         DispatchQueue.main.async {
-            Nexilis.floatingButton.removeFromSuperview()
+            Nexilis.floatingButton?.removeFromSuperview()
             FloatingButton.datePull = nil
             if isShow {
                 Nexilis.floatingButton = FloatingButton()
@@ -3775,21 +3926,8 @@ public class APIS: NSObject {
                 NotificationCenter.default.post(name: NSNotification.Name(rawValue: "checkNewMessagesNexilis"), object: nil, userInfo: nil)
             }
             
-            DispatchQueue.global(qos: .userInitiated).async {
-                if Utils.shouldRequestAuthentication() && Utils.getSetProfile() && (Utils.isMiddleMode() || Utils.isHSAMode()) && Nexilis.hasInit {
-                    DispatchQueue.main.async {
-                        var viewController = UIApplication.shared.windows.first?.rootViewController
-                        var notNull = false
-                        while !notNull {
-                            viewController = UIApplication.shared.windows.first?.rootViewController
-                            if viewController != nil {
-                                notNull = true
-                            }
-                        }
-                        Nexilis.showPassSignIn()
-                    }
-                }
-            }
+            // TFA on return to the app is LiteAuthenticationGate's now: it watches the app itself, counts the
+            // time actually spent in the background, and would otherwise be asked a second time from here.
         }
         afterEnterBackground = true
     }

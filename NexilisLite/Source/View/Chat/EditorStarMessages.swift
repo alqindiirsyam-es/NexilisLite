@@ -95,12 +95,17 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     var contextMenuActionHandlers: [String: () -> Void] = [:]
     var contextMenuActionSeed = 0
     weak var longBubbleContextMenu: ChatBubbleContextMenu?
+    /// Nothing here queues work for a later turn the way a quote's jump does, but the menu
+    /// still says when it owns the touch - see ChatBubbleContextMenuPresenting.
+    var menuTookOverTouch = false
     // Fix: mirrors EditorGroup.swift's link-handling state (see its CHANGELOG entries
     // for the full history of why each of these exists).
     private var currentLinkHighlightViews: [UIView] = []
     private var suppressNextLinkTap = false
     private var suppressLinkTapToken = 0
     private var linkPressGeneration = 0
+    /// When a hold last opened one of the sheets a hold opens - see openHeldSheet.
+    private var lastHeldSheetOpenedAt: TimeInterval = 0
     var touchedSubview = UIView()
     var lastTouchPoint: CGPoint = .zero
     
@@ -532,6 +537,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         let profileMessage = UIImageView()
         // No frame of its own: constraints give it 30x30, and a 35pt frame set here only misled
         // the rounding that used to be worked out from it.
+        // The picture, the name, the date and the chevron go with the bubble while its menu is
+        // up - see ChatBubbleContextMenu.hiddenWithBubbleTag.
+        profileMessage.tag = ChatBubbleContextMenu.hiddenWithBubbleTag
         cellMessage.contentView.addSubview(profileMessage)
         profileMessage.translatesAutoresizingMaskIntoConstraints = false
         let tapGestureRecognizer = ObjectGesture(target: self, action: #selector(profilePersonTapped(_:)))
@@ -606,7 +614,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         // to recognise it again: whether the text has been pushed down by something above it, and
         // where the "Forwarded" strip goes. Both used to test against a hardcoded 32, which is
         // what this margin was before the row was redesigned - so both silently stopped matching.
-        let baseTopMarginText: CGFloat = 15
+        let baseTopMarginText: CGFloat = BubbleTextInset.top
         var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: baseTopMarginText)
         // Parity with EditorPersonal and EditorGroup: at required priority a bubble that also has
         // a quote above the text has no satisfiable layout at all, and Auto Layout resolves that
@@ -687,6 +695,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
 
         // The chevron, and the date, live at the far end of the row.
         let chevron = UIImageView(image: UIImage(systemName: "chevron.right"))
+        chevron.tag = ChatBubbleContextMenu.hiddenWithBubbleTag
         chevron.tintColor = .tertiaryLabel
         chevron.contentMode = .scaleAspectFit
         cellMessage.contentView.addSubview(chevron)
@@ -699,6 +708,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         // left of the row once the date has taken its place, and a label answers that by cutting
         // off the end - which is where the group and the topic are.
         let nameSender = MarqueeLabel()
+        nameSender.tag = ChatBubbleContextMenu.hiddenWithBubbleTag
         cellMessage.contentView.addSubview(nameSender)
         nameSender.translatesAutoresizingMaskIntoConstraints = false
         nameSender.leadingAnchor.constraint(equalTo: profileMessage.trailingAnchor, constant: 10).isActive = true
@@ -745,6 +755,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         // floating orange pill used to say, and saying it on the row itself means the list can be
         // read straight down without a banner interrupting every few messages.
         let dateMessage = UILabel()
+        dateMessage.tag = ChatBubbleContextMenu.hiddenWithBubbleTag
         cellMessage.contentView.addSubview(dateMessage)
         dateMessage.translatesAutoresizingMaskIntoConstraints = false
         dateMessage.trailingAnchor.constraint(equalTo: cellMessage.contentView.trailingAnchor, constant: -16).isActive = true
@@ -801,7 +812,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         } else {
             containerMessage.backgroundColor = isMine ? .blueBubbleColor : .whiteBubbleColor
         }
-        containerMessage.layer.cornerRadius = 10.0
+        containerMessage.layer.cornerRadius = 18
         // Every bubble is on the left here, so they all take the left-hand shape.
         containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
         containerMessage.clipsToBounds = true
@@ -852,15 +863,15 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         } else if !audioChat.isEmpty {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 60).isActive = true
         } else {
-            messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+            messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleTextInset.side).isActive = true
         }
         // Parity with EditorPersonal and EditorGroup: required, this fights whatever else claims
         // the bottom of the bubble - the audio player, a quote's minimum height - and Auto Layout
         // settles the fight by dropping a constraint of its own choosing.
-        let bottomConstraint = messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15)
+        let bottomConstraint = messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -BubbleTextInset.bottom)
         bottomConstraint.priority = .defaultHigh
         bottomConstraint.isActive = true
-        messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+        messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleTextInset.side).isActive = true
         
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         messageText.font = .systemFont(ofSize: 12 + offset())
@@ -1253,32 +1264,49 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         if (!thumbChat.isEmpty && dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1" && dataMessages[indexPath.row]["lock"] as? String != "2") {
             // One measurement, not two: the width and the height come from the same look
             // at the file.
-            let thumbSize = ListGroupImages.getImageSize(image: thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)
+            // A gif is measured from itself once it is here; its still is not its shape.
+            let thumbSize = ListGroupImages.getImageSize(image: ListGroupImages.isMeasurable(gifChat) ? gifChat : thumbChat, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)
             let getHeightImage: CGFloat = thumbSize.height
             let getWidthImage: CGFloat = thumbSize.width
-            topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 45 : getHeightImage + 5)
+            // The picture starts at the very top of the bubble, not at the text's inset.
+            topMarginText.constant = topMarginText.constant - BubbleTextInset.top + (getHeightImage < 40 ? 45 : getHeightImage + 5)
             
             containerMessage.addSubview(imageThumb)
             imageThumb.translatesAutoresizingMaskIntoConstraints = false
             imageThumb.frame = CGRect(x: 0, y: 0, width: getWidthImage, height: getHeightImage)
             let data = queryMessageReply(message_id: reffChat)
+            var pictureAtTop = false
             if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
-                imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+                pictureAtTop = true
+                imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor).isActive = true
             }
-            imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+            // Edge to edge, as the reference draws its pictures, wearing the bubble's corners
+            // where it reaches them; at the top it runs `reach` past the edge on the tail's
+            // side, so the tail is cut into it - see fit(_:sharing:).
+            let reach = pictureAtTop ? ((containerMessage as? BubbleView)?.reach ?? .zero) : .zero
+            imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -reach.left).isActive = true
             imageThumb.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
-            imageThumb.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+            imageThumb.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: reach.right).isActive = true
+            let pictureIsAll = textChat.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if pictureIsAll {
+                imageThumb.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
+                messageText.isHidden = true
+                messageText.heightAnchor.constraint(equalToConstant: 0).isActive = true
+            }
             // The picture asks for its own width, but never past what the bubble is allowed to be:
             // required, the ask alone contradicts the bubble's maximum width and there is no
             // layout that satisfies both.
-            let imgWidthConstraint = imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage)
+            let imgWidthConstraint = imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage + reach.left + reach.right)
             imgWidthConstraint.priority = .defaultHigh
             imgWidthConstraint.isActive = true
-            let imgMaxWidthConstraint = imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerMessage.widthAnchor, constant: -30)
+            let imgMaxWidthConstraint = imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerMessage.widthAnchor, constant: reach.left + reach.right)
             imgMaxWidthConstraint.priority = .required
             imgMaxWidthConstraint.isActive = true
-            imageThumb.layer.cornerRadius = 5.0
-            imageThumb.clipsToBounds = true
+            var pictureCorners: CACornerMask = pictureAtTop ? BubbleView.topCorners : []
+            if pictureIsAll {
+                pictureCorners.formUnion(BubbleView.bottomCorners)
+            }
+            (containerMessage as? BubbleView)?.fit(imageThumb, sharing: pictureCorners)
             imageThumb.contentMode = .scaleAspectFill
             // An image view carries the size of the picture inside it, and this one is held
             // between the top of the bubble and the text below rather than by a height of its
@@ -1419,8 +1447,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                         imageGif.anchor(top: imageThumb.topAnchor, left: imageThumb.leftAnchor, bottom: imageThumb.bottomAnchor, right: imageThumb.rightAnchor)
                         if FileManager.default.fileExists(atPath: gifURL.path) {
                             imageGif.image = SDAnimatedImage(contentsOfFile: gifURL.path)
-//                                imageGif.shouldCustomLoopCount = true
-//                                imageGif.animationRepeatCount = 4
+                            GifBubble.playOnce(imageGif, in: imageThumb)
                         } else if FileEncryption.shared.isSecureExists(filename: gifChat){
                             do {
                                 if var data = try FileEncryption.shared.readSecure(filename: gifChat) {
@@ -1430,8 +1457,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                                     }
                                     if let imageData = SDAnimatedImage(data: data) {
                                         imageGif.image = imageData
-//                                        imageGif.shouldCustomLoopCount = true
-//                                        imageGif.animationRepeatCount = 4
+                                        GifBubble.playOnce(imageGif, in: imageThumb)
                                     }
                                 }
                             }
@@ -1579,13 +1605,13 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             containerViewFile.translatesAutoresizingMaskIntoConstraints = false
             let data = queryMessageReply(message_id: reffChat)
             if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as! Int == 0) {
-                containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+                containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleBox.inset).isActive = true
             } else {
                 containerViewFile.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
             }
-            containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+            containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleBox.inset).isActive = true
             containerViewFile.bottomAnchor.constraint(equalTo:messageText.topAnchor, constant: -5).isActive = true
-            containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+            containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleBox.inset).isActive = true
 //            containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
             // Fix: the card sat on a flat twenty per cent black, which on a light bubble is a
             // slab of grey and on a dark one is nearly invisible. It is the same kind of thing a
@@ -1593,7 +1619,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             // writing on it uses the same two weights. See BubblePanel.
             let onDarkBubble = self.traitCollection.userInterfaceStyle == .dark
             containerViewFile.backgroundColor = BubblePanel.ground(dark: onDarkBubble)
-            containerViewFile.layer.cornerRadius = 5.0
+            containerViewFile.layer.cornerRadius = BubbleBox.radius
             containerViewFile.clipsToBounds = true
             // A floor under the width, so a document with a short name or none at all is still a
             // card rather than a grey square with an icon crammed into it.
@@ -1613,7 +1639,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             containerViewFile.addSubview(nameFile)
             
             imageFile.translatesAutoresizingMaskIntoConstraints = false
-            imageFile.leadingAnchor.constraint(equalTo: containerViewFile.leadingAnchor, constant: 5).isActive = true
+            imageFile.leadingAnchor.constraint(equalTo: containerViewFile.leadingAnchor, constant: 10).isActive = true
             imageFile.trailingAnchor.constraint(equalTo: nameFile.leadingAnchor, constant: -5).isActive = true
             imageFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor).isActive = true
             imageFile.widthAnchor.constraint(equalToConstant: 30).isActive = true
@@ -1898,8 +1924,8 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 let containerReply = UIView()
                 containerMessage.addSubview(containerReply)
                 containerReply.translatesAutoresizingMaskIntoConstraints = false
-                containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-                containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+                containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleBox.inset).isActive = true
+                containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleBox.inset).isActive = true
                 if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                     containerReply.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
                 } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
@@ -1911,12 +1937,12 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 } else {
                     containerReply.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 }
-                containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+                containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleBox.inset).isActive = true
                 let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
                 minHeightConstraint.priority = .defaultHigh
                 minHeightConstraint.isActive = true
                 containerReply.backgroundColor = quoteOverlay
-                containerReply.layer.cornerRadius = 5
+                containerReply.layer.cornerRadius = BubbleBox.radius
                 containerReply.clipsToBounds = true
                 
                 if (thumbChat != "" || fileChat != "") && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
@@ -1929,7 +1955,7 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                 leftReply.leadingAnchor.constraint(equalTo: containerReply.leadingAnchor).isActive = true
                 leftReply.topAnchor.constraint(equalTo: containerReply.topAnchor).isActive = true
                 leftReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor).isActive = true
-                leftReply.widthAnchor.constraint(equalToConstant: 3).isActive = true
+                leftReply.widthAnchor.constraint(equalToConstant: ChatReplyPreview.stripWidth).isActive = true
                 leftReply.layer.cornerRadius = 5
                 leftReply.clipsToBounds = true
                 leftReply.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMinXMinYCorner]
@@ -2150,15 +2176,18 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         }
         
         func showForwardedSign() {
-            topMarginText.constant = topMarginText.constant + 20
+            topMarginText.constant = topMarginText.constant + BubbleTextInset.forwardedPush
             
             let containerForwarded = UIView()
             containerMessage.addSubview(containerForwarded)
             containerForwarded.translatesAutoresizingMaskIntoConstraints = false
-            containerForwarded.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+            containerForwarded.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleTextInset.labelSide).isActive = true
             containerForwarded.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: baseTopMarginText).isActive = true
             containerForwarded.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            containerForwarded.heightAnchor.constraint(equalToConstant: 20).isActive = true
+            // As tall as its one line and no more: the writing is pinned to both edges of the
+            // strip, so the space above the mark is the text's own inset and the space under it
+            // is the 2pt the text below keeps.
+            containerForwarded.heightAnchor.constraint(equalToConstant: BubbleTextInset.forwardedLine).isActive = true
             if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                 containerForwarded.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
             } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
@@ -2171,15 +2200,16 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
             
             let imageForwarded = UIImageView()
             containerForwarded.addSubview(imageForwarded)
-            imageForwarded.anchor(top: containerForwarded.topAnchor, left: containerForwarded.leftAnchor, width: 15, height: 15)
+            imageForwarded.anchor(left: containerForwarded.leftAnchor, width: 14, height: 14)
+            imageForwarded.centerYAnchor.constraint(equalTo: containerForwarded.centerYAnchor).isActive = true
             imageForwarded.image = UIImage(systemName: "arrowshape.turn.up.right.fill")
             imageForwarded.tintColor = .gray
             
             let titleForwarded = UILabel()
             containerForwarded.addSubview(titleForwarded)
-            titleForwarded.anchor(top: containerForwarded.topAnchor, left: imageForwarded.rightAnchor, right: containerForwarded.rightAnchor, height: 15)
-            titleForwarded.font = .systemFont(ofSize: 15)
+            titleForwarded.anchor(top: containerForwarded.topAnchor, left: imageForwarded.rightAnchor, bottom: containerForwarded.bottomAnchor, right: containerForwarded.rightAnchor)
             let textForwarded = "Forwarded".localized()
+            // The message's own size, italic - the strip is exactly that line tall.
             titleForwarded.attributedText = " $\(textForwarded)$".richText()
         }
         
@@ -2842,6 +2872,11 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
     }
     
     @objc func contentMessageTapped(_ sender: ObjectGesture) {
+        // A gif that has played and rests under its disc is played again by a tap; only a gif
+        // still running opens the viewer - see GifBubble.
+        if !sender.gif_id.isEmpty, GifBubble.replayIfResting(in: sender.imageView) {
+            return
+        }
         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -3253,7 +3288,10 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         // when the touch is on a link, leaving it to handleLinkTouchHighlight's own
         // timer instead. See EditorGroup.swift's CHANGELOG entries for the full
         // history.
-        if LinkHighlighting.linkHit(at: location, in: interaction.view) != nil {
+        if let view = interaction.view, let held = LinkHighlighting.linkHit(at: location, in: view) {
+            openHeldSheet(in: view) { [weak self] in
+                self?.presentLinkActionSheet(urlString: held.urlString)
+            }
             return nil
         }
 
@@ -3714,6 +3752,48 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
         return false
     }
 
+
+    // Fix: a hold over a link or a name was timed from the text view's own touches, and from
+    // nowhere else. On a screen that reads pressure - an iPhone 7 and the phones of its years -
+    // the bubble's menu recognises a firm press by force, sooner than any hold of a fixed
+    // length, and the moment it recognises, UIKit cancels the touches the text view was timing.
+    // So on those devices the timer never reached its end: holding a name did nothing at all,
+    // no card, no menu, nothing. The menu already stands down over a link and over a name; now,
+    // when it stands down, it hands the hold on to the sheet it was meant for. Whichever of the
+    // two notices the hold first opens the sheet, and the other finds it already open.
+
+    /// Whether the sheet a hold opens has just been opened - by the other of the two routes.
+    private var heldSheetJustOpened: Bool {
+        return CACurrentMediaTime() - lastHeldSheetOpenedAt < 1.0
+    }
+
+    private func markHeldSheetOpened() {
+        lastHeldSheetOpenedAt = CACurrentMediaTime()
+    }
+
+    /// Opens the sheet a hold on `view` was for, from the menu's side of the hold.
+    private func openHeldSheet(in view: UIView, _ open: @escaping () -> Void) {
+        guard !heldSheetJustOpened else { return }
+        markHeldSheetOpened()
+        // The finger is still down and no menu is coming to tidy up after it: the pressed look
+        // lets go, the highlight goes with it, and the lift that follows must not also be read
+        // as a tap on what was held.
+        PressableView.liftAll(in: view)
+        linkPressGeneration += 1
+        hideLinkHighlight()
+        suppressNextLinkTap = true
+        suppressLinkTapToken += 1
+        let myToken = suppressLinkTapToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            guard let self = self, self.suppressLinkTapToken == myToken else { return }
+            self.suppressNextLinkTap = false
+        }
+        endOpeningPlacement()
+        // Out of the menu's own recognition first, so the interaction is done with the touch
+        // before the sheet goes up over it.
+        DispatchQueue.main.async(execute: open)
+    }
+
     private func handleLinkTouch(_ phase: PressableTextView.Phase, at point: CGPoint, in textView: UITextView) {
         switch phase {
         case .began:
@@ -3747,6 +3827,9 @@ public class EditorStarMessages: UIViewController, UITableViewDataSource, UITabl
                     guard let self = self, self.suppressLinkTapToken == myToken else { return }
                     self.suppressNextLinkTap = false
                 }
+                // Unless the menu's own press got there first - see openHeldSheet.
+                guard !self.heldSheetJustOpened else { return }
+                self.markHeldSheetOpened()
                 self.presentLinkActionSheet(urlString: urlString)
             }
 

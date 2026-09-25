@@ -44,8 +44,11 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
     var profileNameLabel: UILabel?
     var profileBadge: UIImageView?
     var profileCard: UIView?
+    var messageTile: UIControl?
     var audioTile: UIControl?
     var videoTile: UIControl?
+    /// Holds the card at the foot of the screen - blocking and unfriending, or adding as a friend.
+    var safetyBox: UIStackView?
     var myFriendCount: UILabel?
     var myStatusRow: ProfileCardRow?
 
@@ -55,7 +58,6 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
         profileBadge?.image = image
         profileBadge?.isHidden = image == nil
     }
-    var friendshipTile: UIControl?
     /// True once the new layout is in place, so the storyboard's static rows stay out of the way.
     var usesNewProfileLayout = false
 
@@ -95,6 +97,8 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
     func showName(_ text: String) {
         name = text
         profileNameLabel?.text = text
+        // The card at the foot names this person too - see refreshSafetyCard.
+        refreshSafetyCard()
         guard !usesNewProfileLayout else {
             return
         }
@@ -162,66 +166,80 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                     guard let user = user else {
                         return
                     }
-                    if let me = User.getMyPin(), me == self.data || self.flag == Flag.me {
-                        Database.shared.database?.inTransaction({ fmdb, rollback in
-                            do {
-                                let idMe = User.getMyPin()!
-                                if let cursorCount = Database.shared.getRecords(fmdb: fmdb, query: "select COUNT(*) from BUDDY where f_pin <> '\(idMe)' and first_name NOT LIKE 'USR%' "), cursorCount.next() {
-                                    let count = cursorCount.string(forColumnIndex: 0)!
-                                    self.countFriend.text = count + " " + "Friends".localized()
-                                    self.myFriendCount?.text = count + " " + "Friends".localized()
-                                    self.countFriend.font = .systemFont(ofSize: 12)
-                                    self.viewFriend.layer.cornerRadius = 5.0
-                                    self.viewFriend.clipsToBounds = true
-                                    self.viewFriend.isHidden = false
-                                    
-                                    self.viewFriend.isUserInteractionEnabled = true
-                                    self.viewFriend.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.friendsTapped)))
-                                    cursorCount.close()
-                                }
-                            } catch {
-                                rollback.pointee = true
-                                print("Access database error: \(error.localizedDescription)")
-                            }
-                        })
-                    }
-                    if User.isOfficialRegular(official_account: user.official ?? "") || User.isOfficial(official_account: user.official ?? "") || User.isVerified(official_account: user.official ?? "") || User.isCallCenter(userType: user.userType ?? "") || User.isInternal(userType: user.userType ?? "") {
-                        self.viewUserType.layer.cornerRadius = 5.0
-                        self.viewUserType.clipsToBounds = true
-                        self.viewUserType.isHidden = false
-                        if User.isOfficialRegular(official_account: user.official ?? "") || User.isOfficial(official_account: user.official ?? "") {
-                            self.imageUserType.image = UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                            self.showUserBadge(self.imageUserType.image)
-                            self.labelUserType.text = "Official".localized()
-                        } else if User.isVerified(official_account: user.official ?? "") {
-                            self.imageUserType.image = UIImage(named: "ic_verified", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                            self.showUserBadge(self.imageUserType.image)
-                            self.labelUserType.text = "Verified".localized()
-                        } else if User.isInternal(userType: user.userType ?? "") {
-                            // The outer test already allowed an internal account through, but no
-                            // mark was ever chosen for it - so it reached here and came out blank.
-                            self.imageUserType.image = UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                            self.showUserBadge(self.imageUserType.image)
-                            self.labelUserType.text = "Internal".localized()
-                        } else if User.isCallCenter(userType: user.userType ?? "") {
-                            let dataCategory = CategoryCC.getDataFromServiceId(service_id: user.ex_offmp!)
-                            self.imageUserType.image = UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
-                            self.showUserBadge(self.imageUserType.image)
-//                            if dataCategory != nil {
-//                                self.labelUserType.text = "Call Center (\(dataCategory!.service_name))".localized()
-//                            } else {
-                                self.labelUserType.text = "Call Center".localized()
-//                            }
-//                            self.buttonHistoryCC.isHidden = true
-                        }
-                    }
-                    self.showName("\(user.firstName) \(user.lastName)")
-                    if !user.thumb.isEmpty {
-                        self.setProfilePicture(named: user.thumb)
-                    }
+                    self.show(user)
                 }
             }
         }
+    }
+
+    /// Puts the record on screen: the friend count, the badge, the name and the picture.
+    ///
+    /// Fix: this only ever ran from viewDidAppear, on a record read on another queue - so the
+    /// screen was pushed in with a placeholder picture, no badge and no count, and they landed a
+    /// beat after the push had finished. The record is already in hand in viewDidLoad; it is
+    /// shown from there first, and viewDidAppear only brings it up to date.
+    private func show(_ user: User) {
+        if let me = User.getMyPin(), me == self.data || self.flag == Flag.me {
+            Database.shared.database?.inTransaction({ fmdb, rollback in
+                do {
+                    let idMe = User.getMyPin()!
+                    if let cursorCount = Database.shared.getRecords(fmdb: fmdb, query: "select COUNT(*) from BUDDY where f_pin <> '\(idMe)' and first_name NOT LIKE 'USR%' "), cursorCount.next() {
+                        let count = cursorCount.string(forColumnIndex: 0)!
+                        self.countFriend.text = count + " " + "Friends".localized()
+                        self.myFriendCount?.text = count + " " + "Friends".localized()
+                        self.countFriend.font = .systemFont(ofSize: 12)
+                        PanelCorner.chip(self.viewFriend)
+                        self.viewFriend.clipsToBounds = true
+                        self.viewFriend.isHidden = false
+                        
+                        self.viewFriend.isUserInteractionEnabled = true
+                        // Once: shown again, this must not stack a second tap.
+                        if self.viewFriend.gestureRecognizers?.isEmpty ?? true {
+                            self.viewFriend.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.friendsTapped)))
+                        }
+                        cursorCount.close()
+                    }
+                } catch {
+                    rollback.pointee = true
+                    print("Access database error: \(error.localizedDescription)")
+                }
+            })
+        }
+        if User.isOfficialRegular(official_account: user.official ?? "") || User.isOfficial(official_account: user.official ?? "") || User.isVerified(official_account: user.official ?? "") || User.isCallCenter(userType: user.userType ?? "") || User.isInternal(userType: user.userType ?? "") {
+            PanelCorner.chip(self.viewUserType)
+            self.viewUserType.clipsToBounds = true
+            self.viewUserType.isHidden = false
+            if User.isOfficialRegular(official_account: user.official ?? "") || User.isOfficial(official_account: user.official ?? "") {
+                self.imageUserType.image = UIImage(named: "ic_official_flag", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                self.showUserBadge(self.imageUserType.image)
+                self.labelUserType.text = "Official".localized()
+            } else if User.isVerified(official_account: user.official ?? "") {
+                self.imageUserType.image = UIImage(named: "ic_verified", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                self.showUserBadge(self.imageUserType.image)
+                self.labelUserType.text = "Verified".localized()
+            } else if User.isInternal(userType: user.userType ?? "") {
+                // The outer test already allowed an internal account through, but no
+                // mark was ever chosen for it - so it reached here and came out blank.
+                self.imageUserType.image = UIImage(named: "ic_internal", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                self.showUserBadge(self.imageUserType.image)
+                self.labelUserType.text = "Internal".localized()
+            } else if User.isCallCenter(userType: user.userType ?? "") {
+                let dataCategory = CategoryCC.getDataFromServiceId(service_id: user.ex_offmp!)
+                self.imageUserType.image = UIImage(named: "pb_call_center", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                self.showUserBadge(self.imageUserType.image)
+//                if dataCategory != nil {
+//                    self.labelUserType.text = "Call Center (\(dataCategory!.service_name))".localized()
+//                } else {
+                    self.labelUserType.text = "Call Center".localized()
+//                }
+//                self.buttonHistoryCC.isHidden = true
+            }
+        }
+        self.showName("\(user.firstName) \(user.lastName)")
+        if !user.thumb.isEmpty {
+            self.setProfilePicture(named: user.thumb)
+        }
+        self.refreshStatusEverywhere()
     }
     
     private func getData(completion: @escaping (User?) -> ()) {
@@ -379,6 +397,10 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             installProfileLayout()
             showName("\(myData?.firstName ?? "") \(myData?.lastName ?? "")".trimmingCharacters(in: .whitespaces))
             setProfileStatus(myData?.status)
+            // The picture, the badge and the count go up with the screen, not after it.
+            if let myData = myData {
+                show(myData)
+            }
         } else if flag == Flag.invite {
             navigationItem.rightBarButtonItem = nil
             call.isEnabled = false
@@ -402,6 +424,9 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
             // Again now the label exists: the status was read a moment ago, before there was
             // anywhere to put it.
             setProfileStatus(myData?.status)
+            if let myData = myData {
+                show(myData)
+            }
             if !isBNI {
                 call.addTarget(self, action: #selector(call(sender:)), for: .touchUpInside)
                 video.addTarget(self, action: #selector(video(sender:)), for: .touchUpInside)
@@ -452,6 +477,7 @@ public class ProfileViewController: UITableViewController, UITextFieldDelegate {
                         self.buttonSaveStatus.isHidden = true
                         self.user?.status = self.editTextStatus.text!
                         self.editTextStatus.text = self.editTextStatus.text!
+                        self.refreshStatusEverywhere()
                         let imageView = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
                         imageView.tintColor = .white
                         self.publicBanner.dismiss()
@@ -1189,7 +1215,9 @@ extension ProfileViewController {
         ProfileCardStyle.halo(statusLabel)
         profileStatusLabel = statusLabel
         column.addArrangedSubview(padded(statusLabel))
-        column.setCustomSpacing(22, after: column.arrangedSubviews.last!)
+        // The status and the friend count are two lines of the same block under the name, not
+        // two sections - 22 between them read as a gap the screen had nothing to put in.
+        column.setCustomSpacing(6, after: column.arrangedSubviews.last!)
 
         if flag == .me {
             let friends = UILabel()
@@ -1210,6 +1238,14 @@ extension ProfileViewController {
         let card = flag == .me ? buildMyCard() : buildLinksCard()
         profileCard = card
         column.addArrangedSubview(card)
+        column.setCustomSpacing(24, after: card)
+
+        // Filled by refreshSafetyCard, and filled again whenever the friendship changes.
+        let safety = UIStackView()
+        safety.axis = .vertical
+        safety.spacing = 0
+        safetyBox = safety
+        column.addArrangedSubview(safety)
 
         // A plain view carries the background, with the scrolling content on top of it.
         //
@@ -1262,57 +1298,220 @@ extension ProfileViewController {
         return box
     }
 
-    private func padded(_ view: UIView) -> UIView {
+    private func padded(_ view: UIView, inset: CGFloat = 24) -> UIView {
         let box = UIView()
         view.translatesAutoresizingMaskIntoConstraints = false
         box.addSubview(view)
         NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 24),
-            view.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -24),
+            view.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: inset),
+            view.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -inset),
             view.topAnchor.constraint(equalTo: box.topAnchor),
             view.bottomAnchor.constraint(equalTo: box.bottomAnchor)
         ])
         return box
     }
 
-    /// Audio, Video, and adding or removing the person as a friend.
+    /// The three things that can be done *with* this person: write to them, call them, see them.
+    ///
+    /// Fix: the third of these used to be unfriending, which is not something done with somebody
+    /// but to them - and it sat in green among the ways of reaching them. It has moved to the
+    /// card at the foot of the screen, beside blocking, where the reference keeps it.
     private func buildActionRow() -> UIView {
         let row = UIStackView()
         row.axis = .horizontal
         row.distribution = .fillEqually
-        row.spacing = 10
+        row.spacing = 8
 
-        let audio = actionTile(symbol: "phone.fill", title: "Audio".localized(), action: #selector(call(sender:)))
-        let camera = actionTile(symbol: "video.fill", title: "Video".localized(), action: #selector(video(sender:)))
+        let write = actionTile(symbol: "message", title: "Message".localized(), action: #selector(chat(sender:)))
+        let audio = actionTile(symbol: "phone", title: "Voice".localized(), action: #selector(call(sender:)))
+        let camera = actionTile(symbol: "video", title: "Video".localized(), action: #selector(video(sender:)))
+        messageTile = write
         audioTile = audio
         videoTile = camera
+        row.addArrangedSubview(write)
         row.addArrangedSubview(audio)
         row.addArrangedSubview(camera)
-        let friendship = actionTile(symbol: "person.badge.plus", title: "Friend".localized(), action: #selector(tapFriendship))
-        friendshipTile = friendship
-        row.addArrangedSubview(friendship)
-        return padded(row)
+        return padded(row, inset: 20)
     }
 
     private func actionTile(symbol: String, title: String, action: Selector) -> UIControl {
         let tile = ProfileActionTile()
-        tile.icon.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular))
+        tile.icon.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular))
         tile.caption.text = title
         tile.addTarget(self, action: action, for: .touchUpInside)
-        tile.heightAnchor.constraint(equalToConstant: 62).isActive = true
+        tile.heightAnchor.constraint(equalToConstant: 74).isActive = true
         return tile
     }
 
-    /// Which of the two the third button is offering, and what it says.
+    /// Kept under its old name because the screen calls it whenever the friendship changes: what
+    /// it refreshes now is the card at the foot, which is where friendship lives.
     func refreshFriendshipButton() {
-        guard let tile = friendshipTile as? ProfileActionTile else {
+        refreshSafetyCard()
+    }
+
+    /// What the reader can do *about* this person rather than with them - blocking them, letting
+    /// them go - or, for somebody who is not a friend yet, the one thing this screen is for.
+    ///
+    /// Rebuilt rather than rewritten: how many lines there are depends on the friendship, and a
+    /// card is a handful of views.
+    private func refreshSafetyCard() {
+        guard let box = safetyBox else {
             return
         }
-        let isFriend = flag == .friend
-        tile.icon.image = UIImage(systemName: isFriend ? "person.badge.minus" : "person.badge.plus",
-                                  withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular))
-        tile.caption.text = isFriend ? "Unfriend".localized() : "Friend".localized()
-        tile.tintColor = isFriend ? .systemRed : .systemBlue
+        for view in box.arrangedSubviews {
+            box.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        guard flag != .me else {
+            box.isHidden = true
+            return
+        }
+        box.isHidden = false
+        // Fix: read only off the buddy record, which a profile opened from a conversation's own
+        // bar does not have yet - it is fetched a moment later - so the two lines read "Block"
+        // and "Unfriend" with nobody named in them. The name this screen is showing is the same
+        // name, and it is there from the first frame; showName calls back here when the record
+        // turns up with a better one.
+        let shown = (user?.fullName ?? "").trimmingCharacters(in: .whitespaces)
+        let title = shown.isEmpty ? name.trimmingCharacters(in: .whitespaces) : shown
+        let named: (String) -> String = { word in
+            title.isEmpty ? word.localized() : word.localized() + " " + title
+        }
+        if flag == .friend {
+            let blocked = isBlockingThisPerson
+            box.addArrangedSubview(cardOfRows([
+                plainRow(title: named(blocked ? "Unblock" : "Block"),
+                         colour: blocked ? .systemBlue : .systemRed, action: #selector(tapBlock)),
+                plainRow(title: named("Unfriend"), colour: .systemRed, action: #selector(didTapUnfriend(sender:)))
+            ]))
+        } else {
+            box.addArrangedSubview(cardOfRows([
+                plainRow(title: named("Add Friend"), colour: .systemBlue, action: #selector(didTapAdd(sender:)))
+            ]))
+        }
+    }
+
+    /// Whether it is this reader who has blocked the other one. The other way round - being
+    /// blocked - is theirs to undo, not ours, so it offers nothing.
+    private var isBlockingThisPerson: Bool {
+        return blockState == "1"
+    }
+
+    /// Blocked in either direction, which is what decides whether this person can be reached.
+    private var isBlockedEitherWay: Bool {
+        return blockState == "1" || blockState == "-1"
+    }
+
+    private var blockState: String {
+        let flag = User.getDataCanNil(pin: data)?.ex_block ?? ""
+        return flag.isEmpty ? "0" : flag
+    }
+
+    private func plainRow(title: String, colour: UIColor, action: Selector) -> ProfilePlainRow {
+        let row = ProfilePlainRow()
+        row.caption.text = title
+        row.caption.textColor = colour
+        row.addTarget(self, action: action, for: .touchUpInside)
+        row.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        return row
+    }
+
+    /// The same panel the rows above sit in: one fill, one set of corners, a hairline between.
+    private func cardOfRows(_ rows: [UIView]) -> UIView {
+        let card = UIStackView()
+        card.axis = .vertical
+        card.spacing = 0
+        card.backgroundColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.08) : .white }
+        ProfileCardStyle.round(card)
+        card.clipsToBounds = true
+        for (index, row) in rows.enumerated() {
+            if index > 0 {
+                card.addArrangedSubview(cardDivider(inset: 18))
+            }
+            card.addArrangedSubview(row)
+        }
+        let lifted = UIView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        lifted.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: lifted.topAnchor),
+            card.bottomAnchor.constraint(equalTo: lifted.bottomAnchor),
+            card.leadingAnchor.constraint(equalTo: lifted.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: lifted.trailingAnchor)
+        ])
+        ProfileCardStyle.lift(lifted)
+        return padded(lifted)
+    }
+
+    /// Blocking is asked about first, the way unfriending is: it is not undone by the person it
+    /// happened to.
+    @objc func tapBlock() {
+        let name = (user?.fullName ?? "").trimmingCharacters(in: .whitespaces)
+        let blocked = isBlockingThisPerson
+        let question = (blocked ? "Are you sure to unblock" : "Are you sure to block").localized() + " \(name)"
+        let alert = LibAlertController(title: "", message: question, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel".localized(), style: .default))
+        alert.addAction(UIAlertAction(title: (blocked ? "Unblock" : "Block").localized(),
+                                      style: blocked ? .default : .destructive, handler: { [weak self] _ in
+            self?.setBlocked(!blocked)
+        }))
+        present(alert, animated: true)
+    }
+
+    /// The conversation's own way of blocking somebody, asked for from here.
+    ///
+    /// Nothing about it is new: the same two requests the conversation's own menu sends
+    /// (getBlock / getUnBlock), the same flag written into the same column afterwards, and then
+    /// the same word the server sends when the other side does it - so a conversation standing
+    /// behind this screen puts its cover up and rewrites its menu exactly as it does for a block
+    /// that arrives from outside.
+    private func setBlocked(_ blocked: Bool) {
+        guard !data.isEmpty else {
+            return
+        }
+        Nexilis.showLoader()
+        DispatchQueue.global().async {
+            let request = blocked ? CoreMessage_TMessageBank.getBlock(l_pin: self.data)
+                                  : CoreMessage_TMessageBank.getUnBlock(l_pin: self.data)
+            let taken = Nexilis.writeAndWait(message: request)?.isOk() ?? false
+            if taken {
+                Database.shared.database?.inTransaction({ (fmdb, rollback) in
+                    _ = Database.shared.updateRecord(fmdb: fmdb, table: "BUDDY",
+                                                     cvalues: ["ex_block": blocked ? "1" : "0"],
+                                                     _where: "f_pin = '\(self.data)'")
+                })
+            }
+            DispatchQueue.main.async {
+                Nexilis.hideLoader(completion: {
+                    guard taken else {
+                        let imageView = UIImageView(image: UIImage(systemName: "xmark.circle.fill"))
+                        imageView.tintColor = .white
+                        self.publicBanner.dismiss()
+                        self.publicBanner = FloatingNotificationBanner(title: "Server busy, please try again later".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .danger, colors: nil, iconPosition: .center)
+                        self.publicBanner.show()
+                        return
+                    }
+                    self.user = User.getData(pin: self.data)
+                    self.refreshSafetyCard()
+                    self.applyStrangerLimits()
+                    // The same announcement the server makes when the other side blocks us, so
+                    // whatever is listening - the conversation this screen was opened from, most
+                    // of all - hears about ours in exactly the same way. See
+                    // EditorPersonal.onUnfriend, which is what puts the cover over the field.
+                    if let word = try? JSONSerialization.data(withJSONObject: ["l_pin": self.data,
+                                                                              "block": blocked ? "1" : "0"]),
+                       let text = String(data: word, encoding: .utf8) {
+                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: "onUpdatePersonInfo"),
+                                                        object: nil, userInfo: ["state": 01, "message": text])
+                    }
+                    let imageView = UIImageView(image: UIImage(systemName: "info.circle"))
+                    imageView.tintColor = .white
+                    self.publicBanner.dismiss()
+                    self.publicBanner = FloatingNotificationBanner(title: (blocked ? "You blocked this user" : "You unblocked this user").localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .info, colors: nil, iconPosition: .center)
+                    self.publicBanner.show()
+                })
+            }
+        }
     }
 
     /// What somebody who is not a friend yet can be offered.
@@ -1326,18 +1525,14 @@ extension ProfileViewController {
         }
         let isFriend = flag == .friend
         profileCard?.isHidden = !isFriend
-        for tile in [audioTile, videoTile] {
-            tile?.isEnabled = isFriend
-            tile?.alpha = isFriend ? 1 : 0.4
+        // Blocked either way, there is nothing to send and nobody to call: the three ways of
+        // reaching this person are shown, so it is plain what is not on offer, and dead.
+        let reachable = isFriend && !isBlockedEitherWay
+        for tile in [messageTile, audioTile, videoTile] {
+            tile?.isEnabled = reachable
+            tile?.alpha = reachable ? 1 : 0.4
         }
-    }
-
-    @objc func tapFriendship() {
-        if flag == .friend {
-            didTapUnfriend(sender: self)
-        } else {
-            didTapAdd(sender: self)
-        }
+        refreshSafetyCard()
     }
 
     private func buildLinksCard() -> UIView {
@@ -1345,7 +1540,7 @@ extension ProfileViewController {
         card.axis = .vertical
         card.spacing = 0
         card.backgroundColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.08) : .white }
-        card.layer.cornerRadius = 12
+        ProfileCardStyle.round(card)
         // Clipped so the rows inside keep the rounded corners - which is exactly why the shadow
         // cannot live on this view: a shadow is drawn outside the bounds it is clipped to.
         card.clipsToBounds = true
@@ -1374,7 +1569,7 @@ extension ProfileViewController {
             card.leadingAnchor.constraint(equalTo: lifted.leadingAnchor),
             card.trailingAnchor.constraint(equalTo: lifted.trailingAnchor)
         ])
-        ProfileCardStyle.lift(lifted, radius: 12)
+        ProfileCardStyle.lift(lifted)
         return padded(lifted)
     }
 
@@ -1390,11 +1585,24 @@ extension ProfileViewController {
         return row
     }
 
-    func cardDivider() -> UIView {
+    func cardDivider(inset: CGFloat = 0) -> UIView {
         let divider = UIView()
         divider.backgroundColor = .separator
         divider.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
-        return divider
+        guard inset > 0 else {
+            return divider
+        }
+        // Set in from the left so it starts under the words, the way the reference draws it.
+        let box = UIView()
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(divider)
+        NSLayoutConstraint.activate([
+            divider.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: inset),
+            divider.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            divider.topAnchor.constraint(equalTo: box.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: box.bottomAnchor)
+        ])
+        return box
     }
 
     /// The card of settings the reader keeps for their own account.
@@ -1406,12 +1614,12 @@ extension ProfileViewController {
         card.axis = .vertical
         card.spacing = 0
         card.backgroundColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.08) : .white }
-        card.layer.cornerRadius = 12
+        ProfileCardStyle.round(card)
         card.clipsToBounds = true
 
         let status = cardRow(symbol: "quote.bubble", title: "Status".localized(),
                              action: #selector(tapEditStatus),
-                             value: (user?.status ?? "").isEmpty ? "Write a status".localized() : user?.status)
+                             value: statusRowWords)
         myStatusRow = status
         card.addArrangedSubview(status)
         card.addArrangedSubview(cardDivider())
@@ -1439,8 +1647,25 @@ extension ProfileViewController {
             card.leadingAnchor.constraint(equalTo: lifted.leadingAnchor),
             card.trailingAnchor.constraint(equalTo: lifted.trailingAnchor)
         ])
-        ProfileCardStyle.lift(lifted, radius: 12)
+        ProfileCardStyle.lift(lifted)
         return padded(lifted)
+    }
+
+    /// What the Status row offers, which depends on whether there is one to change. Fix: the row
+    /// wrote the status itself into the line the action belongs on - and, being written only when
+    /// the status was saved from this screen, said "Write a status" over a status that was already
+    /// there whenever the screen was opened afresh.
+    private var statusRowWords: String {
+        return (user?.status ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Write a status".localized()
+            : "Change Status".localized()
+    }
+
+    /// Puts the status on screen wherever it shows: the line under the name, and the row that
+    /// offers to change it.
+    func refreshStatusEverywhere() {
+        setProfileStatus(user?.status)
+        myStatusRow?.value.text = statusRowWords
     }
 
     /// Editing the status without a screen of its own: the field the storyboard made is still what
@@ -1458,8 +1683,8 @@ extension ProfileViewController {
             }
             let text = alert.textFields?.first?.text ?? ""
             self.editTextStatus?.text = text
+            // Written where it shows only once the server has taken it - see saveStatus.
             self.saveStatus(sender: self)
-            self.myStatusRow?.value.text = text.isEmpty ? "Write a status".localized() : text
         })
         present(alert, animated: true)
     }
@@ -1488,8 +1713,28 @@ enum ProfileCardStyle {
         label.layer.masksToBounds = false
     }
 
-    static func lift(_ view: UIView, radius: CGFloat = 12) {
+    /// What the panels on this screen are rounded by.
+    ///
+    /// iOS 26 rounds everything of its own much harder than the systems before it, and the
+    /// reference for this screen follows - measured off it, a corner about a fifth of the panel's
+    /// height, drawn as the continuous curve the system uses rather than a plain arc. Earlier
+    /// systems keep the corner this screen has always had.
+    /// Measured off the reference and now stated the same way everything else is - see
+    /// PanelCorner. The height is the row of three below the name, which is what the cards on
+    /// this screen are read alongside.
+    static var cardRadius: CGFloat {
+        return PanelCorner.radius(height: 74, classic: 12)
+    }
+
+    static func round(_ view: UIView, radius: CGFloat = ProfileCardStyle.cardRadius) {
         view.layer.cornerRadius = radius
+        if #available(iOS 26.0, *) {
+            view.layer.cornerCurve = .continuous
+        }
+    }
+
+    static func lift(_ view: UIView, radius: CGFloat = ProfileCardStyle.cardRadius) {
+        round(view, radius: radius)
         view.layer.shadowColor = UIColor.black.cgColor
         view.layer.shadowOpacity = 0.12
         view.layer.shadowRadius = 6
@@ -1509,34 +1754,69 @@ final class ProfileActionTile: UIControl {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.08) : .white }
-        layer.cornerRadius = 12
         ProfileCardStyle.lift(self)
-        tintColor = .systemBlue
+        // The mark is the colour, the word is not: in the reference the icon carries the tint and
+        // the word underneath is read as plain text.
+        tintColor = .mainColor
         icon.contentMode = .center
         icon.translatesAutoresizingMaskIntoConstraints = false
         addSubview(icon)
-        caption.font = .systemFont(ofSize: 12)
+        caption.font = .systemFont(ofSize: 15)
+        caption.textColor = .label
         caption.textAlignment = .center
+        caption.adjustsFontSizeToFitWidth = true
+        caption.minimumScaleFactor = 0.8
+        caption.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(caption)
+        let block = UILayoutGuide()
+        addLayoutGuide(block)
+        NSLayoutConstraint.activate([
+            icon.centerXAnchor.constraint(equalTo: centerXAnchor),
+            icon.topAnchor.constraint(equalTo: block.topAnchor),
+            caption.topAnchor.constraint(equalTo: icon.bottomAnchor, constant: 8),
+            caption.bottomAnchor.constraint(equalTo: block.bottomAnchor),
+            caption.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            caption.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            // The icon and the word are centred as one block, so tiles of any height read alike.
+            block.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+}
+
+/// One line of the card at the foot: a word and nothing else.
+///
+/// No icon, no chevron, no figure - what the reference uses for the things that are done about
+/// somebody rather than with them, and what sets that card apart from the ones above it.
+final class ProfilePlainRow: UIControl {
+    let caption = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        caption.font = .systemFont(ofSize: 17)
+        caption.numberOfLines = 1
+        caption.adjustsFontSizeToFitWidth = true
+        caption.minimumScaleFactor = 0.75
         caption.translatesAutoresizingMaskIntoConstraints = false
         addSubview(caption)
         NSLayoutConstraint.activate([
-            icon.centerXAnchor.constraint(equalTo: centerXAnchor),
-            icon.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            caption.topAnchor.constraint(equalTo: icon.bottomAnchor, constant: 5),
-            caption.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            caption.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4)
+            caption.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            caption.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -18),
+            caption.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
-        // The whole tile takes the tint, so the icon and the word agree with each other.
-        caption.textColor = tintColor
     }
 
     required init?(coder: NSCoder) {
         return nil
     }
 
-    override func tintColorDidChange() {
-        super.tintColorDidChange()
-        caption.textColor = tintColor
+    override var isHighlighted: Bool {
+        didSet {
+            backgroundColor = isHighlighted ? UIColor.label.withAlphaComponent(0.06) : .clear
+        }
     }
 }
 
@@ -1741,11 +2021,20 @@ extension ProfileViewController {
         guard !pin.isEmpty else {
             return
         }
+        // Away from the main thread: each of these is a count over every message of the
+        // conversation, and the conditions are ones no index answers - see
+        // GroupDetailViewController.refreshAttachmentCounts, which had the same trouble.
         let scope = EditorStarMessages.personalScope(personPin: pin)
-        conversationMediaRow?.value.text = EditorStarMessages.countLabel(
-            EditorStarMessages.conversationCount(scope: scope, and: EditorStarMessages.mediaCountCondition))
-        conversationStarredRow?.value.text = EditorStarMessages.countLabel(
-            EditorStarMessages.conversationCount(scope: scope, and: EditorStarMessages.starredCountCondition))
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let media = EditorStarMessages.countLabel(
+                EditorStarMessages.conversationCount(scope: scope, and: EditorStarMessages.mediaCountCondition))
+            let starred = EditorStarMessages.countLabel(
+                EditorStarMessages.conversationCount(scope: scope, and: EditorStarMessages.starredCountCondition))
+            DispatchQueue.main.async {
+                self?.conversationMediaRow?.value.text = media
+                self?.conversationStarredRow?.value.text = starred
+            }
+        }
     }
 
     /// Everything of this conversation the reader has kept.

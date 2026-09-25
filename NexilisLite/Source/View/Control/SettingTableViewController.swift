@@ -607,7 +607,7 @@ public class SettingTableViewController: UITableViewController, UIGestureRecogni
                                     let banner = FloatingNotificationBanner(title: "Successfully Sign-Out".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
                                     banner.show()
                                     if Nexilis.showFB {
-                                        Nexilis.floatingButton.removeFromSuperview()
+                                        Nexilis.floatingButton?.removeFromSuperview()
                                         FloatingButton.datePull = nil
                                         Nexilis.floatingButton = FloatingButton()
                                         Nexilis.addFB()

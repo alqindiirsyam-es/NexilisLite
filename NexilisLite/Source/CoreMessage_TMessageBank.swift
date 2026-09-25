@@ -2883,14 +2883,16 @@ public class CoreMessage_TMessageBank {
         let tMessage = NexilisLite.TMessage()
         let me = User.getMyPin() ?? ""
         tMessage.mPIN = me
-        tMessage.mCode = CoreMessage_TMessageCode.UPDATE_MESSAGE
+        // The same code and body the Android client sends, so its receiver reads it - see
+        // PIN_OR_UNPIN_MSG. The body was already the same; only the code and the item code
+        // set the two apart.
+        tMessage.mCode = CoreMessage_TMessageCode.PIN_OR_UNPIN_MSG
         tMessage.mStatus = CoreMessage_TMessageUtil.getTID()
         tMessage.mBodies[CoreMessage_TMessageKey.F_PIN] = f_pin
         tMessage.mBodies[CoreMessage_TMessageKey.DATA] = data
         tMessage.mBodies[CoreMessage_TMessageKey.OPPOSITE_PIN] = oppositePin
         tMessage.mBodies[CoreMessage_TMessageKey.CHAT_ID] = chatId
         tMessage.mBodies[CoreMessage_TMessageKey.SCOPE_ID] = scopeId
-        tMessage.mBodies[CoreMessage_TMessageKey.ITEM_CODE] = "pinorunpin"
         return tMessage
     }
     

@@ -761,8 +761,11 @@ class ContactChatViewController: UITableViewController {
                     cursor.close()
                 }
             })
+            // Read here, with the counts they depend on and on the same thread: which of these
+            // conversations is holding a mention of the reader nobody has read yet.
+            let named = UnreadMentions.conversations(unreadCounters: counters)
             DispatchQueue.main.async { [weak self] in
-                self?.applyUnreadCounters(counters)
+                self?.applyUnreadCounters(counters, named: named)
             }
         }
     }
@@ -825,13 +828,15 @@ class ContactChatViewController: UITableViewController {
         })
     }
 
-    private func applyUnreadCounters(_ counters: [String: String]) {
+    private func applyUnreadCounters(_ counters: [String: String], named: Set<String>) {
         var changed = false
         for children in chatGroupMaps.values {
             for chat in children {
                 let fresh = counters[chat.pin] ?? "0"
-                if chat.counter != fresh {
+                let namesMe = named.contains(chat.pin)
+                if chat.counter != fresh || chat.namesMe != namesMe {
                     chat.counter = fresh
+                    chat.namesMe = namesMe
                     changed = true
                 }
             }
@@ -844,14 +849,19 @@ class ContactChatViewController: UITableViewController {
                 continue
             }
             let fresh: String
+            let namesMe: Bool
             if chat.isParent {
                 let total = (chatGroupMaps[chat.groupId] ?? []).reduce(0) { $0 + (Int(counters[$1.pin] ?? "0") ?? 0) }
                 fresh = "\(total)"
+                // A parent row stands for its group's conversations, so it carries their marks.
+                namesMe = (chatGroupMaps[chat.groupId] ?? []).contains { named.contains($0.pin) }
             } else {
                 fresh = counters[chat.pin] ?? "0"
+                namesMe = named.contains(chat.pin)
             }
-            if chat.counter != fresh {
+            if chat.counter != fresh || chat.namesMe != namesMe {
                 chat.counter = fresh
+                chat.namesMe = namesMe
                 changed = true
                 changedRows.append(index)
             }
@@ -970,6 +980,18 @@ class ContactChatViewController: UITableViewController {
             }
             if self.isChooser != nil {
                 tempChats.removeAll(where: { $0.pin == "-997" })
+            }
+            // Fix: the rows were built without the "@" and the mark was put on afterwards, by
+            // the counter read that follows - so every rebuild of this list published rows with
+            // no mark on them, and it came back a moment later, or a good deal later on a busy
+            // device. Coming back from a conversation rebuilds the list, which is where the mark
+            // was seen to go missing. It is part of building a row now.
+            let namedConversations = UnreadMentions.conversations(
+                unreadCounters: allChats.reduce(into: [String: String]()) { $0[$1.pin] = $1.counter })
+            for chat in tempChats + newChatGroupMaps.values.flatMap({ $0 }) {
+                chat.namesMe = chat.isParent
+                    ? (newChatGroupMaps[chat.groupId] ?? []).contains { namedConversations.contains($0.pin) }
+                    : namedConversations.contains(chat.pin)
             }
             tempChats.sort(by: { $0.pinned > $1.pinned })
             if newArchivedChats.count > 0 {
@@ -2197,16 +2219,30 @@ extension ContactChatViewController {
                 titleView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
                     titleView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
-                    titleView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40.0),
+                    // Fix: forty points of room on the right whatever stood in it, so a long name ran
+                    // on under the time. The name gives way instead, and is cut short where whatever
+                    // is beside it begins - the time on a conversation, the chevron on a group.
+                    titleView.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20.0),
                 ])
                 titleView.font = UIFont.systemFont(ofSize: 14 + String.offset(), weight: .medium)
                 
                 let timeView = UILabel()
                 let viewCounter = UIView()
                 let viewPinned = ChatListPin.imageView()
+                // The "@" of a mention nobody has read yet. It only ever appears alongside a badge:
+                // it is about what is waiting, and nothing waits once the conversation is opened.
+                let viewMention = ChatListMention.imageView()
+                let showsMention = data.namesMe && data.counter != "0"
+                if showsMention {
+                    content.addSubview(viewMention)
+                    viewMention.translatesAutoresizingMaskIntoConstraints = false
+                    NSLayoutConstraint.activate([
+                        viewMention.widthAnchor.constraint(equalToConstant: ChatListMention.side),
+                        viewMention.heightAnchor.constraint(equalToConstant: ChatListMention.side)
+                    ])
+                }
                 
                 if data.counter != "0" {
-                    timeView.textColor = .systemRed
                     content.addSubview(viewCounter)
                     viewCounter.translatesAutoresizingMaskIntoConstraints = false
                     NSLayoutConstraint.activate([
@@ -2251,7 +2287,7 @@ extension ContactChatViewController {
                     // The account's mark in front of the name, as the profile screen shows it.
                     // People only: a group already carries marks of its own.
                     if data.groupId.isEmpty, Utils.accountBadge(forPin: data.pin) != nil {
-                        titleView.attributedText = Utils.nameWithBadge(data.name, forPin: data.pin, size: 16, color: titleView.textColor)
+                        titleView.attributedText = Utils.nameWithBadge(data.name, forPin: data.pin, size: 16, color: titleView.textColor).endingInEllipsis()
                     } else {
                         titleView.text = data.name
                     }
@@ -2261,8 +2297,16 @@ extension ContactChatViewController {
                     NSLayoutConstraint.activate([
                         timeView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10.0),
                         timeView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20.0),
+                        titleView.trailingAnchor.constraint(lessThanOrEqualTo: timeView.leadingAnchor, constant: -8.0),
                     ])
-                    timeView.textColor = .gray
+                    // The time says the same thing about the conversation the badge does, so it is
+                    // marked the same way: red while something in it is waiting to be read.
+                    // Fix: it was set red where the badge is built and then written over with grey
+                    // here, which is the line that ran last - so it never was red.
+                    timeView.textColor = data.counter == "0" ? .gray : .systemRed
+                    // The time is never the part that gives way; the name beside it is.
+                    timeView.setContentCompressionResistancePriority(.required, for: .horizontal)
+                    timeView.setContentHuggingPriority(.required, for: .horizontal)
                     timeView.font = UIFont.systemFont(ofSize: 14 + String.offset())
                     
                     let date = Date(milliseconds: Int64(data.serverDate) ?? 0)
@@ -2295,10 +2339,19 @@ extension ContactChatViewController {
                     let messageView = UILabel()
                     content.addSubview(messageView)
                     messageView.translatesAutoresizingMaskIntoConstraints = false
+                    // Fix: forty points of room on the right, whatever was actually standing in it -
+                    // so a long message ran under the badge, and under the pin and the "@" beside it.
+                    // It ends where the leftmost of them begins; with none of them there it runs to
+                    // the same margin as everything else on the row.
+                    let besideTheMessage: UIView? = (data.pinned != 0 && !data.isFolPinned) ? viewPinned
+                        : showsMention ? viewMention
+                        : data.counter != "0" ? viewCounter : nil
                     NSLayoutConstraint.activate([
                         messageView.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10.0),
                         messageView.topAnchor.constraint(equalTo: titleView.bottomAnchor),
-                        messageView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -40.0),
+                        besideTheMessage.map {
+                            messageView.trailingAnchor.constraint(equalTo: $0.leadingAnchor, constant: -8.0)
+                        } ?? messageView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20.0),
                     ])
                     messageView.textColor = .gray
                     if data.messageText.contains("■") {
@@ -2359,13 +2412,21 @@ extension ContactChatViewController {
                                 stringMessage.append(attributeText)
                             }
                         }
-                        messageView.attributedText = stringMessage
+                        messageView.attributedText = stringMessage.endingInEllipsis()
                     }
                     messageView.numberOfLines = 2
                     
                     if data.counter != "0" {
                         viewCounter.topAnchor.constraint(equalTo: timeView.bottomAnchor, constant: 5.0).isActive = true
                         viewCounter.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20).isActive = true
+                    }
+                    // Between the badge and the pin, on the badge's line.
+                    if showsMention {
+                        NSLayoutConstraint.activate([
+                            viewMention.centerYAnchor.constraint(equalTo: viewCounter.centerYAnchor),
+                            viewMention.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor,
+                                                                  constant: -ChatListMention.gap)
+                        ])
                     }
                     if data.pinned != 0 && !data.isFolPinned {
                         if data.counter == "0" {
@@ -2381,7 +2442,8 @@ extension ContactChatViewController {
                             // where the reference has it.
                             NSLayoutConstraint.activate([
                                 viewPinned.centerYAnchor.constraint(equalTo: viewCounter.centerYAnchor),
-                                viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor,
+                                viewPinned.trailingAnchor.constraint(equalTo: showsMention ? viewMention.leadingAnchor
+                                                                                           : viewCounter.leadingAnchor,
                                                                      constant: -ChatListPin.gapToBadge)
                             ])
                         }
@@ -2406,6 +2468,19 @@ extension ContactChatViewController {
                         viewCounter.trailingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: -5).isActive = true
                         viewCounter.centerYAnchor.constraint(equalTo: content.centerYAnchor).isActive = true
                     }
+                    if showsMention {
+                        NSLayoutConstraint.activate([
+                            viewMention.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                            viewMention.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor,
+                                                                  constant: -ChatListMention.gap)
+                        ])
+                    }
+                    // And the group's name stops where the first of them begins.
+                    let besideTheName: UIView = (data.pinned != 0 && !data.isFolPinned) ? viewPinned
+                        : showsMention ? viewMention
+                        : data.counter != "0" ? viewCounter : imageView
+                    titleView.trailingAnchor.constraint(lessThanOrEqualTo: besideTheName.leadingAnchor,
+                                                        constant: -8.0).isActive = true
                     if data.pinned != 0 && !data.isFolPinned {
                         NSLayoutConstraint.activate([
                             viewPinned.centerYAnchor.constraint(equalTo: content.centerYAnchor)
@@ -2416,7 +2491,8 @@ extension ContactChatViewController {
                             ])
                         } else {
                             NSLayoutConstraint.activate([
-                                viewPinned.trailingAnchor.constraint(equalTo: viewCounter.leadingAnchor,
+                                viewPinned.trailingAnchor.constraint(equalTo: showsMention ? viewMention.leadingAnchor
+                                                                                           : viewCounter.leadingAnchor,
                                                                      constant: -ChatListPin.gapToBadge)
                             ])
                         }

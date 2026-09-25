@@ -312,19 +312,61 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         }
         
         buttonSendChat.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
+        GlassLook.imageChanged(buttonSendChat)
         buttonSendChat.circle()
         buttonSendChat.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
         buttonSendChat.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+        // Wrapped rather than made a glass button: the microphone shares its glass with the
+        // camera beside it (see VideoNoteEntryPoint), and only a wrapping glass can be shared.
+        GlassLook.wrap(buttonSendChat, tint: buttonSendChat.backgroundColor)
         textFieldSend.layer.cornerRadius = textFieldSend.maxCornerRadius()
         textFieldSend.layer.borderWidth = 1.0
         textFieldSend.text = "Send message".localized()
         textFieldSend.textColor = UIColor.lightGray
         textFieldSend.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        textFieldSend.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 11, right: 40)
+        textFieldSend.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: 40)
         textFieldSend.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.5).cgColor
         textFieldSend.font = UIFont.systemFont(ofSize: 12 + offset())
         textFieldSend.delegate = self
         textFieldSend.allowsEditingTextAttributes = true
+        // After the font: the one-line height below is measured off it.
+        // The glass takes the field's place in the bar, so the outlets that move the field must
+        // now move the glass.
+        let fieldGlass = GlassLook.adopt(textFieldSend, tint: nil, radius: textFieldSend.layer.cornerRadius)
+        // Fix: crashed on the bot chat, whose scene never connected this outlet - the field
+        // there has no reply preview to make room for. An outlet that is nil has nothing to
+        // re-home.
+        if let top = constraintTopTextField {
+            constraintTopTextField = fieldGlass.rehomed(top)
+        }
+        if #available(iOS 26.0, *) {
+            // The field's right end runs on under the send button; the scroll indicator that
+            // appears once the text is taller than the field stands clear of it, as the
+            // reference's does, rather than hiding behind the button.
+            textFieldSend.verticalScrollIndicatorInsets = UIEdgeInsets(top: 6, left: 0, bottom: 6, right: textFieldSend.textContainerInset.right)
+        }
+        if #available(iOS 26.0, *), let pins = fieldGlass.pins {
+            // Fix: the margin above and below the text used to be the text view's own inset, and
+            // an inset is only an offset of the content - once the field scrolled, the tail of the
+            // line above ran on into the top margin and was cut there, mid-glyph. The margin is
+            // the glass's now: the text view is 11pt in from the glass's top and bottom and has no
+            // vertical inset of its own, so whatever scrolls is clipped at the text's own edge
+            // and the margin is always empty, scrolled or not - which is the reference's look.
+            // Fix: measured before the font was set, the one-line field opened at the storyboard
+            // font's height and shrank to the smaller font's the first time it was edited. The
+            // block runs after the font now, and a line is centred in the 18pt that make a
+            // 40pt capsule with the glass's margins, so one line is 40pt whichever font.
+            let line = ceil((textFieldSend.font ?? UIFont.systemFont(ofSize: 12 + offset())).lineHeight)
+            let pad = max(0, (18 - line) / 2)
+            textFieldSend.textContainerInset.top = pad
+            textFieldSend.textContainerInset.bottom = pad
+            pins.top.constant = 11
+            pins.bottom.constant = -11
+            // The text view's clip is a plain rectangle now - the rounding is the glass's, and a
+            // 20pt radius on a view one line tall would eat into the first letters.
+            textFieldSend.layer.cornerRadius = 0
+            heightTextFieldSend.constant = fieldHeight(for: textFieldSend)
+        }
         
         navigationItem.rightBarButtonItem?.tintColor = UIColor.secondaryColor
         
@@ -609,8 +651,9 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
                 if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized()) {
                     textFieldSend.text = ""
                 }
-                if (self.heightTextFieldSend.constant != 40) {
-                    self.heightTextFieldSend.constant = 40
+                let oneLine = self.fieldHeight(for: self.textFieldSend)
+                if (self.heightTextFieldSend.constant != oneLine) {
+                    self.heightTextFieldSend.constant = oneLine
                 }
                 return
             }
@@ -698,7 +741,7 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
             } else {
                 textFieldSend.text = ""
             }
-            heightTextFieldSend.constant = 40
+            heightTextFieldSend.constant = fieldHeight(for: textFieldSend)
         }
         NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
         // The arrival takes the list up with it; this only finishes the job if it never played.
@@ -877,6 +920,15 @@ public class ChatGPTBotView: UIViewController, UIGestureRecognizerDelegate {
         // the touch back the moment the finger moves, and the pressed look is lifted with it.
         tableChatView.delaysContentTouches = false
         tableChatView.panGestureRecognizer.delaysTouchesBegan = false
+        // Fix: iOS 26 blurs the top edge of a scroll view that runs under a bar - a soft white
+        // band across the first row, over whatever the wallpaper and the topmost bubble were.
+        // It read as the date header having a background, and it does not: the header's
+        // container is clear. The list is meant to show through to the bar, the way the media
+        // viewer already does, so the effect is switched off the same way it is there.
+        if #available(iOS 26.0, *) {
+            tableChatView.topEdgeEffect.isHidden = true
+            tableChatView.bottomEdgeEffect.isHidden = true
+        }
         tableChatView.dataSource = self
         tableChatView.keyboardDismissMode = .interactive
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
@@ -2437,7 +2489,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             } else {
                 containerMessage.backgroundColor = .blueBubbleColor
             }
-            containerMessage.layer.cornerRadius = 10.0
+            containerMessage.layer.cornerRadius = 18
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner, .layerMinXMinYCorner]
             containerMessage.clipsToBounds = true
             (containerMessage as? BubbleView)?.lift()
@@ -2473,7 +2525,7 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             } else {
                 containerMessage.backgroundColor = .whiteBubbleColor
             }
-            containerMessage.layer.cornerRadius = 10.0
+            containerMessage.layer.cornerRadius = 18
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
             containerMessage.clipsToBounds = true
             (containerMessage as? BubbleView)?.lift()
@@ -2536,13 +2588,13 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
             messageText.lineBreakMode = .byWordWrapping
             containerMessage.addSubview(messageText)
             messageText.translatesAutoresizingMaskIntoConstraints = false
-            let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
+            let topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleTextInset.top)
             topMarginText.isActive = true
             messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
             messageText.font = .systemFont(ofSize: 12 + offset())
-            messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-            messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15).isActive = true
-            messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+            messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleTextInset.side).isActive = true
+            messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -BubbleTextInset.bottom).isActive = true
+            messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleTextInset.side).isActive = true
             let textChat = (dataMessages[indexPath.row]["message_text"] as? String) ?? ""
             messageText.attributedText = textChat.richText()
         } else {
@@ -3069,20 +3121,71 @@ extension ChatGPTBotView: UITableViewDelegate, UITableViewDataSource {
 }
 
 extension ChatGPTBotView: UITextViewDelegate {
+
+    /// Puts the field's scroll on a line boundary, once the layout that follows a change has run.
+    ///
+    /// Fix: the field's height is a whole number of lines now, but where it was scrolled to was
+    /// not. A text view scrolls just far enough to show the caret when a line is added, and "just
+    /// enough" is measured off the caret, which is shorter than its line - so the field came to
+    /// rest a few points into a line: the top line cut, the margin under the last one gone, and
+    /// six lines showing where five fit. Snapped to whole lines, the margins are always the insets.
+    fileprivate func snapFieldScroll(_ textView: UITextView) {
+        DispatchQueue.main.async {
+            let layout = textView.layoutManager
+            var range = NSRange()
+            let pitch = layout.numberOfGlyphs > 0 ? layout.lineFragmentRect(forGlyphAt: 0, effectiveRange: &range).height : 0
+            let farthest = max(0, textView.contentSize.height - textView.bounds.height)
+            let now = textView.contentOffset.y
+            let snapped = pitch > 0 ? min(max((now / pitch).rounded() * pitch, 0), farthest) : 0
+            if abs(snapped - now) > 0.5 {
+                textView.contentOffset.y = snapped
+            }
+        }
+    }
+
+    /// How tall the field should be for what is in it: its insets plus its lines, up to five of
+    /// them - past five it scrolls, and what shows is then exactly five whole lines with the same
+    /// margin above the first as below the last, the way the reference's field behaves.
+    ///
+    /// Fix: the cap was a number - 95pt, later five times the font's nominal line height - and
+    /// the lines are not laid out at that height: the text's own font, its leading, a mention or
+    /// a bold run all make a line taller than the nominal, so the cap fell mid-line and the
+    /// field, scrolled to either end, showed a cut line and no margin. The lines are read off the
+    /// layout itself now, so the height is always a whole number of them.
+    fileprivate func fieldHeight(for textView: UITextView) -> CGFloat {
+        let insets = textView.textContainerInset
+        let layout = textView.layoutManager
+        layout.ensureLayout(for: textView.textContainer)
+        var lines: [CGRect] = []
+        var index = 0
+        while index < layout.numberOfGlyphs {
+            var range = NSRange()
+            lines.append(layout.lineFragmentRect(forGlyphAt: index, effectiveRange: &range))
+            index = NSMaxRange(range)
+        }
+        // The empty line after a trailing newline is a line too.
+        if layout.extraLineFragmentRect.height > 0 {
+            lines.append(layout.extraLineFragmentRect)
+        }
+        let shown = lines.prefix(5)
+        // One line at least: 18pt of text view on glass, where the margins are the glass's and
+        // 18 + 22 is the 40pt capsule; the 40pt the field was drawn with everywhere else.
+        let floor: CGFloat = GlassLook.glass(around: textView) != nil ? 18 : 40
+        guard let last = shown.last else { return floor }
+        return max(floor, ceil(insets.top + last.maxY + insets.bottom))
+    }
     public func textViewDidChangeSelection(_ textView: UITextView) {
         let cursorPosition = textView.caretRect(for: self.textFieldSend.selectedTextRange!.start).origin
         let currentLine = Int(cursorPosition.y / self.textFieldSend.font!.lineHeight)
         UIView.animate(withDuration: 0.3) {
             let numberOfLines = textView.textContainer.lineBreakMode == .byWordWrapping ? Int(textView.contentSize.height / textView.font!.lineHeight) - 1 : 1
-            if currentLine == 0 && numberOfLines == 1 {
-                self.heightTextFieldSend.constant = 40
-            } else if self.heightTextFieldSend.constant < 95.0 && currentLine >= 4 {
-                self.heightTextFieldSend.constant = 95.0
-            } else if currentLine < 4 && numberOfLines < 5 {
-                if (self.textFieldSend.text.count > 0 && self.heightTextFieldSend.constant != self.textFieldSend.contentSize.height) {
-                    self.heightTextFieldSend.constant = self.textFieldSend.contentSize.height
-                }
+            // One rule for every size: the field is as tall as its lines, five at most.
+            _ = (currentLine, numberOfLines)
+            let height = self.fieldHeight(for: self.textFieldSend)
+            if self.heightTextFieldSend.constant != height {
+                self.heightTextFieldSend.constant = height
             }
+            self.snapFieldScroll(self.textFieldSend)
         }
     }
     

@@ -19,10 +19,13 @@ import CryptoKit
 import WebKit
 import CommonCrypto
 import NexilisZTA
+#if canImport(NexilisSecurityShield)
+import NexilisSecurityShield
+#endif
 import AudioToolbox
 
 public class Nexilis: NSObject {
-    public static var cpaasVersion = "6.0.5"
+    public static var cpaasVersion = "6.0.7"
     public static var sAPIKey = ""
     
     public static var ADDRESS = ""
@@ -148,11 +151,28 @@ public class Nexilis: NSObject {
     }
     
     public static func connect(apiKey: String, userId:String = "", delegate: ConnectDelegate, showButton: Bool = true, fromMAB: Bool = false) {
+        // RIL: Lite's backend is one of the URLs RILProtection signs when the host's RIL opt-in
+        // says ProtectNexilisLite. The base can change once connected, so it is read per request.
+        // Uploads are left out - their bodies are files, over what a signature covers.
+        APISZTA.registerNexilisLiteRILScope {
+            let base = Utils.getURLBase()
+            return (base: [base], excluded: [base + "uploader"])
+        }
         guard SentinelSecurityGate.isAuthorized else {
             NXLogger.general.publicError("[Nexilis] connect ditolak: Sentinel belum mengotorisasi.")
             delegate.onFailed(error: "Sentinel authorization is required before Nexilis.connect().")
             return
         }
+        // Second gate: the SecurityShield policy, which APIS.connect runs between the two. A host
+        // calling Nexilis.connect directly does not get to skip it.
+        guard !securityShieldRequired || SecurityShield.hasPassed else {
+            NXLogger.general.publicError("[Nexilis] connect ditolak: SecurityShield belum lolos.")
+            delegate.onFailed(error: "SecurityShield must pass before Nexilis.connect() - use APIS.connect().")
+            return
+        }
+        // A pre-asset sign-in (LiteBootstrapAuth) already signed this person in during the chain:
+        // its result is applied here, once, instead of putting the old form up a second time.
+        LiteBootstrapAuth.applyPendingReceipt()
         // Fix: the mode was persisted only further down, after the master key had been created.
         // At mode 1 that creation can refuse - a biometric-bound key on a device that cannot
         // hold one - and connect() returned before the mode was ever written. Everything that
@@ -166,6 +186,12 @@ public class Nexilis: NSObject {
         showFB = showButton
         Nexilis.fromMAB = fromMAB
         floatingButton = FloatingButton()
+        // A host that put its main interface up while connect() was still waiting on ZTA and
+        // SecurityShield asked for the button before it existed; it gets it now.
+        if addFBPending {
+            addFBPending = false
+            DispatchQueue.main.async { addFB() }
+        }
         
         Nexilis.shared.createDelegate()
         
@@ -173,7 +199,11 @@ public class Nexilis: NSObject {
         
         Nexilis.showButtonFB = showButton
         
-        SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
+        // A pre-asset sign-in has just verified the user (its Face ID started Lite's timer): keep it, or the
+        // master key and every screen that follows would ask again within seconds of the sign-in.
+        if LiteBootstrapAuth.pendingContinuation == nil {
+            SecureUserDefaults.shared.removeValue(forKey: "lastAuthenticationTime")
+        }
         
         do {
             try MasterKeyUtil.shared.generateAndStoreMasterKey()
@@ -214,6 +244,9 @@ public class Nexilis: NSObject {
         // anything that can return early.
 
         IncomingThread.default.run()
+        // Modes 1 and 2: TFA again after the app was away longer than authentication_duration, Face ID again
+        // for a protected screen once the timer has run out.
+        LiteAuthenticationGate.install()
         
         imageCache.countLimit = 100
         imageCache.totalCostLimit = 1024 * 1024 * 200
@@ -221,6 +254,9 @@ public class Nexilis: NSObject {
         DispatchQueue.global(qos: .userInitiated).async {
             let bExpectedMode = Utils.isHSAMode() || Utils.isMiddleMode()
             if bExpectedMode {
+                // Signed in by the pre-asset form in the chain: carry on from there, not from Lite's
+                // own Sign-In Method / TFA screens, which would ask the same person a second time.
+                if LiteBootstrapAuth.continueAfterSignIn() { return }
                 if !fromMAB && !Utils.getSetProfile() {
                     DispatchQueue.main.async {
                         var viewController = UIApplication.shared.windows.first?.rootViewController
@@ -282,6 +318,7 @@ public class Nexilis: NSObject {
                 hasInit = true
                 let address = Nexilis.getAddressNew(apiKey:Nexilis.sAPIKey)
                 if address.isEmpty {
+                    NXLogger.general.publicError("[Connect] alamat server CLX tidak didapat (getAddressNew kosong)")
                     return ""
                 }
 //                print("ADDRESS LEWAT: \(address)")
@@ -294,12 +331,19 @@ public class Nexilis: NSObject {
                 }
 //                print("INIT CONNECTION: \(id)")
                 try API.initConnection(sAPIK: Nexilis.sAPIKey, cbiI: Callback(), sTCPAddr: Nexilis.ADDRESS, nTCPPort: Nexilis.PORT, sUserID: id, sStartWH: "09:00", bUseTLS: true)
+                NXLogger.general.publicInfo("[Connect] initConnection dipanggil (port \(Nexilis.PORT), connection id \(id.count) karakter)")
             }
             if !isChecking {
+                var waited = 0
                 while (API.nGetCLXConnState() == 0) {
 //                    print("API.nGetCLXConnState() == 0")
                     Thread.sleep(forTimeInterval: 0.5)
+                    waited += 1
+                    if waited % 20 == 0 {
+                        NXLogger.general.publicInfo("[Connect] menunggu koneksi CLX \(waited / 2)s (inet=\(API.bInetConnAvailable()))")
+                    }
                 }
+                if waited > 0 { NXLogger.general.publicInfo("[Connect] koneksi CLX tersambung setelah \(Double(waited) / 2)s") }
             }
             return id
         } catch {
@@ -449,7 +493,10 @@ public class Nexilis: NSObject {
             // at most - see pullInstantMessagingIfStale.
             pullInstantMessagingIfStale()
 
-            startSecurityShield(apiKey: apiKey)
+            // The policy itself ran before connecting (APIS.connect). From here its reports carry
+            // the signed-in user, and any that could not be delivered earlier are retried.
+            if let me = User.getMyPin() { SecurityShield.setUserPin(me) }
+            SecurityShield.flushPendingReports()
 
             if let me = User.getMyPin() {
                 if Utils.getSetProfile() {
@@ -526,33 +573,6 @@ public class Nexilis: NSObject {
         }
     }
     
-    private static var securityShieldStarted = false
-    private static let securityShieldLock = NSLock()
-
-    /// Starts the security checks from inside the library, the way Android does it.
-    ///
-    /// On Android the check belongs to the library, not to the app that hosts it: `API.startInit`
-    /// (io.nexilis.dm) fires `SecurityShield.getInstance().check(...)` on a thread of its own right
-    /// after `initService` and `getFeatureAccess`, and the app host's own call in `MainActivity` is
-    /// commented out. Ours sat in the host's `AppDelegate.onSuccess`, which left the checks out of
-    /// any other app embedding NexilisLite and tied them to a delegate callback that only fires
-    /// once a pin exists. Same spot in the sequence as Android now, so every host gets them.
-    ///
-    /// Runs alongside the app - nothing here waits on the result. A device that fails is told so by
-    /// SecurityShield itself, through an alert it puts up on a window of its own.
-    static func startSecurityShield(apiKey: String) {
-        // startConnect runs again on reconnect and re-login; the checks are meant to happen once
-        // per launch, and starting a second chain would stack a second alert on top of the first.
-        securityShieldLock.lock()
-        let alreadyStarted = securityShieldStarted
-        securityShieldStarted = true
-        securityShieldLock.unlock()
-        guard !alreadyStarted else {
-            return
-        }
-        SecurityShield.check(appName: APIS.getAppNm(), apiKey: apiKey)
-    }
-
     private static var ringtoneID: SystemSoundID = 0
 
     public static func playRingtoneCall() {
@@ -631,7 +651,21 @@ public class Nexilis: NSObject {
         Nexilis.sharedAudioPlayer?.stop()
     }
     
+    /// False when the host (APIS.connect(securityShield: false)) or a no-code shield's plist
+    /// switched SecurityShield off for this app.
+    static var securityShieldRequired = true
+
+    /// Set when addFB() was called before connect() created the button.
+    private static var addFBPending = false
+
     public static func addFB() {
+        // The button is created by connect(), which now waits for NexilisZTA and SecurityShield.
+        // A host that switches to its main interface as soon as ZTA is ready (OneApp's
+        // SceneDelegate) calls this first - that used to add a nil button and crash.
+        guard floatingButton != nil else {
+            addFBPending = true
+            return
+        }
         if let keyWindow = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) {
             keyWindow.addSubview(floatingButton)
         }
@@ -873,7 +907,7 @@ public class Nexilis: NSObject {
                                         Utils.setConfigModeFB(value: df)
                                         DispatchQueue.main.async {
                                             if Nexilis.showFB {
-                                                Nexilis.floatingButton.removeFromSuperview()
+                                                Nexilis.floatingButton?.removeFromSuperview()
                                                 FloatingButton.datePull = nil
                                                 Nexilis.floatingButton = FloatingButton()
                                                 Nexilis.addFB()
@@ -976,7 +1010,10 @@ public class Nexilis: NSObject {
                 print("gagal getfeatureaccess:")
                 isGettingFeatureAccess = false
                 if Utils.getSecureFolderOffline() == "0" || (Utils.getSecureFolderOffline() == "1" && !Utils.getSetProfile()) {
-                    getFeatureAccess()
+                    // writeSync answers nil at once while the socket is down, and an immediate retry
+                    // turned that into a busy loop - millions of attempts a minute, the CPU and the
+                    // log flat out - until the connection came up. Two seconds apart instead.
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) { getFeatureAccess() }
 //                    DispatchQueue.main.async {
 //                        if !APIS.checkAppStateisBackground() {
 //                            APIS.showRestartApp()
@@ -1144,7 +1181,12 @@ public class Nexilis: NSObject {
         navigationController.navigationBar.titleTextAttributes = textAttributes
         navigationController.modalPresentationStyle = .fullScreen
         navigationController.modalTransitionStyle = .crossDissolve
-        UIApplication.shared.windows.first?.rootViewController?.present(navigationController, animated: false)
+        // From the top of what is presented: from the root alone, a screen already presented over it (a chat
+        // opened modally) made this present fail with nothing but a console warning.
+        var top = UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController
+            ?? UIApplication.shared.windows.first?.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed { top = presented }
+        top?.present(navigationController, animated: false)
     }
     
     public static func destroyAll() {
@@ -1685,8 +1727,8 @@ public class Nexilis: NSObject {
         } else if index == IDX_CONFERENCE_ROOM_FORM {
             APIS.openConference()
         } else if index == IDX_SETTING {
-            if Nexilis.floatingButton.mySettingDelegate != nil {
-                Nexilis.floatingButton.mySettingDelegate?.settingDelegate()
+            if Nexilis.floatingButton?.mySettingDelegate != nil {
+                Nexilis.floatingButton?.mySettingDelegate?.settingDelegate()
             } else {
                 APIS.openSetting()
             }
@@ -1858,41 +1900,63 @@ public class Nexilis: NSObject {
         return false
     }
 
+    /// Sends `message` and blocks until its answer arrives or `timeout` runs out.
+    ///
+    /// Fix: this crashed, now and then, on the first requests after the app was brought back -
+    /// `EXC_BREAKPOINT` in `incomingData`, on `groupWait?.leave()`. A `DispatchGroup` traps when
+    /// it is left more often than it was entered, and the group here was entered once and could
+    /// be left twice: the answer arriving in the same moment the wait timed out (each side found
+    /// the group still in the table, and each left it), or arriving twice, as a server that
+    /// re-sends does. The two sides also guarded the table with different locks - the queue
+    /// here, a plain lock in `incomingData` - so neither ever excluded the other.
+    ///
+    /// One lock now, and the group is *taken out of the table* by whichever side leaves it, in
+    /// the same critical section that finds it. A second answer finds no group; a timeout that
+    /// races an answer finds no group; and a group is only ever left by the one that removed it.
     public static func writeAndWait(message: TMessage, timeout: Int = 15 * 1000) -> TMessage? {
-        if message.getStatus().isEmpty {
+        let status = message.getStatus()
+        if status.isEmpty {
             return nil
         }
 
-        var groupWait: DispatchGroup?
-
+        let groupWait = DispatchGroup()
+        groupWait.enter()
         syncQueue.sync {
-            listDispatchGroups[message.getStatus()] = DispatchGroup()
-            groupWait = listDispatchGroups[message.getStatus()]
-            groupWait?.enter()
-            waitQueue[message.getStatus()] = message
+            listDispatchGroups[status] = groupWait
+            waitQueue[status] = message
         }
 
         _ = write(message: message, timeout: timeout)
 
-        if groupWait?.wait(timeout: .now() + .milliseconds(timeout)) == .timedOut {
+        if groupWait.wait(timeout: .now() + .milliseconds(timeout)) == .timedOut {
+            var stillWaiting = false
             syncQueue.sync {
-                waitQueue.removeValue(forKey: message.getStatus())
-                listDispatchGroups.removeValue(forKey: message.getStatus())
-                groupWait?.leave()
+                // Only this call's own group: another request with the same status may have put
+                // its group in the table since, and that one is not ours to take.
+                if listDispatchGroups[status] === groupWait {
+                    listDispatchGroups.removeValue(forKey: status)
+                    stillWaiting = true
+                }
+                waitQueue.removeValue(forKey: status)
+            }
+            if stillWaiting {
+                // Nobody answered, so nobody left it: balanced here, outside the lock.
+                groupWait.leave()
             }
             return nil
         }
 
         var response: TMessage?
         syncQueue.sync {
-            listDispatchGroups.removeValue(forKey: message.getStatus())
-            response = waitQueue.removeValue(forKey: message.getStatus())
+            if listDispatchGroups[status] === groupWait {
+                listDispatchGroups.removeValue(forKey: status)
+            }
+            response = waitQueue.removeValue(forKey: status)
         }
         return response
     }
     
     private static let incomingDataQueue = DispatchQueue(label: "com.nexilis.incomingData")
-    private static let waitQueueLock = NSLock()
 
     static func incomingData(packetId: String, data: AnyObject) {
         // Semua incoming data diproses secara serial
@@ -1914,20 +1978,22 @@ public class Nexilis: NSObject {
             // Sekarang aman karena di serial queue
             message.mBodies[CoreMessage_TMessageKey.PACKET_ID] = packetId
             
-            waitQueueLock.lock()
-            let waitEntry = waitQueue[message.getStatus()]
-            waitQueueLock.unlock()
-            
-            if waitEntry != nil {
-                if message.mBodies.keys.contains(CoreMessage_TMessageKey.ERRCOD) {
-                    waitQueueLock.lock()
-                    waitQueue[message.getStatus()] = message
-                    let groupWait = listDispatchGroups[message.getStatus()]
-                    waitQueueLock.unlock()
-                    
-                    groupWait?.leave()  // leave SETELAH unlock untuk hindari deadlock
-                    return
+            // An answer somebody is waiting for: handed to them through the table, and the group
+            // taken out of it in the same breath - see writeAndWait for why it must be taken.
+            var answered = false
+            var groupWait: DispatchGroup?
+            let status = message.getStatus()
+            syncQueue.sync {
+                if waitQueue[status] != nil, message.mBodies.keys.contains(CoreMessage_TMessageKey.ERRCOD) {
+                    waitQueue[status] = message
+                    groupWait = listDispatchGroups.removeValue(forKey: status)
+                    answered = true
                 }
+            }
+            if answered {
+                // Left outside the lock, so the waiter waking up can take the lock at once.
+                groupWait?.leave()
+                return
             }
             
             IncomingThread.default.addQueue(message: message)

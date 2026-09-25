@@ -885,6 +885,11 @@ class ListGroupImages: UIViewController, UITableViewDataSource, UITableViewDeleg
     }
 
     /// The pixel size of an image file, read from its header rather than by decoding it.
+    /// Whether the file is here to be measured - false while it is still on its way.
+    static func isMeasurable(_ image: String) -> Bool {
+        return pixelSize(of: image) != nil
+    }
+
     private static func pixelSize(of image: String) -> CGSize? {
         measuredSizesLock.lock()
         let known = measuredSizes[image]

@@ -332,6 +332,22 @@ public final class VideoNoteComposer: UIView {
         bottomBar.addSubview(sendButton)
         sendButton.translatesAutoresizingMaskIntoConstraints = false
 
+        if #available(iOS 26.0, *) {
+            // The reference on iOS 26: no band behind the buttons, each a round glass button of
+            // its own - the bin, the stop and the flip clear with their glyphs in colour, the
+            // send tinted like the input bar's.
+            bottomBar.backgroundColor = .clear
+            GlassLook.adopt(binButton, tint: nil, foreground: .label,
+                            symbol: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular))
+            GlassLook.adopt(stopButton, tint: nil, foreground: .systemRed,
+                            symbol: UIImage.SymbolConfiguration(pointSize: 24, weight: .regular))
+            // The flip is the one grey button: a grey slab with a white glyph, as the reference has it.
+            GlassLook.adopt(flipButton, tint: UIColor(white: 0.45, alpha: 0.6), foreground: .white,
+                            symbol: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium))
+            GlassLook.adopt(sendButton, tint: .mainColor, foreground: .white,
+                            symbol: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold))
+        }
+
         let tapCircle = UITapGestureRecognizer(target: self, action: #selector(circleTapped))
         circle.addGestureRecognizer(tapCircle)
         circle.isUserInteractionEnabled = true
@@ -1283,6 +1299,9 @@ public final class VideoNoteEntryPoint: NSObject, UIGestureRecognizerDelegate {
     /// Sits behind the camera and the microphone both, so the two read as one control with two
     /// halves rather than as two buttons that happen to be next to each other.
     private let capsule = UIView()
+    /// On glass: the shared capsule's leading edge at the camera, or at the microphone alone.
+    private var capsuleWide: NSLayoutConstraint?
+    private var capsuleNarrow: NSLayoutConstraint?
 
     private weak var owner: UIViewController?
     private weak var anchor: UIButton?
@@ -1330,22 +1349,44 @@ public final class VideoNoteEntryPoint: NSObject, UIGestureRecognizerDelegate {
         capsule.layer.masksToBounds = true
         capsule.isUserInteractionEnabled = false
 
-        // Behind both, then the camera in front of it - the microphone is already there and keeps
-        // its own place in the order.
-        bar.insertSubview(capsule, belowSubview: anchor)
-        bar.insertSubview(button, aboveSubview: capsule)
-        NSLayoutConstraint.activate([
-            // Flush against the microphone, so there is no seam between the two halves.
-            button.trailingAnchor.constraint(equalTo: anchor.leadingAnchor),
-            button.centerYAnchor.constraint(equalTo: anchor.centerYAnchor),
-            button.widthAnchor.constraint(equalToConstant: 30),
-            button.heightAnchor.constraint(equalToConstant: 40),
+        if #available(iOS 26.0, *), let glassPin = GlassLook.pin(of: anchor, .leading) {
+            // On glass the microphone sits in an interactive glass capsule of its own (see
+            // `GlassLook.wrap`), and `bar` here is that capsule's content view. The camera goes in
+            // beside it, and the capsule's leading edge is moved from the microphone to the camera
+            // so the two share one piece of glass - the way the header's search and menu do - and
+            // a press on either swells the whole of it. When the camera is away the edge goes back
+            // to the microphone and the capsule is a circle again.
+            bar.insertSubview(button, belowSubview: anchor)
+            glassPin.isActive = false
+            let wide = bar.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: -6)
+            let narrow = bar.leadingAnchor.constraint(equalTo: anchor.leadingAnchor)
+            capsuleWide = wide
+            capsuleNarrow = narrow
+            NSLayoutConstraint.activate([
+                wide,
+                button.trailingAnchor.constraint(equalTo: anchor.leadingAnchor, constant: -4),
+                button.centerYAnchor.constraint(equalTo: anchor.centerYAnchor),
+                button.widthAnchor.constraint(equalTo: anchor.widthAnchor),
+                button.heightAnchor.constraint(equalTo: anchor.heightAnchor)
+            ])
+        } else {
+            // Behind both, then the camera in front of it - the microphone is already there and
+            // keeps its own place in the order.
+            bar.insertSubview(capsule, belowSubview: anchor)
+            bar.insertSubview(button, aboveSubview: capsule)
+            NSLayoutConstraint.activate([
+                // Flush against the microphone, so there is no seam between the two halves.
+                button.trailingAnchor.constraint(equalTo: anchor.leadingAnchor),
+                button.centerYAnchor.constraint(equalTo: anchor.centerYAnchor),
+                button.widthAnchor.constraint(equalToConstant: 30),
+                button.heightAnchor.constraint(equalToConstant: 40),
 
-            capsule.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: -6),
-            capsule.trailingAnchor.constraint(equalTo: anchor.trailingAnchor),
-            capsule.topAnchor.constraint(equalTo: anchor.topAnchor),
-            capsule.bottomAnchor.constraint(equalTo: anchor.bottomAnchor)
-        ])
+                capsule.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: -6),
+                capsule.trailingAnchor.constraint(equalTo: anchor.trailingAnchor),
+                capsule.topAnchor.constraint(equalTo: anchor.topAnchor),
+                capsule.bottomAnchor.constraint(equalTo: anchor.bottomAnchor)
+            ])
+        }
 
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
         hold.minimumPressDuration = 0.2
@@ -1366,6 +1407,11 @@ public final class VideoNoteEntryPoint: NSObject, UIGestureRecognizerDelegate {
     public func setHidden(_ hidden: Bool) {
         button.isHidden = hidden
         capsule.isHidden = hidden
+        // The shared glass shrinks to the microphone alone while the camera is away.
+        if let wide = capsuleWide, let narrow = capsuleNarrow {
+            (hidden ? wide : narrow).isActive = false
+            (hidden ? narrow : wide).isActive = true
+        }
     }
 
     /// Takes the microphone's own colours rather than guessing at them, so the two halves cannot
@@ -1373,6 +1419,11 @@ public final class VideoNoteEntryPoint: NSObject, UIGestureRecognizerDelegate {
     /// microphone does.
     public func matchAppearance(background: UIColor?, tint: UIColor) {
         capsule.backgroundColor = background
+        // Before iOS 26 the capsule stands on the same ground the bar's other controls do - see
+        // ChatMentionList.dress, which leaves a system with glass alone.
+        ChatMentionList.dress(capsule, colour: background ?? .mainColor)
+        // On glass the colour is the shared capsule's tint, set when the microphone was wrapped;
+        // the camera is a plain glyph on it.
         button.tintColor = tint
     }
 

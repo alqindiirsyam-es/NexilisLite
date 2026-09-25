@@ -104,13 +104,31 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
             self.navigationItem.leftBarButtonItem = leftItem
         }
         
+        // The same ground the profile screen stands on - see ProfileViewController: the app's own
+        // artwork where the account has any, and where it has none the app's white, or its
+        // near-black in the dark.
+        let backdrop = UIView(frame: tableView.bounds)
+        backdrop.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        backdrop.backgroundColor = traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .secondaryColor
+        Utils.addBackground(view: backdrop)
+        tableView.backgroundView = backdrop
+        tableView.backgroundColor = .clear
+
         reload()
+        refreshAttachmentCounts()
         let center: NotificationCenter = NotificationCenter.default
         center.addObserver(self, selector: #selector(updateData(notification:)), name: NSNotification.Name(rawValue: "onGroup"), object: nil)
         center.addObserver(self, selector: #selector(updateData(notification:)), name: NSNotification.Name(rawValue: "onTopic"), object: nil)
         center.addObserver(self, selector: #selector(updateData(notification:)), name: NSNotification.Name(rawValue: "onMember"), object: nil)
     }
     
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Coming back from the media list, some of what was counted may be gone.
+        refreshAttachmentCounts()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         if self.isMovingFromParent {
             self.checkReadMessage?()
@@ -126,7 +144,7 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     }
     
     func reload() {
-        getData { group in
+        getData { group, friends, createdBy in
             // Fix: everything the table reads used to be written right here, on whatever thread
             // the fetch came back on, while only the reload was moved to the main one. UIKit asks
             // a table for its rows during a navigation transition, and it did so while the list of
@@ -134,6 +152,8 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
             // table reads is written on the thread the table is read on.
             DispatchQueue.main.async {
                 self.group = group
+                self.friendPins = friends
+                self.createdByName = createdBy
                 if let myData = self.group?.members.first(where: { member in
                     return member.pin == User.getMyPin()!
                 }) {
@@ -278,63 +298,129 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
         }
     }
     
-    private func getData(completion: @escaping (Group) -> ()) {
-        DispatchQueue.global().async {
-            let query = "select g.group_id, g.f_name, g.image_id, g.quote, g.created_by, g.created_date, g.parent, g.group_type, g.is_open, g.official, g.level from GROUPZ g where g.group_id = '\(self.data)'"
-            Database.shared.database?.inTransaction({ fmdb, rollback in
-                do {
-                    if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query), cursor.next() {
-                        let group = Group(id: cursor.string(forColumnIndex: 0) ?? "",
-                                           name: cursor.string(forColumnIndex: 1) ?? "",
-                                           profile: cursor.string(forColumnIndex: 2) ?? "",
-                                           quote: cursor.string(forColumnIndex: 3) ?? "",
-                                           by: cursor.string(forColumnIndex: 4) ?? "",
-                                           date: cursor.string(forColumnIndex: 5) ?? "",
-                                           parent: cursor.string(forColumnIndex: 6) ?? "",
-                                           groupType: cursor.string(forColumnIndex: 7) ?? "",
-                                           isOpen: cursor.string(forColumnIndex: 8) ?? "",
-                                           official: cursor.string(forColumnIndex: 9) ?? "",
-                                        level: cursor.string(forColumnIndex: 10) ?? "")
-                        cursor.close()
-                        
-                        group.topics.append(Topic(chatId: "", title: "Lounge".localized(), thumb: ""))
-                        
-                        if let cursorTopic = Database.shared.getRecords(fmdb: fmdb, query: "select chat_id, title, thumb from DISCUSSION_FORUM where group_id = '\(self.data)'") {
-                            while cursorTopic.next() {
-                                let topic = Topic(chatId: cursorTopic.string(forColumnIndex: 0) ?? "",
-                                                  title: cursorTopic.string(forColumnIndex: 1) ?? "",
-                                                  thumb: cursorTopic.string(forColumnIndex: 2) ?? "")
-                                group.topics.append(topic)
-                            }
-                            cursorTopic.close()
-                        }
-                        
-                        if let cursorMember = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin, first_name, last_name, thumb_id, position from GROUPZ_MEMBER where group_id = '\(self.data)' order by 2 asc") {
-                            while cursorMember.next() {
-                                let member = Member(pin: cursorMember.string(forColumnIndex: 0) ?? "",
-                                                firstName: cursorMember.string(forColumnIndex: 1) ?? "",
-                                                lastName: cursorMember.string(forColumnIndex: 2) ?? "",
-                                                thumb: cursorMember.string(forColumnIndex: 3) ?? "",
-                                                position: cursorMember.string(forColumnIndex: 4) ?? "")
-                                if let cursorUser = Database.shared.getRecords(fmdb: fmdb, query: "SELECT user_type, official_account, image_id FROM BUDDY where f_pin='\(member.pin)'"), cursorUser.next() {
-                                    member.userType = cursorUser.string(forColumnIndex: 0)
-                                    member.official = cursorUser.string(forColumnIndex: 1)
-                                    member.thumb = cursorUser.string(forColumnIndex: 2) ?? ""
-                                    cursorUser.close()
-                                }
-                                group.members.append(member)
-                            }
-                            cursorMember.close()
-                        }
-                        
-                        completion(group)
-                    }
-                } catch {
-                    rollback.pointee = true
-                    print("Access database error: \(error.localizedDescription)")
+    /// What the two rows above the topics say they hold. Counted away from the drawing, because
+    /// counting them is a walk over every message of the conversation - see
+    /// refreshAttachmentCounts.
+    private var mediaCount = 0
+    private var starredCount = 0
+
+    /// Counts what this conversation is keeping, and draws the two rows again when it knows.
+    private func refreshAttachmentCounts() {
+        let scope = EditorStarMessages.groupScope(groupId: data, topicChatId: openedTopicChatId)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let media = EditorStarMessages.conversationCount(scope: scope,
+                                                             and: EditorStarMessages.mediaCountCondition)
+            let starred = EditorStarMessages.conversationCount(scope: scope,
+                                                               and: EditorStarMessages.starredCountCondition)
+            DispatchQueue.main.async {
+                guard let self = self, self.mediaCount != media || self.starredCount != starred else {
+                    return
                 }
-            })
+                self.mediaCount = media
+                self.starredCount = starred
+                guard let section = self.sections.firstIndex(of: .attachments),
+                      section < self.tableView.numberOfSections else {
+                    return
+                }
+                self.tableView.reloadSections(IndexSet(integer: section), with: .none)
+            }
         }
+    }
+
+    /// What a member row used to ask the database about, once per row drawn, and now asks the
+    /// set that came back with the members.
+    private var friendPins: Set<String> = []
+    /// Who made the group, looked up once rather than on every pass over the Detail rows.
+    private var createdByName = ""
+
+    // Fix: this was read on a background queue, and the reading on screen said plainly why that
+    // was the wait: the queries themselves came to under fifteen milliseconds, while the block
+    // holding them sat about two seconds waiting for a thread to run on - the global pool being
+    // full of other work already blocked on the database and the network. Nothing here was slow;
+    // it was only queued behind everything else in the app. Fifteen milliseconds is less than a
+    // frame, so it is read here, on the thread that is about to draw it, and the screen has its
+    // group the moment it appears.
+    private func getData(completion: (Group, Set<String>, String) -> ()) {
+        let query = "select g.group_id, g.f_name, g.image_id, g.quote, g.created_by, g.created_date, g.parent, g.group_type, g.is_open, g.official, g.level from GROUPZ g where g.group_id = '\(self.data)'"
+        Database.shared.database?.inTransaction({ fmdb, rollback in
+            do {
+                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: query), cursor.next() {
+                    let group = Group(id: cursor.string(forColumnIndex: 0) ?? "",
+                                       name: cursor.string(forColumnIndex: 1) ?? "",
+                                       profile: cursor.string(forColumnIndex: 2) ?? "",
+                                       quote: cursor.string(forColumnIndex: 3) ?? "",
+                                       by: cursor.string(forColumnIndex: 4) ?? "",
+                                       date: cursor.string(forColumnIndex: 5) ?? "",
+                                       parent: cursor.string(forColumnIndex: 6) ?? "",
+                                       groupType: cursor.string(forColumnIndex: 7) ?? "",
+                                       isOpen: cursor.string(forColumnIndex: 8) ?? "",
+                                       official: cursor.string(forColumnIndex: 9) ?? "",
+                                    level: cursor.string(forColumnIndex: 10) ?? "")
+                    cursor.close()
+                    
+                    group.topics.append(Topic(chatId: "", title: "Lounge".localized(), thumb: ""))
+                    
+                    if let cursorTopic = Database.shared.getRecords(fmdb: fmdb, query: "select chat_id, title, thumb from DISCUSSION_FORUM where group_id = '\(self.data)'") {
+                        while cursorTopic.next() {
+                            let topic = Topic(chatId: cursorTopic.string(forColumnIndex: 0) ?? "",
+                                              title: cursorTopic.string(forColumnIndex: 1) ?? "",
+                                              thumb: cursorTopic.string(forColumnIndex: 2) ?? "")
+                            group.topics.append(topic)
+                        }
+                        cursorTopic.close()
+                    }
+
+                    // Fix: the members were read with one query, and then each of them asked
+                    // the buddy table about itself - a hundred members, a hundred and one
+                    // queries, all of them on the way to drawing this screen. On an iPhone 7
+                    // that is the wait seen before anything appears. The database can answer
+                    // both in one pass, which is what a join is for; a member this device holds
+                    // no buddy record for still comes back, with the group's own copy of their
+                    // name and picture, exactly as before.
+                    // b.f_pin comes back as well: a member this device holds a buddy record
+                    // for is somebody I have added, which is the only thing the row wanted
+                    // from the query it used to run for itself while it was being drawn.
+                    let memberQuery = "SELECT m.f_pin, m.first_name, m.last_name, m.thumb_id, m.position,"
+                        + " b.user_type, b.official_account, b.image_id, b.f_pin"
+                        + " FROM GROUPZ_MEMBER m LEFT JOIN BUDDY b ON b.f_pin = m.f_pin"
+                        + " WHERE m.group_id = '\(self.data)' ORDER BY 2 ASC"
+                    var friendPins = Set<String>()
+                    if let cursorMember = Database.shared.getRecords(fmdb: fmdb, query: memberQuery) {
+                        while cursorMember.next() {
+                            let member = Member(pin: cursorMember.string(forColumnIndex: 0) ?? "",
+                                            firstName: cursorMember.string(forColumnIndex: 1) ?? "",
+                                            lastName: cursorMember.string(forColumnIndex: 2) ?? "",
+                                            thumb: cursorMember.string(forColumnIndex: 3) ?? "",
+                                            position: cursorMember.string(forColumnIndex: 4) ?? "")
+                            if let userType = cursorMember.string(forColumnIndex: 5) {
+                                member.userType = userType
+                                member.official = cursorMember.string(forColumnIndex: 6)
+                                member.thumb = cursorMember.string(forColumnIndex: 7) ?? ""
+                            }
+                            if let buddyPin = cursorMember.string(forColumnIndex: 8), !buddyPin.isEmpty {
+                                friendPins.insert(buddyPin)
+                            }
+                            group.members.append(member)
+                        }
+                        cursorMember.close()
+                    }
+
+                    // The name of whoever made the group: one row, asked for here rather than
+                    // on every pass the table makes over the Detail section.
+                    var createdBy = "Unknown".localized()
+                    if let cursorBy = Database.shared.getRecords(fmdb: fmdb, query: "select first_name || ' ' || ifnull(last_name, '') from BUDDY where f_pin = '\(group.by)'") {
+                        if cursorBy.next() {
+                            createdBy = cursorBy.string(forColumnIndex: 0) ?? createdBy
+                        }
+                        cursorBy.close()
+                    }
+                    completion(group, friendPins, createdBy)
+                }
+            } catch {
+                rollback.pointee = true
+                print("Access database error: \(error.localizedDescription)")
+            }
+        })
     }
     
     // MARK: - Cell selected
@@ -842,23 +928,6 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
         }
     }
     
-    private func checkIsFriend(pin: String) -> Bool {
-        var isFriend = true
-        Database.shared.database?.inTransaction({ fmdb, rollback in
-            do {
-                if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select f_pin from BUDDY where f_pin = '\(pin)'"), cursor.next() {
-                    cursor.close()
-                } else {
-                    isFriend = false
-                }
-            } catch {
-                rollback.pointee = true
-                print("Access database error: \(error.localizedDescription)")
-            }
-        })
-        return isFriend
-    }
-    
     // MARK: - Table view data source
     
     override func numberOfSections(in tableView: UITableView) -> Int {
@@ -912,18 +981,18 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
         case .attachments:
             let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
             var content = cell.defaultContentConfiguration()
-            let scope = EditorStarMessages.groupScope(groupId: data, topicChatId: openedTopicChatId)
-            let count: Int
+            // Fix: these two figures were counted here, which is to say twice for every pass the
+            // table makes over these rows - and each is a count over every message of the
+            // conversation, on the main thread, with conditions no index can answer. Opening this
+            // screen on an iPhone 7 waited on them. They are counted once, away from the drawing,
+            // and what is drawn is what was counted - see refreshAttachmentCounts.
+            let count = indexPath.row == 0 ? mediaCount : starredCount
             if indexPath.row == 0 {
                 content.text = "Media, links and docs".localized()
                 content.image = UIImage(systemName: "photo.on.rectangle")
-                count = EditorStarMessages.conversationCount(scope: scope,
-                                                             and: EditorStarMessages.mediaCountCondition)
             } else {
                 content.text = "Starred Messages".localized()
                 content.image = UIImage(systemName: "star")
-                count = EditorStarMessages.conversationCount(scope: scope,
-                                                             and: EditorStarMessages.starredCountCondition)
             }
             content.imageProperties.tintColor = .secondaryLabel
             cell.contentConfiguration = content
@@ -947,14 +1016,22 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
             return cell
         case .profile:
             let cell = tableView.dequeueReusableCell(withIdentifier: "profileCell", for: indexPath) as! ProfileCell
-            cell.cover.image = UIImage(named: "Sofa", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+            // Fix: a stock photograph of a sofa sat behind the group's picture - a picture of
+            // somebody's living room in a screen about a group of people, and the one thing on
+            // this screen that belonged to no one. What is behind it now is what is behind the
+            // profile: the app's own ground, which this screen lets through.
+            cell.cover.image = nil
+            cell.cover.backgroundColor = .clear
+            cell.backgroundColor = .clear
+            cell.contentView.backgroundColor = .clear
             guard let g = group else {
                 return cell
             }
             if let image = tempImage {
                 cell.profile.image = image
             } else {
-                getImage(name: g.profile, placeholderImage: UIImage(systemName: "person.2.circle.fill"), tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                // The picture is drawn 120 across; it was being decoded and redrawn at 400.
+                getImage(name: g.profile, placeholderImage: UIImage(systemName: "person.2.circle.fill"), tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 120, height: 120)) { result, isDownloaded, image in
                     cell.profile.image = image
                 }
             }
@@ -1040,19 +1117,8 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                     content.secondaryText = String(g.members.count)
                 default:
                     content.text = "Created by".localized()
-                    Database.shared.database?.inTransaction({ fmdb, rollback in
-                        do {
-                            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "select first_name || ' ' || ifnull(last_name, '') from BUDDY where f_pin = '\(g.by)'") {
-                                if cursor.next() {
-                                    content.secondaryText = cursor.string(forColumnIndex: 0) ?? "Unknown".localized()
-                                }
-                                cursor.close()
-                            }
-                        } catch {
-                            rollback.pointee = true
-                            print("Access database error: \(error.localizedDescription)")
-                        }
-                    })
+                    // Found with the rest of the group - see getData.
+                    content.secondaryText = createdByName
                 }
             }
             cell.contentConfiguration = content
@@ -1072,7 +1138,9 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                 } else {
                     let member = g.members[isAdmin ? indexPath.row - 1 : indexPath.row]
                     content.imageProperties.maximumSize = CGSize(width: 20, height: 20)
-                    getImage(name: member.thumb, placeholderImage: UIImage(systemName: "person.fill"), isCircle: true, tableView: tableView, indexPath: indexPath) { result, isDownloaded, image in
+                    // Twenty points is what the row shows of it, and now what is decoded and
+                    // rounded for it - not four hundred, once per member, on the drawing thread.
+                    getImage(name: member.thumb, placeholderImage: UIImage(systemName: "person.fill"), isCircle: true, tableView: tableView, indexPath: indexPath, targetSize: CGSize(width: 20, height: 20)) { result, isDownloaded, image in
                         content.image = image
                         if !result {
                             content.imageProperties.tintColor = .mainColor
@@ -1085,7 +1153,7 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
                     } else {
                         content.text = (member.firstName + " " + member.lastName).trimmingCharacters(in: .whitespaces)
                     }
-                    if !checkIsFriend(pin: member.pin) {
+                    if !friendPins.contains(member.pin) {
                         if member.position == "1" {
                             content.secondaryAttributedText = self.set(image: UIImage(named: "pb_twsn_group_admin_11", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, image2:  UIImage(named: "pb_add_contact", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, with: "", size: 20, y: 0, moreImage: true)
                         } else {
@@ -1135,10 +1203,34 @@ class GroupDetailViewController: UITableViewController, UITextFieldDelegate {
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         switch sections[indexPath.section] {
         case .profile:
-            return 200
+            // Fix: two hundred points, which is what a picture needed when it was laid over a
+            // photograph the width of the screen. The photograph is gone and what is left is the
+            // group's own picture, 120 across, so the row is that and a margin - not eighty
+            // points of nothing around it.
+            return 120 + Self.pictureMargin * 2
         default:
             return UITableView.automaticDimension
         }
+    }
+
+    /// What the group's picture is given above and below it.
+    private static let pictureMargin: CGFloat = 14
+
+    /// No band above the picture and none below it: a section with no title still gets a
+    /// grouped table's full header, and stacked on the row's own margin that was the gap the
+    /// picture floated in. The sections that do have a title keep theirs.
+    override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        guard section < sections.count, sections[section] == .profile else {
+            return UITableView.automaticDimension
+        }
+        return .leastNormalMagnitude
+    }
+
+    override func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
+        guard section < sections.count, sections[section] == .profile else {
+            return UITableView.automaticDimension
+        }
+        return .leastNormalMagnitude
     }
     
 }

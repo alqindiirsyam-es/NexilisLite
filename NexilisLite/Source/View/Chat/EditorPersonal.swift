@@ -304,6 +304,16 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     let signSelectedPin = UIStackView()
     var bottomAnchorPreviewReply = NSLayoutConstraint()
     var blocking = ""
+
+    /// Blocked in either direction - by this reader, or by the person they are reading. Nothing
+    /// can be sent either way while it stands, so this conversation can only be read.
+    var isBlockedConversation: Bool {
+        guard let pin = dataPerson["f_pin"] ?? nil, !pin.isEmpty else {
+            return false
+        }
+        let flag = User.getDataCanNil(pin: pin)?.ex_block ?? ""
+        return flag == "1" || flag == "-1"
+    }
     var timeoutCC = Timer()
     var nowSelectedCategoryCC = ""
     var showToastTwiceClick = false
@@ -455,12 +465,17 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     /// its real proportions are used from the start.
     private var imageBubbleSizes: [String: CGSize] = [:]
 
-    func imageBubbleSize(messageId: String, thumb: String) -> CGSize {
+    func imageBubbleSize(messageId: String, thumb: String, gif: String = "") -> CGSize {
         if let known = imageBubbleSizes[messageId] {
             return known
         }
-        let size = ListGroupImages.getImageSize(image: thumb, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)
-        if !messageId.isEmpty {
+        // A gif is measured from itself: the still that stands in for it is not the gif's
+        // shape. Until the gif is here the still's size serves and is not kept, so the row
+        // takes the gif's own proportions the moment it arrives.
+        let gifIsHere = !gif.isEmpty && ListGroupImages.isMeasurable(gif)
+        let measured = gifIsHere ? gif : thumb
+        let size = ListGroupImages.getImageSize(image: measured, screenWidth: self.view.frame.size.width * 0.6, screenHeight: 305)
+        if !messageId.isEmpty, gif.isEmpty || gifIsHere {
             imageBubbleSizes[messageId] = size
         }
         return size
@@ -541,8 +556,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             for row in rows {
                 let messageId = row["message_id"] as? String ?? ""
                 let thumb = row["thumb_id"] as? String ?? ""
-                let isVideo = !(row["video_id"] as? String ?? "").isEmpty
-                let hasPicture = isVideo || !(row["image_id"] as? String ?? "").isEmpty
+                // A gif travels in the video slot as well, but it is opened as a picture that
+                // moves, not as a video - see the viewer.
+                let gif = row[TypeDataMessage.gif_id] as? String ?? ""
+                let isVideo = !(row["video_id"] as? String ?? "").isEmpty && gif.isEmpty
+                let hasPicture = isVideo || !gif.isEmpty || !(row["image_id"] as? String ?? "").isEmpty
                 guard !messageId.isEmpty, !thumb.isEmpty, hasPicture, !seen.contains(messageId) else {
                     continue
                 }
@@ -561,7 +579,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 entries.append((lastDate, entries.count, MediaViewerViewController.StripItem(
                     messageId: messageId,
                     thumbFileName: thumb,
-                    mediaFileName: isVideo ? (row["video_id"] as? String ?? "") : (row["image_id"] as? String ?? ""),
+                    mediaFileName: !gif.isEmpty ? gif : (isVideo ? (row["video_id"] as? String ?? "") : (row["image_id"] as? String ?? "")),
                     isVideo: isVideo,
                     caption: row["message_text"] as? String ?? "",
                     title: profile["name"] ?? "",
@@ -736,7 +754,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // and no second trip to the database per picture.
         for row in rows {
             let messageId = row["message_id"] as? String ?? ""
-            let isVideo = !(row["video_id"] as? String ?? "").isEmpty
+            let gif = row[TypeDataMessage.gif_id] as? String ?? ""
+            let isVideo = !(row["video_id"] as? String ?? "").isEmpty && gif.isEmpty
             var when = ""
             let timestamp = Double(row["server_date"] as? String ?? "")
             if let timestamp = timestamp {
@@ -746,7 +765,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             entries.append((timestamp ?? 0, entries.count, MediaViewerViewController.StripItem(
                 messageId: messageId,
                 thumbFileName: row["thumb_id"] as? String ?? "",
-                mediaFileName: isVideo ? (row["video_id"] as? String ?? "") : (row["image_id"] as? String ?? ""),
+                mediaFileName: !gif.isEmpty ? gif : (isVideo ? (row["video_id"] as? String ?? "") : (row["image_id"] as? String ?? "")),
                 isVideo: isVideo,
                 caption: row["message_text"] as? String ?? "",
                 title: row["f_display_name"] as? String ?? "",
@@ -1311,9 +1330,18 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         for receipt in pending {
             sendReadMessageStatus(chat_id: receipt.chatId, f_pin: receipt.fPin, message_scope_id: receipt.scope, message_id: receipt.messageId)
         }
-        if counter > 0 {
-            counter = 0
-            updateCounter(counter: counter)
+        // Fix: what was cleared here was the count this screen read when the preview was built,
+        // and only if there was one at all. A message that arrives while the preview is up is
+        // not in that number - and where the conversation had nothing unread before, there was
+        // nothing to clear, so nothing was - which left the row in the list still badged for a
+        // conversation the reader had just opened and read. It is open now: nothing in it is
+        // unread, whatever was counted a moment ago.
+        counter = 0
+        updateCounter(counter: 0)
+        // And whatever landed while it was only being looked at is reported read like anything
+        // else, once the push has put this screen in front of the reader.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.markVisibleMessagesRead()
         }
         scheduleAutoDownloadSweep()
     }
@@ -1859,6 +1887,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     var contextCC = ""
     
     var tableMentionEdit = UITableView()
+    /// Whether the reader has pulled the list of names open past the four it starts at.
+    private var mentionListExpanded = false
+    /// Set while the list's own height is being changed under the drag, so that the scroll this
+    /// causes is not read as another drag - see mentionListDidScroll.
+    private var isAdjustingMentionList = false
+    /// How far the finger closing the list has travelled - see mentionListPanned.
+    private var mentionPanLastY: CGFloat = 0
     var heightTableEditMention: NSLayoutConstraint!
     private weak var lastContextMenuView: UIView?
     private var lastContextMenuInteraction: UIContextMenuInteraction?
@@ -1873,6 +1908,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private var suppressNextLinkTap = false
     private var suppressLinkTapToken = 0
     private var linkPressGeneration = 0
+    /// When a hold last opened one of the sheets a hold opens - see openHeldSheet.
+    private var lastHeldSheetOpenedAt: TimeInterval = 0
     
     private var readStatusTasks: [Task<Void, Never>] = []
     
@@ -1897,9 +1934,21 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // The display link holds this screen; it must not outlive the screen's stay.
+        stopTrackingKeyboard()
+        stopHoldingUnderMenu()
         // Off screen is off screen, whether that is the reader going back, opening another
         // conversation over this one, or stepping into this one's own profile.
         unregisterAsOpenConversation()
+        // Fix: the bar was left translucent for whatever screen came next. The conversation
+        // makes it so on iOS 26 (see prepareNavigationBar), and the other screens set their
+        // colours but never say opaque - they never had to. Under a translucent bar a screen
+        // runs up beneath it, and the chat list's segment bar, pinned to the top of its table,
+        // went up under the navigation bar and vanished. Back to opaque on the way out; this
+        // screen makes it translucent again every time it comes back.
+        if #available(iOS 26.0, *) {
+            navigationController?.navigationBar.isTranslucent = false
+        }
     }
 
     public override func viewDidDisappear(_ animated: Bool) {
@@ -1913,11 +1962,452 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     public override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        // Before the placements below: they measure the room the table has, and this is what
+        // sets it.
+        refreshRoomUnderInputArea()
+        if longBubbleContextMenu != nil || listStillHeldAfterMenu {
+            holdListUnderMenu()
+            return
+        }
         // The rows have real heights only once the table has laid out. Placing the chat at
         // its newest message here means it is drawn in the right place the first time, with
         // no visible jump - which is what the old fade from alpha 0 was covering up.
         applyPendingInitialBottomScroll()
         applyPendingUnreadMarkerScroll()
+    }
+
+
+    /// On glass the conversation runs on under the input area, the way the reference has it:
+    /// the bars are clear and the messages scroll behind the field and the buttons. The table
+    /// used to stop 10pt above the bar; now it reaches the bottom of the screen and is inset by
+    /// what stands over it instead - see `refreshRoomUnderInputArea`. Everything that keeps the
+    /// reader's place (`listAnchor`, `distanceFromNewestMessage`) already reckons in
+    /// `adjustedContentInset`, so the inset is all it takes.
+    private var conversationRunsUnderInputArea = false
+    /// The message whose bubble menu is on screen, if one is; rows built for it hide their
+    /// bubble and chrome as the menu did - see willDisplay.
+    private var menuMessageId: String?
+
+    /// Hides or shows the bubble and what stands beside it in `cell`, the way the bubble menu
+    /// does for the row it was opened on.
+    private func setMenuRowChrome(hidden: Bool, in cell: UITableViewCell) {
+        for view in cell.contentView.subviews
+        where view.tag == EditorPersonal.bubbleTag || view.tag == EditorPersonal.selectionAvatarTag
+            || view.tag == ChatBubbleContextMenu.hiddenWithBubbleTag {
+            view.alpha = hidden ? 0 : 1
+        }
+    }
+
+    /// Whether the input area follows the keyboard under the finger (see `followKeyboardUnderFinger`).
+    private var ridesKeyboard = false
+    /// The keyboard's full height while it is up, and where its top was announced to be.
+    private var shownKeyboardHeight: CGFloat?
+    /// Whether the drag in progress began under where the keyboard's top is - which a finger can
+    /// only do while the keyboard is still on its way up. Such a drag is a scroll, not a pull on
+    /// the keyboard, and the bar must not follow it.
+    private var dragBeganUnderKeyboard = false
+    /// True from the keyboard's announcement until it has finished arriving. The bar does not
+    /// follow a finger meanwhile: the keyboard does not begin dismissing for a finger that
+    /// crosses its top while it is still on its way up, so neither may the bar.
+    private var keyboardIsArriving = false
+
+    /// Runs while the keyboard is about: every frame, the bar is stood on the keyboard's drawn
+    /// position - see KeyboardFrameReader. This replaces guessing from the finger.
+    private var keyboardTracker: CADisplayLink?
+    /// A line pinned to the system's keyboard layout guide, read each frame as drawn: the
+    /// system's own word on where the keyboard is, animation and interactive drag included.
+    private var keyboardProbe: UIView?
+
+    private func installKeyboardProbeIfNeeded() {
+        guard keyboardProbe == nil, #available(iOS 15.0, *) else { return }
+        let probe = UIView()
+        probe.isUserInteractionEnabled = false
+        probe.isHidden = true
+        view.addSubview(probe)
+        probe.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            probe.topAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            probe.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            probe.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            probe.heightAnchor.constraint(equalToConstant: 1)
+        ])
+        keyboardProbe = probe
+    }
+
+    /// Where the keyboard layout guide says the keyboard's top is right now, or nil before it
+    /// has said anything sensible.
+    private var keyboardTopByGuide: CGFloat? {
+        guard let probe = keyboardProbe else { return nil }
+        let drawn = keyboardMayBeMoving ? (probe.layer.presentation() ?? probe.layer) : probe.layer
+        let top = drawn.frame.minY
+        return top > 1 ? top : nil
+    }
+    /// The keyboard has been announced away while a finger was still down; the tracker stays
+    /// until that finger lifts, in case it brings the keyboard back.
+    private var stopTrackerWhenDragEnds = false
+
+    /// Starts following the keyboard's drawn frame. False when there is no keyboard to read,
+    /// in which case the announcements drive the bar as they always did.
+    @discardableResult
+    private func startTrackingKeyboard() -> Bool {
+        // Only where the list is put back by the inset the tracker's frames drive - see
+        // refreshRoomUnderInputArea. Fix: the tracker took over the bar on every system with a
+        // keyboard layout guide, iOS 15 included, and on those the list was never put back:
+        // nothing there works the inset out from the bar's place, so the conversation stayed
+        // where it was and the keyboard rose over the newest messages - and the reply bar with
+        // it. Without the tracker those systems take the path they always took: the
+        // announcement, one layout, and the list put back at the end of it.
+        guard conversationRunsUnderInputArea else {
+            return false
+        }
+        installKeyboardProbeIfNeeded()
+        guard KeyboardFrameReader.keyboardTop(in: view) != nil || keyboardTopByGuide != nil else {
+            return false
+        }
+        if keyboardTracker == nil {
+            let link = CADisplayLink(target: self, selector: #selector(trackKeyboard))
+            link.add(to: .main, forMode: .common)
+            keyboardTracker = link
+        }
+        stopTrackerWhenDragEnds = false
+        trackKeyboard()
+        return true
+    }
+
+    private func stopTrackingKeyboard() {
+        keyboardTracker?.invalidate()
+        keyboardTracker = nil
+        stopTrackerWhenDragEnds = false
+    }
+
+    /// Whether the keyboard may be in motion right now: on its way in or out, or under a finger.
+    private var keyboardMayBeMoving: Bool {
+        return keyboardIsArriving || keyboardIsLeaving || tableChatView.isTracking
+    }
+    private var keyboardIsLeaving = false
+
+    @objc private func trackKeyboard() {
+        guard viewIfLoaded?.window != nil, !isEditingMessage, viewSticker.superview == nil else { return }
+        let byHost = KeyboardFrameReader.keyboardTop(in: view, live: keyboardMayBeMoving)
+        let byGuide = keyboardTopByGuide
+        // The layout guide first - it is the system's own account and follows a finger; the
+        // keyboard's placeholder only where there is no guide to ask.
+        guard let top = byGuide ?? byHost else { return }
+        let foot = max(0, view.bounds.height - top)
+        if abs(constraintBottomAttachment.constant - foot) > 0.5 {
+            constraintBottomAttachment.constant = foot
+            view.layoutIfNeeded()
+        }
+    }
+
+
+    @objc func keyboardDidHide(notification: NSNotification) {
+        keyboardIsLeaving = false
+        guard keyboardTracker != nil else { return }
+        if tableChatView.isTracking {
+            stopTrackerWhenDragEnds = true
+        } else {
+            stopTrackingKeyboard()
+        }
+    }
+
+    /// The keyboard has settled: the bar is made to stand on it, whatever a drag during the
+    /// arrival may have done to it. Fix: the bar was left a finger's worth under the keyboard
+    /// whenever the list was scrolled as the keyboard came up - and it stayed there, since
+    /// nothing else was ever announced.
+    @objc func keyboardDidShow(notification: NSNotification) {
+        keyboardIsArriving = false
+        // The keyboard is up and standing over the sticker panel: now it can go, unseen.
+        if stickerPanelWaitingForKeyboard, viewSticker.isDescendant(of: view) {
+            stickerPanelWaitingForKeyboard = false
+            tearDownStickerPanel()
+            refreshStickerButton()
+        }
+        guard keyboardTracker == nil, viewIfLoaded?.window != nil, !isEditingMessage,
+              let keyboardHeight = shownKeyboardHeight, viewSticker.superview == nil,
+              abs(constraintBottomAttachment.constant - keyboardHeight) > 0.5 else { return }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+            self.constraintBottomAttachment.constant = keyboardHeight
+            self.view.layoutIfNeeded()
+        }
+    }
+
+    private func noteWhereDragBegan() {
+        // Only a drag that begins with the keyboard fully up, and the finger above it, can pull
+        // the keyboard down - that is the system's own rule. Fix: a drag begun before the
+        // keyboard had arrived was still taken for a pull once it had, and the bar went to the
+        // finger while the keyboard, which knew better, stayed put.
+        guard let keyboardHeight = shownKeyboardHeight, !keyboardIsArriving else {
+            dragBeganUnderKeyboard = true
+            return
+        }
+        let fingerY = tableChatView.panGestureRecognizer.location(in: view).y
+        dragBeganUnderKeyboard = fingerY >= view.bounds.height - keyboardHeight
+    }
+
+    /// Puts the bar back on a keyboard that stays after the finger lifts.
+    ///
+    /// Fix: a drag that pulled the keyboard part of the way down and let go left the bar where
+    /// the finger had been. The keyboard decides for itself at that moment - it goes, and its
+    /// hide notice brings the bar down with it; or it comes back up, and nothing announces that.
+    /// The scroll view's drag can end while the keyboard is still tracking the touch, so the
+    /// bar was left low, under a keyboard that had returned. A moment after the drag ends, a
+    /// keyboard still announced as up gets the bar back; one on its way out has said so by then.
+    private func settleBarAfterDrag() {
+        if stopTrackerWhenDragEnds {
+            // The keyboard went while this finger was down and did not come back with it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self = self, self.stopTrackerWhenDragEnds, !self.tableChatView.isTracking else { return }
+                // Brought back by the same finger: it is up again, unannounced, so the tracker
+                // stays with it.
+                if let top = KeyboardFrameReader.keyboardTop(in: self.view), top < self.view.bounds.height - 1 {
+                    self.stopTrackerWhenDragEnds = false
+                    return
+                }
+                self.trackKeyboard()
+                self.stopTrackingKeyboard()
+            }
+        }
+        guard keyboardTracker == nil, ridesKeyboard, shownKeyboardHeight != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self = self, let keyboardHeight = self.shownKeyboardHeight,
+                  self.viewSticker.superview == nil, !self.tableChatView.isDragging,
+                  abs(self.constraintBottomAttachment.constant - keyboardHeight) > 0.5 else { return }
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+                self.constraintBottomAttachment.constant = keyboardHeight
+                self.view.layoutIfNeeded()
+            }
+        }
+    }
+
+    /// Moves the input area with the keyboard as the finger drags the keyboard away.
+    ///
+    /// Fix: with `keyboardDismissMode = .interactive` the keyboard follows the finger down, but
+    /// nothing is announced until it has gone - so the bar stood where the keyboard had been,
+    /// the messages showing through the gap below it, and dropped only at the end. UIKit's own
+    /// rule is simple: once the finger is below the keyboard's top, the keyboard's top is the
+    /// finger. The bar's foot is put there too, on every scroll of the drag, so the two move as
+    /// one - the way the reference's bar sits on its keyboard. (The keyboard layout guide would
+    /// be the tidy way, but it did not move during the drag here.)
+    private func followKeyboardUnderFinger() {
+        // Fix: a scroll begun while the keyboard was still rising, with the finger low on the
+        // screen, was taken for a pull on the keyboard - the bar went to the finger and stayed
+        // a keyboard's worth short of where the keyboard stopped, under it.
+        guard keyboardTracker == nil else { return }
+        guard ridesKeyboard, let keyboardHeight = shownKeyboardHeight, !dragBeganUnderKeyboard,
+              !keyboardIsArriving, tableChatView.isDragging, viewSticker.superview == nil else { return }
+        let fingerY = tableChatView.panGestureRecognizer.location(in: view).y
+        let keyboardTop = view.bounds.height - keyboardHeight
+        // The keyboard is never above where it was announced, and never below the screen.
+        let currentTop = min(max(keyboardTop, fingerY), view.bounds.height)
+        let foot = view.bounds.height - currentTop
+        if abs(constraintBottomAttachment.constant - foot) > 0.5 {
+            constraintBottomAttachment.constant = foot
+            view.layoutIfNeeded()
+        }
+    }
+    /// The material under the attachment row (always) and under the field row (while a reply is
+    /// being composed) - see `letConversationRunUnderInputArea`.
+    private let attachmentMaterial = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+    /// Holds the attachment row's foot above the bar's bottom - see `letConversationRunUnderInputArea`.
+    private var attachmentLift: NSLayoutConstraint?
+    private let replyMaterial = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+
+    /// How tall the reply preview over the field is: the reference's 64pt on glass, the 50pt it
+    /// always had before, plus the reader's font offset.
+    private var replyBarHeight: CGFloat {
+        let base: CGFloat
+        if #available(iOS 26.0, *) { base = 64 } else { base = 50 }
+        // Fix: three points of bar for every point of the reader's font offset, which on any
+        // setting above the smallest put the bar well past the reference's height. The bar has
+        // to grow with the text it holds - two lines of it - but by the text's own measure, not
+        // by three times it.
+        return base + self.offset()
+    }
+    /// The constraint that ended the table above the bar, kept alive once it is idle: the outlet
+    /// holding it is weak, and the selection session still writes to it.
+    private var retiredTableBottom: NSLayoutConstraint?
+
+    private func letConversationRunUnderInputArea() {
+        conversationRunsUnderInputArea = true
+        viewTextfield.backgroundColor = .clear
+        viewButton.backgroundColor = .clear
+        viewAttachment.backgroundColor = .clear
+        // The row of attachment buttons stands on the safe area: it used to run down to the edge
+        // of the screen, which put its buttons under the home indicator on a device that has
+        // one. Spelled out as constraints - the row is 60pt of cells, and its foot is held
+        // `attachmentLift` above the bar's bottom, a distance set on every layout (see
+        // `refreshRoomUnderInputArea`). The storyboard's own foot for the row comes off first.
+        for tie in viewButton.constraints where tie.firstItem === viewAttachment || tie.secondItem === viewAttachment {
+            if tie.firstAttribute == .bottom && tie.secondAttribute == .bottom {
+                tie.isActive = false
+            }
+        }
+        // Fix: the storyboard also holds the bar at a fixed 60pt, and a 60pt bar cannot hold a
+        // row of `GlassLook.rowHeight` standing `attachmentLift` above its foot - so with the
+        // keyboard away the layout gave up the row's top tie and the circles rode up under the
+        // field, and with the keyboard up (no lift) they sat where they were meant to: the row
+        // moved with the keyboard. The bar is as tall as the row and its stand from here.
+        for tie in viewButton.constraints where tie.firstItem === viewButton && tie.firstAttribute == .height && tie.secondItem == nil {
+            tie.isActive = false
+        }
+        let lift = viewAttachment.bottomAnchor.constraint(equalTo: viewButton.bottomAnchor)
+        attachmentLift = lift
+        NSLayoutConstraint.activate([lift, viewAttachment.heightAnchor.constraint(equalToConstant: GlassLook.rowHeight)])
+        // The reference stands its attachment row on a light material always, and its field row
+        // on the same material only while a reply is being composed - the two then read as one
+        // band. Ours does the same: the row's material is there from the start, the field's
+        // waits for a reply and goes when the reply does.
+        attachmentMaterial.translatesAutoresizingMaskIntoConstraints = false
+        viewButton.insertSubview(attachmentMaterial, at: 0)
+        replyMaterial.translatesAutoresizingMaskIntoConstraints = false
+        replyMaterial.isHidden = true
+        viewTextfield.insertSubview(replyMaterial, at: 0)
+        // The foot of the screen stands on one thing whichever panel is there - see
+        // GlassLook.applyPanelGround, which is also where the reading is chosen.
+        GlassLook.applyPanelGround(attachmentMaterial)
+        GlassLook.applyPanelGround(replyMaterial)
+        NSLayoutConstraint.activate([
+            attachmentMaterial.leadingAnchor.constraint(equalTo: viewButton.leadingAnchor),
+            attachmentMaterial.trailingAnchor.constraint(equalTo: viewButton.trailingAnchor),
+            // A little above the row's top, so the circles sit inside the band rather than on
+            // its edge - and 5pt short of the field's foot (which is 8 above the row), so the
+            // band does not touch the field.
+            attachmentMaterial.topAnchor.constraint(equalTo: viewButton.topAnchor, constant: -3),
+            attachmentMaterial.bottomAnchor.constraint(equalTo: viewButton.bottomAnchor),
+            replyMaterial.leadingAnchor.constraint(equalTo: viewTextfield.leadingAnchor),
+            replyMaterial.trailingAnchor.constraint(equalTo: viewTextfield.trailingAnchor),
+            replyMaterial.topAnchor.constraint(equalTo: viewTextfield.topAnchor),
+            replyMaterial.bottomAnchor.constraint(equalTo: viewTextfield.bottomAnchor)
+        ])
+        // Left in place but idle, so nothing has to know that it no longer decides anything.
+        retiredTableBottom = constraintBottomTableViewWithTextfield
+        constraintBottomTableViewWithTextfield.isActive = false
+        // To the bottom of the screen, not to the bar: the room the bar (or the keyboard under
+        // it) takes is an inset, worked out on every layout in `refreshRoomUnderInputArea`. An
+        // inset is what makes the keyboard's own interactive dismissal smooth - the list's
+        // frame never changes, only how much of it is covered, and the content is moved along
+        // by exactly that.
+        tableChatView.bottomAnchor.constraint(equalTo: view.bottomAnchor).isActive = true
+        // The input area rides on the keyboard as it is dragged away - see
+        // `followKeyboardUnderFinger`, called from every scroll while the keyboard is up.
+        ridesKeyboard = true
+    }
+
+    /// True once the push is over: until then the reader is at the newest message by definition,
+    /// and the numbers this screen is measured by are still settling.
+    private var arrivalSettled = false
+
+    /// The foot of the screen as it will be once this chat has finished arriving.
+    ///
+    /// Fix: a conversation is pushed with the tab bar hidden, and UIKit keeps that bar's height in
+    /// this screen's safe area until the push animation has finished - measured on screen, 83pt
+    /// where the home indicator alone is 34. The attachment row stands on that number, so the
+    /// whole input area sat 49pt too high for the first couple of layout passes and then dropped
+    /// to where it belonged, carrying the conversation with it: the shuffle under the newest
+    /// message every time a chat opens, and the different-looking gap in every screenshot taken
+    /// while it lasted. The table's own inset arithmetic is not affected - it takes that safe area
+    /// off and the table adds it back - so the bar was the whole of it. The window's foot is the
+    /// number that does not move.
+    var settledFoot: CGFloat {
+        guard let window = view.window else {
+            return view.safeAreaInsets.bottom
+        }
+        return min(view.safeAreaInsets.bottom, window.safeAreaInsets.bottom)
+    }
+
+    /// The inset that keeps the newest message clear of whatever stands over the bottom of the
+    /// table - the input area, or the selection bar in its place - plus the 10pt gap the table
+    /// used to end with. Measured on every layout, since the keyboard, a reply preview and the
+    /// selection bar all change what is standing there.
+
+
+
+    private func refreshRoomUnderInputArea() {
+        guard conversationRunsUnderInputArea, tableChatView != nil else { return }
+        // The attachment row's stand on the safe area: the indicator's height while the row is
+        // at the bottom of the screen, nothing once the keyboard or the sticker panel has lifted
+        // it clear - or there would be an empty band between the row and what raised it.
+        let lift: CGFloat = constraintBottomAttachment.constant > 0 ? 0 : settledFoot
+        if let foot = attachmentLift, abs(foot.constant + lift) > 0.5 {
+            foot.constant = -lift
+        }
+        var coverTop = CGFloat.greatestFiniteMagnitude
+        if !viewTextfield.isHidden {
+            coverTop = min(coverTop, view.convert(viewTextfield.bounds, from: viewTextfield).minY)
+        }
+        if containerMultpileSelectSession.isDescendant(of: view) {
+            coverTop = min(coverTop, view.convert(containerMultpileSelectSession.bounds, from: containerMultpileSelectSession).minY)
+        }
+        // The field row's material is there exactly as long as a reply preview is - decided
+        // here, from what is actually on screen, rather than by whichever path put the preview
+        // up or took it down.
+        let replyUp = containerPreviewReply.isDescendant(of: viewTextfield)
+        if replyMaterial.isHidden == replyUp {
+            replyMaterial.isHidden = !replyUp
+        }
+        let tableBottom = view.convert(tableChatView.bounds, from: tableChatView).maxY
+        var room: CGFloat = coverTop < .greatestFiniteMagnitude ? max(0, tableBottom - coverTop + 10) : 0
+        // The table adds its own safe area on top of this (contentInsetAdjustmentBehavior is
+        // .always), so that much comes off, or the gap would be the home indicator's height too
+        // big.
+        //
+        // What comes off is the safe area the table has *now*, because that is what it will add to
+        // the inset written below. Fix: this was briefly changed to take off what the table was
+        // already applying (adjusted minus inset), on the reasoning that the two cannot disagree -
+        // but that is the safe area of the pass before, and writing against it puts the inset a
+        // pass behind for as long as the safe area is moving. The disagreement it was meant to
+        // cure - one pass where the inset had been worked out against the old number - is cured
+        // where it happens instead: viewSafeAreaInsetsDidChange asks for a fresh layout, so a safe
+        // area that has just changed is always measured against in a pass of its own.
+        room = max(0, room - tableChatView.safeAreaInsets.bottom)
+        guard abs(tableChatView.contentInset.bottom - room) > 0.5 else { return }
+        let before = tableChatView.contentInset.bottom
+        // Whether the reader was at the newest message before the bar changed size - asked
+        // before the inset moves, because the inset is what the end of the list is measured
+        // from.
+        let endBefore = max(-tableChatView.adjustedContentInset.top,
+                            tableChatView.contentSize.height + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
+        // Not to the point: the list rests a home indicator's height short of the figure this
+        // arithmetic gives, so "at the end" has to mean within that much of it, or a reader at
+        // the newest message is taken for one in the middle and the keyboard covers what they
+        // are reading.
+        // Fix: while the chat is still arriving, the reader is at the newest message by
+        // definition - they have not touched anything yet - but this question was still being put
+        // to numbers the push animation has not finished settling: the safe area still carries
+        // the tab bar's height for as long as it runs. Measured against those, "at the end" came
+        // out false, so the list was left where it was and the newest message sat behind the bar
+        // for the whole length of the animation, snapping into place only when it ended. Seen on
+        // every recording of a chat being opened.
+        // Fix: a chat that opens at its unread marker is not a chat that opens at the end, and
+        // this rule was taking every arrival for the second kind - so a conversation with unread
+        // messages was carried to the newest one as soon as the bar changed size, which is what
+        // opening it does. The marker's own placement says which kind this is.
+        let stillArriving = pendingUnreadMarkerScroll == nil
+            && (!arrivalSettled || transitionCoordinator != nil || pendingInitialScrollToBottom)
+        let wasAtEnd = stillArriving
+            || tableChatView.contentOffset.y >= endBefore - (tableChatView.safeAreaInsets.bottom + 8)
+        tableChatView.contentInset.bottom = room
+        tableChatView.verticalScrollIndicatorInsets.bottom = room
+        // What the bar takes, the content rises by - which is the reference: whatever was in
+        // front of the reader stays in front of them as the keyboard comes up, and comes back
+        // down with it. A hair at a time, because this runs on every frame the bar moves, so
+        // the rise is as smooth as the keyboard's own travel rather than one jump at the end.
+        let lowest = -tableChatView.adjustedContentInset.top
+        let highest = max(lowest, tableChatView.contentSize.height + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
+        // At the end before, at the end after - not "rise by what the bar took", which keeps
+        // whatever slack the list was resting with and leaves the newest message that far
+        // behind the bar. Fix: read off a recording, the last message sat half under the bar
+        // when the keyboard came up on a freshly opened chat, by exactly the home indicator's
+        // height the list had been resting short of its own end.
+        let wanted = wasAtEnd ? highest : tableChatView.contentOffset.y + (room - before)
+        let moved = min(max(wanted, lowest), highest)
+        // Not while a finger is on the list: there the reader owns the offset, and writing to
+        // it under them is the tug that reads as a bounce. Momentum is another matter - the
+        // reference pushes the list up mid-flick too.
+        if abs(moved - tableChatView.contentOffset.y) > 0.5, !tableChatView.isTracking {
+            tableChatView.contentOffset.y = moved
+        }
     }
 
     /// Fix: the room the table is given while a selection bar is up is measured off the safe
@@ -1926,6 +2416,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     /// behind the bar. The measurement is taken again whenever the inset settles.
     public override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
+        // A safe area that has just changed is measured against in a fresh layout, not in the one
+        // that is already running - see refreshRoomUnderInputArea.
+        view.setNeedsLayout()
         guard bottomTableConstantBeforeSelection != nil else { return }
         constraintBottomTableViewWithTextfield.constant = view.safeAreaInsets.bottom - 60
     }
@@ -1982,6 +2475,17 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             // this going on for ever.
             return
         }
+        // The rows are made to settle before they are measured.
+        //
+        // Fix: a row only takes its real height once it has been laid out, and until then the
+        // table answers for it with an estimate - so the end of the list worked out here was the
+        // end of a conversation that was still growing, and the newest message was left behind the
+        // bar until something happened to lay the table out again. Measured off a recording: the
+        // content sat twenty-six points low for half a second after the chat opened. It was found
+        // by accident, too - while a debug readout was in place the fault went away, because
+        // reading a row's rectangle every pass is itself a way of asking the table to settle.
+        // Asked for outright here instead.
+        tableChatView.layoutIfNeeded()
         let lowest = -tableChatView.adjustedContentInset.top
         let bottom = max(lowest, tableChatView.contentSize.height
                          + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
@@ -2003,13 +2507,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     /// Puts the header in place: colours, the back button's tint, and the bar itself if the
     /// screen underneath had hidden it.
     private func prepareNavigationBar() {
-        let navBarAppearance = UINavigationBarAppearance()
-        navBarAppearance.configureWithOpaqueBackground()
-        navBarAppearance.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
-        navigationController?.navigationBar.standardAppearance = navBarAppearance
-        navigationController?.navigationBar.scrollEdgeAppearance = navBarAppearance
-        navigationController?.navigationBar.isTranslucent = false
-        navigationController?.navigationBar.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        let barColour: UIColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .mainColor
+        // The ground the list of names stands on, with the bar's own colour over it - the
+        // conversation shows through both. Translucent means the screen runs up under the bar;
+        // the table already reckons the bar into its insets, so nothing else has to move.
+        if let bar = navigationController?.navigationBar {
+            ChatMentionList.dress(bar, colour: barColour)
+        }
         navigationController?.navigationBar.tintColor = .white
         navigationController?.navigationBar.overrideUserInterfaceStyle = .dark
         self.setNeedsStatusBarAppearanceUpdate()
@@ -2088,6 +2592,30 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
 
     public override func viewDidAppear(_ animated: Bool) {
+        // The push is over and the safe area is this screen's own at last: the room under the
+        // newest message is worked out once more against numbers that will not move again.
+        arrivalSettled = true
+        view.setNeedsLayout()
+        // And then a few turns of its own.
+        //
+        // Fix: the rows only take their real heights once they have been drawn, and the table does
+        // that in a layout of its own - one this screen never hears about, because nothing has
+        // invalidated *its* layout. The opening placement runs from this screen's layout passes,
+        // so it was not asked again: measured off a recording, the conversation sat twenty-six
+        // points low for half a second after the push, with the newest message's own clock behind
+        // the bar, and only came up when something else happened to ask for a layout. These are
+        // that something else, and they stop mattering the moment the placement is done - see
+        // applyPendingInitialBottomScroll, which gives up on its own.
+        for delay in [0.05, 0.15, 0.3, 0.5, 0.8, 1.2] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self, self.pendingInitialScrollToBottom || self.pendingUnreadMarkerScroll != nil else {
+                    return
+                }
+                self.refreshRoomUnderInputArea()
+                self.applyPendingInitialBottomScroll()
+                self.applyPendingUnreadMarkerScroll()
+            }
+        }
         prepareNavigationBar()
         updateProfile()
         // Anything that arrived while this screen was being built gets its chance now.
@@ -2159,24 +2687,38 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             FloatingButton.setHidden(true)
         }
         
-        viewButton.layer.shadowColor = self.traitCollection.userInterfaceStyle == .dark ? UIColor.white.cgColor : UIColor.gray.cgColor
-        viewButton.layer.shadowOpacity = 1
-        viewButton.layer.shadowOffset = .zero
-        viewButton.layer.shadowRadius = 3
-        viewButton.addTopBorder(with: UIColor.lightGray, andWidth: 1.0)
+        if #available(iOS 26.0, *) {
+            letConversationRunUnderInputArea()
+        } else {
+            viewButton.layer.shadowColor = self.traitCollection.userInterfaceStyle == .dark ? UIColor.white.cgColor : UIColor.gray.cgColor
+            viewButton.layer.shadowOpacity = 1
+            viewButton.layer.shadowOffset = .zero
+            viewButton.layer.shadowRadius = 3
+            viewButton.addTopBorder(with: UIColor.lightGray, andWidth: 1.0)
+            viewAttachment.backgroundColor = .white
+        }
         
 //        buttonVoice.setImage(resizeImage(image: UIImage(named: "Voice-Record", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)), for: .normal)
-        viewAttachment.backgroundColor = .white
         buttonSendImage.setImage(resizeImage(image: UIImage(named: "Send-Image", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor), for: .normal)
         buttonSendPhoto.setImage(resizeImage(image: UIImage(named: "Camera", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor), for: .normal)
-        buttonSendSticker.setImage(resizeImage(image: UIImage(named: "Sticker---Emoji", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor), for: .normal)
+        refreshStickerButton()
         buttonSendFile.setImage(resizeImage(image: UIImage(named: "File---Documents", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor), for: .normal)
+        // On glass the four are round clear-glass buttons, the icons in the colour they had.
+        let attachmentIcon: UIColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+        for cell in [buttonSendImage, buttonSendPhoto, buttonSendSticker, buttonSendFile] {
+            GlassLook.adoptCircle(in: cell!, foreground: attachmentIcon)
+        }
         
         buttonSendChat.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
+        GlassLook.imageChanged(buttonSendChat)
         
         buttonSendChat.circle()
         buttonSendChat.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
         buttonSendChat.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+        // Wrapped rather than made a glass button: the microphone shares its glass with the
+        // camera beside it (see VideoNoteEntryPoint), and only a wrapping glass can be shared.
+        GlassLook.wrap(buttonSendChat, tint: buttonSendChat.backgroundColor)
+        ChatMentionList.dress(buttonSendChat, colour: buttonSendChat.backgroundColor ?? .mainColor)
         // After the colour, not before: the camera takes the microphone's own background to make
         // one capsule of the two, and there is nothing to take until it has been set.
         installVideoNoteButton()
@@ -2189,6 +2731,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             buttonAckConfidential.addTarget(self, action: #selector(showChooserACKConfidential), for: .touchUpInside)
             buttonAckConfidential.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
             buttonAckConfidential.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+            GlassLook.adopt(buttonAckConfidential, tint: buttonAckConfidential.backgroundColor, foreground: buttonAckConfidential.tintColor)
+        ChatMentionList.dress(buttonAckConfidential, colour: buttonAckConfidential.backgroundColor ?? .mainColor)
         }
         textFieldSend.backgroundColor = .white
         textFieldSend.layer.cornerRadius = textFieldSend.maxCornerRadius()
@@ -2196,12 +2740,62 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         textFieldSend.text = "Send message".localized()
         textFieldSend.textColor = UIColor.lightGray
         textFieldSend.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        textFieldSend.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 11, right: 40)
+        textFieldSend.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: 40)
         textFieldSend.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.5).cgColor
         textFieldSend.font = UIFont.systemFont(ofSize: 12 + offset())
         textFieldSend.delegate = self
         textFieldSend.customDelegate = self
         textFieldSend.allowsEditingTextAttributes = true
+        // After the font: the one-line height below is measured off it.
+        // The glass takes the field's place in the bar, so the outlets that move the field must
+        // now move the glass.
+        let fieldGlass = GlassLook.adopt(textFieldSend, tint: nil, radius: textFieldSend.layer.cornerRadius)
+        // Fix: crashed on the bot chat, whose scene never connected this outlet - the field
+        // there has no reply preview to make room for. An outlet that is nil has nothing to
+        // re-home.
+        if let top = constraintTopTextField {
+            constraintTopTextField = fieldGlass.rehomed(top)
+        }
+        if #available(iOS 26.0, *) {
+            // The field row and the attachment row are one piece on glass: the 20pt the field,
+            // the send button and the gear stood above the row's bottom comes down to 8, and the
+            // attachment row's material starts where they end (see `letConversationRunUnderInputArea`).
+            for foot in viewTextfield.constraints
+            where foot.firstAttribute == .bottom && foot.secondAttribute == .bottom && foot.constant == 20 {
+                foot.constant = 8
+            }
+        }
+        if let left = constraintLeftTextField {
+            constraintLeftTextField = fieldGlass.rehomed(left)
+        }
+        if #available(iOS 26.0, *) {
+            // The field's right end runs on under the send button; the scroll indicator that
+            // appears once the text is taller than the field stands clear of it, as the
+            // reference's does, rather than hiding behind the button.
+            textFieldSend.verticalScrollIndicatorInsets = UIEdgeInsets(top: 6, left: 0, bottom: 6, right: textFieldSend.textContainerInset.right)
+        }
+        if #available(iOS 26.0, *), let pins = fieldGlass.pins {
+            // Fix: the margin above and below the text used to be the text view's own inset, and
+            // an inset is only an offset of the content - once the field scrolled, the tail of the
+            // line above ran on into the top margin and was cut there, mid-glyph. The margin is
+            // the glass's now: the text view is 11pt in from the glass's top and bottom and has no
+            // vertical inset of its own, so whatever scrolls is clipped at the text's own edge
+            // and the margin is always empty, scrolled or not - which is the reference's look.
+            // Fix: measured before the font was set, the one-line field opened at the storyboard
+            // font's height and shrank to the smaller font's the first time it was edited. The
+            // block runs after the font now, and a line is centred in the 18pt that make a
+            // 40pt capsule with the glass's margins, so one line is 40pt whichever font.
+            let line = ceil((textFieldSend.font ?? UIFont.systemFont(ofSize: 12 + offset())).lineHeight)
+            let pad = max(0, (18 - line) / 2)
+            textFieldSend.textContainerInset.top = pad
+            textFieldSend.textContainerInset.bottom = pad
+            pins.top.constant = 11
+            pins.bottom.constant = -11
+            // The text view's clip is a plain rectangle now - the rounding is the glass's, and a
+            // 20pt radius on a view one line tall would eat into the first letters.
+            textFieldSend.layer.cornerRadius = 0
+            heightTextFieldSend.constant = fieldHeight(for: textFieldSend)
+        }
         
         navigationItem.rightBarButtonItem?.tintColor = UIColor.secondaryColor
         
@@ -2229,6 +2823,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             }
         }
         
+        // The names are known now, so the packs they spell are worked out here.
+        buildStickerPacks()
+
         tableChatView.register(UITableViewCell.self, forCellReuseIdentifier: "cellEditorPersonal")
         
         loadData()
@@ -2236,7 +2833,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         
         let center: NotificationCenter = NotificationCenter.default
         center.addObserver(self, selector: #selector(keyboardWillShow(notification:)), name: UIResponder.keyboardWillShowNotification, object: nil)
+        center.addObserver(self, selector: #selector(keyboardDidShow(notification:)), name: UIResponder.keyboardDidShowNotification, object: nil)
         center.addObserver(self, selector: #selector(keyboardWillHide(notification:)), name: UIResponder.keyboardWillHideNotification, object: nil)
+        center.addObserver(self, selector: #selector(keyboardDidHide(notification:)), name: UIResponder.keyboardDidHideNotification, object: nil)
         center.addObserver(self, selector: #selector(onReceiveMessage(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerReceiveChat), object: nil)
         center.addObserver(self, selector: #selector(onStatusChat(notification:)), name: NSNotification.Name(rawValue: Nexilis.listenerStatusChat), object: nil)
         center.addObserver(self, selector: #selector(onUploadChat(notification:)), name: NSNotification.Name(rawValue: "onUploadChat"), object: nil)
@@ -2280,6 +2879,24 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // row sat below the bottom edge and could only be reached by scrolling a list nobody
         // thinks to scroll. There is no header to make room for; there never was.
         tableMention.contentInset = .zero
+        // Fix: with the header translucent the screen runs up under it, and a scroll view that
+        // adjusts its own insets can take that as a reason to push its content down - the one
+        // row of a one-name list then sat mostly below the list's own bottom edge, cut off by
+        // the input area. This list is exactly as tall as its rows; nothing may inset it.
+        tableMention.contentInsetAdjustmentBehavior = .never
+        // Fix: the gap was not an inset after all but the padding a plain-style table puts above
+        // its first section header - about 22pt, there even when the header itself is nil and
+        // 0pt tall. On a list exactly as tall as its rows, that pushed the whole list down by a
+        // header's padding and left the last row cut off under the input area.
+        tableMention.sectionHeaderTopPadding = 0
+        tableMention.sectionHeaderHeight = 0
+        tableMention.estimatedSectionHeaderHeight = 0
+        tableMention.sectionFooterHeight = 0
+        tableMention.estimatedSectionFooterHeight = 0
+        if #available(iOS 26.0, *) {
+            tableMention.topEdgeEffect.isHidden = true
+            tableMention.bottomEdgeEffect.isHidden = true
+        }
         // The height of the list is worked out as 44 points a row, so say so rather than leaving
         // it to whatever the storyboard's estimate happens to be.
         tableMention.rowHeight = ChatMentionList.rowHeight
@@ -2287,13 +2904,28 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         tableMention.separatorInset = UIEdgeInsets(top: 0, left: 52, bottom: 0, right: 0)
         tableMention.keyboardDismissMode = .none
         tableMention.showsVerticalScrollIndicator = false
-        // A card, the way the rest of the input area is drawn, rather than a bare table sitting
-        // against the wallpaper.
-        tableMention.backgroundColor = traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
-        tableMention.layer.cornerRadius = 12
-        tableMention.layer.cornerCurve = .continuous
-        tableMention.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        tableMention.clipsToBounds = true
+        // The conversation stays visible through it - see ChatMentionList.dress.
+        ChatMentionList.dress(tableMention)
+        // And it does not reach the sides: the reference leaves a little of the conversation
+        // showing either side of the card. The storyboard pins it to both edges, so those pins
+        // are taken off first - the same way the bottom one is, just below.
+        for constraint in tableMention.superview?.constraints ?? [] {
+            guard constraint.firstItem === tableMention || constraint.secondItem === tableMention else {
+                continue
+            }
+            switch constraint.firstAttribute {
+            case .leading, .trailing, .left, .right:
+                constraint.isActive = false
+            default:
+                break
+            }
+        }
+        NSLayoutConstraint.activate([
+            tableMention.leadingAnchor.constraint(equalTo: view.leadingAnchor,
+                                                  constant: ChatMentionList.sideInset),
+            tableMention.trailingAnchor.constraint(equalTo: view.trailingAnchor,
+                                                   constant: -ChatMentionList.sideInset)
+        ])
         // Fix: where this list sat was worked out by hand, in eight different places, from the
         // keyboard's height plus the text field's height plus a hand-picked 25 - and then nudged
         // by another number every time the input area grew or shrank: +40 when a reply preview
@@ -2304,11 +2936,16 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // Whatever that area happens to contain - a reply preview, a link preview, both, or a
         // keyboard under it - the list sits on top of it and nothing has to be calculated.
         contraintBottomMention.isActive = false
-        tableMention.bottomAnchor.constraint(equalTo: viewTextfield.topAnchor).isActive = true
+        tableMention.bottomAnchor.constraint(equalTo: viewTextfield.topAnchor,
+                                             constant: -ChatMentionList.bottomInset).isActive = true
         // The storyboard leaves it 150 tall so it can be seen while the screen is being laid
         // out. Hiding it used to be a matter of pushing it off the bottom of the screen; now it
         // is away when it has no height, so it has to start with none.
         heightTableMention.constant = 0
+        // Last, once it is held where it is going to be held: the glass is put around it and
+        // takes over those holds - see ChatMentionList.adoptGlass.
+        ChatMentionList.adoptGlass(tableMention)
+        tableMention.panGestureRecognizer.addTarget(self, action: #selector(mentionListPanned(_:)))
         
         tableChatView.rowHeight = UITableView.automaticDimension
         // A concrete estimate rather than automaticDimension, which makes the table measure
@@ -2654,6 +3291,15 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // the touch back the moment the finger moves, and the pressed look is lifted with it.
         tableChatView.delaysContentTouches = false
         tableChatView.panGestureRecognizer.delaysTouchesBegan = false
+        // Fix: iOS 26 blurs the top edge of a scroll view that runs under a bar - a soft white
+        // band across the first row, over whatever the wallpaper and the topmost bubble were.
+        // It read as the date header having a background, and it does not: the header's
+        // container is clear. The list is meant to show through to the bar, the way the media
+        // viewer already does, so the effect is switched off the same way it is there.
+        if #available(iOS 26.0, *) {
+            tableChatView.topEdgeEffect.isHidden = true
+            tableChatView.bottomEdgeEffect.isHidden = true
+        }
         // Pull a row right to reply to it, left for its info - see ChatBubbleSwipe.
         bubbleSwipe = ChatBubbleSwipe(tableView: tableChatView, canPerform: { [weak self] indexPath, direction in
             return self?.canSwipeBubble(at: indexPath, direction: direction) ?? false
@@ -2675,6 +3321,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         }
         tableChatView.dataSource = self
         tableChatView.keyboardDismissMode = .interactive
+        // The keyboard guide's probe is laid out now, at the bottom, so its first move is the
+        // keyboard's animated arrival rather than a jump to wherever the keyboard already is.
+        installKeyboardProbeIfNeeded()
+        // On every iOS, not only where the conversation runs under the bar: the bar follows the
+        // keyboard down under the finger there too, or it stands where the keyboard was and the
+        // messages show through the gap until the keyboard has gone - see
+        // followKeyboardUnderFinger.
+        ridesKeyboard = true
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tapGesture.cancelsTouchesInView = false
         tableChatView.addGestureRecognizer(tapGesture)
@@ -3610,7 +4264,18 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     // offset after it, so a page read later can overlap what is already on
                     // screen. Cheap insurance against showing the same message twice.
                     if !self.dataMessages.isEmpty {
-                        let known = Set(self.dataMessages.compactMap { $0["message_id"] as? String })
+                        // Fix: the pictures folded into a collage are not rows of their own, so
+                        // they were unknown here - and a page that overlapped a collage put every
+                        // one of them back at the end of the list as a picture on its own. That
+                        // was the room that grew by a screen of repeated pictures whenever new
+                        // messages were checked for, and slid down to them. What the collages
+                        // hold is known too.
+                        var known = Set(self.dataMessages.compactMap { $0["message_id"] as? String })
+                        for pictures in self.groupImages.values {
+                            for picture in pictures {
+                                known.insert(picture.messageId)
+                            }
+                        }
                         loaded.removeAll { known.contains($0["message_id"] as? String ?? "") }
                     }
                     if prepend {
@@ -3777,6 +4442,14 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         guard hasOlderMessages, !isLoadingOlderMessages else {
             return
         }
+        // Fix: read off the log - a page read while the table had no rows on screen at all, which
+        // is a table in the middle of its own update, not a reader near the top. With nothing on
+        // screen there is no row to keep the reader's place by, and the page landed on the
+        // rough measure instead: the conversation moved by sixteen hundred points, a screen and
+        // a half of bubbles, in one frame. The page can wait for the table to settle.
+        guard tableChatView.indexPathsForVisibleRows?.isEmpty == false else {
+            return
+        }
         if let lastEmptyOlderPage = lastEmptyOlderPage, Date().timeIntervalSince(lastEmptyOlderPage) < 0.5 {
             return
         }
@@ -3784,11 +4457,47 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // back afterwards, because writing the scroll position from outside ends a fling where
         // it stands. Every caller is either finger-down or at rest, and this is what makes that
         // a guarantee rather than an arrangement.
-        if tableChatView.isDecelerating, !tableChatView.isDragging {
+        //
+        // Fix: with one exception, and it is the wait the reader called "load more is late". A
+        // fling that outruns what is loaded ends against the top of it and rubber-bands there,
+        // and the page was read only once that bounce had played itself out - six tenths of a
+        // second and more of a conversation sitting still against its own ceiling. A list held
+        // at that ceiling has no journey left to interrupt: there is nothing there for the
+        // put-back to spoil, and the page can go in at once.
+        if tableChatView.isDecelerating, !tableChatView.isDragging,
+           tableChatView.contentOffset.y > -tableChatView.adjustedContentInset.top + 1 {
             return
         }
         isLoadingOlderMessages = true
         defer { isLoadingOlderMessages = false }
+        // Fix: at the ceiling of what is loaded the list is still bouncing when the page goes in,
+        // and a bounce and a page landing over each other is what the reader saw as a blink -
+        // the conversation changing where it stood from one frame to the next. The bounce is
+        // ended first: the list simply stops where the conversation ends, and the page goes into
+        // a list at rest. Stopping there is no loss - what matters is that nothing moves under
+        // the reader that they did not move themselves.
+        if tableChatView.isDecelerating, !tableChatView.isDragging {
+            let ceiling = -tableChatView.adjustedContentInset.top
+            tableChatView.setContentOffset(CGPoint(x: tableChatView.contentOffset.x,
+                                                   y: max(tableChatView.contentOffset.y, ceiling)),
+                                           animated: false)
+        }
+        // And under a finger, the drag is ended before the page is read.
+        //
+        // Fix: measured frame by frame off a recording of a slow read - the list stood perfectly
+        // still for a quarter of a second and then moved a hundred and seventy to two hundred
+        // and thirty points in a single frame, again and again. That is not a scroll, it is the
+        // main thread held while the page is built: the finger goes on travelling the whole
+        // time, and a scroll view applies every point of that travel in the one frame it gets
+        // back. Whatever the list passed over in that frame was never drawn at all - the
+        // bubbles that were "skipped". The stall cannot be helped while the page is built here;
+        // the catching up can. With the drag ended there is no stored-up travel to apply: the
+        // list stops where it stood, the page goes in under a still list, and the reader picks
+        // up from the bubble they were on rather than from wherever their finger had reached.
+        if tableChatView.isDragging {
+            tableChatView.panGestureRecognizer.isEnabled = false
+            tableChatView.panGestureRecognizer.isEnabled = true
+        }
         // Fix: refreshWindowBounds() used to run here, and it asks the database to count the
         // conversation twice - once for the oldest message on screen and once for the newest.
         // Those two counts, plus the page read's own OFFSET walk, meant three passes over the
@@ -3800,6 +4509,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             return
         }
         let rowsBeforeLoad = dataMessages.count
+        let heightBeforeLoad = tableChatView.contentSize.height
+        let offsetBeforeLoad = tableChatView.contentOffset.y
 
         // Sitting at the newest message is a place of its own, and it is where a chat that has
         // just been opened sits. It has to be remembered as that, because the rows above have
@@ -3847,8 +4558,42 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // expensive here was being asked for an estimated height for every row of the whole
         // conversation while each of those answers walked the whole conversation - and that is
         // what message(at:) no longer does.
+        //
+        // Where the reader has to end up once the page is in: the row they were on, at the very
+        // same height on the screen - or the end of the list, where that is where they were.
+        // Worked out from the table's own geometry, which costs no cell: rectForRow answers from
+        // the heights the table is already carrying.
+        func placeForReader() -> CGFloat? {
+            if wasAtBottom {
+                let lowest = -tableChatView.adjustedContentInset.top
+                return max(lowest, tableChatView.contentSize.height
+                           + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
+            }
+            if let anchorMessageId = anchorMessageId,
+               let restored = indexPath(forMessageId: anchorMessageId),
+               restored.section < tableChatView.numberOfSections,
+               restored.row < tableChatView.numberOfRows(inSection: restored.section) {
+                return tableChatView.rectForRow(at: restored).minY - anchorDistanceFromTop
+            }
+            // Fix: with no row to anchor on - the first row on screen was a collage, whose
+            // pictures are not messages the list can find again - nothing was put back at all,
+            // and the page landed on top of the reader: the whole list dropped by the height of
+            // what had been read. The page's own height is the next best measure of it.
+            return offsetBeforeLoad + (tableChatView.contentSize.height - heightBeforeLoad)
+        }
+        // Four ways of handing the page to the table were measured against each other on the
+        // device, and none of them beat this one - the plainest. Inserting the rows rather than
+        // reloading moved the cost from the put-back into the insert and no further (25+70ms
+        // against 69+2); moving the offset inside the update was worse again (120-175ms, up to
+        // twenty-five bubbles built); setting the offset before the first layout meant asking
+        // rectForRow of a table that had just been reloaded, which makes it work out the
+        // geometry of the whole conversation there and then (up to 197ms). What all four have in
+        // common is the part that cannot be argued away: a screenful of bubbles has to be built,
+        // and a bubble costs about five milliseconds. A page lands in something under a tenth of
+        // a second, and it is the drag being ended - see above - rather than any of this that
+        // keeps the reader from losing their place over it.
+        tableChatView.reloadData()
         UIView.performWithoutAnimation {
-            tableChatView.reloadData()
             tableChatView.layoutIfNeeded()
         }
         // Fix: put back where the reader was, and then check the answer and put it back again
@@ -3858,16 +4603,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // out from the old numbers is then a row's worth out. That was the drop-and-recover
         // seen when a page landed just after a chat opened.
         for _ in 0..<4 {
-            var target: CGFloat?
-            if wasAtBottom {
-                let lowest = -tableChatView.adjustedContentInset.top
-                target = max(lowest, tableChatView.contentSize.height
-                             + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
-            } else if let anchorMessageId = anchorMessageId,
-                      let restored = indexPath(forMessageId: anchorMessageId) {
-                target = tableChatView.rectForRow(at: restored).minY - anchorDistanceFromTop
-            }
-            guard let target = target, abs(tableChatView.contentOffset.y - target) > 0.5 else {
+            // Measuring the rows that came on screen can change what the rows above them add
+            // up to, so the place is asked for again until it stops moving.
+            guard let target = placeForReader(),
+                  abs(tableChatView.contentOffset.y - target) > 0.5 else {
                 break
             }
             tableChatView.setContentOffset(CGPoint(x: tableChatView.contentOffset.x, y: target), animated: false)
@@ -4164,7 +4903,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     /// seconds hit the hold on that very layout pass and threw the reader back to where the chat
     /// had opened. Everything the reader does to a conversation is taking it over, not only
     /// dragging it.
-    private func endOpeningPlacement() {
+
+    func endOpeningPlacement() {
         pendingUnreadMarkerScroll = nil
         pendingUnreadMarkerDeadline = nil
         pendingInitialScrollToBottom = false
@@ -4189,6 +4929,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             // waiting is not an attempt, and the deadline above is what stops this going on.
             return
         }
+        // The rows are made to settle before the marker's place is worked out from them - a long
+        // message answers for its height with an estimate until it has been laid out, and that
+        // estimate is what the marker would otherwise be placed by. See
+        // applyPendingInitialBottomScroll, which settles them the same way.
+        tableChatView.layoutIfNeeded()
         let rowRect = tableChatView.rectForRow(at: indexPath)
         let topInset = tableChatView.adjustedContentInset.top
         // A plain table pins the date header over the top of the visible area, so the row has
@@ -4538,17 +5283,28 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             let loadedThrough = loadedOffset + loadedCount
             if loadedThrough < countMessagesNow {
                 let missing = countMessagesNow - loadedThrough
-                self.counter = Int(missing)
+                let rowsBefore = dataMessages.count
                 getData(offset: loadedThrough, limit: missing, marksFirstAsUnread: true)
                 loadedCount += missing
+                // Fix: everything below assumed the page had brought something. A count that
+                // disagrees with the window - a collage folds rows away, a message the window
+                // does not show is still counted - brought nothing at all, and the list was
+                // still reloaded, badged and scrolled for it. Nothing new, nothing to do.
+                guard dataMessages.count > rowsBefore else {
+                    return
+                }
+                self.counter = Int(missing)
                 tableChatView.reloadData()
                 if !self.indicatorCounterBSTB.isDescendant(of: self.view) && !self.buttonScrollToBottom.isDescendant(of: self.view) {
-                    let indexMessage = self.dataMessages.firstIndex(where: { $0["message_id"] as? String == self.markerCounter })
-                    if indexMessage != nil {
-                        let section = self.dataDates.firstIndex(of: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "")
-                        let row = self.messages(onDate: self.dataMessages[indexMessage!]["chat_date"]  as? String ?? "").firstIndex(where: { $0["message_id"] as? String == self.dataMessages[indexMessage!]["message_id"] as? String })
-                        self.tableChatView.safeScrollToRow(at: IndexPath(row: row!, section: section!), at: .top, animated: true)
-                    }
+                    // Fix: the list scrolled itself away from the newest message. A reader at
+                    // the bottom - no scroll-to-bottom button on screen - was taken up to the
+                    // unread marker, the top of whatever this pass had counted as new, and a
+                    // room whose loaded window counts differently from the database (a collage
+                    // folds rows away) counted something as new on every check: the chat
+                    // opened at its newest message and then slid off up the list on its own, or
+                    // did so under a held bubble. A reader at the newest message stays there;
+                    // what arrives is simply below, the way the reference follows new messages.
+                    self.tableChatView.scrollToBottom(isAnimated: true)
                 } else if self.buttonScrollToBottom.isDescendant(of: self.view) {
                     DispatchQueue.main.async { [self] in
                         if !self.indicatorCounterBSTB.isDescendant(of: self.view) {
@@ -5007,25 +5763,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     private func disableEditor() {
-        view.addSubview(containerAction)
-        containerAction.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            containerAction.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
-            containerAction.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
-            containerAction.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
-            containerAction.heightAnchor.constraint(equalToConstant: 120)
-        ])
-        containerAction.backgroundColor = .secondaryColor.withAlphaComponent(0.8)
-        let labelDisable = UILabel()
-        containerAction.addSubview(labelDisable)
-        labelDisable.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            labelDisable.centerYAnchor.constraint(equalTo: containerAction.centerYAnchor),
-            labelDisable.centerXAnchor.constraint(equalTo: containerAction.centerXAnchor),
-        ])
-        labelDisable.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        labelDisable.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-        labelDisable.text = "Call center session is over".localized()
+        coverInputArea(saying: "Call center session is over".localized())
     }
     
     @objc func onStatusChat(notification: NSNotification) {
@@ -5394,25 +6132,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                     navigationItem.rightBarButtonItem = nil
                     navigationItem.rightBarButtonItems = nil
                     changeAppBar()
-                    view.addSubview(containerAction)
-                    containerAction.translatesAutoresizingMaskIntoConstraints = false
-                    NSLayoutConstraint.activate([
-                        containerAction.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
-                        containerAction.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
-                        containerAction.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
-                        containerAction.heightAnchor.constraint(equalToConstant: 120)
-                    ])
-                    containerAction.backgroundColor = .secondaryColor.withAlphaComponent(0.8)
-                    let labelUnfriend = UILabel()
-                    containerAction.addSubview(labelUnfriend)
-                    labelUnfriend.translatesAutoresizingMaskIntoConstraints = false
-                    NSLayoutConstraint.activate([
-                        labelUnfriend.centerYAnchor.constraint(equalTo: containerAction.centerYAnchor),
-                        labelUnfriend.centerXAnchor.constraint(equalTo: containerAction.centerXAnchor),
-                    ])
-                    labelUnfriend.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-                    labelUnfriend.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-                    labelUnfriend.text = "You have unfriended this user".localized()
+                    // The same cover the block puts up, for the same reason - see coverInputArea.
+                    coverInputArea(saying: "You have unfriended this user".localized())
                     NotificationCenter.default.post(name: NSNotification.Name(rawValue: "reloadTabChats"), object: nil, userInfo: nil)
                     if contactChatNav.viewIfLoaded?.window != nil {
                         contactChatNav.dismiss(animated: true)
@@ -5432,7 +6153,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                             if(block == "-1"){
                                 dismissKeyboard()
                             }
-                            blockedView(blocked: block)
+                            // Fix: any word about blocking put the cover up, including the word
+                            // that says a block has just been lifted - so unblocking left the
+                            // conversation shut. At "0" there is nothing to cover, and
+                            // setRightButtonItem below takes what is there away.
+                            if block != "0" {
+                                blockedView(blocked: block)
+                            }
                             if contactChatNav.viewIfLoaded?.window != nil {
                                 contactChatNav.dismiss(animated: true)
                             }
@@ -5447,29 +6174,46 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     
     func blockedView(blocked: String) {
         dismissKeyboard()
+        coverInputArea(saying: blocked == "1" ? "You blocked this user".localized()
+                                              : "You have been blocked by this user".localized())
+    }
+
+    /// Lays a cover over the whole input area - the field, the send button, and the row of
+    /// attachments under it - with a word in the middle of it saying why.
+    ///
+    /// Fix: this was a strip a hundred and twenty points tall pinned to the foot of the screen,
+    /// and the input area has since grown past that: the field itself stood clear of the cover,
+    /// so a reader who had blocked somebody could still tap it, write, and send. The cover is tied
+    /// to the top of the field now, whatever height the bar happens to be and wherever the
+    /// keyboard has put it, and it takes the touches itself.
+    func coverInputArea(saying words: String) {
+        containerAction.subviews.forEach({ $0.removeFromSuperview() })
+        containerAction.removeFromSuperview()
         view.addSubview(containerAction)
         containerAction.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             containerAction.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
             containerAction.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
             containerAction.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
-            containerAction.heightAnchor.constraint(equalToConstant: 120)
+            containerAction.topAnchor.constraint(equalTo: viewTextfield.topAnchor)
         ])
         containerAction.backgroundColor = .secondaryColor.withAlphaComponent(0.8)
-        let labelBlocked = UILabel()
-        containerAction.addSubview(labelBlocked)
-        labelBlocked.translatesAutoresizingMaskIntoConstraints = false
+        containerAction.isUserInteractionEnabled = true
+        let label = UILabel()
+        containerAction.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            labelBlocked.centerYAnchor.constraint(equalTo: containerAction.centerYAnchor),
-            labelBlocked.centerXAnchor.constraint(equalTo: containerAction.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: containerAction.centerYAnchor),
+            label.centerXAnchor.constraint(equalTo: containerAction.centerXAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: containerAction.leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: containerAction.trailingAnchor, constant: -16)
         ])
-        labelBlocked.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-        labelBlocked.font = UIFont.systemFont(ofSize: 12 + offset()).bold
-        if blocked == "1" {
-            labelBlocked.text = "You blocked this user".localized()
-        } else {
-            labelBlocked.text = "You have been blocked by this user".localized()
-        }
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
+        label.font = UIFont.systemFont(ofSize: 12 + offset()).bold
+        label.text = words
+        view.bringSubviewToFront(containerAction)
     }
     
     @objc func seeProfileTapped() {
@@ -5512,19 +6256,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     @IBAction func voiceTapped(_ sender: UIButton) {
-        if (self.constraintBottomAttachment.constant != 0.0) {
-            constraintBottomAttachment.constant = 0.0
-            self.viewSticker.removeConstraints(self.viewSticker.constraints)
-            self.viewSticker.removeFromSuperview()
-        }
+        dismissStickerPanel()
     }
     
     @IBAction func imageTapped(_ sender: UIButton) {
-        if (self.constraintBottomAttachment.constant != 0.0) {
-            constraintBottomAttachment.constant = 0.0
-            self.viewSticker.removeConstraints(self.viewSticker.constraints)
-            self.viewSticker.removeFromSuperview()
-        }
+        dismissStickerPanel()
         if isContactCenter && fPinContacCenter.isEmpty && isRequestContactCenter {
             return
         }
@@ -5592,11 +6328,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     @IBAction func photoTapped(_ sender: UIButton) {
-        if (self.constraintBottomAttachment.constant != 0.0) {
-            constraintBottomAttachment.constant = 0.0
-            self.viewSticker.removeConstraints(self.viewSticker.constraints)
-            self.viewSticker.removeFromSuperview()
-        }
+        dismissStickerPanel()
         if isContactCenter && fPinContacCenter.isEmpty && isRequestContactCenter {
             return
         }
@@ -5616,60 +6348,418 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         if isContactCenter && fPinContacCenter.isEmpty && isRequestContactCenter {
             return
         }
-        if textFieldSend.isFirstResponder {
-            dismissKeyboard()
+        endOpeningPlacement()
+        // The panel and the keyboard take turns in the same space, and the button says which one
+        // the next tap brings - see refreshStickerButton.
+        if viewSticker.isDescendant(of: view) {
+            // Back to the keyboard. The bar is standing at the panel's height, which is the
+            // keyboard's own, so the keyboard arriving moves nothing: the panel is taken away by
+            // the keyboard's own announcement. See the keyboard-will-show handler.
+            textFieldSend.becomeFirstResponder()
+            return
         }
+        let wasTyping = textFieldSend.isFirstResponder
+        buildStickerPanel()
+        if wasTyping {
+            // Letting the keyboard go now swaps one for the other in place: the bar is already at
+            // that height and the panel is exactly as tall, so nothing travels.
+            textFieldSend.resignFirstResponder()
+        } else {
+            // Fix: the panel used to go up under the conversation without the conversation
+            // moving - a scroll to the row last noted, at `.none`, does nothing for a row that
+            // is still on screen, so the input area simply rose over the newest messages. The
+            // list is held in place the way it is for the keyboard: measured before the panel
+            // takes its room, put back after.
+            moveInputArea(bottomTo: stickerPanelShownHeight)
+        }
+        refreshStickerButton()
+    }
+
+    /// The sticker packs, in the order their names put them.
+    ///
+    /// A sticker is called sticker_<pack>_<number>, so the number in the middle is the pack and the
+    /// one at the end is its place inside it - read as a number, or ten would come after one.
+    /// Worked out once, when the names are read off the bundle.
+    func buildStickerPacks() {
+        var byPack: [String: [String]] = [:]
+        for name in stickers {
+            let parts = (name as NSString).deletingPathExtension.components(separatedBy: "_")
+            guard parts.count > 1 else {
+                continue
+            }
+            byPack[parts[1], default: []].append(name)
+        }
+        stickerPacks = byPack.keys.sorted().map { pack in
+            let items = byPack[pack]!.sorted { left, right in
+                Self.stickerNumber(left) < Self.stickerNumber(right)
+            }
+            return (pack, items)
+        }
+        shownStickerPack = 0
+    }
+
+    private static func stickerNumber(_ name: String) -> Int {
+        return Int((name as NSString).deletingPathExtension.components(separatedBy: "_").last ?? "") ?? 0
+    }
+
+    /// The stickers of the pack the reader is looking at.
+    var stickersInShownPack: [String] {
+        guard !stickerPacks.isEmpty else {
+            return stickers
+        }
+        return stickerPacks[min(shownStickerPack, stickerPacks.count - 1)].items
+    }
+
+    /// The row of packs along the foot of the panel, and which one is picked out.
+    private func buildStickerPackRow(in panel: UIView) -> UIView {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.distribution = .fillEqually
+        row.spacing = 6
+        row.translatesAutoresizingMaskIntoConstraints = false
+        for (index, pack) in stickerPacks.enumerated() {
+            let tab = UIButton(type: .system)
+            tab.tag = index
+            tab.layer.cornerRadius = 10
+            tab.clipsToBounds = true
+            tab.imageView?.contentMode = .scaleAspectFit
+            tab.contentEdgeInsets = UIEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+            if let first = pack.items.first,
+               let picture = UIImage(named: first, in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+                ?? UIImage(named: first, in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil) {
+                tab.setImage(picture.withRenderingMode(.alwaysOriginal), for: .normal)
+            }
+            tab.addTarget(self, action: #selector(stickerPackTapped(_:)), for: .touchUpInside)
+            row.addArrangedSubview(tab)
+        }
+        stickerPackRow = row
+        panel.addSubview(row)
+        return row
+    }
+
+    @objc func stickerPackTapped(_ sender: UIButton) {
+        guard sender.tag != shownStickerPack, sender.tag < stickerPacks.count else {
+            return
+        }
+        shownStickerPack = sender.tag
+        stickerGrid?.reloadData()
+        stickerGrid?.setContentOffset(.zero, animated: false)
+        refreshStickerPackRow()
+    }
+
+    /// Which pack reads as picked: the one being shown carries a fill behind it, the rest none.
+    func refreshStickerPackRow() {
+        guard let row = stickerPackRow else {
+            return
+        }
+        for (index, tab) in row.arrangedSubviews.enumerated() {
+            tab.backgroundColor = index == shownStickerPack ? .tertiarySystemFill : .clear
+        }
+    }
+
+    /// How tall the sticker panel stands: exactly the keyboard it takes the place of.
+    ///
+    /// The keyboard's height is remembered across its going away, so a panel opened from a resting
+    /// field is the size of the keyboard the reader saw last. Before any keyboard has been seen on
+    /// this device, a figure close to one.
+    private static var lastKeyboardHeight: CGFloat = 0
+    private static let keyboardHeightKey = "sticker_panel_keyboard_height"
+
+    /// Written down every time a keyboard is seen, and kept between runs - so the panel is the
+    /// keyboard's size from the first time it is opened on a device the reader has typed on,
+    /// rather than only after the keyboard has been up in this session.
+    static func rememberKeyboardHeight(_ height: CGFloat) {
+        guard height > 100 else {
+            return
+        }
+        lastKeyboardHeight = height
+        SecureUserDefaults.shared.set(Double(height), forKey: keyboardHeightKey)
+    }
+
+    var stickerPanelHeight: CGFloat {
+        if let up = shownKeyboardHeight, up > 0 {
+            return up
+        }
+        if Self.lastKeyboardHeight > 0 {
+            return Self.lastKeyboardHeight
+        }
+        if let stored: Double = SecureUserDefaults.shared.value(forKey: Self.keyboardHeightKey), stored > 100 {
+            Self.lastKeyboardHeight = CGFloat(stored)
+            return CGFloat(stored)
+        }
+        return Self.predictedKeyboardHeight
+    }
+
+    /// What a keyboard is likely to be on this phone, for the one opening before any keyboard has
+    /// ever been seen on it.
+    ///
+    /// Fix: a single figure of three hundred, which is a fair size on a tall phone and far too
+    /// much on a small one - on an iPhone 7 the panel came up towering over the conversation. The
+    /// heights below are the portrait keyboards of the phones this app runs on, the predictive bar
+    /// included, and on the phones that have a home indicator its strip is part of the number, the
+    /// same way the system reports it.
+    static var predictedKeyboardHeight: CGFloat {
+        switch UIScreen.main.bounds.height {
+        case ..<600:
+            return 216
+        case ..<700:
+            return 260
+        case ..<800:
+            return 271
+        case ..<850:
+            return 336
+        default:
+            return 346
+        }
+    }
+
+    /// The height the panel on screen was built at, which is what the bar stands on for as long as
+    /// it is up - the keyboard's announcements read this rather than a number of their own.
+    private(set) var stickerPanelShownHeight: CGFloat = 0
+
+    /// True between the keyboard announcing itself and arriving, while the sticker panel is still
+    /// standing under it - see keyboardDidShow, which is where the panel goes.
+    private var stickerPanelWaitingForKeyboard = false
+
+    /// The packs the stickers fall into, and the one on screen - see buildStickerPacks.
+    var stickerPacks: [(pack: String, items: [String])] = []
+    var shownStickerPack = 0
+    weak var stickerGrid: UICollectionView?
+    weak var stickerPackRow: UIStackView?
+    /// What ties the panel to this screen. Held on to because the ties themselves are held by the
+    /// screen's view, and a panel taken away without them leaves them behind - see
+    /// tearDownStickerPanel.
+    private var stickerPanelConstraints: [NSLayoutConstraint] = []
+
+    /// The sticker button shows what the next tap will do: the stickers while the keyboard is in
+    /// their place, and the keyboard while the stickers are.
+    func refreshStickerButton() {
+        let tint: UIColor = traitCollection.userInterfaceStyle == .dark ? .white : .mainColor
+        let picture: UIImage?
+        if viewSticker.isDescendant(of: view) {
+            // Drawn into the same 30pt square the other three icons are, with its own proportions
+            // kept: a keyboard is wider than it is tall, and stretching one into a square bends
+            // the keys. Fix: asked for by point size it came out a different weight and size from
+            // its neighbours.
+            let symbol = UIImage(systemName: "keyboard",
+                                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .regular))?
+                .withTintColor(tint, renderingMode: .alwaysOriginal)
+            picture = symbol.map { drawn in
+                let box = CGSize(width: 30, height: 30)
+                let fit = min(box.width / drawn.size.width, box.height / drawn.size.height)
+                let size = CGSize(width: drawn.size.width * fit, height: drawn.size.height * fit)
+                return UIGraphicsImageRenderer(size: box).image { _ in
+                    drawn.draw(in: CGRect(x: (box.width - size.width) / 2,
+                                          y: (box.height - size.height) / 2,
+                                          width: size.width, height: size.height))
+                }.withRenderingMode(.alwaysOriginal)
+            }
+        } else if let sticker = UIImage(named: "Sticker---Emoji", in: Bundle.resourceBundle(for: Nexilis.self), with: nil) {
+            picture = resizeImage(image: sticker, targetSize: CGSize(width: 30, height: 30))
+                .withTintColor(tint, renderingMode: .alwaysOriginal)
+        } else {
+            picture = nil
+        }
+        guard let picture = picture else {
+            return
+        }
+        // Not setImage: on glass the picture lives on a circle of its own inside this button - see
+        // GlassLook.circleImageChanged.
+        GlassLook.circleImageChanged(in: buttonSendSticker, to: picture)
+    }
+
+    /// Takes the panel off the screen and leaves nothing of it behind.
+    ///
+    /// Fix: the panel was removed but the four constraints holding it to this screen were not -
+    /// those live on the screen's own view, not on the panel, so they stayed behind pointing at a
+    /// view nobody could see. The next panel brought four more, the two sets disagreed about how
+    /// tall the thing was, and the layout settled the argument by giving the grid no height at
+    /// all: stickers, then keyboard, then stickers again, and the second time the panel came up
+    /// empty.
+    private func tearDownStickerPanel() {
+        NSLayoutConstraint.deactivate(stickerPanelConstraints)
+        stickerPanelConstraints = []
+        viewSticker.subviews.forEach { $0.removeFromSuperview() }
+        viewSticker.removeConstraints(viewSticker.constraints)
+        viewSticker.removeFromSuperview()
+        stickerPanelShownHeight = 0
+        stickerGrid = nil
+        stickerPackRow = nil
+    }
+
+    /// Puts the grid of stickers up, as tall as the keyboard.
+    private func buildStickerPanel() {
+        guard !viewSticker.isDescendant(of: view) else {
+            return
+        }
+        stickerPanelShownHeight = stickerPanelHeight
+        view.addSubview(viewSticker)
+        if #available(iOS 26.0, *) {
+            // The same ground the attachment row under it stands on, so the panel and the row read
+            // as one piece - and as the keyboard whose place it is taking. See applyPanelGround.
+            viewSticker.backgroundColor = .clear
+            let material = UIVisualEffectView(effect: nil)
+            GlassLook.applyPanelGround(material)
+            material.translatesAutoresizingMaskIntoConstraints = false
+            viewSticker.insertSubview(material, at: 0)
+            NSLayoutConstraint.activate([
+                material.leadingAnchor.constraint(equalTo: viewSticker.leadingAnchor),
+                material.trailingAnchor.constraint(equalTo: viewSticker.trailingAnchor),
+                material.topAnchor.constraint(equalTo: viewSticker.topAnchor),
+                material.bottomAnchor.constraint(equalTo: viewSticker.bottomAnchor)
+            ])
+        }
+        viewSticker.translatesAutoresizingMaskIntoConstraints = false
+        // Kept, because these are held by this screen's own view rather than by the panel - see
+        // tearDownStickerPanel, which is the only way they can be taken away again.
+        stickerPanelConstraints = [
+            viewSticker.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            viewSticker.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            viewSticker.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            viewSticker.heightAnchor.constraint(equalToConstant: stickerPanelShownHeight)
+        ]
+        NSLayoutConstraint.activate(stickerPanelConstraints)
+
+        let layout = UICollectionViewFlowLayout()
+        layout.scrollDirection = .vertical
+        let collectionSticker = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionSticker.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "cellSticker")
+        collectionSticker.delegate = self
+        collectionSticker.dataSource = self
+        collectionSticker.backgroundColor = .clear
+        viewSticker.addSubview(collectionSticker)
+        stickerGrid = collectionSticker
+        collectionSticker.translatesAutoresizingMaskIntoConstraints = false
+
+        // The packs along the foot, the way the reference has them - the grid above, one row of
+        // packs below it, and nothing else on that row.
+        let packs = buildStickerPackRow(in: viewSticker)
+        let rule = UIView()
+        rule.backgroundColor = .separator
+        rule.translatesAutoresizingMaskIntoConstraints = false
+        viewSticker.addSubview(rule)
+
+        NSLayoutConstraint.activate([
+            collectionSticker.topAnchor.constraint(equalTo: viewSticker.topAnchor, constant: 12),
+            collectionSticker.leadingAnchor.constraint(equalTo: viewSticker.leadingAnchor, constant: 20),
+            collectionSticker.trailingAnchor.constraint(equalTo: viewSticker.trailingAnchor, constant: -20),
+            collectionSticker.bottomAnchor.constraint(equalTo: rule.topAnchor, constant: -6),
+
+            rule.leadingAnchor.constraint(equalTo: viewSticker.leadingAnchor),
+            rule.trailingAnchor.constraint(equalTo: viewSticker.trailingAnchor),
+            rule.heightAnchor.constraint(equalToConstant: 0.5),
+            rule.bottomAnchor.constraint(equalTo: packs.topAnchor, constant: -4),
+
+            packs.leadingAnchor.constraint(equalTo: viewSticker.leadingAnchor, constant: 12),
+            packs.trailingAnchor.constraint(equalTo: viewSticker.trailingAnchor, constant: -12),
+            packs.heightAnchor.constraint(equalToConstant: 44),
+            // Stood on the foot of the screen by measure, not on the panel's safe-area guide.
+            //
+            // Fix: that guide is not the home indicator while the keyboard is up - the keyboard's
+            // own height goes into the bottom safe area, so on a panel built with the keyboard
+            // still on screen the guide sat three hundred points above the panel's foot. The row
+            // of packs was pinned to it, the grid was pinned above the row, and the grid came out
+            // with no height at all: the second time the stickers were opened they were gone.
+            // Read off the probe: "grid 362x0 cells12 panel 402x328".
+            packs.bottomAnchor.constraint(equalTo: viewSticker.bottomAnchor, constant: -(settledFoot + 6))
+        ])
+        refreshStickerPackRow()
+    }
+
+    /// Raises or lowers the input area by what stands under it - the sticker panel's height, or
+    /// nothing - and keeps the messages in front of the reader where they are while it moves,
+    /// exactly as the keyboard does. See `listAnchor` and `restore(_:)`.
+    private func moveInputArea(bottomTo constant: CGFloat) {
+        guard constraintBottomAttachment.constant != constant else { return }
+        let wasShowing = listAnchor
+        constraintBottomAttachment.constant = constant
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseInOut, .beginFromCurrentState], animations: {
+            self.view.layoutIfNeeded()
+            self.restore(wasShowing)
+        })
+    }
+
+    /// Puts the field's scroll on a line boundary, once the layout that follows a change has run.
+    ///
+    /// Fix: the field's height is a whole number of lines now, but where it was scrolled to was
+    /// not. A text view scrolls just far enough to show the caret when a line is added, and "just
+    /// enough" is measured off the caret, which is shorter than its line - so the field came to
+    /// rest a few points into a line: the top line cut, the margin under the last one gone, and
+    /// six lines showing where five fit. Snapped to whole lines, the margins are always the insets.
+    private func snapFieldScroll(_ textView: UITextView) {
         DispatchQueue.main.async {
-            if !self.viewSticker.isDescendant(of: self.view) {
-                self.constraintBottomAttachment.constant = 200.0
-                self.view.addSubview(self.viewSticker)
-                self.viewSticker.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    self.viewSticker.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
-                    self.viewSticker.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
-                    self.viewSticker.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
-                    self.viewSticker.heightAnchor.constraint(equalToConstant: 200)
-                ])
-                
-                let layout = UICollectionViewFlowLayout()
-                layout.scrollDirection = .vertical
-                let collectionSticker = UICollectionView(frame: .zero, collectionViewLayout: layout)
-                collectionSticker.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "cellSticker")
-                collectionSticker.delegate = self
-                collectionSticker.dataSource = self
-                collectionSticker.backgroundColor = .clear
-                self.viewSticker.addSubview(collectionSticker)
-                collectionSticker.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    collectionSticker.topAnchor.constraint(equalTo: self.viewSticker.topAnchor, constant: 20),
-                    collectionSticker.bottomAnchor.constraint(equalTo: self.viewSticker.bottomAnchor, constant: -20),
-                    collectionSticker.leadingAnchor.constraint(equalTo: self.viewSticker.leadingAnchor, constant: 20),
-                    collectionSticker.trailingAnchor.constraint(equalTo: self.viewSticker.trailingAnchor, constant: -20)
-                ])
-                if (self.currentIndexpath != nil) {
-                    DispatchQueue.main.async {
-                        self.tableChatView.safeScrollToRow(at: IndexPath(row: self.currentIndexpath!.row, section: self.currentIndexpath!.section), at: .none, animated: false)
-                    }
-                } else {
-                    self.tableChatView.scrollToBottom()
-                }
-            } else {
-                self.constraintBottomAttachment.constant = 0.0
-                self.viewSticker.removeConstraints(self.viewSticker.constraints)
-                self.viewSticker.removeFromSuperview()
+            let layout = textView.layoutManager
+            var range = NSRange()
+            let pitch = layout.numberOfGlyphs > 0 ? layout.lineFragmentRect(forGlyphAt: 0, effectiveRange: &range).height : 0
+            let farthest = max(0, textView.contentSize.height - textView.bounds.height)
+            let now = textView.contentOffset.y
+            let snapped = pitch > 0 ? min(max((now / pitch).rounded() * pitch, 0), farthest) : 0
+            if abs(snapped - now) > 0.5 {
+                textView.contentOffset.y = snapped
             }
         }
+    }
+
+    /// How tall the field should be for what is in it: its insets plus its lines, up to five of
+    /// them - past five it scrolls, and what shows is then exactly five whole lines with the same
+    /// margin above the first as below the last, the way the reference's field behaves.
+    ///
+    /// Fix: the cap was a number - 95pt, later five times the font's nominal line height - and
+    /// the lines are not laid out at that height: the text's own font, its leading, a mention or
+    /// a bold run all make a line taller than the nominal, so the cap fell mid-line and the
+    /// field, scrolled to either end, showed a cut line and no margin. The lines are read off the
+    /// layout itself now, so the height is always a whole number of them.
+    /// The top of the field as drawn: the glass's, where the field is wrapped in one, since the
+    /// text view sits 11pt inside it there. What stacks above the field - the reply preview, the
+    /// link preview - stands on this.
+    private var fieldTopAnchor: NSLayoutYAxisAnchor {
+        GlassLook.glass(around: textFieldSend)?.topAnchor ?? textFieldSend.topAnchor
+    }
+
+    /// The same for the field of the message editor.
+    private var editFieldTopAnchor: NSLayoutYAxisAnchor {
+        GlassLook.glass(around: editTextView)?.topAnchor ?? editTextView.topAnchor
+    }
+
+    private func fieldHeight(for textView: UITextView) -> CGFloat {
+        let insets = textView.textContainerInset
+        let layout = textView.layoutManager
+        layout.ensureLayout(for: textView.textContainer)
+        var lines: [CGRect] = []
+        var index = 0
+        while index < layout.numberOfGlyphs {
+            var range = NSRange()
+            lines.append(layout.lineFragmentRect(forGlyphAt: index, effectiveRange: &range))
+            index = NSMaxRange(range)
+        }
+        // The empty line after a trailing newline is a line too.
+        if layout.extraLineFragmentRect.height > 0 {
+            lines.append(layout.extraLineFragmentRect)
+        }
+        let shown = lines.prefix(5)
+        // One line at least: 18pt of text view on glass, where the margins are the glass's and
+        // 18 + 22 is the 40pt capsule; the 40pt the field was drawn with everywhere else.
+        let floor: CGFloat = GlassLook.glass(around: textView) != nil ? 18 : 40
+        guard let last = shown.last else { return floor }
+        return max(floor, ceil(insets.top + last.maxY + insets.bottom))
+    }
+
+    /// Takes the sticker panel down, if it is up, and gives the room back to the conversation
+    /// without moving what the reader is looking at.
+    private func dismissStickerPanel() {
+        guard viewSticker.isDescendant(of: view) || constraintBottomAttachment.constant != 0 else { return }
+        // Emptied as well: the grid is built afresh on every opening, and used to be stacked on
+        // top of the one before.
+        tearDownStickerPanel()
+        refreshStickerButton()
+        moveInputArea(bottomTo: 0)
     }
     
     @IBAction func fileTapped(_ sender: UIButton) {
         if isContactCenter && fPinContacCenter.isEmpty && isRequestContactCenter {
             return
         }
-        if (self.constraintBottomAttachment.constant != 0.0) {
-            constraintBottomAttachment.constant = 0.0
-            self.viewSticker.removeConstraints(self.viewSticker.constraints)
-            self.viewSticker.removeFromSuperview()
-        }
+        dismissStickerPanel()
         documentPicker.present()
     }
     
@@ -5682,17 +6772,23 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         // The camera belongs to an empty bar. Once there is something written the bar is about
         // sending that, and a second way to start a recording only gets in the way.
         videoNoteEntry?.setHidden(hasText)
-        // Read off the microphone itself, every refresh, so the joined capsule follows it through
-        // a theme change instead of holding whatever colour it was built with.
+        // The microphone's own colour, worked out again every refresh, so the joined capsule
+        // follows it through a theme change - not read back off the button, which on glass
+        // has no flat fill to read.
         videoNoteEntry?.matchAppearance(
-            background: buttonSendChat.backgroundColor,
+            background: self.traitCollection.userInterfaceStyle == .dark ? .white : .mainColor,
             tint: self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white)
+        // While the camera is beside it the microphone stands on the capsule's ground; alone,
+        // as the paper plane, it stands on its own. Only before iOS 26 - see ChatMentionList.
+        ChatMentionList.setGround(hidden: !hasText, on: buttonSendChat)
         guard !hasText else {
             buttonSendChat.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
+            GlassLook.imageChanged(buttonSendChat)
             return
         }
         let mic = UIImage(systemName: "mic.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold))
         buttonSendChat.setImage(mic?.withTintColor(self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white, renderingMode: .alwaysOriginal), for: .normal)
+        GlassLook.imageChanged(buttonSendChat)
     }
 
 
@@ -5717,9 +6813,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             // Nothing else is being written or picked while a video note is being taken.
             self.textFieldSend.resignFirstResponder()
             if self.viewSticker.isDescendant(of: self.view) {
-                self.constraintBottomAttachment.constant = 0.0
-                self.viewSticker.removeConstraints(self.viewSticker.constraints)
-                self.viewSticker.removeFromSuperview()
+                self.dismissStickerPanel()
                 self.view.layoutIfNeeded()
             }
         }
@@ -5768,9 +6862,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             // raises the input area by the height of the panel (constraintBottomAttachment = 200),
             // and every other way of closing it puts that back - this one did not, so the bar was
             // left floating 200pt off the bottom with nothing under it.
-            constraintBottomAttachment.constant = 0.0
-            viewSticker.removeConstraints(viewSticker.constraints)
-            viewSticker.removeFromSuperview()
+            dismissStickerPanel()
             view.layoutIfNeeded()
         }
 
@@ -5894,8 +6986,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             self.isConfidential = !self.isConfidential
             if self.isConfidential {
                 self.buttonAckConfidential.setImage(imageConfidential, for: .normal)
+                GlassLook.imageChanged(self.buttonAckConfidential)
             } else {
                 self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+                GlassLook.imageChanged(self.buttonAckConfidential)
             }
             if self.isAck {
                 self.isAck = false
@@ -5908,8 +7002,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             self.isAck = !self.isAck
             if self.isAck {
                 self.buttonAckConfidential.setImage(imageAck, for: .normal)
+                GlassLook.imageChanged(self.buttonAckConfidential)
             } else {
                 self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+                GlassLook.imageChanged(self.buttonAckConfidential)
             }
             if self.isConfidential {
                 self.isConfidential = false
@@ -5922,8 +7018,10 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             self.isSecret = !self.isSecret
             if self.isSecret {
                 self.buttonAckConfidential.setImage(imageSecret, for: .normal)
+                GlassLook.imageChanged(self.buttonAckConfidential)
             } else {
                 self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+                GlassLook.imageChanged(self.buttonAckConfidential)
             }
             if self.isConfidential {
                 self.isConfidential = false
@@ -5949,6 +7047,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             self.isAck = false
             self.isSecret = false
             self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+            GlassLook.imageChanged(self.buttonAckConfidential)
         }))
         self.present(alertController, animated: true, completion: nil)
     }
@@ -5960,10 +7059,13 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         let imageAck = resizeImage(image: UIImage(named: "ack_icon", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal)
         if isAck {
             buttonAckConfidential.setImage(imageAck, for: .normal)
+            GlassLook.imageChanged(buttonAckConfidential)
         } else if isConfidential {
             buttonAckConfidential.setImage(imageConfidential, for: .normal)
+            GlassLook.imageChanged(buttonAckConfidential)
         } else {
             self.buttonAckConfidential.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(scale: .large))?.withTintColor(.white).withRenderingMode(.alwaysTemplate), for: .normal)
+            GlassLook.imageChanged(self.buttonAckConfidential)
         }
     }
     
@@ -6065,11 +7167,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             searchBar.resignFirstResponder()
         } else {
             textFieldSend.resignFirstResponder() // dismiss keyoard
-            if (self.constraintBottomAttachment.constant != 0.0) {
-                constraintBottomAttachment.constant = 0.0
-                self.viewSticker.removeConstraints(self.viewSticker.constraints)
-                self.viewSticker.removeFromSuperview()
-            }
+            dismissStickerPanel()
         }
     }
     
@@ -6174,7 +7272,23 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             // keyboard's height.
             let wasShowing = self.listAnchor
             self.constraintViewTextField.constant = 0
-            self.constraintBottomAttachment.constant = 0
+            self.shownKeyboardHeight = nil
+            self.keyboardIsArriving = false
+            self.keyboardIsLeaving = true
+            // Fix: the sticker panel stayed on screen but the bar dropped to the bottom edge
+            // behind it - leaving the app and coming back has the system announce the keyboard
+            // away, and this put the bar's foot at zero without asking what was standing under
+            // it. The panel is 200pt tall and the bar stands on it for as long as it is up.
+            // Announced away, the keyboard is on its way out - and from here the system's own
+            // account of it can no longer be trusted. Fix: read off a recording, once a drag
+            // had pulled the keyboard clear of the screen, the layout guide and the keyboard's
+            // placeholder both went on reporting it part way up, wherever the finger was, for
+            // as long as the finger stayed down; the bar, stood on that, hung in the middle of
+            // the screen over the messages. The tracker follows the finger only until this
+            // announcement; then the bar goes down with the keyboard, on the announced curve.
+            stopTrackingKeyboard()
+            let stickerUp = self.viewSticker.isDescendant(of: self.view)
+            self.constraintBottomAttachment.constant = stickerUp ? self.stickerPanelShownHeight : 0
             self.constraintBottomContainerMultpileSelectSession.constant = 0
             keyboardHeightForMention = nil
             let travel = keyboardTravel(info)
@@ -6214,14 +7328,28 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             let keyboardHeight: CGFloat = keyboardSize.height
             
             if self.constraintBottomAttachment.constant != keyboardHeight || self.constraintViewTextField.constant != keyboardHeight - 60 {
+                // The panel is left standing while the keyboard travels: it is the same height
+                // and in the same place, so the keyboard slides up over it and what the reader
+                // sees is one being covered by the other. Taken away in keyboardDidShow, once
+                // there is nothing of it left to see. Fix: it used to be taken away here, at the
+                // first word of the keyboard - so the conversation showed through the gap for the
+                // length of the animation, which is the jolt seen going from stickers back to
+                // typing. The button says what the next tap does from this moment, though.
                 if self.viewSticker.isDescendant(of: self.view) {
-                    self.constraintBottomAttachment.constant = 0.0
-                    self.viewSticker.removeConstraints(self.viewSticker.constraints)
-                    self.viewSticker.removeFromSuperview()
+                    self.stickerPanelWaitingForKeyboard = true
                 }
+                Self.rememberKeyboardHeight(keyboardHeight)
 //                self.constraintViewTextField.constant = keyboardHeight - 60
-                self.constraintBottomAttachment.constant = keyboardHeight
+                self.shownKeyboardHeight = keyboardHeight
+                self.keyboardIsArriving = true
+                self.keyboardIsLeaving = false
                 self.keyboardHeightForMention = keyboardHeight
+                // Stood on the keyboard itself, frame by frame, wherever it can be seen; the
+                // announced height only where it cannot.
+                let tracked = self.startTrackingKeyboard()
+                if !tracked {
+                    self.constraintBottomAttachment.constant = keyboardHeight
+                }
                 // Measured before the layout changes, exactly as on the way out. This used to
                 // work out how much of the list the keyboard was about to take that it was not
                 // taking already; holding the distance from the end of the list covers that case
@@ -6232,6 +7360,11 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 }
                 let travel = keyboardTravel(info)
                 UIView.animate(withDuration: travel.duration, delay: 0, options: travel.options, animations: {
+                    if tracked {
+                        // The list keeps its place by the inset the layout works out on every
+                        // frame the bar moves; the put-back waits for the keyboard to settle.
+                        return
+                    }
                     self.view.layoutIfNeeded()
                     // Fix: this used to scroll to the last remembered row, or all the way to the
                     // newest message, every time the keyboard came up - so tapping the input
@@ -6277,8 +7410,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
                 if (textFieldSend.text!.trimmingCharacters(in: .whitespacesAndNewlines) != "Send message".localized()) {
                     textFieldSend.text = ""
                 }
-                if (self.heightTextFieldSend.constant != 40) {
-                    self.heightTextFieldSend.constant = 40
+                let oneLine = self.fieldHeight(for: self.textFieldSend)
+                if (self.heightTextFieldSend.constant != oneLine) {
+                    self.heightTextFieldSend.constant = oneLine
                 }
                 return
             }
@@ -6547,7 +7681,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
             textFieldSend.textColor = UIColor.lightGray
         } else if constraintBottomAttachment.constant != 0 {
             textFieldSend.text = ""
-            heightTextFieldSend.constant = 40
+            heightTextFieldSend.constant = fieldHeight(for: textFieldSend)
         }
         deleteReplyView()
         deleteLinkPreview()
@@ -7433,6 +8567,144 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     /// chat just opened, where none of the pictures have landed. The head of the first row showing
     /// moves only when the rows *above* it change, which is the one thing that does have to be
     /// followed.
+    /// Where the list stood when the bubble menu went up; it is put back there on every scroll
+    /// or layout for as long as the menu stays. Nil when no menu is up.
+    private var heldOffsetUnderMenu: CGPoint?
+    /// The same place as a row - the row under the reader and where it sat - which is what
+    /// survives a reload that re-measures rows. Nil when no menu is up.
+    private var heldPlaceUnderMenu: ListAnchor?
+    /// Set while the bubble menu has the touch, and cleared a moment after it has gone: work a
+    /// press queued for a later turn - a quote's jump, most of all - belongs to the press the
+    /// menu took over, and must not land once the menu is out of the way.
+    var menuTookOverTouch = false
+
+    /// Puts the list back where it stood when the menu went up, if anything has moved it.
+    /// Until when the list is still the menu's rather than the reader's, after the menu itself
+    /// has gone. Nil when nothing holds it.
+    private var holdUnderMenuUntil: Date?
+
+    /// True while the hold the menu left behind is still in force - see the dismissal that sets
+    /// it. A finger on the list ends it at once: from that moment the list is the reader's.
+    private var listStillHeldAfterMenu: Bool {
+        guard let until = holdUnderMenuUntil, Date() < until,
+              let list = tableChatView, !list.isTracking else {
+            return false
+        }
+        return true
+    }
+
+    /// How long the hold may go on extending itself, whatever the rows do.
+    private var holdUnderMenuCap: Date?
+    /// Runs the hold every frame for as long as it is in force.
+    private var menuHoldLink: CADisplayLink?
+
+    private func holdListUnderMenu() {
+        guard longBubbleContextMenu != nil || listStillHeldAfterMenu else { return }
+        putBackUnderMenu()
+    }
+
+    /// Fix: the hold used to be checked on a handful of timed passes and on this screen's own
+    /// layout. Read off a recording with the log on: one correction landed, of seven hundred and
+    /// eighty-eight points, and then the conversation went on sliding past the reader for a
+    /// second more with nothing logged at all - because a row above the reader settling at its
+    /// real height moves what is on screen without moving the offset, so there is no scroll to
+    /// hear about and no layout pass of this screen either. The only way to catch that is to look
+    /// every frame, which is what this does for as long as the hold lasts.
+    private func startHoldingUnderMenu() {
+        guard menuHoldLink == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(holdFrameUnderMenu))
+        link.add(to: .main, forMode: .common)
+        menuHoldLink = link
+    }
+
+    @objc private func holdFrameUnderMenu() {
+        guard longBubbleContextMenu != nil || listStillHeldAfterMenu else {
+            stopHoldingUnderMenu()
+            return
+        }
+        putBackUnderMenu()
+    }
+
+    private func stopHoldingUnderMenu() {
+        menuHoldLink?.invalidate()
+        menuHoldLink = nil
+    }
+
+    /// Gives the list back to whoever is about to move it on purpose.
+    ///
+    /// Fix: the menu keeps its hold on the list for a moment after it closes, putting the list
+    /// back where it stood every frame - see putBackUnderMenu. Replying from the menu runs
+    /// inside that moment, and replying opens the reply bar: the list becomes shorter by the
+    /// bar's height and has to move up by as much to keep the message being replied to in view.
+    /// It did move, and the hold put it straight back, every frame, until the hold ran out - so
+    /// a reply from the menu left the message behind the bar, while the very same reply by
+    /// swipe, with no menu and no hold, moved as it should. The hold is there to undo what the
+    /// menu itself does to the list, and it has no business outliving a reader who has chosen
+    /// something for the list to do.
+    private func releaseListAfterMenu() {
+        holdUnderMenuUntil = nil
+        holdUnderMenuCap = nil
+        heldOffsetUnderMenu = nil
+        heldPlaceUnderMenu = nil
+        stopHoldingUnderMenu()
+    }
+
+    /// By the offset the reader was at, which is exact.
+    ///
+    /// Fix: this put the list back by *row* - the row's place re-measured and the content moved
+    /// to keep it where it was - which is right when something has re-measured the rows, and
+    /// wrong here. Read off the log on a recording: fifteen milliseconds after the menu went up,
+    /// this moved the list a hundred and seventy points, every single time, and that is the jump
+    /// seen when the menu is cancelled. Nothing re-measures while the menu is up - the list is
+    /// held still and its callbacks stand down - so there is nothing for a row to correct, and
+    /// the offset the reader was left at is the whole of what has to be kept.
+    private func putBackUnderMenu() {
+        // One thing is kept, and it is the only thing the reader can see: the row they were
+        // looking at, at the very same height on the screen as it was in the moment before the
+        // menu was made. Every frame, for as long as the menu is up and for a moment after.
+        //
+        // Fix, and this is the whole of it. Read off the log, with the numbers of one press:
+        // before the menu the row stood at 14110 and the content measured 15275; the menu's own
+        // layout left the row at 13675 and the content at 14840, four hundred and thirty-five
+        // points shorter, with the system moving the offset two hundred and seventy of those by
+        // itself. So the rows above the reader really do change size when the menu is built, and
+        // they change back when it goes. Holding the *offset* through that keeps a number still
+        // and lets the conversation slide under it - the jump seen on opening the menu, and again
+        // on closing it. Holding the *row* is what keeps the picture still, which is what was
+        // asked for. The place is read once, before the menu touches anything, and never read
+        // again: re-reading it under the menu is re-reading it off the very distortion it is
+        // there to undo.
+        if let place = heldPlaceUnderMenu, let path = indexPath(forMessageId: place.messageId),
+           path.section < tableChatView.numberOfSections,
+           path.row < tableChatView.numberOfRows(inSection: path.section) {
+            let lowest = -tableChatView.adjustedContentInset.top
+            let highest = max(lowest, tableChatView.contentSize.height
+                              + tableChatView.adjustedContentInset.bottom - tableChatView.bounds.height)
+            let head = tableChatView.rectForRow(at: path).minY - place.headBelowViewport
+            let target = min(max(head - tableChatView.adjustedContentInset.top, lowest), highest)
+            let moved = target - tableChatView.contentOffset.y
+            if abs(moved) > 0.5 {
+                tableChatView.contentOffset.y = target
+                // Something is still moving the rows, so the hold waits it out: each correction
+                // buys another moment, up to the cap set when the menu went. A finger on the list
+                // ends it at once whatever it is waiting for.
+                if longBubbleContextMenu == nil, let cap = holdUnderMenuCap {
+                    holdUnderMenuUntil = min(cap, max(holdUnderMenuUntil ?? .distantPast,
+                                                      Date().addingTimeInterval(0.4)))
+                }
+            }
+            heldOffsetUnderMenu = tableChatView.contentOffset
+            return
+        }
+        // No row to hold by - it has been deleted, or the window was rebuilt around it. The
+        // offset is the next best thing.
+        guard let held = heldOffsetUnderMenu else { return }
+        let now = tableChatView.contentOffset
+        if abs(now.y - held.y) > 0.5 || abs(now.x - held.x) > 0.5 {
+            tableChatView.setContentOffset(held, animated: false)
+        }
+    }
+
     private var listAnchor: ListAnchor? {
         guard let scrollView = tableChatView, scrollView.bounds.height > 0,
               let indexPath = scrollView.indexPathsForVisibleRows?.first,
@@ -7501,7 +8773,12 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private var scrollToBottomBottomConstraint: NSLayoutConstraint?
 
     private func addButtonScrollToBottom() {
-        if isInitialLoading {
+        // Fix: a preview is looked at, not scrolled, so this button does nothing there - but it
+        // was still put up whenever the list had not settled at its newest message yet, and the
+        // card the reader holds under their finger showed it, with its unread count floating
+        // over the conversation. Low Power Mode made it the usual case rather than a rare one,
+        // because everything the placement waits on takes longer there.
+        if isInitialLoading || isPreview {
             return
         }
         self.view.addSubview(buttonScrollToBottom)
@@ -7525,6 +8802,8 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
         buttonScrollToBottom.imageEdgeInsets.top = 2.0
         buttonScrollToBottom.layer.cornerRadius = 17.5
         buttonScrollToBottom.clipsToBounds = true
+        GlassLook.adopt(buttonScrollToBottom, tint: .mainColor, foreground: .white)
+        ChatMentionList.dress(buttonScrollToBottom, colour: .mainColor)
         buttonScrollToBottom.addTarget(self, action: #selector(scrollTobottomAction), for: .touchUpInside)
     }
     
@@ -7570,7 +8849,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
 
     private func addCounterAtButttonScrollToBottom() {
-        if isInitialLoading || counter == 0 {
+        if isInitialLoading || isPreview || counter == 0 {
             return
         }
         self.view.addSubview(indicatorCounterBSTB)
@@ -7601,6 +8880,9 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     }
     
     @objc func scrollTobottomAction() {
+        // Where the list goes from here is this button's business, not the opening
+        // placement's - see presentBubbleContextMenu.
+        endOpeningPlacement()
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.prepare()
         generator.impactOccurred()
@@ -7709,6 +8991,7 @@ public class EditorPersonal: UIViewController, ImageVideoPickerDelegate, UIGestu
     private func removeScrollToBottomButton() {
         if buttonScrollToBottom.isDescendant(of: view) {
             buttonScrollToBottom.removeConstraints(buttonScrollToBottom.constraints)
+            ChatMentionList.removeGround(of: buttonScrollToBottom)
             buttonScrollToBottom.removeFromSuperview()
 
             if indicatorCounterBSTB.isDescendant(of: view) {
@@ -8314,27 +9597,18 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
                                 index = NSMaxRange(lineRange)
                                 numberOfLines += 1
                             }
-                            if currentLine == 1 && (numberOfLines == 1 || numberOfLines == 0) {
-                                if self.isEditingMessage {
-                                    self.constraintHeighteditTextView.constant = 40
-                                } else {
-                                    self.heightTextFieldSend.constant = 40
+                            // One rule for every size, in place of three that argued about which
+                            // line the caret was on: the field is as tall as its lines, five at most.
+                            _ = (currentLine, numberOfLines)
+                            let height = self.fieldHeight(for: nowTextFieldSend)
+                            if self.isEditingMessage {
+                                if self.constraintHeighteditTextView.constant != height {
+                                    self.constraintHeighteditTextView.constant = height
                                 }
-                            } else if (self.heightTextFieldSend.constant < 95.0 || (self.constraintHeighteditTextView != nil && self.constraintHeighteditTextView.constant < 95.0)) && currentLine >= 4 {
-                                if self.isEditingMessage {
-                                    self.constraintHeighteditTextView.constant = 95.0
-                                } else {
-                                    self.heightTextFieldSend.constant = 95.0
-                                }
-                            } else if currentLine < 4 && numberOfLines < 5 {
-                                if (nowTextFieldSend.text.count > 0 && self.heightTextFieldSend.constant != nowTextFieldSend.contentSize.height) {
-                                    if self.isEditingMessage {
-                                        self.constraintHeighteditTextView.constant = nowTextFieldSend.contentSize.height
-                                    } else {
-                                        self.heightTextFieldSend.constant = nowTextFieldSend.contentSize.height
-                                    }
-                                }
+                            } else if self.heightTextFieldSend.constant != height {
+                                self.heightTextFieldSend.constant = height
                             }
+                            self.snapFieldScroll(nowTextFieldSend)
                         }
                     }
                 }
@@ -8467,16 +9741,99 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         lastTextLength = text.count
     }
     
-    /// How much height the list of names has to work with: what is left between the top of the
-    /// input area and the header above the conversation, less a margin so it never looks wedged
-    /// against either.
+    /// How much height the list of names has to work with: everything between the top of the
+    /// input area and the header above the conversation.
+    ///
+    /// Fix: twelve points were held back above it. The reference holds back none - the list runs
+    /// from the input area right up to the bar, and the row the top edge falls through is cut,
+    /// which is itself what says there is more of the list than there is room for.
     private var roomForMentionList: CGFloat {
         let inputTop = viewTextfield.frame.minY
         let headerBottom = view.safeAreaInsets.top
-        let room = inputTop - headerBottom - 12
+        let room = inputTop - headerBottom
         // A single row, if it comes to that: a list of names with nothing visible in it is worse
         // than a cramped one.
         return max(room, ChatMentionList.rowHeight)
+    }
+
+    /// The list of names grows as it is pulled open and closes up as it is let back down.
+    ///
+    /// Fix: a drag opened it the whole way at once and it stayed open. In the reference the
+    /// height and the scroll are the same gesture: while the list has room left to grow into,
+    /// the drag grows it rather than scrolling it; once it is as tall as there is room for, the
+    /// drag scrolls it like any list; and let back down past its first name, it closes up to
+    /// the four names it opened at. Which of the two happens is decided here, by how much room
+    /// the list has left, and the part of the drag that was not spent growing is handed back to
+    /// the list to scroll with.
+    private func mentionListDidScroll(_ table: UIScrollView) {
+        guard !isAdjustingMentionList else {
+            return
+        }
+        let height: NSLayoutConstraint? = table === tableMentionEdit ? heightTableEditMention : heightTableMention
+        guard let height = height, height.constant > 0 else {
+            return
+        }
+        let offset = table.contentOffset.y
+        guard offset > 0 else {
+            return
+        }
+        let change = min(offset, tallestMentionList - height.constant)
+        guard change > 0 else {
+            return
+        }
+        isAdjustingMentionList = true
+        height.constant += change
+        // The part of the drag that was not spent growing is handed back to the list to scroll.
+        table.contentOffset.y = offset - change
+        view.layoutIfNeeded()
+        isAdjustingMentionList = false
+        mentionListExpanded = height.constant > shortestMentionList + 0.5
+    }
+
+    /// As tall as the list can be: as tall as its names, and no taller than the room there is.
+    private var tallestMentionList: CGFloat {
+        return min(CGFloat(listMentionWithText.count) * ChatMentionList.rowHeight, roomForMentionList)
+    }
+
+    /// And as short as it opens at.
+    private var shortestMentionList: CGFloat {
+        return min(tallestMentionList, ChatMentionList.collapsedRows * ChatMentionList.rowHeight)
+    }
+
+    /// Letting the list back down past its first name closes it up again.
+    ///
+    /// Fix: this was the list's own bounce - dragged past the top, the rubber band gave a
+    /// negative offset to shrink by. The bounce is gone, and with it went every scroll event
+    /// past the top: a list that does not bounce simply stops at nothing. The finger carries on
+    /// moving, though, and that is what is read here instead.
+    @objc private func mentionListPanned(_ pan: UIPanGestureRecognizer) {
+        guard let table = pan.view as? UITableView else {
+            return
+        }
+        guard pan.state == .changed else {
+            mentionPanLastY = 0
+            return
+        }
+        let travelled = pan.translation(in: table).y
+        let step = travelled - mentionPanLastY
+        mentionPanLastY = travelled
+        // Downwards, and only once the list itself has nothing left to give back.
+        guard step > 0, table.contentOffset.y <= 0 else {
+            return
+        }
+        let height: NSLayoutConstraint? = table === tableMentionEdit ? heightTableEditMention : heightTableMention
+        guard let height = height, height.constant > 0 else {
+            return
+        }
+        let give = min(step, height.constant - shortestMentionList)
+        guard give > 0 else {
+            return
+        }
+        isAdjustingMentionList = true
+        height.constant -= give
+        view.layoutIfNeeded()
+        isAdjustingMentionList = false
+        mentionListExpanded = height.constant > shortestMentionList + 0.5
     }
 
     /// Whether the list of names is on screen.
@@ -8526,20 +9883,21 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
             }
         }
         if listMentionWithText.count > 0 {
-            // Four and a half rows when there are more than four, so the half row showing
-            // at the bottom says there is more to scroll to - the old four exactly looked
-            // like the whole list however many names were behind it.
-            let rows = min(CGFloat(listMentionWithText.count), 4.5)
+            let rows = CGFloat(listMentionWithText.count)
             let wasShowing = nowHeightTableMention.constant > 0
-            // And never taller than the room actually left above the input area. On a
-            // 4.7" screen with the keyboard up, a reply preview and a link preview open,
-            // four and a half rows do not fit between the input area and the header -
-            // the list would run up under the navigation bar.
-            nowHeightTableMention.constant = min(rows * ChatMentionList.rowHeight, roomForMentionList)
+            // Fix: four and a half rows, whoever was in the group, and no way to see past them.
+            // The reference opens at four names and gives the rest to whoever pulls the list -
+            // see expandMentionList. Either way the room above the input area is the ceiling,
+            // and that is less than the screen when a reply or a link preview is open under it.
+            let ceiling = mentionListExpanded
+                ? roomForMentionList
+                : min(roomForMentionList, ChatMentionList.collapsedRows * ChatMentionList.rowHeight)
+            nowHeightTableMention.constant = min(rows * ChatMentionList.rowHeight, ceiling)
             nowTableMention.reloadData()
             // Opening is worth animating; growing by a row as the reader types is not -
             // that would have the list breathing under every keystroke.
             if !wasShowing, !isEditingMessage {
+                nowTableMention.contentInset = .zero
                 nowTableMention.setContentOffset(.zero, animated: false)
                 UIView.animate(withDuration: 0.2) {
                     self.view.layoutIfNeeded()
@@ -8560,6 +9918,8 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
             listMentionWithText.removeAll()
             tableMention.reloadData()
             heightTableMention.constant = 0
+            // Next time it opens it opens at four again.
+            mentionListExpanded = false
             if heightTableEditMention != nil {
                 tableMentionEdit.reloadData()
                 heightTableEditMention.constant = 0
@@ -8663,7 +10023,7 @@ extension EditorPersonal: UITextViewDelegate, CustomTextViewPasteDelegate {
         self.viewTextfield.addSubview(self.containerLink)
         self.containerLink.translatesAutoresizingMaskIntoConstraints = false
         self.containerLink.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
-        self.containerLink.bottomAnchor.constraint(equalTo: self.textFieldSend.topAnchor).isActive = true
+        self.containerLink.bottomAnchor.constraint(equalTo: self.fieldTopAnchor).isActive = true
         self.containerLink.trailingAnchor.constraint(equalTo: self.viewTextfield.trailingAnchor).isActive = true
         self.containerLink.heightAnchor.constraint(equalToConstant: 80.0).isActive = true
         self.containerLink.backgroundColor = .secondaryColor
@@ -8973,6 +10333,14 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
     }
     
     public func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        guard let view = interaction.view else {
+            return nil
+        }
+        return bubbleMenuConfiguration(for: view, at: location)
+    }
+
+    /// The bubble's menu, for the interaction's hold on `view` at `location`.
+    private func bubbleMenuConfiguration(for view: UIView, at location: CGPoint) -> UIContextMenuConfiguration? {
         // A finger put down on a list that is still moving is a finger stopping the list. It
         // gets no menu, however long it then rests there - see ListMotion.
         if listMotion.isMoving(tableChatView) {
@@ -8990,7 +10358,10 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         // necessary, since containerMessage's interaction still recognizes over links
         // at its own faster threshold and would otherwise show that menu on top of
         // things well before the threshold is reached.
-        if LinkHighlighting.linkHit(at: location, in: interaction.view) != nil {
+        if let held = LinkHighlighting.linkHit(at: location, in: view) {
+            openHeldSheet(in: view) { [weak self] in
+                self?.presentLinkActionSheet(urlString: held.urlString)
+            }
             return nil
         }
 
@@ -9000,7 +10371,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         // its circle, on a picture in the middle - so a hold meant to stop the send put a menu on
         // top of the button instead. Nothing is lost with it: once a send has failed the message
         // says so, and the menu comes back with Send again in it.
-        if let path = tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: tableChatView)),
+        if let path = tableChatView.indexPathForRow(at: view.convert(location, to: tableChatView)),
            path.section < dataDates.count {
             let rows = messages(onDate: dataDates[path.section])
             if path.row < rows.count {
@@ -9026,11 +10397,11 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         // still on it. Everything pressed under that finger lets go first - the quote, the link
         // preview, and the chip over a mention - or the preview would show them pressed for as
         // long as the menu stayed open. See PressableView.liftAll.
-        PressableView.liftAll(in: interaction.view)
+        PressableView.liftAll(in: view)
         hideLinkHighlight()
         linkPressGeneration += 1
         contextMenuActionHandlers.removeAll()
-        let indexPath = self.tableChatView.indexPathForRow(at: interaction.view!.convert(location, to: self.tableChatView))
+        let indexPath = self.tableChatView.indexPathForRow(at: view.convert(location, to: self.tableChatView))
         let dataMessages = self.messages(onDate: dataDates[indexPath!.section])
         var star: UIAction
         if (dataMessages[indexPath!.row]["is_stared"]  as? String ?? "" == "0") {
@@ -9361,7 +10732,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 self.startMultipleSelectSession()
             }
         })
-        let more = UIMenu(title: "More...".localized(), children: [translate, gcs, summarize])
+        let textTools: [UIMenuElement] = [translate, gcs, summarize]
         let info = chatMenuAction(title: "Info".localized(), image: UIImage(systemName: "info.circle"), handler: {(_) in
             if self.removed {
                 return
@@ -9487,15 +10858,126 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 }
             }
         }
-        let mainMenu = UIMenu(title: "", options: [.displayInline],
-                              children: children)
-        var menuForShow = UIMenu(title: "", children: [mainMenu])
+        // The reference's order. First what stays on the front - Reply, Forward, Copy, Edit,
+        // Info, Star, Delete, in that order, anything else eligible (Send again) ahead of them -
+        // and then More: Pin, the text tools, and Delete once again at the foot, so a reader in
+        // the second page need not go back for it.
+        let frontOrder: [UIMenuElement] = [reply, forward, copy, edit, info, star, delete]
+        var front = children.filter { element in
+            element !== pin && !frontOrder.contains(where: { $0 === element })
+        }
+        front += frontOrder.filter { ordered in children.contains(where: { $0 === ordered }) }
+        // Nothing can be sent into a blocked conversation and nothing can be sent out of it, so
+        // the menu keeps only what can be done with a message that is already here: copying it,
+        // asking about it, starring it, and getting rid of it.
+        if isBlockedConversation {
+            let allowed: [UIMenuElement] = [copy, info, star, delete]
+            front = front.filter { element in allowed.contains(where: { $0 === element }) }
+        }
+        var moreItems: [UIMenuElement] = []
+        if children.contains(where: { $0 === pin }) {
+            moreItems.append(pin)
+        }
         if isMore {
-            menuForShow = UIMenu(title: "", children: [mainMenu, more])
+            moreItems += textTools
+        }
+        // Only a More with something of its own in it; Delete alone would be a page for nothing.
+        if !moreItems.isEmpty, children.contains(where: { $0 === delete }),
+           let runDelete = contextMenuActionHandlers[delete.identifier.rawValue] {
+            moreItems.append(chatMenuAction(title: delete.title, image: delete.image, attributes: .destructive, handler: { _ in
+                runDelete()
+            }))
+        }
+        if isBlockedConversation {
+            // Pin, and the text tools that write somewhere, belong to a conversation that is open.
+            moreItems = []
+        }
+        let mainMenu = UIMenu(title: "", options: [.displayInline], children: front)
+        var menuForShow = UIMenu(title: "", children: [mainMenu])
+        if !moreItems.isEmpty {
+            menuForShow = UIMenu(title: "", children: [mainMenu, UIMenu(title: "More...".localized(), children: moreItems)])
         }
         // Fix: the menu is ours, not UIKit's - see presentBubbleContextMenu(for:elements:).
-        if let bubble = interaction.view,
-           presentBubbleContextMenu(for: bubble, elements: menuForShow.children) {
+        // The place the reader is at is taken before the menu goes up and held for as long as
+        // it is up - the same measure that keeps the list still under a reply bar or a
+        // keyboard (see listAnchor / restore). Whatever lays the list out or reloads it while
+        // the menu is open, the message under the reader's finger stays where it was.
+        // Read now, before anything the interaction does on its own: the system brings a
+        // bubble that is partly off screen fully into view for its own preview, with a scroll
+        // of the list it never asked about - the shift seen on every menu opened over a bubble
+        // cut off by the top of the screen. The offset is exact, so it is the offset that is
+        // held rather than a row: nothing under the menu changes the rows, and an exact place
+        // can be put back without a measurement between.
+        let offsetUnderMenu = tableChatView.contentOffset
+        // Taken before the menu has touched anything: this is the state the reader is to be
+        // given back, whatever the menu's own layout does to the rows meanwhile.
+        let placeUnderMenu = listAnchor
+        if presentBubbleContextMenu(for: view, elements: menuForShow.children) {
+            heldOffsetUnderMenu = offsetUnderMenu
+            // Any scroll already under way - the system's, or a fling's last few points - is
+            // stopped where the reader was, not where it was going.
+            tableChatView.setContentOffset(offsetUnderMenu, animated: false)
+            // The place the reader is to be given back when the menu goes, measured before the
+            // menu laid a finger on the rows. It is never applied while the menu is up - see
+            // putBackUnderMenu, which holds the offset and nothing else for as long as the menu
+            // is on screen. Applying it meanwhile was the jump in the moment the menu rose: a
+            // place measured against the old heights, put back against the heights the menu's
+            // own layout had just changed.
+            heldPlaceUnderMenu = placeUnderMenu.map {
+                ListAnchor(messageId: $0.messageId, headBelowViewport: $0.headBelowViewport,
+                           viewportHeight: $0.viewportHeight, wasAtEnd: false)
+            }
+            // Fix: put back in the same frame. Whatever moves the list does so in a layout pass
+            // that would otherwise run after this returns and be drawn before the next turn of
+            // the run loop got to correct it - one frame of the list somewhere else, seen as a
+            // flicker. The layout is asked for now, and the place put back before anything is
+            // drawn; the two short passes after cover a change that arrives a beat later.
+            view.layoutIfNeeded()
+            tableChatView.layoutIfNeeded()
+            putBackUnderMenu()
+            // Kept up past the menu itself: the rows go on settling after it has gone, and a
+            // layout pass inside the table does not always reach this screen's own, so the place
+            // is checked on a few turns of its own as well. holdListUnderMenu is what decides
+            // whether the hold is still in force - it ends the moment a finger lands on the list.
+            startHoldingUnderMenu()
+            let heldMessageId = dataMessages[indexPath!.row]["message_id"] as? String
+            menuMessageId = heldMessageId
+            let alsoOnDismiss = longBubbleContextMenu?.onDismiss
+            longBubbleContextMenu?.onDismiss = { [weak self] in
+                // Fix: the hold used to end with the menu, and whatever moves the list was
+                // waiting for exactly that. Measured off a recording: the list set off in the
+                // frame the menu was dismissed in and went on moving for the better part of a
+                // second, landing where the chat had been opened - the jump reported after
+                // every cancel. So the place is kept for a beat longer than the menu, and
+                // given up the moment the reader's own finger lands on the list.
+                self?.holdUnderMenuUntil = Date().addingTimeInterval(1.2)
+                self?.holdUnderMenuCap = Date().addingTimeInterval(3.0)
+                alsoOnDismiss?()
+                // A row built while the menu was up hid itself; shown again now the menu is gone.
+                self?.menuMessageId = nil
+                if let self = self, let held = heldMessageId, let path = self.indexPath(forMessageId: held),
+                   let cell = self.tableChatView.cellForRow(at: path) {
+                    self.setMenuRowChrome(hidden: false, in: cell)
+                }
+                // In the same turn the bubble comes back, and not on the frame after: laying
+                // the table out here is what re-measures the row the menu had covered, and the
+                // put-back that follows lands before anything is drawn. Read off the log, that
+                // correction used to arrive forty milliseconds late - a few frames of the
+                // conversation sitting a screen away from where the reader left it.
+                if let self = self {
+                    self.tableChatView.layoutIfNeeded()
+                    self.putBackUnderMenu()
+                }
+                // The place is kept a beat longer than the menu - the rows are still
+                // settling when it goes - and given up together with the hold that uses it.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.1) { [weak self] in
+                    self?.holdUnderMenuUntil = nil
+                    self?.holdUnderMenuCap = nil
+                    self?.heldOffsetUnderMenu = nil
+                    self?.heldPlaceUnderMenu = nil
+                    self?.stopHoldingUnderMenu()
+                }
+            }
             return nil
         }
         return UIContextMenuConfiguration(identifier: nil,
@@ -9658,11 +11140,16 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             blurView.addGestureRecognizer(tapGesture)
             
             editTextView = CustomTextView()
-            editTextView.layer.cornerRadius = textFieldSend.maxCornerRadius()
+            // Fix: the radius was read off the conversation's field, and that field is no longer
+            // a 40pt capsule to read from - on glass it is the one-line text view inside the
+            // capsule, 18pt tall, so the editor's field came out with 9pt corners; taller with
+            // a draft, it came out squarer still. The radius is the capsule's own: half of the
+            // 40pt a one-line field stands, the same on every system.
+            editTextView.layer.cornerRadius = 20
             editTextView.layer.borderWidth = 1.0
             editTextView.textColor = UIColor.black
             editTextView.tintColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
-            editTextView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 11, right: 40)
+            editTextView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: 40)
             editTextView.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.5).cgColor
             editTextView.font = UIFont.systemFont(ofSize: 12 + offset())
             editTextView.delegate = self
@@ -9675,6 +11162,27 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             constraintBottomeditTextView.isActive = true
             constraintHeighteditTextView.isActive = true
             editTextView.attributedText = oldText.richText(isEditing: true, listMentionInTextField: listMentionInTextField)
+            // The same glass field as the conversation's: clear glass around the text view, the
+            // margins the glass's rather than the text's, the height a whole number of lines. The
+            // keyboard moves the field by its bottom constraint, which is re-homed to the glass.
+            let editGlass = GlassLook.adopt(editTextView, tint: nil, radius: editTextView.layer.cornerRadius)
+            constraintBottomeditTextView = editGlass.rehomed(constraintBottomeditTextView)
+            if #available(iOS 26.0, *), let pins = editGlass.pins {
+                editTextView.verticalScrollIndicatorInsets = UIEdgeInsets(top: 6, left: 0, bottom: 6, right: editTextView.textContainerInset.right)
+                let line = ceil((editTextView.font ?? UIFont.systemFont(ofSize: 12 + offset())).lineHeight)
+                let pad = max(0, (18 - line) / 2)
+                editTextView.textContainerInset.top = pad
+                editTextView.textContainerInset.bottom = pad
+                pins.top.constant = 11
+                pins.bottom.constant = -11
+                editTextView.layer.cornerRadius = 0
+            }
+            // Fix: the field opened at the 40pt it was made with and took its real height only
+            // once the editor had been presented - on glass, where 40pt of text view is two
+            // lines, it came up too tall and shrank a beat later. Laid out now, at its width, so
+            // the lines can be counted before anything is shown.
+            view.layoutIfNeeded()
+            constraintHeighteditTextView.constant = fieldHeight(for: editTextView)
             editTextView.becomeFirstResponder()
             
             buttonSendEdit.setImage(resizeImage(image: self.traitCollection.userInterfaceStyle == .dark ? UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!.withTintColor(.blackDarkMode) : UIImage(named: "Send-(White)", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)!, targetSize: CGSize(width: 30, height: 30)).withRenderingMode(.alwaysOriginal), for: .normal)
@@ -9765,6 +11273,10 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             buttonSendEdit.anchor(right: view.rightAnchor, paddingRight: 15, width: 40, height: 40)
             constraintBottomSendEditTV = buttonSendEdit.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -15)
             constraintBottomSendEditTV.isActive = true
+            // Tinted glass, as the conversation's send button.
+            ChatMentionList.dress(buttonSendEdit, colour: buttonSendEdit.backgroundColor ?? .mainColor)
+            let sendEditGlass = GlassLook.wrap(buttonSendEdit, tint: buttonSendEdit.backgroundColor)
+            constraintBottomSendEditTV = sendEditGlass.rehomed(constraintBottomSendEditTV)
             
             let viewMessage = UIView()
             view.addSubview(viewMessage)
@@ -9780,7 +11292,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
                 viewMessage.backgroundColor = .whiteBubbleColor
                 viewMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
             }
-            viewMessage.bottomAnchor.constraint(equalTo: editTextView.topAnchor, constant: -15).isActive = true
+            viewMessage.bottomAnchor.constraint(equalTo: editFieldTopAnchor, constant: -15).isActive = true
             viewMessage.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
             viewMessage.widthAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
             viewMessage.layer.cornerRadius = 10.0
@@ -9806,26 +11318,28 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             // The same list, and the same corrections - see the setup of tableMention.
             tableMentionEdit.contentInset = .zero
             tableMentionEdit.rowHeight = ChatMentionList.rowHeight
+            tableMentionEdit.sectionHeaderTopPadding = 0
+            tableMentionEdit.sectionHeaderHeight = 0
+            tableMentionEdit.estimatedSectionHeaderHeight = 0
+            tableMentionEdit.contentInsetAdjustmentBehavior = .never
             tableMentionEdit.estimatedRowHeight = ChatMentionList.rowHeight
             tableMentionEdit.separatorInset = UIEdgeInsets(top: 0, left: 52, bottom: 0, right: 0)
             tableMentionEdit.showsVerticalScrollIndicator = false
-            tableMentionEdit.backgroundColor = traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .white
-            tableMentionEdit.layer.cornerRadius = 12
-            tableMentionEdit.layer.cornerCurve = .continuous
-            tableMentionEdit.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-            tableMentionEdit.clipsToBounds = true
+            ChatMentionList.dress(tableMentionEdit)
             view.addSubview(tableMentionEdit)
-            tableMentionEdit.anchor(left: view.leftAnchor, bottom: editTextView.topAnchor, right: view.rightAnchor)
+            tableMentionEdit.anchor(left: view.leftAnchor, bottom: editFieldTopAnchor, right: view.rightAnchor,
+                                    paddingLeft: ChatMentionList.sideInset,
+                                    paddingBottom: ChatMentionList.bottomInset,
+                                    paddingRight: ChatMentionList.sideInset)
             heightTableEditMention = tableMentionEdit.heightAnchor.constraint(equalToConstant: 0)
             self.heightTableEditMention.isActive = true
+            ChatMentionList.adoptGlass(tableMentionEdit)
+            tableMentionEdit.panGestureRecognizer.addTarget(self, action: #selector(mentionListPanned(_:)))
         }
         editVC.modalTransitionStyle = .crossDissolve
         editVC.modalPresentationStyle = .overFullScreen
         self.present(editVC, animated: true, completion: {
-            self.constraintHeighteditTextView.constant = self.editTextView.contentSize.height
-            if self.constraintHeighteditTextView.constant > 95 {
-                self.constraintHeighteditTextView.constant = 95.0
-            }
+            self.constraintHeighteditTextView.constant = self.fieldHeight(for: self.editTextView)
         })
     }
     
@@ -9937,6 +11451,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         // point a finger can reach. It stands on the safe area now, in the place the input bar
         // had, and the table is given back exactly the room that leaves: the gap over the bar
         // comes out the same 10pt on a device with an indicator and on one without.
+        endOpeningPlacement()
         let readingPlace = distanceFromNewestMessage()
         bottomTableConstantBeforeSelection = constraintBottomTableViewWithTextfield.constant
         constraintBottomTableViewWithTextfield.constant = view.safeAreaInsets.bottom - 60
@@ -10847,9 +12362,10 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
             self.containerPreviewReply.subviews.forEach { $0.removeFromSuperview() }
             self.containerPreviewReply.removeConstraints(self.containerPreviewReply.constraints)
             self.containerPreviewReply.removeFromSuperview()
+            self.replyMaterial.isHidden = true
             
             self.reffId = nil
-            let replyBarHeight = 50 + (self.offset() * 3)
+            let replyBarHeight = self.replyBarHeight
             // Measured before the bar goes, and put back after: the list grows when it goes, so
             // shifting the content by the bar's height corrected on top of the correction a
             // scroll view already makes for itself - the smaller cousin of the jump the keyboard
@@ -10880,7 +12396,7 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
         }
         if self.reffId != nil {
             self.bottomAnchorPreviewReply.isActive = false
-            self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.textFieldSend.topAnchor)
+            self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.fieldTopAnchor)
             self.bottomAnchorPreviewReply.isActive = true
         }
     }
@@ -10890,7 +12406,9 @@ extension EditorPersonal: UIContextMenuInteractionDelegate {
 //ECL
 extension EditorPersonal: UICollectionViewDelegate, UICollectionViewDataSource {
     public func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        return 76
+        // Fix: seventy-six, written in - the number of stickers the bundle happened to hold. The
+        // grid shows one pack at a time now, and a pack is as long as it is.
+        return stickersInShownPack.count
     }
     
     public func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
@@ -10907,19 +12425,25 @@ extension EditorPersonal: UICollectionViewDelegate, UICollectionViewDataSource {
             imageSticker.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
             imageSticker.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor)
         ])
-        var imageStickerBundle = UIImage(named: stickers[indexPath.row], in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        let shown = stickersInShownPack
+        guard indexPath.row < shown.count else {
+            return cell
+        }
+        var imageStickerBundle = UIImage(named: shown[indexPath.row], in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
         if imageStickerBundle == nil {
-            imageStickerBundle = UIImage(named: stickers[indexPath.row], in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
+            imageStickerBundle = UIImage(named: shown[indexPath.row], in: Bundle.resourcesMediaBundle(for: Nexilis.self), with: nil)
         }
         imageSticker.image = imageStickerBundle //resourcesMediaBundle
         return cell
     }
     
     public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        sendChat(message_text: "sticker/\(stickers[indexPath.row])", attachment_flag: "11", viewController: self)
-        constraintBottomAttachment.constant = 0.0
-        self.viewSticker.removeConstraints(self.viewSticker.constraints)
-        self.viewSticker.removeFromSuperview()
+        let shown = stickersInShownPack
+        guard indexPath.row < shown.count else {
+            return
+        }
+        sendChat(message_text: "sticker/\(shown[indexPath.row])", attachment_flag: "11", viewController: self)
+        dismissStickerPanel()
     }
 }
 
@@ -10936,6 +12460,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         // A bubble that has just been sent or has just arrived grows into place as its row comes
         // on screen - see pendingBubbleArrival.
         playPendingBubbleArrivalIfNeeded(for: cell, at: indexPath)
+        // Fix: the row under an open bubble menu, built again while the menu was up - a reload
+        // landing just after the chat opened - came back with its picture showing beside the
+        // hidden bubble. The menu hides what it was given; a row built after that has to hide
+        // itself, for as long as the menu is on this message.
+        if let held = menuMessageId, message(at: indexPath)?["message_id"] as? String == held {
+            setMenuRowChrome(hidden: true, in: cell)
+        }
         // Remember what each row actually measured, so the table estimates rows it has not
         // built yet from real numbers. That is what keeps the content from shifting under the
         // reader when a page of older messages is inserted above.
@@ -11243,11 +12774,27 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         // 1289 against 1029. Measured here the way it is drawn there: the folded text, through the
         // same folding the bubble itself uses, and a line for the "Read more" that closes it.
         let shown = foldIfLong(text, messageId: messageId)
-        var measured = ceil((shown as NSString).boundingRect(
-            with: CGSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font],
-            context: nil).height)
+        // Fix: the raw message was measured, and the raw message is not what is drawn. On its way
+        // into the bubble it goes through richText, which turns "@pin" into the person's name,
+        // takes the markdown marks out of the text and leaves the words they were around, and
+        // sets some runs in another weight. Read off the log on screen, a message of a hundred
+        // and fifty characters with names in it was reckoned at 192 points and drawn at 113 -
+        // and every point of that difference is the list moving under the reader when the row is
+        // finally measured. Measured here as it is drawn, for the messages where the two differ;
+        // a message with none of that in it is the same string either way and is measured plainly,
+        // which is nearly all of them.
+        let bounds = CGSize(width: width, height: .greatestFiniteMagnitude)
+        let options: NSStringDrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
+        let drawnDiffers = shown.contains("@") || shown.contains("*") || shown.contains("_")
+            || shown.contains("~") || shown.contains("`") || shown.lowercased().contains("http")
+        var measured: CGFloat
+        if drawnDiffers {
+            measured = ceil(shown.richText()
+                .boundingRect(with: bounds, options: options, context: nil).height)
+        } else {
+            measured = ceil((shown as NSString).boundingRect(
+                with: bounds, options: options, attributes: [.font: font], context: nil).height)
+        }
         if isFolded(messageId, text: text) {
             measured += ceil(font.lineHeight)
         }
@@ -11286,7 +12833,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             || !(((row[TypeDataMessage.gif_id] as? String) ?? "").isEmpty)
         if carriesPicture {
             return {
-                let measured = imageBubbleSize(messageId: messageId, thumb: thumb).height
+                let measured = imageBubbleSize(messageId: messageId, thumb: thumb, gif: (row[TypeDataMessage.gif_id] as? String) ?? "").height
                 return measured < 40 ? 45 : measured + 5
             }()
         }
@@ -11300,10 +12847,38 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     }
 
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // The list of names is its own thing: the drag on it is its height as much as its
+        // scroll - see mentionListDidScroll.
+        if scrollView === tableMention || scrollView === tableMentionEdit {
+            mentionListDidScroll(scrollView)
+            return
+        }
         lastY = scrollView.contentOffset.y
         if scrollView == tableChatView {
+        }
+        // Fix: the list moved under the bubble menu as it opened. The menu holds the list still,
+        // and holding it ends whatever drag the summoning finger had started - which ran the
+        // work a finished drag runs, reading the next page of older messages and putting the
+        // list back around it, with the rows above the reader re-measured in the process. None
+        // of that has a place while the menu is up; the list is not the reader's to move - and
+        // whatever did move it is undone on the spot, the message held under the menu put back
+        // where it was.
+        if longBubbleContextMenu != nil || listStillHeldAfterMenu {
+            if scrollView == tableChatView {
+                holdListUnderMenu()
+            }
+            return
+        }
+        if scrollView == tableChatView {
             dateHeaders.listDidMove(isDragging: scrollView.isDragging, in: tableChatView)
+            followKeyboardUnderFinger()
             listMotion.didMove()
+            // A press waiting to become a long press belongs to a still list. Fix: the guard on
+            // the way in asks whether the list is moving, and on the first press after a chat
+            // opens it never is - the finger lands, the list is at rest, and the drag that
+            // follows was never told to call the press off, so the link sheet arrived half a
+            // scroll later. The list moving is that word.
+            cancelPendingLinkPress()
         }
         // The reader has taken the list over - a later layout pass must not pull it back to
         // the unread marker under their finger.
@@ -11342,9 +12917,28 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         // the top of the loaded window on its way down, and a page inserted above the reader
         // moves the end they are travelling towards - which is how a tap on the button used to
         // stop short of the bottom.
+        // Fix: the lead was measured from where the finger is, and a flick leaves the finger far
+        // behind: a hard one travels thousands of points after it lets go, and reached the end
+        // of what was loaded long before any page was read there - a dead stop at a false
+        // beginning. Measured off two recordings, ours stood still for half a second and more
+        // at every page turn of a long fling; the reference for nothing over ninety
+        // milliseconds. So the lead is measured from where the flick would *land* - worked out
+        // from the drag's own velocity, the way the system works out its deceleration - and the
+        // pages that landing needs are read while the finger is still down. Still with the
+        // finger down, and nowhere else: reading them the moment the finger lifted was tried,
+        // and the scroll view had already taken its bearings for the deceleration by then, so
+        // it flew off from a place that the page put in above had just moved.
         if scrollView == tableChatView, !isInitialLoading, !pendingInitialScrollToBottom,
            !isDashingToBottom, hasOlderMessages, scrollView.isDragging,
-           scrollView.contentOffset.y < scrollView.frame.height * EditorPersonal.olderMessageLead {
+           min(scrollView.contentOffset.y, flingDestination(of: scrollView))
+               < scrollView.frame.height * EditorPersonal.olderMessageLead {
+            loadOlderMessages()
+        }
+        // And the instant a fling arrives at the top of what is loaded, rather than after the
+        // bounce it makes there - see the momentum guard in loadOlderMessages.
+        if scrollView == tableChatView, !isInitialLoading, !pendingInitialScrollToBottom,
+           !isDashingToBottom, hasOlderMessages, !scrollView.isDragging, scrollView.isDecelerating,
+           scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top + 1 {
             loadOlderMessages()
         }
         // And the other end, for a window a jump has moved off the newest message.
@@ -11353,6 +12947,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             if distanceFromBottom < 400 {
                 loadNewerMessages()
             }
+        }
+        // Everything from here on is about the conversation. The list of names shares this
+        // delegate, and scrolling it has nothing to say about what the conversation is showing.
+        guard scrollView == tableChatView else {
+            return
         }
         let now = Date()
         guard now.timeIntervalSince(lastScrollCheckTime) > 0.3 else { return }
@@ -11366,6 +12965,18 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
     }
 
+    /// Where the list would come to rest if the finger let go this instant.
+    ///
+    /// The drag's velocity, projected the way UIScrollView projects its own deceleration: the
+    /// distance still to travel is the velocity (in points a millisecond) times rate/(1-rate).
+    /// The pan's velocity is the finger's, in points a second, and the finger and the content
+    /// move opposite ways.
+    private func flingDestination(of scrollView: UIScrollView) -> CGFloat {
+        let contentVelocity = -scrollView.panGestureRecognizer.velocity(in: scrollView).y / 1000
+        let rate = scrollView.decelerationRate.rawValue
+        return scrollView.contentOffset.y + contentVelocity * rate / (1 - rate)
+    }
+
     /// The finger has just landed. If the reader is anywhere near the end of what is loaded, the
     /// next page is read now.
     ///
@@ -11373,6 +12984,22 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     /// under the finger, so putting the list back where it was is invisible, and there is no
     /// momentum to interrupt. Every page read from here is a page not read mid-fling.
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // The reader's own finger outranks the hold a menu left behind - see
+        // listStillHeldAfterMenu. From here the list is theirs again.
+        if scrollView == tableChatView {
+            releaseListAfterMenu()
+        }
+        // Fix: the list moved under the bubble menu as it opened. The menu holds the list still,
+        // and holding it ends whatever drag the summoning finger had started - which ran the
+        // work a finished drag runs, reading the next page of older messages and putting the
+        // list back around it, with the rows above the reader re-measured in the process. None
+        // of that has a place while the menu is up; the list is not the reader's to move.
+        if longBubbleContextMenu != nil {
+            return
+        }
+        if scrollView == tableChatView {
+            noteWhereDragBegan()
+        }
         guard scrollView == tableChatView, !isInitialLoading, !pendingInitialScrollToBottom,
               !isDashingToBottom, hasOlderMessages else {
             return
@@ -11384,6 +13011,14 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     }
 
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        // Fix: the list moved under the bubble menu as it opened. The menu holds the list still,
+        // and holding it ends whatever drag the summoning finger had started - which ran the
+        // work a finished drag runs, reading the next page of older messages and putting the
+        // list back around it, with the rows above the reader re-measured in the process. None
+        // of that has a place while the menu is up; the list is not the reader's to move.
+        if longBubbleContextMenu != nil {
+            return
+        }
         guard scrollView == tableChatView else {
             return
         }
@@ -11396,6 +13031,17 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     }
 
     public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        // Fix: the list moved under the bubble menu as it opened. The menu holds the list still,
+        // and holding it ends whatever drag the summoning finger had started - which ran the
+        // work a finished drag runs, reading the next page of older messages and putting the
+        // list back around it, with the rows above the reader re-measured in the process. None
+        // of that has a place while the menu is up; the list is not the reader's to move.
+        if longBubbleContextMenu != nil {
+            return
+        }
+        if scrollView == tableChatView {
+            settleBarAfterDrag()
+        }
         guard scrollView == tableChatView, !decelerate else {
             return
         }
@@ -11686,7 +13332,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
         if tableView == tableMention || tableView == tableMentionEdit {
             let cellMention = tableView.dequeueReusableCell(withIdentifier: tableView == tableMention ? "cellMention" : "cellEditMention", for: indexPath as IndexPath)
-            cellMention.backgroundColor = .clear
+            ChatMentionList.dressRow(cellMention)
             // Fix: a row could be asked for after the list behind it had already been emptied -
             // showMention clears it and reloads on every keystroke - and the row was then drawn
             // with no name and no picture, which is what left blank lines in the list.
@@ -11705,6 +13351,12 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             content.imageProperties.tintColor = .secondaryLabel
             content.imageProperties.maximumSize = CGSize(width: ChatMentionList.avatarSize, height: ChatMentionList.avatarSize)
             content.imageProperties.cornerRadius = ChatMentionList.avatarSize / 2
+            // Fix: the names did not line up. A picture is drawn at 32 points, but the circle
+            // drawn for somebody who has none is a symbol, and a symbol is as big as its own
+            // font makes it - narrower than 32 - so those rows started their name further left.
+            // The room a picture takes is reserved whatever is actually in it.
+            content.imageProperties.reservedLayoutSize = CGSize(width: ChatMentionList.avatarSize,
+                                                                height: ChatMentionList.avatarSize)
             content.imageToTextPadding = 12
             content.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14)
             if mentioned.pin == "-997" {
@@ -11715,7 +13367,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 // decoded, which is the case that matters here; when it is not, getImage draws
                 // this one row again once it has been fetched.
                 getImage(name: mentioned.thumb,
-                         placeholderImage: UIImage(systemName: "person.crop.circle"),
+                         placeholderImage: ChatMentionList.placeholderAvatar,
                          isCircle: true,
                          tableView: tableView,
                          indexPath: indexPath,
@@ -12172,7 +13824,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             } else {
                 containerMessage.backgroundColor = .blueBubbleColor
             }
-            containerMessage.layer.cornerRadius = 10.0
+            containerMessage.layer.cornerRadius = 18
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner, .layerMinXMinYCorner]
             containerMessage.clipsToBounds = true
             (containerMessage as? BubbleView)?.lift()
@@ -12243,7 +13895,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             } else {
                 containerMessage.backgroundColor = .whiteBubbleColor
             }
-            containerMessage.layer.cornerRadius = 10.0
+            containerMessage.layer.cornerRadius = 18
             containerMessage.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner]
             containerMessage.clipsToBounds = true
             (containerMessage as? BubbleView)?.lift()
@@ -12424,7 +14076,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
 
         containerMessage.addSubview(messageText)
         messageText.translatesAutoresizingMaskIntoConstraints = false
-        var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15)
+        var topMarginText = messageText.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleTextInset.top)
         topMarginText.priority = .defaultHigh
         messageText.textColor = self.traitCollection.userInterfaceStyle == .dark ? .white : .black
         messageText.font = .systemFont(ofSize: 12 + offset())
@@ -12454,7 +14106,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         } else if !audioChat.isEmpty {
             messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 60).isActive = true
         } else {
-            messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+            messageText.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleTextInset.side).isActive = true
         }
         if dataMessages[indexPath.row]["f_pin"] as? String == "-999" && (dataMessages[indexPath.row]["blog_id"] as? String) != nil && !(dataMessages[indexPath.row]["blog_id"]  as? String ?? "").isEmpty && (dataMessages[indexPath.row]["message_text"]  as? String ?? "").contains("Berikut QR Code dan detil booking Anda") {
             messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -115).isActive = true
@@ -12518,11 +14170,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             let textAfterName = textChat.component(1, separatedBy: "~")
             messageRequestFriend = textName + " " + textAfterName.localized()
         } else {
-            let bottomConstraint = messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -15)
+            let bottomConstraint = messageText.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor, constant: -BubbleTextInset.bottom)
             bottomConstraint.priority = .defaultHigh
             bottomConstraint.isActive = true
         }
-        messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+        messageText.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleTextInset.side).isActive = true
         let originalMessageText = textChat
         if (dataMessages[indexPath.row]["lock"] != nil && (dataMessages[indexPath.row]["lock"])! as? String == "1") {
             if (dataMessages[indexPath.row]["f_pin"] as? String == idMe) {
@@ -12697,8 +14349,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             let containerCall = PressableView()
             containerCall.backgroundColor = .white.withAlphaComponent(0.3)
             containerMessage.addSubview(containerCall)
-            containerCall.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: 5, paddingLeft: 5, paddingBottom: 5, paddingRight: 5, height: 60)
-            containerCall.layer.cornerRadius = 5
+            // The same panel a quote or a document sits on: 4pt in from the bubble, corners
+            // concentric with the bubble's - see BubbleBox.
+            containerCall.anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, right: containerMessage.rightAnchor, paddingTop: BubbleBox.inset, paddingLeft: BubbleBox.inset, paddingBottom: BubbleBox.inset, paddingRight: BubbleBox.inset, height: 60)
+            containerCall.layer.cornerRadius = BubbleBox.radius
             containerCall.clipsToBounds = true
             
             var imageCall = "phone.fill.arrow.up.right"
@@ -13124,10 +14778,11 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 statusMessage.isHidden = true
                 imageStared.isHidden = true
                 topMarginText.constant = topMarginText.constant + 205
-                var constTop = 5.0
+                // Flush with the top of the bubble; under the "Forwarded" line when there is one.
+                var constTop: CGFloat = 0
                 if dataMessages[indexPath.row][TypeDataMessage.is_forwarded] != nil && dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 != 0 {
                     topMarginText.constant = topMarginText.constant + 10
-                    constTop = 35.0
+                    constTop = BubbleTextInset.top + BubbleTextInset.forwardedPush
                 }
                 // WhatsApp's arrangement, and the reason it changes with the count: two
                 // images are two tall halves side by side, three are one tall half beside two
@@ -13140,16 +14795,33 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     // Which picture of the run this tile is, so a quote of one of them can be
                     // pointed at after the jump lands on the collage they share.
                     listImageThumb[i].accessibilityIdentifier = "\(EditorPersonal.collageTileName)\(i)"
-                    listImageThumb[i].layer.cornerRadius = 5.0
-                    listImageThumb[i].clipsToBounds = true
                     listImageThumb[i].contentMode = .scaleAspectFill
+                    // Flush with the bubble, a tile takes the bubble's corners where it reaches
+                    // them - the top ones only when nothing sits above the collage.
+                    var tileCorners: CACornerMask
+                    switch (tileCount, i) {
+                        case (2, 0), (3, 0): tileCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+                        case (2, 1): tileCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+                        case (3, 2): tileCorners = [.layerMaxXMaxYCorner]
+                        case (_, 0): tileCorners = [.layerMinXMinYCorner]
+                        case (_, 1): tileCorners = [.layerMaxXMinYCorner]
+                        case (_, 2): tileCorners = [.layerMinXMaxYCorner]
+                        default: tileCorners = [.layerMaxXMaxYCorner]
+                    }
+                    if constTop > 0 {
+                        tileCorners.subtract(BubbleView.topCorners)
+                    }
+                    (containerMessage as? BubbleView)?.fit(listImageThumb[i], sharing: tileCorners)
                     let widthHeightImage: CGFloat = 120
+                    // The tile in the tail corner runs `reach` past the edge, so the tail is
+                    // cut into it - see BubbleView.fit(_:sharing:).
+                    let tailReach = constTop > 0 ? UIEdgeInsets.zero : ((containerMessage as? BubbleView)?.reach ?? .zero)
                     // The collage is a square of the same tiles however many there are:
-                    // 120 + 5 + 120 on a side. Sizes are written out rather than left to the
+                    // 120 + 2 + 120 on a side. Sizes are written out rather than left to the
                     // edges of the bubble, because an image view with no height of its own takes
                     // its height from the picture inside it - a loaded thumbnail was pushing the
                     // whole bubble open to hundreds of points tall.
-                    let collageSide = widthHeightImage * 2 + 5
+                    let collageSide = widthHeightImage * 2 + 2
                     listImageThumb[i].setContentHuggingPriority(.defaultLow, for: .vertical)
                     listImageThumb[i].setContentHuggingPriority(.defaultLow, for: .horizontal)
                     listImageThumb[i].setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -13161,19 +14833,19 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                             // same way the four-image arrangement has always been - so the bubble
                             // is exactly as tall as the collage rather than as tall as whatever
                             // margin happens to be set for the text below it.
-                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingTop: constTop, paddingLeft: 5, paddingBottom: 5, width: widthHeightImage, height: collageSide)
+                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingTop: constTop, paddingLeft: -tailReach.left, width: widthHeightImage + tailReach.left, height: collageSide)
                         case (2, 1):
                             // The other half, level with it. This one also reaches the right edge
                             // of the bubble: the bubble is only as wide as what is pinned to both
                             // of its sides, and without that it stayed narrow enough to cut this
                             // tile off entirely - the collage looked like a single tall sliver.
-                            listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: collageSide)
+                            listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 2, paddingRight: -tailReach.right, width: widthHeightImage + tailReach.right, height: collageSide)
                         case (3, 1):
                             // Reaches the right edge for the same reason; the quarter below it
                             // then only needs to line up under this one.
-                            listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 2, paddingRight: -tailReach.right, width: widthHeightImage + tailReach.right, height: widthHeightImage)
                         case (3, 2):
-                            listImageThumb[i].anchor(top: listImageThumb[1].bottomAnchor, left: listImageThumb[0].rightAnchor, paddingTop: 5, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: listImageThumb[1].bottomAnchor, left: listImageThumb[0].rightAnchor, paddingTop: 2, paddingLeft: 2, width: widthHeightImage, height: widthHeightImage)
                         // Fix: the square of quarters was pinned from both ends and joined in the
                         // middle by nothing. The top row hung from the top of the bubble, the
                         // bottom row from its bottom, and no constraint said the two rows were five
@@ -13187,13 +14859,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                         // is the same square, and the bubble takes its width from the top-right
                         // tile and its height from the bottom-left. Every edge is settled once.
                         case (_, 0):
-                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, paddingTop: constTop, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: containerMessage.topAnchor, left: containerMessage.leftAnchor, paddingTop: constTop, paddingLeft: -tailReach.left, width: widthHeightImage + tailReach.left, height: widthHeightImage)
                         case (_, 1):
-                            listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 5, paddingRight: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: listImageThumb[0].topAnchor, left: listImageThumb[0].rightAnchor, right: containerMessage.rightAnchor, paddingLeft: 2, paddingRight: -tailReach.right, width: widthHeightImage + tailReach.right, height: widthHeightImage)
                         case (_, 2):
-                            listImageThumb[i].anchor(top: listImageThumb[0].bottomAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingTop: 5, paddingLeft: 5, paddingBottom: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: listImageThumb[0].bottomAnchor, left: containerMessage.leftAnchor, bottom: containerMessage.bottomAnchor, paddingTop: 2, width: widthHeightImage, height: widthHeightImage)
                         default:
-                            listImageThumb[i].anchor(top: listImageThumb[1].bottomAnchor, left: listImageThumb[2].rightAnchor, paddingTop: 5, paddingLeft: 5, width: widthHeightImage, height: widthHeightImage)
+                            listImageThumb[i].anchor(top: listImageThumb[1].bottomAnchor, left: listImageThumb[2].rightAnchor, paddingTop: 2, paddingLeft: 2, width: widthHeightImage, height: widthHeightImage)
                     }
                     let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
                     let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
@@ -13473,17 +15145,20 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             } else {
                 // One measurement, not two: the width and the height come from the same look
                 // at the file.
-                let thumbSize = imageBubbleSize(messageId: messageIdChat, thumb: thumbChat)
+                let thumbSize = imageBubbleSize(messageId: messageIdChat, thumb: thumbChat, gif: gifChat)
                 let getHeightImage: CGFloat = thumbSize.height
                 let getWidthImage: CGFloat = thumbSize.width
-                topMarginText.constant = topMarginText.constant + (getHeightImage < 40 ? 45 : getHeightImage + 5)
+                // The picture starts at the very top of the bubble, not at the text's inset.
+                topMarginText.constant = topMarginText.constant - BubbleTextInset.top + (getHeightImage < 40 ? 45 : getHeightImage + 5)
                 
                 containerMessage.addSubview(imageThumb)
                 imageThumb.frame = CGRect(x: 0, y: 0, width: getWidthImage, height: getHeightImage)
                 imageThumb.translatesAutoresizingMaskIntoConstraints = false
                 let data = queryMessageReply(message_id: reffChat)
+                var pictureAtTop = false
                 if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 == 0) {
-                    imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+                    pictureAtTop = true
+                    imageThumb.topAnchor.constraint(equalTo: containerMessage.topAnchor).isActive = true
                 } else {
                     // Fix: with a quote (or a "Forwarded" line) above it, the picture is given no
                     // top edge of its own - it hangs between whatever is above and the text below.
@@ -13497,17 +15172,34 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     imgHeightConstraint.priority = UILayoutPriority(751)
                     imgHeightConstraint.isActive = true
                 }
-                imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+                // Edge to edge, as the reference draws its pictures: the bubble is the picture's
+                // width, and the picture wears the bubble's corners where it reaches them. At the
+                // top it also runs `reach` past the edge on the tail's side, so the tail is cut
+                // into the picture - see BubbleView.fit(_:sharing:).
+                let reach = pictureAtTop ? ((containerMessage as? BubbleView)?.reach ?? .zero) : .zero
+                imageThumb.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -reach.left).isActive = true
                 imageThumb.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
-                imageThumb.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-                let imgWidthConstraint = imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage)
+                imageThumb.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: reach.right).isActive = true
+                // A picture with no caption runs to the bottom of the bubble as well; the empty
+                // text under it would otherwise hold a blank line open. Blank, not empty: a
+                // caption of nothing but whitespace is no caption.
+                let pictureIsAll = textChat.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if pictureIsAll {
+                    imageThumb.bottomAnchor.constraint(equalTo: containerMessage.bottomAnchor).isActive = true
+                    messageText.isHidden = true
+                    messageText.heightAnchor.constraint(equalToConstant: 0).isActive = true
+                }
+                let imgWidthConstraint = imageThumb.widthAnchor.constraint(equalToConstant: getWidthImage + reach.left + reach.right)
                 imgWidthConstraint.priority = .defaultHigh
                 imgWidthConstraint.isActive = true
-                let imgMaxWidthConstraint = imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerMessage.widthAnchor, constant: -30)
+                let imgMaxWidthConstraint = imageThumb.widthAnchor.constraint(lessThanOrEqualTo: containerMessage.widthAnchor, constant: reach.left + reach.right)
                 imgMaxWidthConstraint.priority = .required
                 imgMaxWidthConstraint.isActive = true
-                imageThumb.layer.cornerRadius = 5.0
-                imageThumb.clipsToBounds = true
+                var pictureCorners: CACornerMask = pictureAtTop ? BubbleView.topCorners : []
+                if pictureIsAll {
+                    pictureCorners.formUnion(BubbleView.bottomCorners)
+                }
+                (containerMessage as? BubbleView)?.fit(imageThumb, sharing: pictureCorners)
                 imageThumb.contentMode = .scaleAspectFill
                 // Fix: an image view carries the size of the picture inside it, and this one is
                 // held between the top of the bubble and the text below rather than by a height
@@ -13723,8 +15415,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                             imageGif.anchor(top: imageThumb.topAnchor, left: imageThumb.leftAnchor, bottom: imageThumb.bottomAnchor, right: imageThumb.rightAnchor)
                             if FileManager.default.fileExists(atPath: gifURL.path) {
                                 imageGif.image = SDAnimatedImage(contentsOfFile: gifURL.path)
-//                                imageGif.shouldCustomLoopCount = true
-//                                imageGif.animationRepeatCount = 4
+                                GifBubble.playOnce(imageGif, in: imageThumb)
                             } else if FileEncryption.shared.isSecureExists(filename: gifChat){
                                 do {
                                     if var data = try FileEncryption.shared.readSecure(filename: gifChat) {
@@ -13734,8 +15425,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                                         }
                                         if let imageData = SDAnimatedImage(data: data) {
                                             imageGif.image = imageData
-    //                                        imageGif.shouldCustomLoopCount = true
-    //                                        imageGif.animationRepeatCount = 4
+                                            GifBubble.playOnce(imageGif, in: imageThumb)
                                         }
                                     }
                                 }
@@ -13873,7 +15563,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 if !videoChat.isEmpty, !videoIsHere, !Download.isDownloading(forKey: videoChat) {
                     VideoBubbleChrome.addPendingSize(to: imageThumb, fileName: videoChat)
                 }
-                if !videoChat.isEmpty, videoIsHere {
+                // A gif has no length worth writing, and no mark in the corner either: the disc
+                // that appears once it has played is what says what it is - see GifBubble.
+                if !videoChat.isEmpty, videoIsHere, gifChat.isEmpty {
                     let knownLength = videoLength(ofMessage: dataMessages[indexPath.row])
                     let lengthLabel = VideoBubbleChrome.addFooter(to: imageThumb, seconds: knownLength)
                     if knownLength == 0 {
@@ -13917,19 +15609,23 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             // itself says. See Utils.documentKind.
             let documentKind = Utils.documentKind(named: documentName, file: fileChat)
             let finalExtFile = Utils.documentType(of: documentKind)
+            // A PDF that is here shows the top of its first page above its name, the way the
+            // reference does - see PDFBubblePreview. One still on its way shows nothing yet.
+            let pdfPreviewHeight: CGFloat = PDFBubblePreview.canPreview(kind: documentKind) && PDFBubblePreview.isHere(fileNamed: fileChat)
+                ? PDFBubblePreview.height : 0
             containerMessage.addSubview(containerViewFile)
             containerViewFile.translatesAutoresizingMaskIntoConstraints = false
             let data = queryMessageReply(message_id: reffChat)
             if (reffChat.isEmpty || data.count == 0) && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 == 0) {
-                containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+                containerViewFile.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleBox.inset).isActive = true
             } else {
                 // At least fifty, not exactly fifty: a name of two or three lines has to be able to
                 // make the strip taller, and an exact height would simply clip it.
                 containerViewFile.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
             }
-            containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+            containerViewFile.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleBox.inset).isActive = true
             containerViewFile.bottomAnchor.constraint(equalTo:messageText.topAnchor, constant: -5).isActive = true
-            containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+            containerViewFile.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleBox.inset).isActive = true
 //            containerViewFile.heightAnchor.constraint(equalToConstant: 50).isActive = true
             // Fix: the card sat on a flat twenty per cent black, which on a light bubble is a
             // slab of grey and on a dark one is nearly invisible. It is the same kind of thing a
@@ -13937,7 +15633,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             // writing on it uses the same two weights. See BubblePanel.
             let onDarkBubble = self.traitCollection.userInterfaceStyle == .dark
             containerViewFile.backgroundColor = BubblePanel.ground(dark: onDarkBubble)
-            containerViewFile.layer.cornerRadius = 5.0
+            containerViewFile.layer.cornerRadius = BubbleBox.radius
             containerViewFile.clipsToBounds = true
             // Fix: the card took its width from the name label, so a document with a short name -
             // or none at all - left it barely wider than its own icon, a grey square with a
@@ -13947,6 +15643,14 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             let fileCardWidth = containerViewFile.widthAnchor.constraint(greaterThanOrEqualToConstant: 190)
             fileCardWidth.priority = .defaultHigh
             fileCardWidth.isActive = true
+            if pdfPreviewHeight > 0 {
+                // A card with a page on it is as wide as a link card - the page is what the
+                // card is for, and the reference's is the width of the bubble. It gives way on a
+                // narrow screen the same way.
+                let wide = containerViewFile.widthAnchor.constraint(equalToConstant: LinkPreviewCard.width(inViewOfWidth: self.view.frame.width))
+                wide.priority = .defaultHigh
+                wide.isActive = true
+            }
             
             // Fix: every document wore the same grey page, whatever it was - a column of
             // attachments was a column of identical marks and only the file name told them
@@ -13958,8 +15662,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             containerViewFile.addSubview(imageFile)
             imageFile.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                imageFile.leadingAnchor.constraint(equalTo: containerViewFile.leadingAnchor, constant: 5),
-                imageFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                imageFile.leadingAnchor.constraint(equalTo: containerViewFile.leadingAnchor, constant: 10),
+                imageFile.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor, constant: pdfPreviewHeight / 2),
                 imageFile.widthAnchor.constraint(equalToConstant: 30),
                 imageFile.heightAnchor.constraint(equalToConstant: 30)
             ])
@@ -13993,15 +15697,29 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 fileBytes = VideoNote.Facts.measuredSize(ofAttachmentNamed: fileChat)
             }
             let fileType = finalExtFile
-            fileFacts.text = fileBytes > 0
-                ? "\(VideoNote.Facts.humanSize(fileBytes)) \u{2022} \(fileType)"
-                : fileType
+            // Pages, size and type, each written in as it becomes known: the size can arrive
+            // from the secure store a moment later, and a PDF's page count with its preview.
+            var knownPages = 0
+            var knownBytes = fileBytes
+            let writeFileFacts: () -> Void = { [weak fileFacts] in
+                var parts: [String] = []
+                if knownPages > 0 {
+                    parts.append("\(knownPages) " + (knownPages == 1 ? "page".localized() : "pages".localized()))
+                }
+                if knownBytes > 0 {
+                    parts.append(VideoNote.Facts.humanSize(knownBytes))
+                }
+                parts.append(fileType)
+                fileFacts?.text = parts.joined(separator: " \u{2022} ")
+            }
+            writeFileFacts()
             if fileBytes == 0 {
                 // Neither the sender nor a plain copy on disk could say. The one place left to
                 // look is the secure store, and looking there means opening the whole file - so it
                 // is done away from the main thread and the line fills itself in.
-                VideoNote.Facts.measureSize(ofAttachmentNamed: fileChat) { [weak fileFacts] bytes in
-                    fileFacts?.text = "\(VideoNote.Facts.humanSize(bytes)) \u{2022} \(fileType)"
+                VideoNote.Facts.measureSize(ofAttachmentNamed: fileChat) { bytes in
+                    knownBytes = bytes
+                    writeFileFacts()
                 }
             }
 
@@ -14017,7 +15735,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             fileText.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 fileText.leadingAnchor.constraint(equalTo: imageFile.trailingAnchor, constant: 8),
-                fileText.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                fileText.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor, constant: pdfPreviewHeight / 2),
                 // Fix, twice over. First the stack was held between "no higher than the top" and
                 // "no lower than the bottom" - two constraints that only limit and never drive, so
                 // nothing ever asked the strip to be taller and the second line was clipped away.
@@ -14032,8 +15750,34 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 // fixed-height card the reference has - a short name simply leaves its second line
                 // empty.
                 containerViewFile.heightAnchor.constraint(
-                    equalToConstant: ceil(nameFile.font.lineHeight) * 2 + 1 + ceil(fileFacts.font.lineHeight) + 12)
+                    equalToConstant: ceil(nameFile.font.lineHeight) * 2 + 1 + ceil(fileFacts.font.lineHeight) + 12 + pdfPreviewHeight)
             ])
+            if pdfPreviewHeight > 0 {
+                let preview = UIImageView()
+                preview.contentMode = .scaleAspectFill
+                preview.clipsToBounds = true
+                // Fix: the page arrived as a 300pt-wide picture, and an image view asks for its
+                // picture's width - so it pushed the card out past the bubble's edge. The card
+                // decides the width; the picture is cropped to it.
+                preview.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                preview.setContentHuggingPriority(.defaultLow, for: .vertical)
+                preview.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                preview.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+                preview.backgroundColor = UIColor(white: 0.5, alpha: 0.12)
+                containerViewFile.addSubview(preview)
+                preview.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    preview.topAnchor.constraint(equalTo: containerViewFile.topAnchor),
+                    preview.leadingAnchor.constraint(equalTo: containerViewFile.leadingAnchor),
+                    preview.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor),
+                    preview.heightAnchor.constraint(equalToConstant: pdfPreviewHeight)
+                ])
+                PDFBubblePreview.facts(ofFileNamed: fileChat) { [weak preview] page, pages in
+                    preview?.image = page
+                    knownPages = pages
+                    writeFileFacts()
+                }
+            }
 
             let mineFile = dataMessages[indexPath.row]["f_pin"] as? String == idMe
             let sendingFile = (dataMessages[indexPath.row]["status"] as? String ?? "") == "1"
@@ -14054,7 +15798,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 // the file, and a button inside it would have both fire at once.
                 containerMessage.addSubview(stop)
                 NSLayoutConstraint.activate([
-                    stop.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                    stop.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor, constant: pdfPreviewHeight / 2),
                     stop.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5),
                     fileText.trailingAnchor.constraint(equalTo: stop.leadingAnchor, constant: -8)
                 ])
@@ -14075,7 +15819,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let stop = TransferStopControl(side: 30)
                 containerMessage.addSubview(stop)
                 NSLayoutConstraint.activate([
-                    stop.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                    stop.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor, constant: pdfPreviewHeight / 2),
                     stop.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5),
                     fileText.trailingAnchor.constraint(equalTo: stop.leadingAnchor, constant: -8)
                 ])
@@ -14104,7 +15848,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 offer.addSubview(arrow)
                 arrow.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
-                    offer.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor),
+                    offer.centerYAnchor.constraint(equalTo: containerViewFile.centerYAnchor, constant: pdfPreviewHeight / 2),
                     offer.trailingAnchor.constraint(equalTo: containerViewFile.trailingAnchor, constant: -5),
                     offer.widthAnchor.constraint(equalToConstant: 30),
                     offer.heightAnchor.constraint(equalToConstant: 30),
@@ -14180,19 +15924,30 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
 
                     containerMessage.addSubview(containerLinkMessage)
                     containerLinkMessage.translatesAutoresizingMaskIntoConstraints = false
-                    containerLinkMessage.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
+                    // Edge to edge like a picture, and flush with the top of the bubble when
+                    // nothing sits above it - see fit(_:sharing:).
+                    let cardAtTop = (reffChat.isEmpty || queryMessageReply(message_id: reffChat).count == 0)
+                        && (dataMessages[indexPath.row][TypeDataMessage.is_forwarded] == nil || dataMessages[indexPath.row][TypeDataMessage.is_forwarded] as? Int ?? 0 == 0)
+                    let cardReach = cardAtTop ? ((containerMessage as? BubbleView)?.reach ?? .zero) : .zero
+                    containerLinkMessage.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: -cardReach.left).isActive = true
                     containerLinkMessage.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
-                    containerLinkMessage.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+                    containerLinkMessage.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: cardReach.right).isActive = true
+                    if cardAtTop {
+                        topMarginText.constant = topMarginText.constant - BubbleTextInset.top
+                    }
+                    (containerMessage as? BubbleView)?.fit(containerLinkMessage, sharing: cardAtTop ? BubbleView.topCorners : [])
                     containerLinkMessage.heightAnchor.constraint(equalToConstant: cardHeight).isActive = true
                     // The card is what makes a bubble carrying a link as wide as it is: a bubble
                     // is otherwise only as wide as its text, and a picture in a narrow bubble is
                     // not worth showing. It gives way where there is not the room, the way a
                     // picture bubble does.
-                    let cardIsWide = containerLinkMessage.widthAnchor.constraint(equalToConstant: cardWidth)
+                    let cardIsWide = containerLinkMessage.widthAnchor.constraint(equalToConstant: cardWidth + cardReach.left + cardReach.right)
                     cardIsWide.priority = .defaultHigh
                     cardIsWide.isActive = true
 
                     let card = LinkPreviewCard()
+                    // The holder does the rounding now, with the bubble's corners.
+                    card.layer.cornerRadius = 0
                     containerLinkMessage.addSubview(card)
                     card.translatesAutoresizingMaskIntoConstraints = false
                     NSLayoutConstraint.activate([
@@ -14252,8 +16007,8 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let containerReply = PressableView()
                 containerMessage.addSubview(containerReply)
                 containerReply.translatesAutoresizingMaskIntoConstraints = false
-                containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-                containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+                containerReply.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleBox.inset).isActive = true
+                containerReply.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleBox.inset).isActive = true
                 if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                     containerReply.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
                 } else if fileChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
@@ -14265,7 +16020,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 } else {
                     containerReply.bottomAnchor.constraint(equalTo: messageText.topAnchor, constant: -5).isActive = true
                 }
-                containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
+                containerReply.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -BubbleBox.inset).isActive = true
                 let minHeightConstraint = containerReply.heightAnchor.constraint(greaterThanOrEqualToConstant: 50 + (self.offset()*3))
                 // Just under the margin that sets the bubble's height, so the two are never left
                 // tied on the same priority with the layout free to pick either. What actually
@@ -14274,7 +16029,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 minHeightConstraint.priority = UILayoutPriority(749)
                 minHeightConstraint.isActive = true
                 containerReply.backgroundColor = quoteOverlay
-                containerReply.layer.cornerRadius = 5
+                containerReply.layer.cornerRadius = BubbleBox.radius
                 containerReply.clipsToBounds = true
                 
                 if (thumbChat != "" || fileChat != "") && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
@@ -14295,7 +16050,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 leftReply.leadingAnchor.constraint(equalTo: containerReply.leadingAnchor).isActive = true
                 leftReply.topAnchor.constraint(equalTo: containerReply.topAnchor).isActive = true
                 leftReply.bottomAnchor.constraint(equalTo: containerReply.bottomAnchor).isActive = true
-                leftReply.widthAnchor.constraint(equalToConstant: 3).isActive = true
+                leftReply.widthAnchor.constraint(equalToConstant: ChatReplyPreview.stripWidth).isActive = true
                 leftReply.layer.cornerRadius = 5
                 leftReply.clipsToBounds = true
                 leftReply.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMinXMinYCorner]
@@ -14400,7 +16155,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                                                             colour: quotedTextColour) {
                     contentReply.attributedText = carried
                 } else {
-                    contentReply.attributedText = message_text.richText(fontSize: 11 + offset())
+                    contentReply.attributedText = Utils.quotedWithoutMentionMarks(message_text.richText(fontSize: 11 + offset()),
+                                                                                  font: contentReply.font ?? UIFont.systemFont(ofSize: 11 + offset()),
+                                                                                  colour: quotedTextColour)
                 }
 // WhatsApp writes the quote in the foreground colour held back a little, not in a
                 // colour of its own: #303237 on that #D3E1F2 quote is black at 77%. Its dark
@@ -14518,15 +16275,18 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         }
         
         func showForwardedSign() {
-            topMarginText.constant = topMarginText.constant + 20
+            topMarginText.constant = topMarginText.constant + BubbleTextInset.forwardedPush
             
             let containerForwarded = UIView()
             containerMessage.addSubview(containerForwarded)
             containerForwarded.translatesAutoresizingMaskIntoConstraints = false
-            containerForwarded.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: 15).isActive = true
-            containerForwarded.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: 15).isActive = true
+            containerForwarded.leadingAnchor.constraint(equalTo: containerMessage.leadingAnchor, constant: BubbleTextInset.labelSide).isActive = true
+            containerForwarded.topAnchor.constraint(equalTo: containerMessage.topAnchor, constant: BubbleTextInset.top).isActive = true
             containerForwarded.trailingAnchor.constraint(equalTo: containerMessage.trailingAnchor, constant: -15).isActive = true
-            containerForwarded.heightAnchor.constraint(equalToConstant: 20).isActive = true
+            // As tall as its one line and no more: the writing is pinned to both edges of the
+            // strip, so the space above the mark is the text's own inset and the space under it
+            // is the 2pt the text below keeps.
+            containerForwarded.heightAnchor.constraint(equalToConstant: BubbleTextInset.forwardedLine).isActive = true
             if thumbChat != "" && (dataMessages[indexPath.row]["lock"] == nil || dataMessages[indexPath.row]["lock"]  as? String ?? "" != "1") {
                 if groupImages[messageIdChat] == nil {
                     containerForwarded.bottomAnchor.constraint(equalTo: imageThumb.topAnchor, constant: -5).isActive = true
@@ -14541,22 +16301,23 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             
             let imageForwarded = UIImageView()
             containerForwarded.addSubview(imageForwarded)
-            imageForwarded.anchor(top: containerForwarded.topAnchor, left: containerForwarded.leftAnchor, width: 15, height: 15)
+            imageForwarded.anchor(left: containerForwarded.leftAnchor, width: 14, height: 14)
+            imageForwarded.centerYAnchor.constraint(equalTo: containerForwarded.centerYAnchor).isActive = true
             imageForwarded.image = UIImage(systemName: "arrowshape.turn.up.right.fill")
             imageForwarded.tintColor = .gray
             
             let titleForwarded = UILabel()
             containerForwarded.addSubview(titleForwarded)
-            titleForwarded.anchor(top: containerForwarded.topAnchor, left: imageForwarded.rightAnchor, right: containerForwarded.rightAnchor, height: 15)
-            titleForwarded.font = .systemFont(ofSize: 15)
+            titleForwarded.anchor(top: containerForwarded.topAnchor, left: imageForwarded.rightAnchor, bottom: containerForwarded.bottomAnchor, right: containerForwarded.rightAnchor)
             let textForwarded = "Forwarded".localized()
+            // The message's own size, italic - the strip is exactly that line tall.
             titleForwarded.attributedText = " $\(textForwarded)$".richText()
         }
         if messageText.isDescendant(of: containerMessage) {
             var addTopMargin = true
             if !reffChat.isEmpty && dataMessages[indexPath.row]["message_scope_id"]  as? String ?? "" != MessageScope.FORM {
                 let data = queryMessageReply(message_id: reffChat)
-                if data.count != 0 && (topMarginText.constant == 15.0 || topMarginText.constant == 100.0) {
+                if data.count != 0 && (topMarginText.constant == BubbleTextInset.top || topMarginText.constant == 100.0) {
                     addTopMargin = false
                 }
             }
@@ -15130,6 +16891,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         guard let tap = sender as? ReadMoreTap else {
             return
         }
+        endOpeningPlacement()
         LongMessage.expand(tap.messageId)
         // It is a different height now, so what was measured of it folded is no longer an answer.
         textBubbleHeights.removeValue(forKey: tap.messageId)
@@ -15465,6 +17227,13 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     }
     
     @objc func contentMessageTapped(_ sender: ObjectGesture) {
+        // Opening what was tapped is the reader taking over - see presentBubbleContextMenu.
+        endOpeningPlacement()
+        // A gif that has played and rests under its disc is played again by a tap; only a gif
+        // still running opens the viewer - see GifBubble.
+        if !sender.gif_id.isEmpty, GifBubble.replayIfResting(in: sender.imageView) {
+            return
+        }
         let nsDocumentDirectory = FileManager.SearchPathDirectory.documentDirectory
         let nsUserDomainMask = FileManager.SearchPathDomainMask.userDomainMask
         let paths = NSSearchPathForDirectoriesInDomains(nsDocumentDirectory, nsUserDomainMask, true)
@@ -15902,6 +17671,16 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 return
             }
             DispatchQueue.main.async {
+                // Fix: the jump is made a turn later, and by then the bubble's menu may have
+                // gone up over it - the press that opened the menu had already been taken for
+                // a tap on the quote. Cancelling the recognizers when the menu appears cannot
+                // call back a turn that is already queued, so the jump asks here, at the last
+                // moment, whether it is still wanted. A menu on screen means it is not, and
+                // nor does a menu that has just been dismissed - that is the jump that landed
+                // after the menu was cancelled.
+                guard self.longBubbleContextMenu == nil, !self.menuTookOverTouch else {
+                    return
+                }
                 // The tap on a quote, or on a pinned message: go to what it names and say so.
                 self.jumpToQuotedMessage(messageId: sender.message_id)
             }
@@ -15932,6 +17711,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     // (broken custom instagram://twitter://youtube:// deep links that "succeeded"
     // but always landed on the app's home screen instead of the tapped content).
     @objc func tapMessageText(_ sender: ObjectGesture) {
+        endOpeningPlacement()
         LinkOpener.open(urlString: sender.message_id)
     }
 
@@ -15940,6 +17720,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
     // presentLinkActionSheet: WhatsApp-style bottom sheet via UISheetPresentationController
     // (iOS 15+), falling back to a plain UIAlertController action sheet on iOS 14.
     private func presentLinkActionSheet(urlString: String) {
+        endOpeningPlacement()
         let openAction: () -> Void = { [weak self] in
             let gesture = ObjectGesture()
             gesture.message_id = urlString
@@ -15999,6 +17780,54 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         return false
     }
 
+    /// Calls off a press that has not yet become a long press, and takes its highlight with it.
+
+    // Fix: a hold over a link or a name was timed from the text view's own touches, and from
+    // nowhere else. On a screen that reads pressure - an iPhone 7 and the phones of its years -
+    // the bubble's menu recognises a firm press by force, sooner than any hold of a fixed
+    // length, and the moment it recognises, UIKit cancels the touches the text view was timing.
+    // So on those devices the timer never reached its end: holding a name did nothing at all,
+    // no card, no menu, nothing. The menu already stands down over a link and over a name; now,
+    // when it stands down, it hands the hold on to the sheet it was meant for. Whichever of the
+    // two notices the hold first opens the sheet, and the other finds it already open.
+
+    /// Whether the sheet a hold opens has just been opened - by the other of the two routes.
+    private var heldSheetJustOpened: Bool {
+        return CACurrentMediaTime() - lastHeldSheetOpenedAt < 1.0
+    }
+
+    private func markHeldSheetOpened() {
+        lastHeldSheetOpenedAt = CACurrentMediaTime()
+    }
+
+    /// Opens the sheet a hold on `view` was for, from the menu's side of the hold.
+    private func openHeldSheet(in view: UIView, _ open: @escaping () -> Void) {
+        guard !heldSheetJustOpened else { return }
+        markHeldSheetOpened()
+        // The finger is still down and no menu is coming to tidy up after it: the pressed look
+        // lets go, the highlight goes with it, and the lift that follows must not also be read
+        // as a tap on what was held.
+        PressableView.liftAll(in: view)
+        linkPressGeneration += 1
+        hideLinkHighlight()
+        suppressNextLinkTap = true
+        suppressLinkTapToken += 1
+        let myToken = suppressLinkTapToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            guard let self = self, self.suppressLinkTapToken == myToken else { return }
+            self.suppressNextLinkTap = false
+        }
+        endOpeningPlacement()
+        // Out of the menu's own recognition first, so the interaction is done with the touch
+        // before the sheet goes up over it.
+        DispatchQueue.main.async(execute: open)
+    }
+
+    private func cancelPendingLinkPress() {
+        linkPressGeneration += 1
+        hideLinkHighlight()
+    }
+
     private func handleLinkTouch(_ phase: PressableTextView.Phase, at point: CGPoint, in textView: UITextView) {
         switch phase {
         case .began:
@@ -16024,6 +17853,15 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                     guard let self = self, self.suppressLinkTapToken == myToken else { return }
                     self.suppressNextLinkTap = false
                 }
+                // Asked again here, not only when the finger landed: half a second is long
+                // enough for the list to have been set moving under it.
+                guard !self.listMotion.isMoving(self.tableChatView) else {
+                    self.hideLinkHighlight()
+                    return
+                }
+                // Unless the menu's own press got there first - see openHeldSheet.
+                guard !self.heldSheetJustOpened else { return }
+                self.markHeldSheetOpened()
                 self.presentLinkActionSheet(urlString: urlString)
             }
 
@@ -16106,7 +17944,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                 let tapGesture = UITapGestureRecognizer(target: self, action: #selector(viewPinTapped))
                 self.containerPin.addGestureRecognizer(tapGesture)
                 self.containerPin.anchor(top: self.view.safeAreaLayoutGuide.topAnchor, left: self.view.leftAnchor, right: self.view.rightAnchor, height: 50)
-                self.containerPin.backgroundColor = .mainColor
+                ChatMentionList.dress(self.containerPin, colour: .mainColor)
                 
                 if dataMessages.count > 1 {
                     self.containerPin.addSubview(self.signSelectedPin)
@@ -16203,12 +18041,14 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             }
         } else if self.containerPin.isDescendant(of: self.view) {
             self.containerPin.subviews.forEach({ $0.removeFromSuperview() })
+            ChatMentionList.removeGround(of: self.containerPin)
             self.containerPin.removeFromSuperview()
             self.tableChatView.contentInset.top = 0
         }
     }
     
     @objc func viewPinTapped() {
+        endOpeningPlacement()
         var dataMessagesPin = self.pinnedMessagesForBanner()
         dataMessagesPin.sort {
             let firstPinned = Int64($0[TypeDataMessage.is_pinned] as? String ?? "0") ?? 0
@@ -16303,6 +18143,10 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             // Not the draft-restore path below, which runs while the chat is still opening and
             // has no business cancelling the placement it is opening with.
             self.endOpeningPlacement()
+            // Nor the menu's to hold on to: the reply bar is about to take a bar's height out
+            // of the list, and the list has to be free to move up by it - see
+            // releaseListAfterMenu.
+            self.releaseListAfterMenu()
             self.deleteReplyView()
             if dataMessagesImage.count != 0 {
                 dataMessages = [dataMessagesImage]
@@ -16321,7 +18165,7 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
             self.deleteReplyView()
             return
         }
-        let replyBarHeight = 50 + (self.offset() * 3)
+        let replyBarHeight = self.replyBarHeight
         let wasShowing = self.listAnchor
         UIView.animate(withDuration: 0.25, delay: 0.0, options: .curveEaseInOut, animations: {
             self.constraintTopTextField.constant = self.constraintTopTextField.constant + replyBarHeight
@@ -16337,13 +18181,18 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         self.containerPreviewReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
         self.containerPreviewReply.topAnchor.constraint(equalTo: self.viewTextfield.topAnchor).isActive = true
         if !self.containerLink.isDescendant(of: self.viewTextfield) {
-            self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.textFieldSend.topAnchor)
+            self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.fieldTopAnchor)
         } else {
             self.bottomAnchorPreviewReply = self.containerPreviewReply.bottomAnchor.constraint(equalTo: self.containerLink.topAnchor)
         }
         self.bottomAnchorPreviewReply.isActive = true
         self.containerPreviewReply.trailingAnchor.constraint(equalTo: self.viewTextfield.trailingAnchor).isActive = true
         self.containerPreviewReply.backgroundColor = self.traitCollection.userInterfaceStyle == .dark ? .blackDarkMode : .secondaryColor
+        if #available(iOS 26.0, *) {
+            // Clear, so the material under the field row shows through it as one band.
+            self.containerPreviewReply.backgroundColor = .clear
+            self.replyMaterial.isHidden = false
+        }
         // The preview is now the bottom-most thing the button must clear.
         self.refreshScrollToBottomButtonPlacement(animated: true)
         
@@ -16351,16 +18200,23 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
         self.containerPreviewReply.addSubview(leftReply)
         leftReply.translatesAutoresizingMaskIntoConstraints = false
         leftReply.leadingAnchor.constraint(equalTo: self.viewTextfield.leadingAnchor).isActive = true
-        leftReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor).isActive = true
-        leftReply.bottomAnchor.constraint(equalTo: self.containerPreviewReply.bottomAnchor).isActive = true
-        leftReply.widthAnchor.constraint(equalToConstant: 3).isActive = true
+        // Standing clear of both ends of the bar, and as thick as the reference draws it - see
+        // ChatReplyPreview.
+        leftReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor,
+                                       constant: ChatReplyPreview.stripInset).isActive = true
+        leftReply.bottomAnchor.constraint(equalTo: self.containerPreviewReply.bottomAnchor,
+                                          constant: -ChatReplyPreview.stripInset).isActive = true
+        leftReply.widthAnchor.constraint(equalToConstant: ChatReplyPreview.stripWidth).isActive = true
         leftReply.backgroundColor = .orangeColor
         
         let titleReply = UILabel()
         self.containerPreviewReply.addSubview(titleReply)
         titleReply.translatesAutoresizingMaskIntoConstraints = false
         titleReply.leadingAnchor.constraint(equalTo: leftReply.leadingAnchor, constant: 10).isActive = true
-        titleReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor, constant: 10).isActive = true
+        // Lower in the taller bar, so the two lines sit in its middle rather than at its top.
+        let titleTop: CGFloat
+        if #available(iOS 26.0, *) { titleTop = 18 } else { titleTop = 10 }
+        titleReply.topAnchor.constraint(equalTo: self.containerPreviewReply.topAnchor, constant: titleTop).isActive = true
         titleReply.font = UIFont.systemFont(ofSize: 12 + offset()).bold
         let idMe = User.getMyPin() as String?
         let f_pin = chatGroup.count == 0 ? (dataMessages[indexPath.row]["f_pin"] as? String ?? "") : chatGroup[0].fpin
@@ -16421,7 +18277,9 @@ extension EditorPersonal: UITableViewDelegate, UITableViewDataSource, AVAudioPla
                                                     colour: quotedTextColour) {
             contentReply.attributedText = carried
         } else {
-            contentReply.attributedText = message_text.richText()
+            contentReply.attributedText = Utils.quotedWithoutMentionMarks(message_text.richText(),
+                                                                          font: contentReply.font ?? UIFont.systemFont(ofSize: 10 + offset()),
+                                                                          colour: quotedTextColour)
         }
         // Same treatment as the quote inside a bubble - 60% of the text colour, which is what
         // WhatsApp uses (--quoted-message-text). This strip sits on a light background in light
@@ -16973,6 +18831,15 @@ enum LinkHighlighting {
         return (textView, info.range, info.urlString)
     }
 
+    /// The mention (if any) under `location` in `containerView`, found the same way linkHit finds
+    /// a link - what the bubble's own menu asks before deciding it has nothing to stand down for.
+    static func mentionHit(at location: CGPoint, in containerView: UIView?) -> (textView: UITextView, range: NSRange, pin: String)? {
+        guard let containerView = containerView, let textView = firstTextView(in: containerView) else { return nil }
+        let pointInTextView = containerView.convert(location, to: textView)
+        guard let info = mentionInfo(at: pointInTextView, in: textView) else { return nil }
+        return (textView, info.range, info.pin)
+    }
+
     /// Converts an http(s) URL string into Chrome's custom URL scheme format
     /// (googlechrome:// for http, googlechromes:// for https - Chrome's documented
     /// scheme, not a guess) so "Open in Chrome" launches the actual page rather than
@@ -17051,7 +18918,16 @@ final class LinkActionSheetViewController: UIViewController {
     /// The sheet's y position when a drag-to-dismiss pan started.
     private var panStartOriginY: CGFloat = 0
 
-    private var topContentInset: CGFloat { usesCustomChrome ? 26 : 18 }
+    private var topContentInset: CGFloat { usesCustomChrome ? (Self.onGlass ? 24 : 26) : 18 }
+
+    /// iOS 26 and later: the sheet is drawn the way the reference draws its own - edge to edge,
+    /// flush with the bottom, a 40pt sweep on the top corners, no grabber, and a glass close
+    /// button. The system sheet there floats inset from the edges on a glass ground, which is
+    /// not that; the custom presentation gives the same shape on every system.
+    private static var onGlass: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
     private static let bottomContentInset: CGFloat = 12
     private static let horizontalContentInset: CGFloat = 16
 
@@ -17109,10 +18985,12 @@ final class LinkActionSheetViewController: UIViewController {
         view.addSubview(contentStack)
 
         if usesCustomChrome {
-            view.layer.cornerRadius = 16
+            view.layer.cornerRadius = Self.onGlass ? 40 : 16
+            view.layer.cornerCurve = .continuous
             view.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
             view.clipsToBounds = true
 
+            grabber.isHidden = Self.onGlass
             grabber.backgroundColor = .tertiaryLabel
             grabber.layer.cornerRadius = 2.5
             grabber.translatesAutoresizingMaskIntoConstraints = false
@@ -17196,8 +19074,12 @@ final class LinkActionSheetViewController: UIViewController {
         let closeButton = LinkActionRow.makeCircularButton(systemImageName: "xmark")
         closeButton.addTarget(self, action: #selector(handleClose), for: .touchUpInside)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.widthAnchor.constraint(equalToConstant: 32).isActive = true
-        closeButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        let closeSize: CGFloat = Self.onGlass ? 40 : 32
+        closeButton.widthAnchor.constraint(equalToConstant: closeSize).isActive = true
+        closeButton.heightAnchor.constraint(equalToConstant: closeSize).isActive = true
+        // A clear glass button on iOS 26, as the reference's close is.
+        GlassLook.adopt(closeButton, tint: nil, foreground: .label,
+                        symbol: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
 
         let row = UIStackView(arrangedSubviews: [iconBackground, textStack, closeButton])
         row.axis = .horizontal
@@ -17265,7 +19147,7 @@ final class LinkActionSheetViewController: UIViewController {
     func presentAsBottomSheet(from presenter: UIViewController) {
         let width = presenter.view.bounds.width
 
-        if #available(iOS 16.0, *) {
+        if #available(iOS 16.0, *), !Self.onGlass {
             let contentHeight = preferredContentHeight(forWidth: width)
             if let sheet = sheetPresentationController {
                 sheet.detents = [.custom(resolver: { _ in contentHeight })]

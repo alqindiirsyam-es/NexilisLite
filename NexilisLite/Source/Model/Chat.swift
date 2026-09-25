@@ -47,6 +47,11 @@ public class Chat: Model {
     public var pinned: Int64
     public var isBot: Int
     public var isFolPinned: Bool
+    /// Whether something unread in this conversation names me - what the row's "@" is about.
+    ///
+    /// Not read with the conversation itself: it is settled alongside the unread counts, which
+    /// are what it depends on. See UnreadMentions.
+    public var namesMe = false
     
     public init(pin: String) {
         self.fpin = ""

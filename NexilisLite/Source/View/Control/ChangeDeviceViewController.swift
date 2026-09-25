@@ -606,7 +606,7 @@ public class ChangeDeviceViewController: UIViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
                 Nexilis.hideLoader(completion: {
                     if Nexilis.showFB {
-                        Nexilis.floatingButton.removeFromSuperview()
+                        Nexilis.floatingButton?.removeFromSuperview()
                         FloatingButton.datePull = nil
                         Nexilis.floatingButton = FloatingButton()
                         Nexilis.addFB()
@@ -653,7 +653,7 @@ public class ChangeDeviceViewController: UIViewController {
                         let banner = FloatingNotificationBanner(title: "Successfully Sign-In".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
                         banner.show()
                         if Nexilis.showFB {
-                            Nexilis.floatingButton.removeFromSuperview()
+                            Nexilis.floatingButton?.removeFromSuperview()
                             FloatingButton.datePull = nil
                             Nexilis.floatingButton = FloatingButton()
                             Nexilis.addFB()

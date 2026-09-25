@@ -18,6 +18,7 @@ import LocalAuthentication
 import AVFoundation
 import AVKit
 import PDFKit
+import QuickLookThumbnailing
 import SDWebImage
 import NexilisZTA
 //import var CommonCrypto.CC_MD5_DIGEST_LENGTH
@@ -1114,8 +1115,8 @@ public final class Utils {
                 }
                 Utils.setFinishInitPrefs(value: true)
                 DispatchQueue.main.async {
-                    if Nexilis.showFB && Nexilis.floatingButton.superview != nil {
-                        Nexilis.floatingButton.setImageWithURL(!Utils.getIconDock().isEmpty && Nexilis.fromMAB)
+                    if Nexilis.showFB && Nexilis.floatingButton?.superview != nil {
+                        Nexilis.floatingButton?.setImageWithURL(!Utils.getIconDock().isEmpty && Nexilis.fromMAB)
                     }
                 }
             } catch {
@@ -1818,18 +1819,35 @@ public final class Utils {
             completion(true, nil)
             return
         }
+        let since: Date? = SecureUserDefaults.shared.value(forKey: "lastAuthenticationTime")
+        NXLogger.general.publicInfo("[Biometric] Face ID diminta (authentication_duration=\(Utils.getAuthenticationDuration().isEmpty ? "-" : Utils.getAuthenticationDuration()), sejak terakhir=\(since.map { String(format: "%.1fs", Date().timeIntervalSince($0)) } ?? "belum pernah"))")
 
         let context = LAContext()
         let reason = "Authenticate to access secure data".localized()
 
         if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) {
-            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, error in
+            // Mode 1: evaluate the master key's own access control (biometryCurrentSet, useItem) rather than
+            // the generic policy. A context that only passed evaluatePolicy is not accepted by that Keychain
+            // item, which then asked for Face ID again on its own - twice more on one sign-in. Evaluated this
+            // way, the one confirmation opens the key for the reads that follow.
+            let evaluate: (@escaping (Bool, Error?) -> Void) -> Void = { reply in
+                if !isSaveState, NXSecurityPolicy.bindsKeysToUserAuth(), let acl = MasterKeyUtil.masterKeyAccessControl() {
+                    context.evaluateAccessControl(acl, operation: .useItem, localizedReason: reason, reply: reply)
+                } else {
+                    context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason, reply: reply)
+                }
+            }
+            evaluate { success, error in
                 if success {
                     // Store the time of successful authentication
                     if let domainState = context.evaluatedPolicyDomainState, isSaveState {
                         Utils.setBiometricState(value: domainState)
                     }
                     SecureUserDefaults.shared.set(Date(), forKey: "lastAuthenticationTime")
+                    // The same confirmation opens the mode-1 master key (its Keychain biometric ACL):
+                    // without this the database / preference reads that follow asked for Face ID again
+                    // seconds later, on a context of their own.
+                    MasterKeyUtil.shared.adoptAuthenticatedContext(context)
                     completion(true, nil)
                 } else {
                     let errorMessage = error?.localizedDescription ?? "Authentication failed"
@@ -2476,7 +2494,7 @@ public class DialogVerifyYou: UIViewController {
                                 let banner = FloatingNotificationBanner(title: "Successfully Sign-In".localized(), subtitle: nil, titleFont: UIFont.systemFont(ofSize: 16), titleColor: nil, titleTextAlign: .left, subtitleFont: nil, subtitleColor: nil, subtitleTextAlign: nil, leftView: imageView, rightView: nil, style: .success, colors: nil, iconPosition: .center)
                                 banner.show()
                                 if Nexilis.showFB {
-                                    Nexilis.floatingButton.removeFromSuperview()
+                                    Nexilis.floatingButton?.removeFromSuperview()
                                     FloatingButton.datePull = nil
                                     Nexilis.floatingButton = FloatingButton()
                                     Nexilis.addFB()
@@ -7781,12 +7799,470 @@ final class APNPendingOpenStore {
     }
 }
 
-/// A card that rises from the foot of the screen carrying a question and a short list of answers.
+/// How round a panel's corners are.
 ///
-/// Written to replace the system action sheet behind "Delete message?". The system sheet cannot be
-/// made to look like this - its title is small grey text, its rows are full-width dividers and its
-/// Cancel is a separate slab - so the card is drawn here instead. Nothing about it is specific to
-/// deleting: it takes a question and some answers, and it is the caller that decides what they mean.
+/// iOS 26 rounds everything of its own far harder than the systems before it, and draws the
+/// corner as a continuous curve rather than a plain arc. One rule for the whole app rather than a
+/// number written into each panel: about a third of the panel's own height there - so a tall tile
+/// is rounder than a short row, which is what the reference does - never so shallow that the
+/// change is invisible and never so deep that a tall panel turns into a lozenge. Earlier systems
+/// keep exactly what the screen had before.
+public enum PanelCorner {
+
+    public static func radius(height: CGFloat, classic: CGFloat) -> CGFloat {
+        if #available(iOS 26.0, *) {
+            return min(max(height * 0.30, 18), 26)
+        }
+        return classic
+    }
+
+    public static func apply(to view: UIView, height: CGFloat, classic: CGFloat) {
+        apply(to: view, radius: radius(height: height, classic: classic))
+    }
+
+    public static func apply(to view: UIView, radius: CGFloat) {
+        view.layer.cornerRadius = radius
+        if #available(iOS 26.0, *) {
+            view.layer.cornerCurve = .continuous
+        }
+    }
+
+    /// The corner of one of the three tiles across the top of a sheet.
+    ///
+    /// Measured off the reference, corner by corner, rather than guessed at: its tiles are drawn
+    /// with a continuous corner whose sweep reads as about eighteen points, and its rows below
+    /// them are drawn as capsules - rounder than the tiles, not the same as them, which is what
+    /// the first two attempts at this both got wrong in opposite directions.
+    public static var sheetTile: CGFloat {
+        if #available(iOS 26.0, *) {
+            return 18
+        }
+        return 16
+    }
+
+    /// The corner of the card the lines under those tiles sit in.
+    ///
+    /// Measured off the reference: the same sweep whether the card carries one line or two - 28pt
+    /// across at the top row, which is a continuous corner of about twenty-two - so it is not half
+    /// the height, however much a card of one line looks like a capsule.
+    public static var sheetRows: CGFloat {
+        if #available(iOS 26.0, *) {
+            return 22
+        }
+        return 16
+    }
+
+    /// The small marks - the friend count, the kind of account - which are chips rather than
+    /// panels: they follow, but nothing like as far.
+    public static func chip(_ view: UIView, classic: CGFloat = 5) {
+        if #available(iOS 26.0, *) {
+            view.layer.cornerRadius = 8
+            view.layer.cornerCurve = .continuous
+        } else {
+            view.layer.cornerRadius = classic
+        }
+    }
+}
+
+/// The one bottom sheet this app slides up from the foot of the screen.
+///
+/// Fix: the card that a mention opened drew its own - a backdrop, a card pulled up by a
+/// constraint, its own tap-to-close - while the link sheet and the call sheet were already using
+/// a real one: a detent measured from the content on iOS 16 and later and
+/// LinkBottomSheetPresentationController below it, with the system's grabber, the system's drag
+/// to dismiss, and on iOS 26 the edge-to-edge shape with the deep corners. Two mechanisms for one
+/// gesture, and only one of them behaved like the rest of the app. This is that one, with what is
+/// inside left to whoever builds it - see LinkActionSheetViewController, which is the same sheet
+/// for links and for calls.
+public class AppBottomSheet: UIViewController {
+
+    /// Everything the sheet shows, in one column. Filled by `buildContent()`.
+    public let contentStack = UIStackView()
+
+    /// iOS 26 draws a sheet edge to edge and flush with the foot of the screen, with a deep sweep
+    /// on the top corners and no grabber. The system's own floats inset on a glass ground, which
+    /// is not that, so there the sheet is presented by hand on every system.
+    static var onGlass: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
+
+    /// True when the chrome - the corners, the grabber - is ours to draw rather than UIKit's.
+    /// Must be settled before the view loads.
+    private var usesCustomChrome = false
+    /// UIViewController holds `transitioningDelegate` weakly, so the sheet keeps its own alive.
+    private var retainedTransitioningDelegate: UIViewControllerTransitioningDelegate?
+    private var panStartOriginY: CGFloat = 0
+    private let grabber = UIView()
+
+    var topContentInset: CGFloat { usesCustomChrome ? (Self.onGlass ? 24 : 26) : 18 }
+    var bottomContentInset: CGFloat { 16 }
+    var horizontalContentInset: CGFloat { 16 }
+
+    /// Run when the sheet has left the screen, however it left - a row was tapped, the close
+    /// button, the backdrop, or it was dragged down.
+    public var onClosed: (() -> Void)?
+
+    /// Where the subclass puts its rows. Called once, from viewDidLoad, before the sheet is
+    /// measured.
+    public func buildContent() {}
+
+    public override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        onClosed?()
+    }
+
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .secondarySystemBackground
+
+        contentStack.axis = .vertical
+        contentStack.spacing = 16
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(contentStack)
+        buildContent()
+
+        if usesCustomChrome {
+            view.layer.cornerRadius = Self.onGlass ? 40 : 16
+            view.layer.cornerCurve = .continuous
+            view.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            view.clipsToBounds = true
+
+            grabber.isHidden = Self.onGlass
+            grabber.backgroundColor = .tertiaryLabel
+            grabber.layer.cornerRadius = 2.5
+            grabber.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(grabber)
+            NSLayoutConstraint.activate([
+                grabber.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+                grabber.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                grabber.widthAnchor.constraint(equalToConstant: 36),
+                grabber.heightAnchor.constraint(equalToConstant: 5)
+            ])
+        }
+
+        let top = usesCustomChrome ? view.topAnchor : view.safeAreaLayoutGuide.topAnchor
+        NSLayoutConstraint.activate([
+            contentStack.topAnchor.constraint(equalTo: top, constant: topContentInset),
+            contentStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: horizontalContentInset),
+            contentStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -horizontalContentInset),
+            // Not `equalTo`: below iOS 16 there are no custom detents and the sheet falls back to
+            // a half screen, which would pull the rows apart to fill it.
+            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor,
+                                                 constant: -bottomContentInset)
+        ])
+    }
+
+    /// Puts the sheet up bottom-anchored and exactly as tall as what is in it, on every system
+    /// this app supports.
+    public func presentAsBottomSheet(from presenter: UIViewController) {
+        let width = presenter.view.bounds.width
+        if #available(iOS 16.0, *), !Self.onGlass {
+            let height = preferredContentHeight(forWidth: width)
+            if let sheet = sheetPresentationController {
+                sheet.detents = [.custom(resolver: { _ in height })]
+                sheet.prefersGrabberVisible = true
+                sheet.preferredCornerRadius = 16
+            }
+        } else {
+            // Set before the view loads - measuring below loads it - so viewDidLoad draws the
+            // corners and the grabber itself.
+            usesCustomChrome = true
+            let height = preferredContentHeight(forWidth: width)
+            let transitioning = LinkBottomSheetTransitioningDelegate(contentHeight: height)
+            retainedTransitioningDelegate = transitioning
+            modalPresentationStyle = .custom
+            transitioningDelegate = transitioning
+            addDragToDismissGesture()
+        }
+        presenter.present(self, animated: true)
+    }
+
+    /// What the content asks for, measured rather than guessed - the height the detent is given.
+    func preferredContentHeight(forWidth width: CGFloat) -> CGFloat {
+        loadViewIfNeeded()
+        view.frame.size = CGSize(width: width, height: UIScreen.main.bounds.height)
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        // A label knows how many lines it needs only once it knows how wide it is, and that is
+        // settled by the pass just done.
+        for label in wrappingLabels where label.bounds.width > 0 {
+            label.preferredMaxLayoutWidth = label.bounds.width
+        }
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+
+        let stackWidth = max(width - horizontalContentInset * 2, 0)
+        let stackHeight = contentStack.systemLayoutSizeFitting(
+            CGSize(width: stackWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel).height
+        // The safe area is 0 while the view is off screen, so the window's own inset is what
+        // keeps the last row clear of the home indicator.
+        return stackHeight + topContentInset + bottomContentInset + Self.windowBottomSafeAreaInset
+    }
+
+    /// The labels that wrap, and so have to be told their width before they can be measured.
+    var wrappingLabels: [UILabel] { [] }
+
+    private static var windowBottomSafeAreaInset: CGFloat {
+        let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) ?? UIApplication.shared.windows.first
+        return window?.safeAreaInsets.bottom ?? 0
+    }
+
+    /// Swipe down to close, matching what UIKit gives the iOS 16+ sheet for free.
+    private func addDragToDismissGesture() {
+        loadViewIfNeeded()
+        view.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(handleDragToDismiss)))
+    }
+
+    @objc private func handleDragToDismiss(_ gesture: UIPanGestureRecognizer) {
+        let travel = gesture.translation(in: view).y
+        switch gesture.state {
+        case .began:
+            panStartOriginY = view.frame.origin.y
+        case .changed:
+            view.frame.origin.y = panStartOriginY + max(travel, 0)
+        case .ended, .cancelled, .failed:
+            if travel > view.bounds.height / 3 || gesture.velocity(in: view).y > 800 {
+                dismiss(animated: true)
+            } else {
+                UIView.animate(withDuration: 0.25) { self.view.frame.origin.y = self.panStartOriginY }
+            }
+        default:
+            break
+        }
+    }
+}
+
+/// The card a mention opens: who they are, the three ways of reaching them, and one row under
+/// them - their profile, or an offer to add them as a friend.
+public final class MentionProfileSheet: AppBottomSheet {
+
+    /// One of the three across the top.
+    public struct Action {
+        public let symbol: String
+        public let title: String
+        public let isEnabled: Bool
+        public let handler: () -> Void
+
+        public init(symbol: String, title: String, isEnabled: Bool, handler: @escaping () -> Void) {
+            self.symbol = symbol
+            self.title = title
+            self.isEnabled = isEnabled
+            self.handler = handler
+        }
+    }
+
+    private let name: String
+    private let subtitle: String
+    private let pictureName: String
+    private let actions: [Action]
+    private let rows: [Action]
+
+    private let nameLabel = UILabel()
+    private let subtitleLabel = UILabel()
+
+    /// `rows` are the lines under the three tiles, in the order they are to be read: copying the
+    /// name when the card was opened by holding it, and then the person's information or the
+    /// offer to add them.
+    public init(name: String, subtitle: String, pictureName: String, actions: [Action], rows: [Action]) {
+        self.name = name
+        self.subtitle = subtitle
+        self.pictureName = pictureName
+        self.actions = actions
+        self.rows = rows
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override var wrappingLabels: [UILabel] { [nameLabel, subtitleLabel] }
+
+    public override func buildContent() {
+        let picture = UIImageView()
+        picture.contentMode = .scaleAspectFill
+        picture.clipsToBounds = true
+        picture.layer.cornerRadius = 44
+        picture.backgroundColor = .tertiarySystemFill
+        let placeholder = UIImage(named: "pb_user", in: Bundle.resourceBundle(for: Nexilis.self), with: nil)
+        picture.image = placeholder
+        if !pictureName.isEmpty {
+            picture.setImage(name: pictureName, placeholderImage: placeholder)
+        }
+        picture.translatesAutoresizingMaskIntoConstraints = false
+
+        // The picture sits in the middle of its own row so the close button can keep the corner.
+        let head = UIView()
+        head.addSubview(picture)
+
+        let close = UIButton(type: .system)
+        close.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)), for: .normal)
+        close.tintColor = .label
+        close.backgroundColor = .tertiarySystemFill
+        close.layer.cornerRadius = 18
+        close.addTarget(self, action: #selector(tapClose), for: .touchUpInside)
+        close.translatesAutoresizingMaskIntoConstraints = false
+        head.addSubview(close)
+        // On iOS 26 the button is glass, as every round button of its kind on that system is;
+        // earlier systems keep the flat fill above. See GlassLook.adopt.
+        GlassLook.adopt(close, tint: nil, foreground: .label,
+                        symbol: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+
+        nameLabel.text = name
+        nameLabel.font = .boldSystemFont(ofSize: 22)
+        nameLabel.textColor = .label
+        nameLabel.textAlignment = .center
+        nameLabel.numberOfLines = 2
+
+        subtitleLabel.text = subtitle
+        subtitleLabel.font = .systemFont(ofSize: 15)
+        subtitleLabel.textColor = .secondaryLabel
+        subtitleLabel.textAlignment = .center
+        subtitleLabel.numberOfLines = 2
+        subtitleLabel.isHidden = subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        let tiles = UIStackView()
+        tiles.axis = .horizontal
+        tiles.distribution = .fillEqually
+        tiles.spacing = 10
+        for (index, action) in actions.enumerated() {
+            let tile = UIButton(type: .system)
+            tile.backgroundColor = .tertiarySystemBackground
+            PanelCorner.apply(to: tile, radius: PanelCorner.sheetTile)
+            tile.tag = index
+            tile.isEnabled = action.isEnabled
+            tile.alpha = action.isEnabled ? 1 : 0.4
+            tile.addTarget(self, action: #selector(tapAction(_:)), for: .touchUpInside)
+            tile.heightAnchor.constraint(equalToConstant: 86).isActive = true
+
+            let icon = UIImageView(image: UIImage(systemName: action.symbol,
+                                                  withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)))
+            icon.tintColor = .mainColor
+            icon.contentMode = .center
+            icon.isUserInteractionEnabled = false
+
+            let caption = UILabel()
+            caption.text = action.title
+            caption.font = .systemFont(ofSize: 15)
+            caption.textColor = .label
+            caption.textAlignment = .center
+            caption.isUserInteractionEnabled = false
+
+            let column = UIStackView(arrangedSubviews: [icon, caption])
+            column.axis = .vertical
+            column.alignment = .center
+            column.spacing = 8
+            column.isUserInteractionEnabled = false
+            column.translatesAutoresizingMaskIntoConstraints = false
+            tile.addSubview(column)
+            NSLayoutConstraint.activate([
+                column.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
+                column.centerYAnchor.constraint(equalTo: tile.centerYAnchor)
+            ])
+            tiles.addArrangedSubview(tile)
+        }
+
+        // One card for the lines, with a hairline between them - which is how the reference draws
+        // them, and not what this was: each line its own rounded card with a gap under it.
+        let lines = UIStackView()
+        lines.axis = .vertical
+        lines.spacing = 0
+        lines.backgroundColor = .tertiarySystemBackground
+        PanelCorner.apply(to: lines, radius: PanelCorner.sheetRows)
+        lines.clipsToBounds = true
+        for (index, action) in rows.enumerated() {
+            if index > 0 {
+                // Set in from the left so it starts under the words, and run to the card's edge -
+                // measured off the reference at fifteen points in, flush on the right.
+                let rule = UIView()
+                rule.backgroundColor = .separator
+                rule.translatesAutoresizingMaskIntoConstraints = false
+                let ruleBox = UIView()
+                ruleBox.addSubview(rule)
+                NSLayoutConstraint.activate([
+                    rule.leadingAnchor.constraint(equalTo: ruleBox.leadingAnchor, constant: 60),
+                    rule.trailingAnchor.constraint(equalTo: ruleBox.trailingAnchor),
+                    rule.topAnchor.constraint(equalTo: ruleBox.topAnchor),
+                    rule.bottomAnchor.constraint(equalTo: ruleBox.bottomAnchor),
+                    ruleBox.heightAnchor.constraint(equalToConstant: 0.5)
+                ])
+                lines.addArrangedSubview(ruleBox)
+            }
+            let row = UIButton(type: .system)
+            row.backgroundColor = .clear
+            row.setTitle(action.title, for: .normal)
+            row.setTitleColor(.label, for: .normal)
+            row.titleLabel?.font = .systemFont(ofSize: 17)
+            row.contentHorizontalAlignment = .leading
+            row.contentEdgeInsets = UIEdgeInsets(top: 0, left: 60, bottom: 0, right: 22)
+            row.tag = index
+            row.addTarget(self, action: #selector(tapRow(_:)), for: .touchUpInside)
+            row.heightAnchor.constraint(equalToConstant: 54).isActive = true
+
+            let rowIcon = UIImageView(image: UIImage(systemName: action.symbol,
+                                                     withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)))
+            rowIcon.tintColor = .label
+            rowIcon.contentMode = .center
+            rowIcon.isUserInteractionEnabled = false
+            rowIcon.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(rowIcon)
+            NSLayoutConstraint.activate([
+                rowIcon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 22),
+                rowIcon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+                rowIcon.widthAnchor.constraint(equalToConstant: 24)
+            ])
+            lines.addArrangedSubview(row)
+        }
+
+        NSLayoutConstraint.activate([
+            picture.topAnchor.constraint(equalTo: head.topAnchor),
+            picture.bottomAnchor.constraint(equalTo: head.bottomAnchor),
+            picture.centerXAnchor.constraint(equalTo: head.centerXAnchor),
+            picture.widthAnchor.constraint(equalToConstant: 88),
+            picture.heightAnchor.constraint(equalToConstant: 88),
+
+            close.topAnchor.constraint(equalTo: head.topAnchor),
+            close.trailingAnchor.constraint(equalTo: head.trailingAnchor),
+            close.widthAnchor.constraint(equalToConstant: 36),
+            close.heightAnchor.constraint(equalToConstant: 36)
+        ])
+
+        contentStack.addArrangedSubview(head)
+        contentStack.setCustomSpacing(14, after: head)
+        contentStack.addArrangedSubview(nameLabel)
+        contentStack.setCustomSpacing(4, after: nameLabel)
+        contentStack.addArrangedSubview(subtitleLabel)
+        contentStack.addArrangedSubview(tiles)
+        contentStack.setCustomSpacing(14, after: tiles)
+        contentStack.addArrangedSubview(lines)
+    }
+
+    @objc private func tapClose() {
+        dismiss(animated: true)
+    }
+
+    @objc private func tapAction(_ sender: UIButton) {
+        guard sender.tag >= 0, sender.tag < actions.count else {
+            return
+        }
+        // The answer runs once the sheet has gone, so whatever it opens next is not fighting this
+        // one for the screen.
+        let handler = actions[sender.tag].handler
+        dismiss(animated: true) { handler() }
+    }
+
+    @objc private func tapRow(_ sender: UIButton) {
+        guard sender.tag >= 0, sender.tag < rows.count else {
+            return
+        }
+        let handler = rows[sender.tag].handler
+        dismiss(animated: true) { handler() }
+    }
+}
+
 public final class BottomChoiceSheet: UIViewController {
 
     public struct Option {
@@ -7969,6 +8445,96 @@ public final class BottomChoiceSheet: UIViewController {
 
 /// The marks a video bubble carries: how long it runs, and - when the file is not here and cannot
 /// be fetched - an offer to fetch it rather than a ring that never fills.
+/// A gif in a bubble plays through once, the way the reference's does, and then rests under a
+/// frosted disc that says what it is; opening it is what plays it again.
+public enum GifBubble {
+    public static func playOnce(_ gif: SDAnimatedImageView, in host: UIView) {
+        // The gif's own pixel size must not have a say in the layout: the bubble is sized from
+        // the file already, and an image view that insists on its content size fought that
+        // and won, opening the bubble to the gif's full height.
+        gif.setContentHuggingPriority(.defaultLow, for: .vertical)
+        gif.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        gif.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        gif.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        gif.contentMode = .scaleAspectFill
+        gif.clipsToBounds = true
+        // The player is left looping as it would; the view itself is paused the first time the
+        // player reports a loop done. Fix: asking the player for a loop count of one left the
+        // gif standing on its first frame and never reported the loop - so the stop is made
+        // here, from the loop report, which is the one signal that does arrive. The view's own
+        // handler is kept in the chain: it is what keeps the view's loop count.
+        guard let player = gif.player else {
+            return
+        }
+        let viewsOwn = player.animationLoopHandler
+        player.animationLoopHandler = { [weak gif, weak host] loops in
+            viewsOwn?(loops)
+            guard loops >= 1 else {
+                return
+            }
+            DispatchQueue.main.async {
+                guard let gif = gif, let host = host, gif.superview === host else {
+                    return
+                }
+                gif.player?.animationLoopHandler = viewsOwn
+                // Not started again by a visit to the window; the disc says what it is now.
+                gif.autoPlayAnimatedImage = false
+                gif.stopAnimating()
+                addRestMark(to: host)
+            }
+        }
+        gif.startAnimating()
+    }
+
+    /// Marks the disc, so a tap can tell a resting gif from one that is playing.
+    private static let discTag = 77_410
+
+    /// A tap on a gif that has played starts it again - the disc goes, and the gif runs through
+    /// once more the same way. Returns false for a gif still playing (or no gif at all), in
+    /// which case the tap is the caller's to handle: it opens the viewer.
+    public static func replayIfResting(in host: UIView) -> Bool {
+        guard let disc = host.subviews.first(where: { $0.tag == discTag }),
+              let gif = host.subviews.compactMap({ $0 as? SDAnimatedImageView }).first else {
+            return false
+        }
+        disc.removeFromSuperview()
+        gif.autoPlayAnimatedImage = true
+        playOnce(gif, in: host)
+        return true
+    }
+
+    /// The disc in the middle of a gif that has played: frosted, with "GIF" on it.
+    public static func addRestMark(to host: UIView) {
+        let disc = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialLight))
+        disc.tag = discTag
+        disc.layer.cornerRadius = 23
+        disc.clipsToBounds = true
+        disc.isUserInteractionEnabled = false
+        disc.alpha = 0
+        host.addSubview(disc)
+        disc.translatesAutoresizingMaskIntoConstraints = false
+
+        let mark = UILabel()
+        mark.text = "GIF"
+        mark.font = .systemFont(ofSize: 13, weight: .bold)
+        mark.textColor = UIColor.black.withAlphaComponent(0.65)
+        disc.contentView.addSubview(mark)
+        mark.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            disc.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            disc.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            disc.widthAnchor.constraint(equalToConstant: 46),
+            disc.heightAnchor.constraint(equalToConstant: 46),
+            mark.centerXAnchor.constraint(equalTo: disc.contentView.centerXAnchor),
+            mark.centerYAnchor.constraint(equalTo: disc.contentView.centerYAnchor)
+        ])
+        UIView.animate(withDuration: 0.2) {
+            disc.alpha = 1
+        }
+    }
+}
+
 public enum VideoBubbleChrome {
 
     /// The camcorder and the running time along the foot of a video thumbnail.
@@ -8399,36 +8965,83 @@ public final class VoiceNoteBar: UIView, AVAudioRecorderDelegate, AVAudioPlayerD
             playButton.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
             playButton.widthAnchor.constraint(equalToConstant: 24),
 
-            binButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            binButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: onGlass ? 14 : 20),
             binButton.centerYAnchor.constraint(equalTo: topAnchor, constant: 83),
-            binButton.widthAnchor.constraint(equalToConstant: 30),
-            binButton.heightAnchor.constraint(equalToConstant: 30),
+            binButton.widthAnchor.constraint(equalToConstant: onGlass ? 40 : 30),
+            binButton.heightAnchor.constraint(equalToConstant: onGlass ? 40 : 30),
 
             pauseButton.centerXAnchor.constraint(equalTo: centerXAnchor),
             pauseButton.centerYAnchor.constraint(equalTo: binButton.centerYAnchor),
-            pauseButton.widthAnchor.constraint(equalToConstant: 30),
-            pauseButton.heightAnchor.constraint(equalToConstant: 30),
+            pauseButton.widthAnchor.constraint(equalToConstant: onGlass ? 52 : 30),
+            pauseButton.heightAnchor.constraint(equalToConstant: onGlass ? 52 : 30),
 
             sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             sendButton.centerYAnchor.constraint(equalTo: binButton.centerYAnchor),
             sendButton.widthAnchor.constraint(equalToConstant: 40),
             sendButton.heightAnchor.constraint(equalToConstant: 40)
         ])
+        // After the constraints: it moves two of them.
+        if #available(iOS 26.0, *) {
+            dressInGlass()
+        }
+    }
+
+    /// Whether the bar is drawn in the system's glass - iOS 26 and later.
+    private var onGlass: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
+
+    /// The reference on iOS 26: the capsule is glass and holds the time and the wave in both
+    /// states, not only once paused; the bin and the pause are round clear-glass buttons, the
+    /// bin's glyph red and the pause's dark; the send is the same tinted glass as the input bar's.
+    @available(iOS 26.0, *)
+    private func dressInGlass() {
+        capsule.backgroundColor = .clear
+        capsule.layer.cornerRadius = 0
+        let glass = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        glass.cornerConfiguration = .capsule()
+        glass.isUserInteractionEnabled = false
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        capsule.addSubview(glass)
+        NSLayoutConstraint.activate([
+            glass.leadingAnchor.constraint(equalTo: capsule.leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: capsule.trailingAnchor),
+            glass.topAnchor.constraint(equalTo: capsule.topAnchor),
+            glass.bottomAnchor.constraint(equalTo: capsule.bottomAnchor)
+        ])
+        capsule.isHidden = false
+        // Inside the capsule now, so in from its edges rather than the bar's.
+        timeLeading.constant = 32
+        waveTrailing.constant = -30
+
+        // A glass button draws a symbol about 1.35x its point size (measured: a 24pt bin came
+        // out 33pt tall), so the sizes here are the reference's - bin and microphone about 22pt
+        // tall, pause and plane smaller and heavier - divided by that. The bin's glass carries a
+        // faint red of its own, the way the reference's does.
+        binButton.setImage(UIImage(systemName: "trash", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .light)), for: .normal)
+        GlassLook.adopt(binButton, tint: UIColor.systemRed.withAlphaComponent(0.14), foreground: .systemRed)
+        GlassLook.adopt(pauseButton, tint: nil, foreground: .label)
+        sendButton.setImage(UIImage(systemName: "paperplane.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)), for: .normal)
+        GlassLook.adopt(sendButton, tint: .mainColor, foreground: .white)
     }
 
     /// A ring while it is listening, the bare microphone once it has stopped - which is how the
-    /// reference tells the two states apart at a glance.
+    /// reference tells the two states apart at a glance. On glass the button is the ring, so
+    /// the glyph is the bare pause.
     private func showPauseGlyph() {
         // The microphone is drawn lighter than the ring: at the same weight it reads as the
         // heavier of the two, which is the wrong way round for what it is.
-        let name = isPaused ? "mic" : "pause.circle"
-        let size: CGFloat = isPaused ? 24 : 27
-        let weight: UIImage.SymbolWeight = isPaused ? .light : .regular
+        let name = isPaused ? "mic" : (onGlass ? "pause.fill" : "pause.circle")
+        // On glass, the reference's sizes over the 1.35 a glass button draws symbols at.
+        let size: CGFloat = isPaused ? (onGlass ? 17 : 24) : (onGlass ? 17 : 27)
+        let weight: UIImage.SymbolWeight = isPaused ? (onGlass ? .regular : .light) : (onGlass ? .semibold : .regular)
         pauseButton.setImage(UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: weight)), for: .normal)
+        GlassLook.imageChanged(pauseButton)
     }
 
     private func applyLayout(forPaused paused: Bool) {
-        capsule.isHidden = !paused
+        capsule.isHidden = !paused && !onGlass
         playButton.isHidden = !paused
         NSLayoutConstraint.deactivate(pausedWave)
         timeLeading.isActive = !paused
@@ -9642,65 +10255,277 @@ public final class MarqueeLabel: UIView {
     }
 }
 
-/// A chat bubble that casts a soft shadow, so it still reads as a bubble when the wallpaper
-/// behind it happens to be the colour the bubble is.
+/// Where the text sits inside a bubble, measured off the reference at 3x: 7pt above the first
+/// line and under the last, 13pt in from each side. The text view brings 5pt of line fragment
+/// padding of its own, so it is pinned 8pt in; a plain label, which brings none, takes the 13.
+public enum BubbleTextInset {
+    public static let top: CGFloat = 7
+    public static let bottom: CGFloat = 7
+    public static let side: CGFloat = 8
+    public static let labelSide: CGFloat = 13
+
+    /// The "Forwarded" mark is one line in the message's own size, italic; the text under it
+    /// starts 2pt below the line.
+    public static var forwardedLine: CGFloat {
+        ceil(UIFont.italicSystemFont(ofSize: 12 + String.offset()).lineHeight)
+    }
+    public static var forwardedPush: CGFloat {
+        forwardedLine + 2
+    }
+}
+
+/// A panel tucked inside a bubble - a quote, a document - sits 4pt in from the bubble's edge,
+/// measured off the reference, and its corners run concentric with the bubble's: the bubble's
+/// radius less the 4pt, which is what reads as "the same corner" from outside.
+public enum BubbleBox {
+    public static let inset: CGFloat = 4
+    public static let radius: CGFloat = 14
+}
+
+/// A chat bubble drawn as a shape: rounded corners of one size, a hairline rim, and a tail at
+/// the corner the message came from.
 ///
-/// A view of its own rather than a shadow set on any plain UIView, for one reason: the shadow is
-/// drawn from `shadowPath`, and a path can only be worked out once the bubble has a size. Taking
-/// it from the layer's own contents instead would cost an offscreen pass per bubble on every
-/// frame of a scroll.
+/// The colour is not the view's own background but the fill of a shape layer underneath the
+/// content, because the tail sits outside the bounds and a background stops at them. The corner
+/// the tail goes on is read from `layer.maskedCorners`: the one corner left out of the three
+/// (top-left for an incoming bubble, top-right for an outgoing one) is where the bubble points
+/// at whoever wrote it, the way the reference points its bubbles at the sender's avatar. The
+/// radius is `layer.cornerRadius`, so the callers keep saying what they always said.
+///
+/// Fix: this used to cast a soft shadow instead. The reference draws no shadow under its bubbles
+/// - only a thin, light rim that keeps the bubble's colour from running into the background -
+/// and a shadow under a flat bubble read as grime against a light wallpaper.
 public final class BubbleView: UIView {
 
-    /// Off until `lift()` is called: an unlifted bubble behaves exactly like the UIView it
-    /// replaced.
+    /// Off until `lift()` is called: an unlifted bubble draws no rim.
     private var lifted = false
+
+    /// The colour, drawn by `shape` rather than by the view itself.
+    private var fill: UIColor?
+
+    private let shape = CAShapeLayer()
+    private let edge = CAShapeLayer()
+
+    /// Views that run into the tail - see fit(_:sharing:) - cut to the outline at layout time.
+    private struct Held {
+        weak var view: UIView?
+    }
+    private var tailed: [Held] = []
+
+    /// How far the tail reaches past the bounds on its side, and how far up the edge it starts:
+    /// measured off the reference at 3x. The notch is where the tail's underside meets the
+    /// bubble's own corner.
+    private static let tailReach: CGFloat = 6
+    private static let tailRise: CGFloat = 12
+    private static let tailEnd: CGFloat = 18
+    private static let notch = CGPoint(x: 8, y: 4)
+
+    /// Light grey, thin: enough to hold the edge, not enough to draw a frame. Lighter still in
+    /// the dark, where a bright line would read as a glow.
+    private static let rim = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor.white.withAlphaComponent(0.14)
+            : UIColor.black.withAlphaComponent(0.10)
+    }
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        setUpLayers()
+    }
+
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setUpLayers()
+    }
+
+    private func setUpLayers() {
+        super.backgroundColor = nil
+        shape.zPosition = -1
+        shape.strokeColor = nil
+        layer.addSublayer(shape)
+        // Above the content, where a layer border would have been.
+        edge.zPosition = 1
+        edge.fillColor = nil
+        edge.lineWidth = 1.0 / UIScreen.main.scale
+        edge.isHidden = true
+        layer.addSublayer(edge)
+        paint()
+    }
+
+    /// The colour lives in the shape, so that the tail - outside the bounds - is the same
+    /// colour as the rest. The view itself stays clear. A bubble made clear (a sticker, a video
+    /// note) has nothing to edge, so its rim goes with the colour.
+    public override var backgroundColor: UIColor? {
+        get { fill }
+        set {
+            fill = newValue
+            paint()
+        }
+    }
+
+    public var hasColour: Bool {
+        (fill?.cgColor.alpha ?? 0) > 0
+    }
+
+    /// The tail corner, from the one corner the caller left square.
+    private enum Tail { case none, topLeft, topRight }
+
+    private var tail: Tail {
+        let masked = layer.maskedCorners
+        guard !masked.isEmpty else {
+            return .none
+        }
+        if !masked.contains(.layerMinXMinYCorner) {
+            return .topLeft
+        }
+        if !masked.contains(.layerMaxXMinYCorner) {
+            return .topRight
+        }
+        return .none
+    }
+
+    public static let topCorners: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+    public static let bottomCorners: CACornerMask = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+
+    /// Rounds a view lying flush with the bubble's sides - a picture, a collage tile, a link
+    /// card - on the corners it shares with the bubble, with the bubble's own radius; the
+    /// corners it does not share stay square. The tail corner is left square too: the tail's
+    /// underside runs beneath the view there, and the view's own corner closes the shape, the
+    /// way the reference's pictures carry their tail.
+    public func fit(_ view: UIView, sharing corners: CACornerMask) {
+        var shared = corners
+        let tailCorner: CACornerMask
+        switch tail {
+        case .topLeft: tailCorner = .layerMinXMinYCorner
+        case .topRight: tailCorner = .layerMaxXMinYCorner
+        case .none: tailCorner = []
+        }
+        if !tailCorner.isEmpty, corners.contains(tailCorner) {
+            // The view reaches the tail corner, so the tail is cut into it, as the reference
+            // cuts a photo's tail into the photo: the caller pins the view `reach` past the
+            // bubble's edge on that side, and here it is masked to the bubble's outline - tail,
+            // notch and whichever other corners it reaches. The mask is drawn in layoutSubviews,
+            // once the view has its frame.
+            view.clipsToBounds = true
+            view.layer.cornerRadius = 0
+            if !tailed.contains(where: { $0.view === view }) {
+                tailed.append(Held(view: view))
+            }
+            setNeedsLayout()
+            return
+        }
+        shared.remove(tailCorner)
+        view.clipsToBounds = true
+        view.layer.cornerRadius = shared.isEmpty ? 0 : layer.cornerRadius
+        view.layer.maskedCorners = shared.isEmpty
+            ? [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            : shared
+    }
+
+    /// How far the drawing reaches outside the bounds, for anyone taking a picture of the bubble.
+    public var reach: UIEdgeInsets {
+        guard hasColour else {
+            return .zero
+        }
+        switch tail {
+        case .topLeft: return UIEdgeInsets(top: 0, left: BubbleView.tailReach, bottom: 0, right: 0)
+        case .topRight: return UIEdgeInsets(top: 0, left: 0, bottom: 0, right: BubbleView.tailReach)
+        case .none: return .zero
+        }
+    }
+
+    public override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // A CGColor does not follow the theme on its own.
+        paint()
+    }
 
     public override func layoutSubviews() {
         super.layoutSubviews()
-        guard lifted else {
-            return
+        let path = outline().cgPath
+        shape.frame = bounds
+        shape.path = path
+        edge.frame = bounds
+        edge.path = path
+        tailed.removeAll { $0.view == nil }
+        for held in tailed {
+            guard let view = held.view, view.superview === self else {
+                continue
+            }
+            let mask = (view.layer.mask as? CAShapeLayer) ?? CAShapeLayer()
+            var intoView = CGAffineTransform(translationX: -view.frame.minX, y: -view.frame.minY)
+            mask.frame = view.bounds
+            mask.path = path.copy(using: &intoView)
+            view.layer.mask = mask
         }
-        let corners = BubbleView.rectCorners(layer.maskedCorners)
-        layer.shadowPath = UIBezierPath(roundedRect: bounds,
-                                        byRoundingCorners: corners,
-                                        cornerRadii: CGSize(width: layer.cornerRadius,
-                                                            height: layer.cornerRadius)).cgPath
     }
 
-    /// Lifts the bubble off the background behind it.
+    private func paint() {
+        shape.fillColor = fill?.resolvedColor(with: traitCollection).cgColor
+        edge.strokeColor = BubbleView.rim.resolvedColor(with: traitCollection).cgColor
+        edge.isHidden = !(lifted && hasColour)
+    }
+
+    /// Edges the bubble against the background behind it.
     ///
-    /// Call after the colour and the corners are settled: a bubble holding nothing but a sticker
-    /// has no colour of its own, and a shadow under one would be a shadow cast by nothing.
+    /// The rim itself waits for a colour - a bubble holding nothing but a sticker has none, and
+    /// a rim around one would be a frame around nothing - but the call is remembered either way,
+    /// so a colour given afterwards gets its rim. Fix: this returned early on a bubble not yet
+    /// coloured, leaving it clipped to its bounds; the group screen colours its own bubbles
+    /// after edging them, and their tails were cut off flat at the edge, rim and all.
     public func lift() {
-        guard let ground = backgroundColor, ground.cgColor.alpha > 0 else {
-            return
-        }
-        // A layer that masks to its bounds cannot draw anything outside them, shadow included.
-        // Nothing in a bubble reaches its edge - the closest, the audio row, stops 10pt short,
-        // and a 10pt corner cuts less than 3pt into the rectangle - so the clipping was not
-        // holding anything in.
+        // The tail is drawn outside the bounds, and a layer that masks to them cannot show it.
+        // Nothing in a bubble needs holding in - the closest, a video note's disc, is the whole
+        // of its bubble.
         clipsToBounds = false
         layer.masksToBounds = false
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOffset = CGSize(width: 0, height: 1)
-        layer.shadowRadius = 3
-        // Black on a dark wallpaper barely registers, and the same weight that reads as a lift in
-        // the dark reads as grime in the light.
-        layer.shadowOpacity = traitCollection.userInterfaceStyle == .dark ? 0.45 : 0.18
+        layer.shadowOpacity = 0
         lifted = true
-        setNeedsLayout()
+        paint()
     }
 
-    private static func rectCorners(_ mask: CACornerMask) -> UIRectCorner {
-        guard !mask.isEmpty else {
-            return .allCorners
+    /// Clockwise from the bottom of the left edge. The tail corner, where there is one, is the
+    /// reference's: the edge sweeps out to a point level with the top, and the underside comes
+    /// back in to a small notch before rounding into the top edge.
+    private func outline() -> UIBezierPath {
+        let w = bounds.width
+        let h = bounds.height
+        let r = max(0, min(layer.cornerRadius, w / 2, h / 2))
+        let tail = self.tail
+        let reach = BubbleView.tailReach
+        let rise = BubbleView.tailRise
+        let end = BubbleView.tailEnd
+        let notch = BubbleView.notch
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: 0, y: h - r))
+        if tail == .topLeft, h > rise + r, w > end + r {
+            path.addLine(to: CGPoint(x: 0, y: rise))
+            path.addQuadCurve(to: CGPoint(x: -reach, y: 0), controlPoint: CGPoint(x: -2, y: 4))
+            path.addQuadCurve(to: notch, controlPoint: CGPoint(x: 4, y: 1))
+            path.addQuadCurve(to: CGPoint(x: end, y: 0), controlPoint: CGPoint(x: 13, y: 0))
+        } else {
+            path.addLine(to: CGPoint(x: 0, y: r))
+            path.addArc(withCenter: CGPoint(x: r, y: r), radius: r,
+                        startAngle: .pi, endAngle: .pi * 1.5, clockwise: true)
         }
-        var corners: UIRectCorner = []
-        if mask.contains(.layerMinXMinYCorner) { corners.insert(.topLeft) }
-        if mask.contains(.layerMaxXMinYCorner) { corners.insert(.topRight) }
-        if mask.contains(.layerMinXMaxYCorner) { corners.insert(.bottomLeft) }
-        if mask.contains(.layerMaxXMaxYCorner) { corners.insert(.bottomRight) }
-        return corners
+        if tail == .topRight, h > rise + r, w > end + r {
+            path.addLine(to: CGPoint(x: w - end, y: 0))
+            path.addQuadCurve(to: CGPoint(x: w - notch.x, y: notch.y), controlPoint: CGPoint(x: w - 13, y: 0))
+            path.addQuadCurve(to: CGPoint(x: w + reach, y: 0), controlPoint: CGPoint(x: w - 4, y: 1))
+            path.addQuadCurve(to: CGPoint(x: w, y: rise), controlPoint: CGPoint(x: w + 2, y: 4))
+        } else {
+            path.addLine(to: CGPoint(x: w - r, y: 0))
+            path.addArc(withCenter: CGPoint(x: w - r, y: r), radius: r,
+                        startAngle: .pi * 1.5, endAngle: .pi * 2, clockwise: true)
+        }
+        path.addLine(to: CGPoint(x: w, y: h - r))
+        path.addArc(withCenter: CGPoint(x: w - r, y: h - r), radius: r,
+                    startAngle: 0, endAngle: .pi * 0.5, clockwise: true)
+        path.addLine(to: CGPoint(x: r, y: h))
+        path.addArc(withCenter: CGPoint(x: r, y: h - r), radius: r,
+                    startAngle: .pi * 0.5, endAngle: .pi, clockwise: true)
+        path.close()
+        return path
     }
 }
 
@@ -11500,6 +12325,174 @@ public enum ChatListPin {
     }
 }
 
+public extension NSAttributedString {
+
+    /// The same text, ending in an ellipsis wherever it runs out of room.
+    ///
+    /// Fix: a label truncates by itself - but only where the text does not say otherwise, and an
+    /// attributed string built for a message carries a paragraph style that does say otherwise:
+    /// it wraps, and whatever is left over is simply cut off, mid-letter, with nothing to show
+    /// that anything was cut. The text's rule wins over the label's, which is why a conversation
+    /// preview ended flush against the unread badge and read as though it had run under it.
+    ///
+    /// What the text already asks for is kept - its alignment, its spacing; only what happens
+    /// where the last line ends is changed.
+    func endingInEllipsis() -> NSAttributedString {
+        guard length > 0 else {
+            return self
+        }
+        let whole = NSRange(location: 0, length: length)
+        var styles: [(NSRange, NSMutableParagraphStyle)] = []
+        // Collected first and applied after: the attributes are not changed while they are
+        // being walked over.
+        enumerateAttribute(.paragraphStyle, in: whole, options: []) { value, range, _ in
+            let style = ((value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle)
+                ?? NSMutableParagraphStyle()
+            style.lineBreakMode = .byTruncatingTail
+            styles.append((range, style))
+        }
+        let ellipsised = NSMutableAttributedString(attributedString: self)
+        for (range, style) in styles {
+            ellipsised.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+        return ellipsised
+    }
+}
+
+/// The "@" a conversation row shows while something unread in it names the reader.
+///
+/// The reference puts it between the pin and the unread badge, in the colour the badge is drawn
+/// in, and drops it the moment the conversation is opened. Ours is red, because red is what this
+/// app counts unread in.
+public enum ChatListMention {
+
+    /// The box it is drawn in - the pin's, so the two sit level.
+    public static let side: CGFloat = 20
+    /// Between the "@" and whatever stands to its right.
+    public static let gap: CGFloat = 6
+
+    public static var colour: UIColor {
+        return .systemRed
+    }
+
+    public static func imageView() -> UIImageView {
+        let view = UIImageView()
+        view.image = UIImage(systemName: "at",
+                             withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold))?
+            .withRenderingMode(.alwaysTemplate)
+        view.tintColor = colour
+        view.contentMode = .scaleAspectFit
+        return view
+    }
+}
+
+/// Which conversations are holding a mention of the reader they have not read yet.
+public enum UnreadMentions {
+
+    /// The conversations, by the `l_pin` their rows carry, whose unread messages name me.
+    ///
+    /// What counts as unread is what the editor's own unread marker counts: the last `counter`
+    /// messages of the conversation, its notices left out - see EditorGroup's
+    /// readableMessageWhereClause. Only conversations that have something unread are asked about
+    /// at all, which on any real account is a handful of small queries; none of them belongs on
+    /// the thread that draws the list.
+    public static func conversations(unreadCounters: [String: String]) -> Set<String> {
+        guard let me = User.getMyPin(), !me.isEmpty else {
+            return []
+        }
+        let unread = unreadCounters.compactMap { conversation, counter -> (String, Int)? in
+            guard !conversation.isEmpty, let count = Int(counter), count > 0 else { return nil }
+            return (conversation, count)
+        }
+        guard !unread.isEmpty else {
+            return []
+        }
+        var named = Set<String>()
+        Database.shared.database?.inTransaction({ fmdb, _ in
+            // Fix: the messages of a conversation were asked for by the id the row carries, as
+            // `l_pin = <id>`, and for a topic that finds nothing at all: a topic is known to
+            // MESSAGE_SUMMARY by its chat_id, while its messages carry the *group's* id in
+            // l_pin and the topic's in chat_id. So the mark never appeared on the conversations
+            // it is most for. The conversations are picked the way the editor picks them - see
+            // EditorStarMessages.groupScope, and EditorGroup.messageWhereClause behind it -
+            // which needs to know which of the two kinds each id is. Asked once here, not once
+            // per conversation: both tables are short.
+            var topics = Set<String>()
+            var groups = Set<String>()
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT chat_id FROM DISCUSSION_FORUM") {
+                while cursor.next() {
+                    topics.insert(cursor.string(forColumnIndex: 0) ?? "")
+                }
+                cursor.close()
+            }
+            if let cursor = Database.shared.getRecords(fmdb: fmdb, query: "SELECT group_id FROM GROUPZ") {
+                while cursor.next() {
+                    groups.insert(cursor.string(forColumnIndex: 0) ?? "")
+                }
+                cursor.close()
+            }
+            for (conversation, count) in unread {
+                // Only where there are people to name. A personal chat has no mentions in it.
+                let scope: String
+                if topics.contains(conversation) {
+                    scope = EditorStarMessages.groupScope(groupId: "", topicChatId: conversation)
+                } else if groups.contains(conversation) {
+                    scope = EditorStarMessages.groupScope(groupId: conversation, topicChatId: "")
+                } else {
+                    continue
+                }
+                // My own messages are left out of the count rather than counted and then not
+                // read: unread means sent by somebody else. Counting them in moved the far end
+                // of the window - a mention sitting at the oldest end of what is unread dropped
+                // out of it the moment I sent something myself, which is exactly the case this
+                // was first tried on.
+                // The window is read as it stands and looked through here rather than being
+                // matched in SQL: what makes a mention a mention is where the pin ends, which
+                // is a question for names(_:in:) and not for LIKE. It is at most `count` rows.
+                let query = "SELECT message_text FROM MESSAGE"
+                    + " WHERE (\(scope)) AND message_id NOT LIKE 'NTFPIN%'"
+                    + " AND ifnull(f_pin, '') <> '\(sqlSafe(me))'"
+                    + " ORDER BY server_date DESC LIMIT \(count)"
+                guard let cursor = Database.shared.getRecords(fmdb: fmdb, query: query) else {
+                    continue
+                }
+                while cursor.next() {
+                    if names(me, in: cursor.string(forColumnIndex: 0) ?? "") {
+                        named.insert(conversation)
+                        break
+                    }
+                }
+                cursor.close()
+            }
+        })
+        return named
+    }
+
+    /// Whether `text` names the person behind `pin`.
+    ///
+    /// A mention is written into the message as "@" and the pin, so "@1234" also reads inside
+    /// "@12345" - somebody else entirely. It counts only where the pin ends, which is where a
+    /// character that cannot be part of one begins: the rule the editor reads mentions by.
+    public static func names(_ pin: String, in text: String) -> Bool {
+        var from = text.startIndex
+        while let found = text.range(of: "@" + pin, range: from..<text.endIndex) {
+            if found.upperBound == text.endIndex {
+                return true
+            }
+            let next = text[found.upperBound]
+            if !(next.isLetter || next.isNumber || next == "_" || next == "-") {
+                return true
+            }
+            from = found.upperBound
+        }
+        return false
+    }
+
+    private static func sqlSafe(_ value: String) -> String {
+        return value.replacingOccurrences(of: "'", with: "''")
+    }
+}
+
 /// A view that looks pressed while a finger is on it - the quote a message replies to, for one.
 ///
 /// A link already darkens under the finger; a mention does the same in a group. The quote did
@@ -12431,6 +13424,25 @@ public struct MessageLimits {
     }
 }
 
+/// The bar above the field that says what a message is replying to.
+///
+/// Measured off the reference at 3x: the bar runs 201 pixels from its own top edge down to the
+/// top of the field, and the strip down its left is 12 pixels wide and stands 15 pixels clear of
+/// the bar's top - so four points of strip, five points of air, and a bar the height below.
+public enum ChatReplyPreview {
+
+    /// How thick the strip beside the name and the message is.
+    ///
+    /// Fix: three points, which next to the reference's four reads as a hairline.
+    public static let stripWidth: CGFloat = 4
+
+    /// How far it stands off the top and the bottom of the bar.
+    ///
+    /// Fix: it ran the bar's whole height, top edge to bottom edge, so it read as a divider
+    /// between the conversation and the field rather than as a mark against what is quoted.
+    public static let stripInset: CGFloat = 5
+}
+
 /// The look of the list of names that drops in above the text field when a message is being
 /// written with an "@" in it.
 ///
@@ -12444,6 +13456,231 @@ public struct ChatMentionList {
     public static let rowHeight: CGFloat = 44
     /// How wide the picture is drawn, in points.
     public static let avatarSize: CGFloat = 32
+
+    /// How many names the list opens at. The reference shows four and lets the reader pull it
+    /// open for the rest - see EditorGroup.expandMentionList.
+    public static let collapsedRows: CGFloat = 4
+    /// How far the card is held off the sides of the screen, measured off the reference.
+    public static let sideInset: CGFloat = 6
+    /// And off the input area below it.
+    public static let bottomInset: CGFloat = 6
+    /// The corner of the card.
+    public static let cornerRadius: CGFloat = 12
+
+    /// The picture shown for somebody who has none.
+    ///
+    /// Drawn at the size a photograph is drawn at, so that a row without a picture is laid out
+    /// exactly like a row with one - see reservedLayoutSize where this is used.
+    public static let placeholderAvatar: UIImage? = UIImage(
+        systemName: "person.crop.circle.fill",
+        withConfiguration: UIImage.SymbolConfiguration(pointSize: avatarSize, weight: .regular))
+
+    /// The ground the list stands on.
+    ///
+    /// Fix: it was a solid card - white, or near-black in the dark - laid over the conversation.
+    /// The reference leaves the conversation visible through the list: a rounded card, held a
+    /// little off the sides of the screen and off the input area, with the conversation blurred
+    /// behind it. What shows through is what says the list has dropped over the conversation
+    /// rather than replaced it.
+    ///
+    /// The blur is built here so that every system gets it; on iOS 26 the ground the rest of the
+    /// app's panels stand on is put over the top of it, so the list matches the sticker panel
+    /// and the attachment row beside it.
+    public static func dress(_ table: UITableView) {
+        // Fix: this stood on the ground the app's other panels stand on - systemChromeMaterial,
+        // which is the most solid of the materials, chosen for panels that sit over a keyboard
+        // where nothing is meant to show through. Over a conversation it read as a plain card.
+        // The reference lets the messages behind the list be seen, blurred: a thin material,
+        // and on a system that has real glass, glass.
+        let ground = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+        if #available(iOS 26.0, *) {
+            ground.effect = UIGlassEffect(style: .regular)
+        }
+        ground.backgroundColor = .clear
+        table.backgroundView = ground
+        table.backgroundColor = .clear
+        // Fix: the bounce was taken away altogether, and with it the give the reference has at
+        // the ends of the list. What it was doing wrong was bouncing a list with nothing in it
+        // to scroll - four names in a four-name list, pulled loose from their own glass for no
+        // reason. It bounces when there is more of it than there is room for, and sits still
+        // when there is not, which is what alwaysBounceVertical decides. Closing the list is
+        // read from the finger either way - see EditorGroup.mentionListPanned - so it no longer
+        // depends on the bounce for that.
+        table.bounces = true
+        table.alwaysBounceVertical = false
+        table.layer.cornerRadius = cornerRadius
+        table.layer.cornerCurve = .continuous
+        table.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner,
+                                     .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        table.clipsToBounds = true
+    }
+
+    /// Sets the list in the glass the rest of the app's panels are set in.
+    ///
+    /// Called after the list has all the constraints it is going to have: the glass takes the
+    /// list's place in the layout and every constraint an ancestor held on the list is re-made
+    /// on the glass - see GlassLook.adopt - so anything added afterwards would be holding the
+    /// list inside its own glass rather than the glass in the screen.
+    public static func adoptGlass(_ table: UITableView) {
+        guard #available(iOS 26.0, *) else {
+            return
+        }
+        GlassLook.adopt(table, tint: nil, radius: cornerRadius)
+        // The glass is the ground now; a second one over it would only dull it.
+        table.backgroundView = nil
+        // adopt takes the bounce away, for a text field's sake. This list keeps the give at
+        // its ends - see dress.
+        table.bounces = true
+        table.alwaysBounceVertical = false
+    }
+
+    /// The same ground, for the bar across the top of a conversation.
+    ///
+    /// Fix: the bar asked for the system's default background and then wrote over it with a
+    /// blur - so on a system that gives bars real glass, the glass was thrown away and replaced
+    /// with something duller, and the bar no longer matched the list that drops below it. The
+    /// default is left as it comes now, which is that glass; before iOS 26 it is the same thin
+    /// material the list stands on. The bar keeps a colour of its own over that ground - the
+    /// app's blue in the light, its near-black in the dark - at a little under full strength, so
+    /// the conversation is just visible passing beneath it.
+    public static func dress(_ bar: UINavigationBar, colour: UIColor) {
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithDefaultBackground()
+        if #available(iOS 26.0, *) {
+            // Left as it comes: on this system a bar's default background is glass.
+        } else {
+            appearance.backgroundEffect = UIBlurEffect(style: .systemThinMaterial)
+        }
+        appearance.backgroundColor = colour.withAlphaComponent(barColourStrength)
+        appearance.shadowColor = .clear
+        bar.standardAppearance = appearance
+        bar.scrollEdgeAppearance = appearance
+        bar.isTranslucent = true
+        bar.backgroundColor = .clear
+    }
+
+    /// How much of the bar's own colour is laid over that ground.
+    public static let barColourStrength: CGFloat = 0.82
+
+    /// The same ground, for a control the editor fills with the app's colour - the send button,
+    /// the one that jumps to the newest message, the band a pinned message sits in.
+    ///
+    /// From iOS 26 those controls are set in glass already, by GlassLook, and this leaves them
+    /// as they are. Before it there is no glass to be set in and they were flat colour laid on
+    /// the conversation; the colour goes over the same thin material the list and the bar stand
+    /// on now, at the same strength, so what passes behind is just visible through them too.
+    public static func dress(_ control: UIView, colour: UIColor) {
+        if #available(iOS 26.0, *) {
+            return
+        }
+        // A ground needs somewhere to stand; a control not yet in a view is dressed next time.
+        guard let host = control.superview else {
+            return
+        }
+        let tinted = colour.withAlphaComponent(barColourStrength)
+        // The colour is set again whenever the control is redrawn; one ground is enough - moved
+        // along if the control has since been put somewhere else.
+        if let ground = ground(of: control) {
+            ground.contentView.backgroundColor = tinted
+            if ground.superview !== host {
+                ground.removeFromSuperview()
+                place(ground, under: control, in: host)
+            }
+            control.backgroundColor = .clear
+            return
+        }
+        let ground = Ground(effect: UIBlurEffect(style: .systemThinMaterial))
+        ground.host = control
+        ground.isUserInteractionEnabled = false
+        // Fix: the colour was left on the control itself, which is to say *under* the material
+        // laid over it - and a material over a colour washes the colour out. The buttons came
+        // out pale, and their white glyphs all but vanished on them. The colour goes over the
+        // material, inside it, exactly as the bar's colour goes over the bar's.
+        ground.contentView.backgroundColor = tinted
+        // Fix: and the ground stood *inside* the button, as its lowest subview - which is where a
+        // button keeps its own image view, and the image view a storyboard button makes for
+        // itself is made on its first layout, after this had run, and was put under the ground.
+        // The gear on the message-mode button was there and could not be seen. The ground stands
+        // beside the button now, just under it in the same view, and the button is left with its
+        // own subviews to itself.
+        place(ground, under: control, in: host)
+        ground.hiddenWatch = control.observe(\.isHidden, options: [.initial, .new]) { [weak ground] control, _ in
+            ground?.isHidden = control.isHidden || ground?.hiddenByHand == true
+        }
+        control.backgroundColor = .clear
+    }
+
+    /// Hides or shows the ground a control was given, for a control that at times stands on a
+    /// ground shared with another - the microphone on the capsule it shares with the camera. Two
+    /// grounds one over the other read as a seam down the middle of the capsule.
+    public static func setGround(hidden: Bool, on control: UIView) {
+        guard let ground = ground(of: control) else {
+            return
+        }
+        ground.hiddenByHand = hidden
+        ground.isHidden = hidden || control.isHidden
+    }
+
+    /// Takes the ground away with the control it stood under. The ground is the control's
+    /// neighbour, not its child, so a control taken out of its view would otherwise leave its
+    /// ground standing there on its own.
+    public static func removeGround(of control: UIView) {
+        ground(of: control)?.removeFromSuperview()
+    }
+
+    private static func ground(of control: UIView) -> Ground? {
+        guard let host = control.superview else { return nil }
+        return host.subviews.first { ($0 as? Ground)?.host === control } as? Ground
+    }
+
+    private static func place(_ ground: Ground, under control: UIView, in host: UIView) {
+        host.insertSubview(ground, belowSubview: control)
+        ground.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            ground.leadingAnchor.constraint(equalTo: control.leadingAnchor),
+            ground.trailingAnchor.constraint(equalTo: control.trailingAnchor),
+            ground.topAnchor.constraint(equalTo: control.topAnchor),
+            ground.bottomAnchor.constraint(equalTo: control.bottomAnchor)
+        ])
+        // The same shape as the control it stands under - the circle of a button, the rounding
+        // of a band - read off the control's own layer at layout, since a circle is only known
+        // once its size is.
+        ground.shapeWatch = control.layer.observe(\.cornerRadius, options: [.initial, .new]) { [weak ground] layer, _ in
+            ground?.layer.cornerRadius = layer.cornerRadius
+            ground?.layer.cornerCurve = layer.cornerCurve
+            ground?.clipsToBounds = true
+        }
+    }
+
+    /// The material put behind a control before iOS 26, remembering whose it is.
+    private final class Ground: UIVisualEffectView {
+        weak var host: UIView?
+        var hiddenWatch: NSKeyValueObservation?
+        var shapeWatch: NSKeyValueObservation?
+        var hiddenByHand = false
+    }
+
+    /// A row of the list: nothing of its own painted over that ground.
+    ///
+    /// Fix: the rows were given a clear `backgroundColor`, and from iOS 14 that is not what
+    /// decides it - a cell drawn through a content configuration takes its ground from its
+    /// `backgroundConfiguration`, which on its own comes out as the system's solid background.
+    /// So the blur was behind the list the whole time with forty-four points of solid colour
+    /// laid over every row of it, and the list read as the card it used to be.
+    public static func dressRow(_ cell: UITableViewCell) {
+        cell.backgroundColor = .clear
+        guard #available(iOS 14.0, *) else {
+            return
+        }
+        cell.configurationUpdateHandler = { cell, state in
+            var ground = UIBackgroundConfiguration.clear()
+            // A row still answers the finger that picks it.
+            ground.backgroundColor = state.isHighlighted || state.isSelected
+                ? UIColor.label.withAlphaComponent(0.08)
+                : .clear
+            cell.backgroundConfiguration = ground
+        }
+    }
 
     /// The bot's picture, decoded once.
     ///
@@ -12659,6 +13896,28 @@ extension Utils {
     /// the slots are filled by whoever sent it and the flag is not. Returns nil only when the
     /// message really is plain text, which is the caller's own business to render, because each of
     /// the six draws mentions and links its own way.
+    /// The same text a bubble shows, with the mentions in it left plain.
+    ///
+    /// Fix: the strip above the field, and the quote inside a bubble, drew every mention the way
+    /// the message itself does - the mention's own colour and its heavier weight. A quote is a
+    /// reminder of what is being answered, not a second place where names are picked out; the
+    /// reference draws its quote in one weight and one colour. The names themselves stay (they
+    /// are part of what was said); only the mark-up goes.
+    public static func quotedWithoutMentionMarks(_ text: NSMutableAttributedString,
+                                                 font: UIFont,
+                                                 colour: UIColor) -> NSMutableAttributedString {
+        let whole = NSRange(location: 0, length: text.length)
+        text.enumerateAttribute(.mentionPin, in: whole, options: []) { value, range, _ in
+            guard value != nil else {
+                return
+            }
+            text.removeAttribute(.mentionPin, range: range)
+            text.addAttribute(.foregroundColor, value: colour, range: range)
+            text.addAttribute(.font, value: font, range: range)
+        }
+        return text
+    }
+
     public static func quotedAttachmentLine(attachmentFlag: String,
                                             thumb: String,
                                             image: String,
@@ -12891,6 +14150,172 @@ public enum BubblePanel {
 /// a Word file, the green of a spreadsheet, the orange of a deck. A web search turned up no
 /// published values for WhatsApp's own set, so these are matched to the conventions rather than
 /// sampled from it.
+/// The top of a document's first page, and for a PDF how many pages it has, for the card a
+/// document travels in: the reference shows both above the file's name. A PDF is drawn by
+/// PDFKit, which also counts its pages; everything else the system can preview - Office files,
+/// iWork files, text - goes through Quick Look's thumbnailer, which gives the first page and no
+/// count. Rendered once per file, off the main thread, and kept; a card asks for it and is
+/// called back when it is there.
+public enum PDFBubblePreview {
+    /// The kinds a card shows a page of: what Quick Look draws a first page for on the device.
+    private static let previewable: Set<String> = [
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv",
+        "pages", "numbers", "key"
+    ]
+
+    public static func canPreview(kind: String) -> Bool {
+        return previewable.contains(kind.lowercased())
+    }
+
+    /// How tall the strip of page is, and how wide it is drawn: wide enough for the widest card
+    /// a phone shows, cropped at the sides on a narrower one.
+    public static let height: CGFloat = 92
+    private static let width: CGFloat = 300
+
+    private static let pictures = NSCache<NSString, UIImage>()
+    private static var pageCounts: [String: Int] = [:]
+    private static var waiting: [String: [(UIImage?, Int) -> Void]] = [:]
+    private static let lock = NSLock()
+    private static let queue = DispatchQueue(label: "nexilis.pdf.preview", qos: .userInitiated)
+
+    /// Whether the file is on this device, plain or in the secure store.
+    public static func isHere(fileNamed name: String) -> Bool {
+        guard !name.isEmpty else {
+            return false
+        }
+        let plain = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: plain.path) || FileEncryption.shared.isSecureExists(filename: name)
+    }
+
+    /// The first page's top and the page count, on the main queue - at once when already made,
+    /// after rendering otherwise. The picture is nil for a PDF that cannot be drawn (locked, or
+    /// not a PDF after all); the count is 0 then.
+    public static func facts(ofFileNamed name: String, completion: @escaping (UIImage?, Int) -> Void) {
+        lock.lock()
+        if let picture = pictures.object(forKey: name as NSString), let count = pageCounts[name] {
+            lock.unlock()
+            completion(picture, count)
+            return
+        }
+        let alreadyRendering = waiting[name] != nil
+        waiting[name, default: []].append(completion)
+        lock.unlock()
+        if alreadyRendering {
+            return
+        }
+        queue.async {
+            let made = render(fileNamed: name)
+            lock.lock()
+            let callbacks = waiting.removeValue(forKey: name) ?? []
+            if let made = made {
+                pictures.setObject(made.picture, forKey: name as NSString)
+                pageCounts[name] = made.pages
+            }
+            lock.unlock()
+            DispatchQueue.main.async {
+                for callback in callbacks {
+                    callback(made?.picture, made?.pages ?? 0)
+                }
+            }
+        }
+    }
+
+    private static func bytes(ofFileNamed name: String) -> Data? {
+        let plain = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: plain.path) {
+            return try? Data(contentsOf: plain)
+        }
+        guard FileEncryption.shared.isSecureExists(filename: name),
+              var data = try? FileEncryption.shared.readSecure(filename: name, withoutBiometric: true) else {
+            return nil
+        }
+        if let decrypted = FileEncryption.shared.decryptFileFromServer(data: data) {
+            data = decrypted
+        }
+        return data
+    }
+
+    private static func render(fileNamed name: String) -> (picture: UIImage, pages: Int)? {
+        guard let data = bytes(ofFileNamed: name) else {
+            return nil
+        }
+        if (name as NSString).pathExtension.lowercased() == "pdf" || PDFDocument(data: data) != nil {
+            return renderPDF(data)
+        }
+        return renderWithQuickLook(data, fileNamed: name)
+    }
+
+    /// Quick Look draws a file, not bytes: a plain copy is handed over as it is, and a copy
+    /// from the secure store is written to a temporary file for the moment it takes, under the
+    /// same name so the extension says what it is.
+    private static func renderWithQuickLook(_ data: Data, fileNamed name: String) -> (picture: UIImage, pages: Int)? {
+        let plain = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(name)
+        var url = plain
+        var temporary: URL?
+        if !FileManager.default.fileExists(atPath: plain.path) {
+            let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("bubble-preview", isDirectory: true)
+            try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+            let copy = scratch.appendingPathComponent(name)
+            guard (try? data.write(to: copy, options: .atomic)) != nil else {
+                return nil
+            }
+            url = copy
+            temporary = copy
+        }
+        defer {
+            if let temporary = temporary {
+                try? FileManager.default.removeItem(at: temporary)
+            }
+        }
+        // Tall enough for any page to fit at full width, so the width is what the size sets.
+        let request = QLThumbnailGenerator.Request(fileAt: url,
+                                                   size: CGSize(width: width, height: width * 4),
+                                                   scale: 3,
+                                                   representationTypes: .thumbnail)
+        var drawn: UIImage?
+        let done = DispatchSemaphore(value: 0)
+        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { representation, _ in
+            drawn = representation?.uiImage
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 15)
+        guard let whole = drawn?.cgImage, let strip = topStrip(of: whole) else {
+            return nil
+        }
+        return (strip, 0)
+    }
+
+    /// The top `height` of a page drawn `width` wide, as a 3x image.
+    private static func topStrip(of all: CGImage) -> UIImage? {
+        let topHeight = min(all.height, Int(CGFloat(all.width) * height / width))
+        guard let top = all.cropping(to: CGRect(x: 0, y: 0, width: all.width, height: topHeight)) else {
+            return nil
+        }
+        return UIImage(cgImage: top, scale: CGFloat(all.width) / width, orientation: .up)
+    }
+
+    private static func renderPDF(_ data: Data) -> (picture: UIImage, pages: Int)? {
+        guard let document = PDFDocument(data: data),
+              !document.isLocked,
+              document.pageCount > 0,
+              let page = document.page(at: 0) else {
+            return nil
+        }
+        let box = page.bounds(for: .cropBox)
+        guard box.width > 0, box.height > 0 else {
+            return nil
+        }
+        // The whole page at 3x, then only its top: the thumbnail follows the page's own rotation,
+        // which drawing it by hand would have to be told about.
+        let pixelWidth = width * 3
+        let whole = page.thumbnail(of: CGSize(width: pixelWidth, height: pixelWidth * box.height / box.width), for: .cropBox)
+        guard let all = whole.cgImage, let strip = topStrip(of: all) else {
+            return nil
+        }
+        return (strip, document.pageCount)
+    }
+}
+
 public enum DocumentBadge {
 
     private static let palette: [String: UInt32] = [
@@ -14228,5 +15653,398 @@ public final class LinkPreviewCard: PressableView {
             attributes: [.font: font],
             context: nil)
         return min(ceil(box.height), ceil(font.lineHeight * CGFloat(lines)))
+    }
+}
+
+// MARK: - Glass under the input-bar controls
+
+/// iOS 26 glass for the input-bar controls, in the colour each used to be painted flat.
+///
+/// A button becomes one of the system's own glass buttons - `UIButton.Configuration.prominentGlass`
+/// tinted with the colour it had, so a blue button stays blue - and with that comes everything the
+/// system does to its glass under a finger: the swell, the shine, the settle back. None of it is
+/// imitated here; imitations never move quite like the real thing. Anything that is not a button
+/// (the text field) gets a plain glass slab beneath it instead.
+///
+/// On earlier systems nothing is touched: the flat fill stays exactly as it was, so callers set
+/// their colours first and then ask for the glass.
+/// Where the keyboard actually is, read off the keyboard itself.
+///
+/// The notifications say where the keyboard will end up; nothing says where it is on the way,
+/// or where a finger has dragged it to, or that a finger has dragged it back. Every attempt to
+/// infer that from the finger went wrong in some case or other. The keyboard is a view in a
+/// window of its own, and its presentation layer says where it is drawn this very frame - so
+/// that is what the input bar is stood on.
+public enum KeyboardFrameReader {
+    /// The keyboard's top edge, in `view`'s coordinates, as drawn right now - mid-animation and
+    /// mid-drag included; nil when there is no keyboard on screen to read.
+    ///
+    /// `live` reads the presentation layer - where the keyboard is drawn this frame - and is
+    /// for while it is moving: arriving, leaving, or under a finger. At rest the model frame
+    /// is read instead. Fix: for a second or so after the keyboard had arrived, its drawn frame
+    /// still answered with a place part way down, and the bar went there - under the keyboard -
+    /// until the drawing caught up. A keyboard at rest is where its frame says it is.
+    public static func keyboardTop(in view: UIView, live: Bool = true) -> CGFloat? {
+        guard view.window != nil else {
+            return nil
+        }
+        // The highest of them. Fix: the system keeps more than one keyboard host about - the
+        // one being shown and a stale one parked below the screen - and taking the tallest
+        // picked the parked one often enough that the bar dropped to the bottom for a second
+        // after every keyboard, until the stale host was cleared away. The one that is up is
+        // the one that is drawn highest.
+        var top: CGFloat?
+        for host in hostViews() {
+            guard let holder = host.superview else {
+                continue
+            }
+            let drawn = live ? (host.layer.presentation() ?? host.layer) : host.layer
+            // Windows share the screen's coordinate space, so a rect in the keyboard's window
+            // is a rect in ours.
+            let onScreen = holder.convert(drawn.frame, to: nil)
+            let inView = view.convert(onScreen, from: nil).minY
+            top = min(top ?? inView, inView)
+        }
+        return top
+    }
+
+    private static func hostViews() -> [UIView] {
+        var windows: [UIWindow] = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+        if windows.isEmpty {
+            windows = UIApplication.shared.windows
+        }
+        var found: [UIView] = []
+        for window in windows where !window.isHidden
+            && (NSStringFromClass(type(of: window)).contains("Keyboard")
+                || NSStringFromClass(type(of: window)).contains("TextEffects")) {
+            collectHosts(in: window, into: &found)
+        }
+        return found.filter { !$0.isHidden && $0.alpha > 0 && $0.bounds.height > 0 }
+    }
+
+    /// The view that stands where the keyboard is. Up to iOS 18 that is the input set's host
+    /// view; on iOS 26 the keyboard is drawn out of process and what is left in the window is a
+    /// keyboard-sized placeholder in an item container, which is what moves. Failing a name,
+    /// any keyboard-related view as wide as the window and a keyboard's height will do.
+    private static func collectHosts(in view: UIView, into found: inout [UIView], depth: Int = 0) {
+        let name = NSStringFromClass(type(of: view))
+        if name.contains("InputSetHostView") || name.contains("KeyboardItemContainerView") {
+            found.append(view)
+            return
+        }
+        if let window = view.window, depth > 0,
+           name.contains("Keyboard") || name.contains("InputSet"),
+           view.bounds.width >= window.bounds.width * 0.9,
+           view.bounds.height >= 150, view.bounds.height <= window.bounds.height * 0.8 {
+            found.append(view)
+            return
+        }
+        guard depth < 6 else {
+            return
+        }
+        for child in view.subviews {
+            collectHosts(in: child, into: &found, depth: depth + 1)
+        }
+    }
+}
+
+enum GlassLook {
+    /// Turns `button` into a glass button tinted `tint`, its image drawn in `foreground`. The round
+    /// clip the flat button needed comes off: the glass makes its own capsule, and a clip would cut
+    /// the swell short at the old edge.
+    ///
+    /// `tint` nil asks for clear glass - the plain kind that shows what is behind it, with only
+    /// the image in colour - rather than a tinted slab.
+    static func adopt(_ button: UIButton, tint: UIColor?, foreground: UIColor,
+                      symbol: UIImage.SymbolConfiguration? = nil) {
+        guard #available(iOS 26.0, *) else { return }
+        var glass = button.configuration ?? (tint == nil ? .glass() : .prominentGlass())
+        glass.baseBackgroundColor = tint
+        glass.baseForegroundColor = foreground
+        glass.cornerStyle = .capsule
+        glass.contentInsets = .zero
+        if let symbol = symbol {
+            glass.preferredSymbolConfigurationForImage = symbol
+        }
+        // The image is the one the caller set the old way, and every later `setImage` is followed
+        // by `imageChanged` so the configuration hears about it.
+        glass.image = painted(button.image(for: .normal), in: foreground)
+        button.configuration = glass
+        button.configurationUpdateHandler = { button in
+            var current = button.configuration
+            let colour = current?.baseForegroundColor
+            current?.image = painted(button.image(for: .normal), in: colour)
+            button.configuration = current
+        }
+        button.tintColor = tint ?? foreground
+        button.backgroundColor = .clear
+        button.layer.cornerRadius = 0
+        button.clipsToBounds = false
+    }
+
+    /// A template image in `colour`, baked in. Clear glass draws its glyph in the label colour
+    /// whatever the configuration is told, so the colour has to be in the image itself; an image
+    /// that already carries its own colours is left as it is.
+    private static func painted(_ image: UIImage?, in colour: UIColor?) -> UIImage? {
+        guard let image = image, let colour = colour, image.renderingMode != .alwaysOriginal else {
+            return image
+        }
+        return image.withTintColor(colour, renderingMode: .alwaysOriginal)
+    }
+
+    /// After `setImage(_:for:)` on a glass button - the configuration draws the image, and it is
+    /// only told to look again when asked. `symbol` sets the size the new glyph is drawn at.
+    static func imageChanged(_ button: UIButton, symbol: UIImage.SymbolConfiguration? = nil) {
+        guard #available(iOS 26.0, *), button.configuration != nil else { return }
+        if let symbol = symbol {
+            button.configuration?.preferredSymbolConfigurationForImage = symbol
+        }
+        button.setNeedsUpdateConfiguration()
+    }
+
+    /// A round clear-glass button standing in the middle of `cell`, carrying the cell's image and
+    /// its actions. The cell keeps its place in a row that shares the width out equally; the glass
+    /// - which has to be a real button of its own to get the system's press from it - is the size
+    /// a circle should be rather than the width of the cell. The cell's own actions come off, so
+    /// a tap beside the circle does nothing, as beside any other button.
+    static func adoptCircle(in cell: UIButton, diameter: CGFloat = 44, foreground: UIColor) {
+        guard #available(iOS 26.0, *) else { return }
+        let orb = UIButton(type: .system)
+        for target in cell.allTargets {
+            for action in cell.actions(forTarget: target, forControlEvent: .touchUpInside) ?? [] {
+                orb.addTarget(target, action: Selector(action), for: .touchUpInside)
+            }
+        }
+        cell.removeTarget(nil, action: nil, for: .allEvents)
+        var glass = UIButton.Configuration.glass()
+        glass.baseForegroundColor = foreground
+        glass.cornerStyle = .capsule
+        glass.contentInsets = .zero
+        glass.image = cell.image(for: .normal)
+        orb.configuration = glass
+        orb.tintColor = foreground
+        cell.setImage(nil, for: .normal)
+        cell.addSubview(orb)
+        orb.translatesAutoresizingMaskIntoConstraints = false
+        // The cell's height is its own from here. The row it sits in tied every cell's height to
+        // the row's, and with a fixed height on the cell as well the row could never be taller
+        // than the cell - so the margin meant to stand the row on the safe area was the one
+        // constraint the layout gave up, and the buttons stayed on the edge of the screen.
+        for tie in cell.superview?.constraints ?? [] {
+            if (tie.firstItem === cell && tie.firstAttribute == .height)
+                || (tie.secondItem === cell && tie.secondAttribute == .height) {
+                tie.isActive = false
+            }
+        }
+        NSLayoutConstraint.activate([
+            orb.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
+            // A little below the middle: the circles sat hard under the field, so the row keeps
+            // the extra room above them (`rowHeight`) and the same 8pt under them as before.
+            orb.centerYAnchor.constraint(equalTo: cell.centerYAnchor, constant: (rowHeight - diameter - 16) / 2),
+            orb.widthAnchor.constraint(equalToConstant: diameter),
+            orb.heightAnchor.constraint(equalToConstant: diameter),
+            // The cell's height came from the image it no longer has; the row would fall in
+            // around the circles without a height of its own.
+            cell.heightAnchor.constraint(equalToConstant: rowHeight)
+        ])
+    }
+
+    /// Changes the picture on the glass circle standing in `cell`.
+    ///
+    /// Fix: adoptCircle moves the cell's own image onto a button of its own and leaves the cell
+    /// with none, so setImage on the cell afterwards changes nothing anybody can see - which is
+    /// why the sticker button went on showing a sticker while the stickers were up and the
+    /// keyboard was what the next tap would bring.
+    static func circleImageChanged(in cell: UIButton, to image: UIImage?) {
+        if #available(iOS 26.0, *),
+           let orb = cell.subviews.compactMap({ $0 as? UIButton }).first, orb.configuration != nil {
+            orb.configuration?.image = image
+            orb.setNeedsUpdateConfiguration()
+            return
+        }
+        cell.setImage(image, for: .normal)
+    }
+
+    /// What the panels at the foot of the screen stand on: the sticker panel, the row of
+    /// attachments, and the band behind a reply.
+    ///
+    /// The keyboard on iOS 26 is glass - the conversation shows through it - so no flat colour can
+    /// ever be it, which is what the first attempt at this got wrong. What the system puts behind
+    /// a band of that kind is the chrome material, and that is what these take. The other two
+    /// readings are kept beside it so that changing is one word:
+    ///
+    /// - `.chrome`   the keyboard's own kind of glass (what is used now)
+    /// - `.material` the lighter frosting this app had before any of this
+    /// - `.colour`   a flat #EFEFF4 / #1C1C1E, measured off the keyboard with the recording's
+    ///               dimming divided back out - for a device where the glass reads wrong
+    public enum PanelGround {
+        case glass
+        case chrome
+        case material
+        case colour
+    }
+
+    public static let panelGround: PanelGround = .chrome
+
+    /// Puts that ground on one of those bands. Nothing happens on earlier systems, which keep the
+    /// frosting they were built with.
+    static func applyPanelGround(_ band: UIVisualEffectView) {
+        guard #available(iOS 26.0, *) else {
+            return
+        }
+        switch panelGround {
+        case .glass:
+            // The system's own glass, which is what the keyboard is made of - clearer than any
+            // blur, and it takes its colour from whatever passes behind it.
+            band.effect = UIGlassEffect(style: .clear)
+            band.backgroundColor = .clear
+        case .chrome:
+            band.effect = UIBlurEffect(style: .systemChromeMaterial)
+            band.backgroundColor = .clear
+        case .material:
+            band.effect = UIBlurEffect(style: .systemMaterial)
+            band.backgroundColor = .clear
+        case .colour:
+            band.effect = nil
+            band.backgroundColor = keyboardGround
+        }
+    }
+
+    /// The flat reading of the keyboard's ground - see PanelGround.colour.
+    public static var keyboardGround: UIColor {
+        return UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 1)
+                : UIColor(red: 239 / 255, green: 239 / 255, blue: 244 / 255, alpha: 1)
+        }
+    }
+
+    /// How tall the attachment row is: 14pt above its circles, 8pt under them.
+    public static let rowHeight: CGFloat = 44 + 14 + 8
+
+    /// Wraps `view` in interactive glass, tinted `tint` (nil for clear glass), and clears the flat
+    /// fill and border it replaces. `radius` shapes the glass; nil makes it a capsule.
+    ///
+    /// For what is not a button - or is a button that shares its glass with another, as the
+    /// microphone does with the camera - the system gives nothing on its own; what it gives
+    /// instead is glass that answers touches - `UIGlassEffect.isInteractive` - with the same swell
+    /// and shine as the glass buttons. That glass only answers touches that land inside it, so the
+    /// view goes into the glass's content view and the glass takes the view's place: every
+    /// constraint an ancestor held on the view is re-made on the glass, and the view is pinned to
+    /// the glass's edges. Constraints the view holds on itself (its own width, its own height)
+    /// stay with it and the glass follows them through the pins.
+    ///
+    /// Constraints that were re-made are new objects; a caller holding one of the old ones through
+    /// an outlet asks the returned `Rehome` for its replacement, or the constant it sets later goes
+    /// to a constraint that is no longer active. The pins are in the `Rehome` too, for a caller
+    /// that wants the glass to reach further than the view on one side.
+    @discardableResult
+    static func wrap(_ view: UIView, tint: UIColor?, radius: CGFloat? = nil) -> Rehome {
+        guard #available(iOS 26.0, *), let parent = view.superview else { return Rehome(moved: [:], pins: nil) }
+        let effect = UIGlassEffect(style: .regular)
+        effect.tintColor = tint
+        effect.isInteractive = true
+        let glass = GlassSlab()
+        glass.effect = effect
+        if let radius = radius {
+            glass.cornerConfiguration = .uniformCorners(radius: .fixed(radius))
+        } else {
+            glass.cornerConfiguration = .capsule()
+        }
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        parent.insertSubview(glass, belowSubview: view)
+
+        // Everything any ancestor pinned to the view is pinned to the glass instead.
+        var moved: [NSLayoutConstraint: NSLayoutConstraint] = [:]
+        var holder: UIView? = parent
+        while let ancestor = holder {
+            for old in ancestor.constraints where old.firstItem === view || old.secondItem === view {
+                let first: AnyObject = old.firstItem === view ? glass : old.firstItem!
+                let second: AnyObject? = old.secondItem === view ? glass : old.secondItem
+                let new = NSLayoutConstraint(item: first, attribute: old.firstAttribute, relatedBy: old.relation,
+                                             toItem: second, attribute: old.secondAttribute,
+                                             multiplier: old.multiplier, constant: old.constant)
+                new.priority = old.priority
+                new.identifier = old.identifier
+                moved[old] = new
+            }
+            holder = ancestor.superview
+        }
+        NSLayoutConstraint.deactivate(Array(moved.keys))
+        glass.contentView.addSubview(view)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        let pins = Rehome.Pins(
+            leading: view.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor),
+            trailing: view.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor),
+            top: view.topAnchor.constraint(equalTo: glass.contentView.topAnchor),
+            bottom: view.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor))
+        NSLayoutConstraint.activate(Array(moved.values) + [pins.leading, pins.trailing, pins.top, pins.bottom])
+        glass.hiddenWatch = view.observe(\.isHidden, options: [.initial, .new]) { [weak glass] view, _ in
+            glass?.isHidden = view.isHidden
+        }
+
+        view.backgroundColor = .clear
+        view.layer.borderWidth = 0
+        // A round clip the flat control needed would cut the glass's swell short at the old edge.
+        // A scroll view keeps its clip, though - and its rounding, which is the glass's own shape:
+        // without it the text ran on past the ends of the capsule as the field filled up.
+        if !(view is UIScrollView) {
+            view.layer.cornerRadius = 0
+            view.clipsToBounds = false
+        }
+        return Rehome(moved: moved, pins: pins)
+    }
+
+    /// Wraps a text field - see `wrap` - and takes away what a scroll view adds over glass.
+    @discardableResult
+    static func adopt(_ field: UIScrollView, tint: UIColor?, radius: CGFloat? = nil) -> Rehome {
+        let rehome = wrap(field, tint: tint, radius: radius)
+        guard #available(iOS 26.0, *) else { return rehome }
+        // A scroll view draws its own scroll-edge effect - a fading band along the top and bottom -
+        // and lets its content bounce past the ends; over glass both read as a dull film where the
+        // clear glass should show, most of all while the field is empty and there is nothing to
+        // scroll. Neither has a place here.
+        field.topEdgeEffect.isHidden = true
+        field.bottomEdgeEffect.isHidden = true
+        field.bounces = false
+        return rehome
+    }
+
+    /// The glass a wrapped view sits in, if it sits in one.
+    static func glass(around view: UIView) -> UIVisualEffectView? {
+        view.superview?.superview as? GlassSlab
+    }
+
+    /// The pin holding one edge of a wrapped view to its glass - for a caller that wants the glass
+    /// to reach further than the view on that side, and swaps the pin for one of its own.
+    static func pin(of view: UIView, _ edge: NSLayoutConstraint.Attribute) -> NSLayoutConstraint? {
+        guard let content = view.superview, glass(around: view) != nil else { return nil }
+        return content.constraints.first {
+            $0.firstItem === view && $0.firstAttribute == edge && $0.secondItem === content && $0.secondAttribute == edge
+        }
+    }
+
+    /// The replacements for constraints `adopt` re-made on the glass. Before iOS 26 nothing was
+    /// re-made and every constraint comes back as it was.
+    struct Rehome {
+        struct Pins {
+            let leading: NSLayoutConstraint
+            let trailing: NSLayoutConstraint
+            let top: NSLayoutConstraint
+            let bottom: NSLayoutConstraint
+        }
+        fileprivate let moved: [NSLayoutConstraint: NSLayoutConstraint]
+        /// The four that hold the view to the glass's content view; nil before iOS 26.
+        let pins: Pins?
+
+        func rehomed(_ constraint: NSLayoutConstraint) -> NSLayoutConstraint {
+            moved[constraint] ?? constraint
+        }
+    }
+
+    private final class GlassSlab: UIVisualEffectView {
+        var hiddenWatch: NSKeyValueObservation?
     }
 }

@@ -696,7 +696,7 @@
                                             <rect key="frame" x="0.0" y="0.0" width="374" height="200"/>
                                             <autoresizingMask key="autoresizingMask"/>
                                             <subviews>
-                                                <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="Sofa" translatesAutoresizingMaskIntoConstraints="NO" id="0K5-VL-Mqq">
+                                                <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" translatesAutoresizingMaskIntoConstraints="NO" id="0K5-VL-Mqq">
                                                     <rect key="frame" x="0.0" y="0.0" width="374" height="200"/>
                                                 </imageView>
                                                 <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="person.circle.fill" catalog="system" translatesAutoresizingMaskIntoConstraints="NO" id="Al4-Bd-c6i">
@@ -3449,7 +3449,6 @@
         <image name="File---Documents" width="500" height="500"/>
         <image name="Send-(White)" width="500" height="500"/>
         <image name="Send-Image" width="500" height="500"/>
-        <image name="Sofa" width="2048" height="1677"/>
         <image name="Sticker---Emoji" width="500" height="500"/>
         <image name="arrow.triangle.2.circlepath.camera.fill" catalog="system" width="128" height="93"/>
         <image name="eye.fill" catalog="system" width="128" height="80"/>
